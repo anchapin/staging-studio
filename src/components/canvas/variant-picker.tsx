@@ -20,19 +20,25 @@ export function VariantPicker({
   return (
     <div className={cn("flex items-center gap-2", className)}>
       <span className={cn(
-        "text-sm font-medium transition-colors",
-        selectedIndex === 0 ? "text-stone-800" : "text-stone-400"
+        "text-sm transition-colors",
+        selectedIndex === 0
+          ? "font-bold text-stone-800 underline underline-offset-2"
+          : "font-medium text-stone-400"
       )}>
         {variant1Label}
+        {selectedIndex === 0 && <span className="sr-only"> (Selected)</span>}
       </span>
-      
+
       <button
+        type="button"
+        role="switch"
+        aria-checked={selectedIndex === 1}
+        aria-label={`Selected variant: ${selectedIndex === 0 ? "A" : "B"}`}
         onClick={() => onSelect(selectedIndex === 0 ? 1 : 0)}
         className={cn(
           "relative h-6 w-12 rounded-full transition-colors duration-200",
           selectedIndex === 0 ? "bg-stone-300" : "bg-stone-800"
         )}
-        aria-label="Toggle variant"
       >
         <span
           className={cn(
@@ -41,12 +47,15 @@ export function VariantPicker({
           )}
         />
       </button>
-      
+
       <span className={cn(
-        "text-sm font-medium transition-colors",
-        selectedIndex === 1 ? "text-stone-800" : "text-stone-400"
+        "text-sm transition-colors",
+        selectedIndex === 1
+          ? "font-bold text-stone-800 underline underline-offset-2"
+          : "font-medium text-stone-400"
       )}>
         {variant2Label}
+        {selectedIndex === 1 && <span className="sr-only"> (Selected)</span>}
       </span>
     </div>
   );
