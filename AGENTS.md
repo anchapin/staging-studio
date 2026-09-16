@@ -23,24 +23,24 @@ npm run build
 ## Layout
 
 - All code lives under `src/` (Next.js src-dir convention): `src/app`, `src/components`, `src/lib`. The `@/*` import alias maps to `src/*`. `middleware.ts` stays at the repo root, not in `src/`.
-- `src/lib/` holds the shared singletons: `prisma.ts`, `supabase.ts` (both client flavors), `ai.ts` (model), `fal.ts` (fal.ai client), `actions.ts`.
-- Room/room-photo mutations are server actions in `src/app/actions/` (`"use server"`). Third-party integrations are API routes under `src/app/api/`: `projects` CRUD (+ nested `rooms`), `inpaint` (+ `[requestId]/status` polling), `generate-copy`, `export-pdf`, `setup` (+ `setup/check`).
+- `src/lib/` holds the shared singletons: `prisma.ts`, `supabase.ts` (browser client, server singleton, and the request-scoped `createSupabaseRequestClient()` factory), `ai.ts` (model), `fal.ts` (fal.ai client) — plus `api-auth.ts` (session → Prisma `User` helper), `env.ts` (call-time env validation), and pure logic modules (`checklist-schema.ts`, `room-patch-schema.ts`, `ai-route-schemas.ts`, `inpaint-polling.ts`).
+- Room/room-photo/Project mutations are server actions in `src/app/actions/` (`"use server"`; all ownership-checked). Tests live in `tests/` (vitest, node env). Third-party integrations are API routes under `src/app/api/`: `projects` CRUD (+ nested `rooms`), `inpaint` (+ `[requestId]/status` polling), `generate-copy`, `export-pdf`, `setup` (+ `setup/check`).
 - `src/components/canvas/` = staging editor UI; `src/components/lookbook/` = printable PDF page components; `src/components/ui/` = shadcn components (`components.json` drives the CLI; all aliases are `@/`-based).
 
 ## Routing & auth
 
 - Real URLs: `/` (server-side auth redirector), `/login`, `/setup` (in `(auth)` group), `/dashboard`, `/projects`, `/projects/new`, `/projects/[id]`, `/projects/[id]/preview` (in `(dashboard)` group), `/auth/callback` (route handler, real segment).
 - Route-group membership is not uniform: the `/dashboard` page sits OUTSIDE the `(dashboard)` group while `/projects/*` sit inside, and `/auth/callback` is not in `(auth)`. Don't "normalize" this without checking which layout wraps what.
-- Auth protection lives entirely in root `middleware.ts` (pathname checks for `/dashboard` and `/projects`), not in folder names. It validates sessions with `supabase.auth.getUser()` (real JWT check, fails closed) and redirects logged-in users away from `/login` and `/setup`. Any new protected route must be added to its pathname guards.
+- Auth protection lives in root `middleware.ts` (pathname checks for `/dashboard` and `/projects`), not in folder names. It validates sessions with `supabase.auth.getUser()` (real JWT check, fails closed) and redirects logged-in users away from `/login` and `/setup`. Any new protected route must be added to its pathname guards. Middleware does NOT guard `/api/*` — API routes and server actions enforce sessions and ownership themselves (via `src/lib/api-auth.ts`); every new mutation endpoint must do the same.
 - Redirect targets differ and that's intended: `/` sends authed users to `/projects`; middleware and the auth callback send users to `/dashboard`.
 - Middleware refreshes auth cookies on every matched request. Server Components can only read cookies — the try/catch-and-ignore around `cookieStore.set` (see `src/app/page.tsx`) is intentional, not a bug.
 
 ## Conventions
 
-- **Supabase clients:** browser code imports `createClient()` from `lib/supabase.ts`. Server code uses `createServerClientSingleton({ getAll, setAll })` from the same file, with the cookie wiring shown in `src/app/page.tsx`. Don't construct Supabase clients elsewhere.
+- **Supabase clients:** browser code imports `createClient()` from `lib/supabase.ts`. Server code uses `createServerClientSingleton({ getAll, setAll })` from the same file, with the cookie wiring shown in `src/app/page.tsx`; route handlers and server actions use the request-scoped `createSupabaseRequestClient()` from the same file. Don't construct Supabase clients elsewhere.
 - **Prisma:** import the singleton from `lib/prisma.ts`; never `new PrismaClient()` elsewhere. Dev mode logs all queries.
 - **AI services:** the OpenAI model lives in `lib/ai.ts` (`aiModel`, gpt-4o-mini). The fal.ai client is configured once in `lib/fal.ts` via `FAL_KEY` — import `fal` from there.
-- **Lookbook/PDF print styling:** `globals.css` provides `.page-break`, `.avoid-break`, `.lookbook-page`, `.no-print`, and `@page` letter-portrait rules. Keep these class names when touching lookbook components or PDF pagination breaks.
+- **Lookbook/PDF print styling:** `src/app/globals.css` provides `.page-break`, `.avoid-break`, `.lookbook-page`, `.no-print`, and `@page` letter-portrait rules. Keep these class names when touching lookbook components or PDF pagination breaks.
 - **Fonts:** Cinzel, Playfair Display, Plus Jakarta Sans load in `src/app/layout.tsx` as CSS variables → use Tailwind `font-cinzel` / `font-playfair` / `font-jakarta`.
 
 ## Env vars
