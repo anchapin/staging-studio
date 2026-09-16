@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import InpaintMaskCanvas from "./inpaint-mask-canvas";
 import { useToast, ToastContainer } from "@/components/ui/toast";
 import { Loader2 } from "lucide-react";
@@ -11,17 +11,20 @@ interface InpaintEditorProps {
   imageUrl: string;
   aesthetic: string;
   promptDirectives: string;
+  variantSlot: 0 | 1;
+  pendingRequestId?: string | null;
   onInpaintComplete?: (resultImageUrl: string) => void;
 }
 
 export default function InpaintEditor({
-  roomId: _roomId,
+  roomId,
   imageUrl,
   aesthetic,
   promptDirectives,
+  variantSlot,
+  pendingRequestId,
   onInpaintComplete,
 }: InpaintEditorProps) {
-  void _roomId;
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
   const { toasts, showError, showSuccess, dismissToast } = useToast();
 
@@ -30,6 +33,13 @@ export default function InpaintEditor({
     showSuccess,
     showError,
   });
+
+  // Resume an in-flight job (e.g. after a refresh): skip the submit and go
+  // straight to polling the persisted requestId.
+  useEffect(() => {
+    if (!pendingRequestId) return;
+    void start(async () => pendingRequestId);
+  }, [pendingRequestId, start]);
 
   const handleInpaint = useCallback(async () => {
     if (!promptDirectives.trim()) {
@@ -56,6 +66,8 @@ export default function InpaintEditor({
           maskUrl: maskDataUrl,
           promptDirectives,
           aesthetic,
+          roomId,
+          variantSlot,
         }),
         signal,
       });
@@ -68,7 +80,7 @@ export default function InpaintEditor({
 
       return startData.requestId as string;
     });
-  }, [maskDataUrl, imageUrl, promptDirectives, aesthetic, start, showError]);
+  }, [maskDataUrl, imageUrl, promptDirectives, aesthetic, roomId, variantSlot, start, showError]);
 
   return (
     <div className="flex flex-col gap-6">

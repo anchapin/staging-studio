@@ -29,6 +29,7 @@ interface Room {
   beforeImageUrl2: string | null;
   afterImageUrl2: string | null;
   selectedVariantIndex: number | null;
+  inpaintRequests?: { id: string }[];
 }
 
 interface Project {
@@ -364,6 +365,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                               imageUrl={room.beforeImageUrl}
                               aesthetic={project.stagingAesthetic}
                               promptDirectives={roomDirectives.trim()}
+                              variantSlot={pickVariantSlot(room)}
+                              pendingRequestId={room.inpaintRequests?.[0]?.id ?? null}
                               onInpaintComplete={(resultImageUrl) =>
                                 void persistInpaintResult(room, resultImageUrl)
                               }

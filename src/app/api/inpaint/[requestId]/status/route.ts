@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fal } from "@/lib/fal";
+import { prisma } from "@/lib/prisma";
 import { createClient } from "@/lib/supabase";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 
@@ -42,6 +43,24 @@ export async function GET(
       );
     }
 
+    // Ownership: the requestId must map to a persisted InpaintRequest whose
+    // room's project belongs to the caller — otherwise 404 (do not leak or
+    // proxy other users' requests).
+    const inpaintRequest = await prisma.inpaintRequest.findUnique({
+      where: { id: requestId },
+      select: { room: { select: { project: { select: { userId: true } } } } },
+    });
+    if (!inpaintRequest || inpaintRequest.room.project.userId !== user.id) {
+      return NextResponse.json(
+        {
+          error: "Request not found",
+          message:
+            "This image processing request could not be found or you don't have access to it.",
+        },
+        { status: 404 }
+      );
+    }
+
     const falQueueStatus = fal.queue.status as FalQueueStatusFunction;
     const result = await falQueueStatus("fal-ai/flux-fill", { requestId });
 
@@ -60,6 +79,7 @@ export async function GET(
       const imageUrl = result.images?.[0]?.url;
 
       if (imageUrl) {
+        let resolvedImageUrl = imageUrl;
         const supabase = createClient();
 
         try {
@@ -78,17 +98,24 @@ export async function GET(
             .from("staging-images")
             .getPublicUrl(`after-${requestId}.png`);
 
-          return NextResponse.json({
-            status: "completed",
-            imageUrl: publicUrlData.publicUrl,
-          });
+          resolvedImageUrl = publicUrlData.publicUrl;
         } catch (storageError) {
           console.error("Storage error:", storageError);
-          return NextResponse.json({
-            status: "completed",
-            imageUrl: imageUrl,
-          });
         }
+
+        try {
+          await prisma.inpaintRequest.update({
+            where: { id: requestId },
+            data: { status: "COMPLETED", resultUrl: resolvedImageUrl },
+          });
+        } catch (recordError) {
+          console.error("Failed to record inpaint completion:", recordError);
+        }
+
+        return NextResponse.json({
+          status: "completed",
+          imageUrl: resolvedImageUrl,
+        });
       }
 
       return NextResponse.json(

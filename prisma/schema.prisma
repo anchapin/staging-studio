@@ -65,5 +65,22 @@ model Room {
 
   createdAt            DateTime @default(now())
 
+  inpaintRequests InpaintRequest[]
+
   @@index([projectId])
+}
+
+// InpaintRequest model: persisted fal.ai queue request (id = fal requestId)
+// so jobs survive serverless deadlines and page refreshes can resume polling.
+model InpaintRequest {
+  id          String   @id
+  roomId      String
+  room        Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  variantSlot Int      // 0 or 1 — which "after" variant slot this run targets
+  status      String   // mirrors fal queue status: IN_QUEUE | IN_PROGRESS | COMPLETED | ERROR
+  resultUrl   String?  // filled when status is COMPLETED
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([roomId])
 }
