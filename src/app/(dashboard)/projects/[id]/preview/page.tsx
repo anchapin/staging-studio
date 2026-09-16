@@ -33,7 +33,7 @@ interface Room {
 }
 
 interface LookbookPreviewPageProps {
-  params: Promise<{ projectId: string }>;
+  params: Promise<{ id: string }>;
 }
 
 export default function LookbookPreviewPage({ params }: LookbookPreviewPageProps) {
@@ -42,7 +42,7 @@ export default function LookbookPreviewPage({ params }: LookbookPreviewPageProps
   const [projectId, setProjectId] = useState<string | null>(null);
 
   useEffect(() => {
-    params.then((resolved) => setProjectId(resolved.projectId));
+    params.then((resolved) => setProjectId(resolved.id));
   }, [params]);
 
   useEffect(() => {

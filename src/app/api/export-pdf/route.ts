@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
     }
 
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-    const previewUrl = `${appUrl}/preview/${projectId}`;
+    const previewUrl = `${appUrl}/projects/${projectId}/preview`;
 
     const apiKey = process.env.BROWSERLESS_API_KEY;
 
