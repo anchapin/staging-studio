@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Cinzel, Playfair_Display, Plus_Jakarta_Sans } from "next/font/google";
-import { Providers } from "@/components/providers";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 
@@ -35,9 +34,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={cn(cinzel.variable, playfair.variable, plusJakarta.variable, "font-sans")}>
-      <body className="antialiased">
-        <Providers>{children}</Providers>
-      </body>
+      <body className="antialiased">{children}</body>
     </html>
   );
 }
