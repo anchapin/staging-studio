@@ -30,7 +30,7 @@ export async function GET() {
     });
 
     return NextResponse.json({ exists: !!user });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ exists: false }, { status: 500 });
   }
 }
