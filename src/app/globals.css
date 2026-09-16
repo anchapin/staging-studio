@@ -1,8 +1,7 @@
+@import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@config "../../tailwind.config.ts";
 
 @layer base {
   :root {
