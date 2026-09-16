@@ -62,14 +62,20 @@ export async function generateMetadata({
     return { title: "Lookbook Preview" };
   }
 
-  const project = await getPreviewProject(id);
-  if (!project) {
+  // A thrown data-layer error falls back to the generic title too — only a
+  // successfully loaded project earns the address in the document title.
+  try {
+    const project = await getPreviewProject(id);
+    if (!project) {
+      return { title: "Lookbook Preview" };
+    }
+
+    return {
+      title: { absolute: `Lookbook Preview · ${project.propertyAddress}` },
+    };
+  } catch {
     return { title: "Lookbook Preview" };
   }
-
-  return {
-    title: { absolute: `Lookbook Preview · ${project.propertyAddress}` },
-  };
 }
 
 /**
@@ -97,7 +103,38 @@ export default async function LookbookPreviewPage({
     notFound();
   }
 
-  const project = await getPreviewProject(id);
+  // Only a real miss (no row) is a 404. A thrown data-layer error is a
+  // load failure (issue #90): render an inline retryable error state
+  // server-side instead of crashing the page or faking data loss.
+  let project: Awaited<ReturnType<typeof getPreviewProject>>;
+  try {
+    project = await getPreviewProject(id);
+  } catch (error) {
+    console.error("Error loading preview project:", error);
+    // The token is verified at this point, so re-requesting the same URL
+    // (token intact) is a plain-server-render "Retry".
+    const retryHref =
+      typeof token === "string"
+        ? `/projects/${id}/preview?${PREVIEW_TOKEN_QUERY_PARAM}=${encodeURIComponent(token)}`
+        : `/projects/${id}/preview`;
+    return (
+      <div className="p-8">
+        <div
+          role="alert"
+          className="mx-auto mt-8 max-w-lg rounded-lg border border-red-200 bg-red-50 p-6 text-center"
+        >
+          <p className="text-red-700">Couldn&apos;t load this project.</p>
+          <a
+            href={retryHref}
+            className="mt-4 inline-block rounded-md bg-stone-800 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-700"
+          >
+            Retry
+          </a>
+        </div>
+      </div>
+    );
+  }
+
   if (!project) {
     notFound();
   }
