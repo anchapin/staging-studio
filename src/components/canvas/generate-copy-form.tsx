@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react";
 import { useToast, ToastContainer } from "@/components/ui/toast";
 import { Loader2, Sparkles } from "lucide-react";
-import { saveRoomMetadata } from "@/app/actions/room";
+import { saveRoomMetadata, saveRoomCopy } from "@/app/actions/room";
 
 interface GenerateCopyFormProps {
   roomId: string;
@@ -31,6 +31,42 @@ export default function GenerateCopyForm({
   const [isGenerating, setIsGenerating] = useState(false);
   const [copy, setCopy] = useState<GeneratedCopy | null>(null);
   const { toasts, showError, showSuccess, dismissToast } = useToast();
+
+  /**
+   * Persists already-generated copy via the `saveRoomCopy` server action
+   * without re-invoking generation. Used to recover from the route's
+   * `save_failed` response so paid generation is not discarded; a retry
+   * re-runs this save-only path, never the full generation.
+   */
+  const persistCopy = useCallback(
+    async (copyToSave: GeneratedCopy, directives: string): Promise<boolean> => {
+      setIsGenerating(true);
+      try {
+        const result = await saveRoomCopy(roomId, copyToSave);
+        if (result.success) {
+          setCopy(copyToSave);
+          showSuccess("Copy saved successfully!");
+          onCopyGenerated?.(copyToSave, directives);
+          return true;
+        }
+        showError(
+          result.error || "Copy was generated but could not be saved.",
+          true,
+          () => {
+            void persistCopy(copyToSave, directives);
+          },
+          "Retry save"
+        );
+        return false;
+      } finally {
+        setIsGenerating(false);
+      }
+    },
+    // Self-reference resolves at call time, so the retry closure above
+    // always reaches the latest `persistCopy` binding.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [roomId, onCopyGenerated, showSuccess, showError]
+  );
 
   const handleGenerate = useCallback(async () => {
     const trimmedDirectives = rawDirectives.trim();
@@ -61,6 +97,12 @@ export default function GenerateCopyForm({
       const data = await response.json();
 
       if (!response.ok) {
+        // The route generated the copy but failed to persist it; retry
+        // save-only with the returned copy instead of regenerating.
+        if (data?.error === "save_failed" && data?.copy) {
+          await persistCopy(data.copy, trimmedDirectives);
+          return;
+        }
         throw new Error(data.message || data.error || "Failed to generate copy");
       }
 
@@ -80,7 +122,7 @@ export default function GenerateCopyForm({
     } finally {
       setIsGenerating(false);
     }
-  }, [roomId, rawDirectives, onCopyGenerated, showError, showSuccess]);
+  }, [roomId, rawDirectives, onCopyGenerated, persistCopy, showError, showSuccess]);
 
   return (
     <div className="space-y-4">
