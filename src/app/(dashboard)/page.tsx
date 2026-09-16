@@ -1,8 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
 import Link from "next/link";
+
+interface Room {
+  id: string;
+  name: string;
+}
 
 interface Project {
   id: string;
@@ -10,32 +15,31 @@ interface Project {
   clientName: string;
   stagingAesthetic: string;
   createdAt: string;
-  rooms: { id: string; name: string }[];
+  rooms: Room[];
+}
+
+async function fetchProjects(): Promise<Project[]> {
+  const supabase = createClient();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session) {
+    throw new Error("Not authenticated");
+  }
+
+  const response = await fetch("/api/projects");
+  if (!response.ok) {
+    throw new Error("Failed to fetch projects");
+  }
+  return response.json();
 }
 
 export default function DashboardPage() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchProjects = async () => {
-      const supabase = createClient();
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session) return;
-
-      const response = await fetch("/api/projects");
-      if (response.ok) {
-        const data = await response.json();
-        setProjects(data);
-      }
-      setLoading(false);
-    };
-
-    fetchProjects();
-  }, []);
+  const { data: projects, isLoading, error } = useQuery({
+    queryKey: ["projects"],
+    queryFn: fetchProjects,
+  });
 
   return (
     <div className="p-8">
@@ -57,11 +61,15 @@ export default function DashboardPage() {
         </Link>
       </div>
 
-      {loading ? (
+      {isLoading ? (
         <div className="flex items-center justify-center py-12">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-stone-300 border-t-stone-800" />
         </div>
-      ) : projects.length === 0 ? (
+      ) : error ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
+          <p className="text-red-700">Failed to load projects.</p>
+        </div>
+      ) : projects?.length === 0 ? (
         <div className="rounded-lg border-2 border-dashed border-stone-300 p-12 text-center">
           <p className="text-stone-600">No projects yet.</p>
           <p className="mt-1 text-sm text-stone-500">
@@ -76,7 +84,7 @@ export default function DashboardPage() {
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {projects.map((project) => (
+          {projects?.map((project) => (
             <Link
               key={project.id}
               href={`/projects/${project.id}`}
@@ -91,7 +99,8 @@ export default function DashboardPage() {
                   {project.stagingAesthetic}
                 </span>
                 <span className="text-xs text-stone-500">
-                  {project.rooms.length} room{project.rooms.length !== 1 ? "s" : ""}
+                  {project.rooms.length} room
+                  {project.rooms.length !== 1 ? "s" : ""}
                 </span>
               </div>
             </Link>
