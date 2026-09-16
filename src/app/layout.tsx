@@ -1,9 +1,8 @@
 import type { Metadata } from "next";
-import { Cinzel, Playfair_Display, Plus_Jakarta_Sans, Geist } from "next/font/google";
+import { Cinzel, Playfair_Display, Plus_Jakarta_Sans } from "next/font/google";
+import { Providers } from "@/components/providers";
 import "./globals.css";
 import { cn } from "@/lib/utils";
-
-const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 const cinzel = Cinzel({
   subsets: ["latin"],
@@ -35,8 +34,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={cn(cinzel.variable, playfair.variable, plusJakarta.variable, "font-sans", geist.variable)}>
-      <body className="antialiased">{children}</body>
+    <html lang="en" className={cn(cinzel.variable, playfair.variable, plusJakarta.variable, "font-sans")}>
+      <body className="antialiased">
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }
