@@ -365,6 +365,8 @@ export default function InpaintMaskCanvas({
             src={overlayImageSrc || undefined}
             alt="Original"
             className="absolute inset-0 h-full w-full rounded-lg border border-gray-300"
+            loading="lazy"
+            decoding="async"
           />
           {canvasElement}
         </div>

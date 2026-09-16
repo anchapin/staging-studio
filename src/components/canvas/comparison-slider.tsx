@@ -1,6 +1,10 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import Image from "next/image";
+
+const SLIDER_IMAGE_SIZES =
+  "(max-width: 767px) calc(100vw - 320px), calc((100vw - 352px) / 2)";
 
 interface ComparisonSliderProps {
   originalImage: string;
@@ -118,23 +122,26 @@ export function ComparisonSlider({
         onTouchEnd={handleTouchEnd}
       >
         <div className="absolute inset-0">
-          <img
+          <Image
             src={originalImage}
             alt={roomName ? `${roomName} before staging` : "Before staging"}
-            className="h-full w-full object-cover"
+            fill
+            sizes={SLIDER_IMAGE_SIZES}
+            className="object-cover"
             draggable={false}
           />
         </div>
 
         <div
-          className="absolute inset-0 overflow-hidden"
-          style={{ width: `${sliderPosition}%` }}
+          className="absolute inset-0"
+          style={{ clipPath: `inset(0 ${100 - sliderPosition}% 0 0)` }}
         >
-          <img
+          <Image
             src={variantImage}
             alt={roomName ? `${roomName} after staging` : "After staging"}
-            className="h-full object-cover"
-            style={{ width: containerRef.current?.offsetWidth }}
+            fill
+            sizes={SLIDER_IMAGE_SIZES}
+            className="object-cover"
             draggable={false}
           />
         </div>

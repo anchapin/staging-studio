@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { LookbookRoomData } from "./types";
 
 interface CoverPageProps {
@@ -11,9 +12,13 @@ export function CoverPage({ project, user }: CoverPageProps) {
       <div className="max-w-2xl text-center space-y-8">
         {user.logoUrl && (
           <div className="flex justify-center">
-            <img
+            <Image
               src={user.logoUrl}
               alt={`${user.firmName} logo`}
+              width={320}
+              height={80}
+              sizes="320px"
+              loading="eager"
               className="h-20 w-auto object-contain"
             />
           </div>
