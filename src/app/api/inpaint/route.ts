@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fal } from "@/lib/fal";
+import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { inpaintRequestSchema } from "@/lib/ai-route-schemas";
 
 const NEGATIVE_PROMPT =
   "walls, windows, trim, doors, molding, structural columns, flooring";
@@ -11,18 +13,31 @@ type FalSubscribeFunction = (
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { imageUrl, maskUrl, promptDirectives, aesthetic } = body;
-
-    if (!imageUrl || !maskUrl || !promptDirectives || !aesthetic) {
+    const user = await getAuthedPrismaUser();
+    if (!user) {
       return NextResponse.json(
         {
-          error: "Missing required fields",
-          message: "Please provide imageUrl, maskUrl, promptDirectives, and aesthetic",
+          error: "Unauthorized",
+          message: "You must be signed in to start inpainting.",
+        },
+        { status: 401 }
+      );
+    }
+
+    const parsed = inpaintRequestSchema.safeParse(await request.json());
+    if (!parsed.success) {
+      return NextResponse.json(
+        {
+          error: "Invalid request",
+          message:
+            "Please provide a valid imageUrl, maskUrl, promptDirectives, and aesthetic.",
+          issues: parsed.error.issues,
         },
         { status: 400 }
       );
     }
+
+    const { imageUrl, maskUrl, promptDirectives, aesthetic } = parsed.data;
 
     const prompt = `${aesthetic} style. ${promptDirectives}`;
 
