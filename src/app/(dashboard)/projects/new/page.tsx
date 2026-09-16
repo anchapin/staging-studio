@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 const BUYER_PERSONAS = [
@@ -25,6 +25,13 @@ export default function NewProjectPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rooms, setRooms] = useState<string[]>([""]);
+  const errorRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (error) {
+      errorRef.current?.focus();
+    }
+  }, [error]);
   const [form, setForm] = useState({
     propertyAddress: "",
     clientName: "",
@@ -84,7 +91,12 @@ export default function NewProjectPage() {
       </div>
 
       {error && (
-        <div className="mb-6 rounded-md bg-red-50 p-4 text-sm text-red-700">
+        <div
+          ref={errorRef}
+          role="alert"
+          tabIndex={-1}
+          className="mb-6 rounded-md bg-red-50 p-4 text-sm text-red-700"
+        >
           {error}
         </div>
       )}
@@ -197,12 +209,14 @@ export default function NewProjectPage() {
                   value={room}
                   onChange={(e) => handleRoomChange(index, e.target.value)}
                   placeholder="e.g. Primary Bedroom"
+                  aria-label={`Room ${index + 1}`}
                   className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-stone-900 placeholder:text-stone-400 focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500"
                 />
                 {rooms.length > 1 && (
                   <button
                     type="button"
                     onClick={() => removeRoom(index)}
+                    aria-label={`Remove Room ${index + 1}`}
                     className="rounded-md px-2 py-1.5 text-sm text-stone-500 hover:bg-stone-100 hover:text-stone-700"
                   >
                     Remove
