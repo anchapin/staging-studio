@@ -103,9 +103,9 @@ export default function ProjectsPage() {
               href={`/projects/${project.id}`}
               className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm transition-shadow hover:shadow-md"
             >
-              <h3 className="font-playfair text-lg font-semibold text-stone-800">
+              <h2 className="font-playfair text-lg font-semibold text-stone-800">
                 {project.propertyAddress}
-              </h3>
+              </h2>
               <p className="mt-1 text-sm text-stone-600">{project.clientName}</p>
               <div className="mt-3 flex items-center justify-between">
                 <span className="rounded-full bg-stone-100 px-2.5 py-0.5 text-xs font-medium text-stone-700">
