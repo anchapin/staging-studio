@@ -13,10 +13,11 @@ npm run db:generate          # after editing prisma/schema.prisma (regenerates c
 npm run db:studio
 npm run lint                 # next lint (eslint 9 flat config)
 npm run typecheck            # tsc --noEmit
+npm test                     # vitest run (tests live in tests/)
 npm run build
 ```
 
-- No test suite, no CI, no formatter config. `next lint` + `npm run typecheck` + `next build` are the only checks — run all three before finishing a change.
+- No CI, no formatter config. Run lint, typecheck, and build (and `npm test` if you touched logic with tests) before finishing a change.
 - Prisma uses `db push`, not migrations — there is no `prisma/migrations/` dir and no migration history to maintain.
 
 ## Layout
