@@ -14,10 +14,7 @@ import GenerateCopyForm, {
 } from "@/components/canvas/generate-copy-form";
 import ExportPdfButton from "@/components/canvas/export-pdf-button";
 import { useToast, ToastContainer } from "@/components/ui/toast";
-import {
-  saveVariantSelection,
-  saveRoomMetadata,
-} from "@/app/actions/room";
+import { saveVariantSelection } from "@/app/actions/room";
 
 const MAX_DIRECTIVE_LENGTH = 2000;
 
@@ -194,26 +191,6 @@ export default function ProjectDetailView({ id }: { id: string }) {
       }
     },
     [project?.id, applyRoomUpdate, showError, showSuccess, router]
-  );
-
-  const handleCopyGenerated = useCallback(
-    (roomId: string, rawDirectives: string) => {
-      // The generate-copy route persists the copy itself (saveRoomCopy);
-      // here we additionally record the user's directives for the room.
-      void saveRoomMetadata(roomId, { rawDirectives }).then((result) => {
-        if (!result.success) {
-          showError(
-            result.error || "Failed to save staging directives",
-            true,
-            () => {
-              handleCopyGenerated(roomId, rawDirectives);
-            },
-            "Retry saving staging directives"
-          );
-        }
-      });
-    },
-    [showError]
   );
 
   if (loading) {
@@ -402,14 +379,18 @@ export default function ProjectDetailView({ id }: { id: string }) {
                             </h4>
                             <GenerateCopyForm
                               roomId={room.id}
-                              roomName={room.name}
-                              aesthetic={project.stagingAesthetic}
-                              targetBuyer={project.targetBuyer}
                               initialDirectives={roomDirectives}
                               onCopyGenerated={(
                                 _copy: GeneratedCopy,
                                 rawDirectives: string
-                              ) => handleCopyGenerated(room.id, rawDirectives)}
+                              ) =>
+                                // The form saves directives before generating;
+                                // mirror them into the inpaint editor's state.
+                                setDirectives((prev) => ({
+                                  ...prev,
+                                  [room.id]: rawDirectives,
+                                }))
+                              }
                             />
                           </div>
                         </>
