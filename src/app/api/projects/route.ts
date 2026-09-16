@@ -1,12 +1,25 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createSupabaseRequestClient } from "@/lib/supabase";
+import { getAuthedPrismaUser } from "@/lib/api-auth";
 
-// GET: List all projects (public listing for dashboard)
+// GET: List the authed user's projects (scoped to caller)
 export async function GET() {
   try {
+    const userRow = await getAuthedPrismaUser();
+
+    if (!userRow) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const projects = await prisma.project.findMany({
-      include: {
+      where: { userId: userRow.id },
+      select: {
+        id: true,
+        propertyAddress: true,
+        clientName: true,
+        stagingAesthetic: true,
+        createdAt: true,
         rooms: {
           select: { id: true, name: true },
         },
