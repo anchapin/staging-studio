@@ -32,6 +32,11 @@ export default function InpaintEditor({
   });
 
   const handleInpaint = useCallback(async () => {
+    if (!promptDirectives.trim()) {
+      showError("Please provide staging directives first.");
+      return;
+    }
+
     if (!maskDataUrl) {
       showError("Please draw a mask on the image first.");
       return;
