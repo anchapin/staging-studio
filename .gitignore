@@ -43,3 +43,7 @@ coverage/
 # Misc
 *.log
 .vercel
+
+# generated toolchain artifacts
+next-env.d.ts
+tsconfig.tsbuildinfo
