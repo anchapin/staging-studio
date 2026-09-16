@@ -2,12 +2,9 @@
 
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
+import type { ChecklistItem } from "@/lib/checklist-schema";
 
-export type CopyChecklistItem = {
-  item: string;
-  category: "DIY/Declutter" | "Rental Inventory" | "Minor Repair";
-  priority: "Critical" | "High" | "Standard";
-};
+export type CopyChecklistItem = ChecklistItem;
 
 export type GeneratedCopy = {
   observedChallenge: string;

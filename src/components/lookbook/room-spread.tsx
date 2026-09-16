@@ -1,5 +1,12 @@
 import Image from "next/image";
+import { parseChecklistItems } from "@/lib/checklist-schema";
 import { LookbookRoomData, ChecklistItem } from "./types";
+
+const PRIORITY_STYLES: Record<ChecklistItem["priority"], string> = {
+  Critical: "border-primary bg-primary/10",
+  High: "border-secondary bg-secondary/10",
+  Standard: "border-muted bg-muted/50",
+};
 
 interface RoomSpreadProps {
   room: LookbookRoomData;
@@ -9,7 +16,7 @@ interface RoomSpreadProps {
 
 export function RoomSpread({ room, project }: RoomSpreadProps) {
   const pillars = extractPillars(room);
-  const checklist = (room.checklistItems || []) as ChecklistItem[];
+  const checklist = parseChecklistItems(room.checklistItems, { roomId: room.id });
 
   return (
     <div className="lookbook-page min-h-screen flex flex-col bg-stone-50">
@@ -101,11 +108,7 @@ export function RoomSpread({ room, project }: RoomSpreadProps) {
               >
                 <div
                   className={`w-4 h-4 rounded border flex-shrink-0 mt-0.5 ${
-                    item.priority === "high"
-                      ? "border-primary bg-primary/10"
-                      : item.priority === "medium"
-                      ? "border-secondary bg-secondary/10"
-                      : "border-muted bg-muted/50"
+                    PRIORITY_STYLES[item.priority]
                   }`}
                 />
                 <span className="font-jakarta text-foreground">{item.item}</span>

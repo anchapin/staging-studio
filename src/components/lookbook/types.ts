@@ -1,8 +1,6 @@
-export interface ChecklistItem {
-  item: string;
-  category: string;
-  priority: "high" | "medium" | "low";
-}
+import type { ChecklistItem } from "@/lib/checklist-schema";
+
+export type { ChecklistItem };
 
 export interface RoomData {
   id: string;
