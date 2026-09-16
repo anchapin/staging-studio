@@ -1,24 +1,46 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { roomPatchSchema } from "@/lib/room-patch-schema";
 
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string; roomId: string }> }
 ) {
   try {
-    const { roomId } = await params;
-    const body = await request.json();
+    const { id: projectId, roomId } = await params;
 
-    const room = await prisma.room.update({
-      where: { id: roomId },
-      data: {
-        selectedVariantIndex: body.selectedVariantIndex,
-        beforeImageUrl: body.beforeImageUrl,
-        afterImageUrl: body.afterImageUrl,
-        beforeImageUrl2: body.beforeImageUrl2,
-        afterImageUrl2: body.afterImageUrl2,
-      },
+    const user = await getAuthedPrismaUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const parsed = roomPatchSchema.safeParse(await request.json());
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid request body", issues: parsed.error.issues },
+        { status: 400 }
+      );
+    }
+
+    const ownershipWhere = {
+      id: roomId,
+      project: { id: projectId, userId: user.id },
+    };
+
+    const { count } = await prisma.room.updateMany({
+      where: ownershipWhere,
+      data: parsed.data,
     });
+
+    if (count === 0) {
+      return NextResponse.json({ error: "Room not found" }, { status: 404 });
+    }
+
+    const room = await prisma.room.findFirst({ where: ownershipWhere });
+    if (!room) {
+      return NextResponse.json({ error: "Room not found" }, { status: 404 });
+    }
 
     return NextResponse.json(room);
   } catch (error) {
