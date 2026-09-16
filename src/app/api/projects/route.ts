@@ -37,10 +37,10 @@ export async function POST(request: Request) {
     );
 
     const {
-      data: { session },
-    } = await supabase.auth.getSession();
+      data: { user },
+    } = await supabase.auth.getUser();
 
-    if (!session?.user) {
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -55,11 +55,11 @@ export async function POST(request: Request) {
       );
     }
 
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
+    const userRow = await prisma.user.findUnique({
+      where: { email: user.email },
     });
 
-    if (!user) {
+    if (!userRow) {
       return NextResponse.json(
         { error: "User not found in database" },
         { status: 404 }
@@ -68,7 +68,7 @@ export async function POST(request: Request) {
 
     const project = await prisma.project.create({
       data: {
-        userId: user.id,
+        userId: userRow.id,
         propertyAddress,
         clientName,
         targetBuyer,

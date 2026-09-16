@@ -21,10 +21,10 @@ interface Project {
 async function fetchProjects(): Promise<Project[]> {
   const supabase = createClient();
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  if (!session) {
+  if (!user) {
     throw new Error("Not authenticated");
   }
 

@@ -23,8 +23,8 @@ export default async function Home() {
   });
 
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  redirect(session ? "/projects" : "/login");
+  redirect(user ? "/projects" : "/login");
 }

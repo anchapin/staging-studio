@@ -17,9 +17,9 @@ export default function SetupPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data }) => {
-      setSession(data.session);
-      if (!data.session) {
+    supabase.auth.getUser().then(async ({ data }) => {
+      setSession(data.user ? { user: data.user } : null);
+      if (!data.user) {
         router.push("/login");
         return;
       }

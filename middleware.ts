@@ -29,14 +29,16 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // Refresh session if expired
+  // Refresh session if expired. getUser() validates the JWT against the
+  // Supabase auth server (signature + expiry); on error (forged/stale cookie,
+  // invalid token) user is null and every branch below fails closed.
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
+    data: { user },
+  } = await supabase.auth.getUser();
 
   // Protect dashboard routes
   if (
-    !session &&
+    !user &&
     (request.nextUrl.pathname.startsWith("/dashboard") ||
       request.nextUrl.pathname.startsWith("/projects"))
   ) {
@@ -45,7 +47,7 @@ export async function middleware(request: NextRequest) {
 
   // Redirect logged-in users away from auth pages
   if (
-    session &&
+    user &&
     (request.nextUrl.pathname.startsWith("/login") ||
       request.nextUrl.pathname.startsWith("/setup"))
   ) {

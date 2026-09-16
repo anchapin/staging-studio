@@ -35,18 +35,18 @@ export async function GET(request: NextRequest) {
 
   try {
     const {
-      data: { session },
-    } = await supabase.auth.getSession();
+      data: { user },
+    } = await supabase.auth.getUser();
 
-    if (!session?.user) {
+    if (!user) {
       return respond({ exists: false }, { status: 401 });
     }
 
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
+    const userRow = await prisma.user.findUnique({
+      where: { email: user.email },
     });
 
-    return respond({ exists: !!user });
+    return respond({ exists: !!userRow });
   } catch {
     return respond({ exists: false }, { status: 500 });
   }
@@ -83,10 +83,10 @@ export async function POST(request: NextRequest) {
 
   try {
     const {
-      data: { session },
-    } = await supabase.auth.getSession();
+      data: { user },
+    } = await supabase.auth.getUser();
 
-    if (!session?.user) {
+    if (!user) {
       return respond({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -100,18 +100,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const user = await prisma.user.create({
+    const createdUser = await prisma.user.create({
       data: {
         firmName,
         ownerName,
         logoUrl,
-        email: session.user.email,
+        email: user.email,
         psychologyPageContent: psychologyPageContent || null,
         signoffContent: signoffContent || null,
       },
     });
 
-    return respond({ success: true, user });
+    return respond({ success: true, user: createdUser });
   } catch (error) {
     console.error("Setup error:", error);
     return respond({ error: "Failed to save user setup" }, { status: 500 });

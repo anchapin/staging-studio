@@ -20,8 +20,8 @@ export async function getSignedUploadUrl(
     }
   );
 
-  const { data: sessionData } = await supabase.auth.getSession();
-  if (!sessionData.session) {
+  const { data: userData } = await supabase.auth.getUser();
+  if (!userData.user) {
     throw new Error("Not authenticated");
   }
 
@@ -59,8 +59,8 @@ export async function confirmRoomPhotoUpload(
     }
   );
 
-  const { data: sessionData } = await supabase.auth.getSession();
-  if (!sessionData.session) {
+  const { data: userData } = await supabase.auth.getUser();
+  if (!userData.user) {
     throw new Error("Not authenticated");
   }
 

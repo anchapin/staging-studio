@@ -24,15 +24,15 @@ export default async function DashboardLayout({
   );
 
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  if (!session) {
+  if (!user) {
     redirect("/login");
   }
 
-  const user = await prisma.user.findUnique({
-    where: { email: session.user.email },
+  const userRow = await prisma.user.findUnique({
+    where: { email: user.email },
     include: {
       projects: {
         orderBy: { updatedAt: "desc" },
@@ -81,9 +81,9 @@ export default async function DashboardLayout({
           <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-stone-500">
             Projects
           </p>
-          {user?.projects && user.projects.length > 0 ? (
+          {userRow?.projects && userRow.projects.length > 0 ? (
             <ul className="space-y-1">
-              {user.projects.map((project) => (
+              {userRow.projects.map((project) => (
                 <li key={project.id}>
                   <Link
                     href={`/projects/${project.id}`}
