@@ -1,58 +1,22 @@
-"use client";
-
-import { useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase";
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { getDashboardUserWithProjects } from "@/lib/dashboard-data";
 
-interface Room {
-  id: string;
-  name: string;
-}
+/**
+ * Server-rendered projects list (issue #83). Reads Prisma through the same
+ * request-cached loader the (dashboard) layout uses for the sidebar, so one
+ * navigation runs one auth check and one query — no client auth
+ * round-trip gates the first paint. Errors surface through this segment's
+ * error boundary (error.tsx keeps the old "Failed to load projects." UI).
+ */
+export default async function ProjectsPage() {
+  // Defensive: the layout awaits this same cached call and redirects
+  // unauthenticated/unprovisioned users before any data can render.
+  const { sessionEmail, userRow } = await getDashboardUserWithProjects();
+  if (!sessionEmail) redirect("/login");
+  if (!userRow) redirect("/setup");
 
-interface Project {
-  id: string;
-  propertyAddress: string;
-  clientName: string;
-  stagingAesthetic: string;
-  createdAt: string;
-  rooms: Room[];
-}
-
-async function fetchProjects(): Promise<Project[]> {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    throw new Error("Not authenticated");
-  }
-
-  const response = await fetch("/api/projects");
-  if (!response.ok) {
-    throw new Error("Failed to fetch projects");
-  }
-  return response.json();
-}
-
-export default function ProjectsPage() {
-  const [projects, setProjects] = useState<Project[] | null>(null);
-  const [error, setError] = useState(false);
-  const isLoading = projects === null && !error;
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchProjects()
-      .then((data) => {
-        if (!cancelled) setProjects(data);
-      })
-      .catch(() => {
-        if (!cancelled) setError(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const projects = userRow.projects;
 
   return (
     <div className="p-8">
@@ -74,15 +38,7 @@ export default function ProjectsPage() {
         </Link>
       </div>
 
-      {isLoading ? (
-        <div className="flex items-center justify-center py-12">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-stone-300 border-t-stone-800" />
-        </div>
-      ) : error ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
-          <p className="text-red-700">Failed to load projects.</p>
-        </div>
-      ) : projects?.length === 0 ? (
+      {projects.length === 0 ? (
         <div className="rounded-lg border-2 border-dashed border-stone-300 p-12 text-center">
           <p className="text-stone-600">No projects yet.</p>
           <p className="mt-1 text-sm text-stone-500">
@@ -97,7 +53,7 @@ export default function ProjectsPage() {
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {projects?.map((project) => (
+          {projects.map((project) => (
             <Link
               key={project.id}
               href={`/projects/${project.id}`}

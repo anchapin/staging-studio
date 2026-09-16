@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, PencilRuler, X } from "lucide-react";
@@ -66,15 +66,30 @@ function pickVariantSlot(room: Room): 0 | 1 {
   return room.selectedVariantIndex === 1 ? 0 : 1;
 }
 
-export default function ProjectDetailView({ id }: { id: string }) {
+/**
+ * @param initialProject Server-rendered project data (issue #83): the page
+ *   fetches it through the request-cached loader shared with
+ *   generateMetadata, so first paint needs no client auth round-trip or
+ *   fetch. `loadProject` (the issue #90 retry-state machinery) is kept as
+ *   the client-side REFETCH path for interactive updates — it is only
+ *   invoked explicitly (e.g. by the retry affordance below), never on mount.
+ */
+export default function ProjectDetailView({
+  id,
+  initialProject,
+}: {
+  id: string;
+  initialProject: Project;
+}) {
   const router = useRouter();
-  const [project, setProject] = useState<Project | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [project, setProject] = useState<Project | null>(initialProject);
+  const [loading, setLoading] = useState(false);
   /**
-   * Null while loading or once loaded. When set, `status` is the failing
-   * response's HTTP status — or null when the fetch threw (network error).
-   * Only a real 404 renders the not-found state; everything else is a
-   * retryable load failure (issue #90).
+   * Null while loaded (the normal server-rendered state) or once a refetch
+   * succeeds. When set, `status` is the failing response's HTTP status —
+   * or null when the fetch threw (network error). Only a real 404 renders
+   * the not-found state; everything else is a retryable load failure
+   * (issue #90).
    */
   const [loadError, setLoadError] = useState<{ status: number | null } | null>(
     null
@@ -83,6 +98,13 @@ export default function ProjectDetailView({ id }: { id: string }) {
   const [directives, setDirectives] = useState<Record<string, string>>({});
   const { toasts, showError, showSuccess, showInfo, dismissToast } = useToast();
 
+  /**
+   * Explicit refetch through GET /api/projects/[id] (issue #90 retry-state
+   * machinery). Not run on mount — initial render is server data (issue
+   * #83); interactive updates re-sync via local state plus
+   * `router.refresh()` (which re-renders the server tree, including the
+   * sidebar). Kept for the retry affordance and future refetch needs.
+   */
   const loadProject = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
@@ -114,10 +136,6 @@ export default function ProjectDetailView({ id }: { id: string }) {
       setLoading(false);
     }
   }, [id]);
-
-  useEffect(() => {
-    void loadProject();
-  }, [loadProject]);
 
   const applyRoomUpdate = useCallback((roomId: string, patch: Partial<Room>) => {
     setProject((prev) =>

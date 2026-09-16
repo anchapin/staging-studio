@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { createSupabaseRequestClient } from "@/lib/supabase";
-import { prisma } from "@/lib/prisma";
+import { getDashboardUserWithProjects } from "@/lib/dashboard-data";
 
 export const dynamic = "force-dynamic";
 
@@ -10,29 +9,14 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = await createSupabaseRequestClient();
+  // Shared, request-cached loader (issue #83): the pages this layout wraps
+  // (/projects, /projects/[id]) await the same function and reuse this
+  // result — one auth round-trip + one Prisma query per navigation.
+  const { sessionEmail, userRow } = await getDashboardUserWithProjects();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
+  if (!sessionEmail) {
     redirect("/login");
   }
-
-  const userRow = await prisma.user.findUnique({
-    where: { email: user.email },
-    include: {
-      projects: {
-        orderBy: { updatedAt: "desc" },
-        select: {
-          id: true,
-          propertyAddress: true,
-          clientName: true,
-        },
-      },
-    },
-  });
 
   // Authenticated but never provisioned (password-first signup, fresh
   // DB): every mutation would 404 with "User not found in database".
