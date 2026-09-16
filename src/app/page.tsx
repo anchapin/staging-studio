@@ -1,17 +1,30 @@
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase";
+import { createServerClientSingleton } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const supabase = createClient();
+  const cookieStore = await cookies();
+
+  const supabase = createServerClientSingleton({
+    getAll() {
+      return cookieStore.getAll();
+    },
+    setAll(cookiesToSet) {
+      try {
+        cookiesToSet.forEach(({ name, value, options }) =>
+          cookieStore.set(name, value, options as Parameters<typeof cookieStore.set>[2])
+        );
+      } catch {
+        // Server Components cannot write cookies; middleware refreshes them.
+      }
+    },
+  });
+
   const {
     data: { session },
   } = await supabase.auth.getSession();
 
-  if (session) {
-    redirect("/dashboard");
-  } else {
-    redirect("/login");
-  }
+  redirect(session ? "/projects" : "/login");
 }

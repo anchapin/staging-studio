@@ -35,7 +35,11 @@ export async function middleware(request: NextRequest) {
   } = await supabase.auth.getSession();
 
   // Protect dashboard routes
-  if (!session && request.nextUrl.pathname.startsWith("/dashboard")) {
+  if (
+    !session &&
+    (request.nextUrl.pathname.startsWith("/dashboard") ||
+      request.nextUrl.pathname.startsWith("/projects"))
+  ) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
