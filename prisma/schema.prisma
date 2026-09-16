@@ -1,8 +1,13 @@
 // Prisma Schema for StagingStudio
 
+// Datasource
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
 }
 
 // User model: firm branding and editable page templates
