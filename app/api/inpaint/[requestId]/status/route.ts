@@ -2,6 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { fal } from "@/lib/fal";
 import { createClient } from "@/lib/supabase";
 
+interface FalStatusResult {
+  status: string;
+  images?: Array<{ url: string }>;
+  error?: string;
+}
+
+type FalQueueStatusFunction = (
+  id: string,
+  options: { requestId: string }
+) => Promise<FalStatusResult>;
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ requestId: string }> }
@@ -11,20 +22,24 @@ export async function GET(
 
     if (!requestId) {
       return NextResponse.json(
-        { error: "Missing requestId" },
+        {
+          error: "Missing requestId",
+          message: "Request ID is required to check status",
+        },
         { status: 400 }
       );
     }
 
-    const result = await fal.subscribe("fal-ai/flux-fill", {
-      requestId,
-      pollInterval: 1000,
-      maxRetries: 60,
-    });
+    const falQueueStatus = fal.queue.status as FalQueueStatusFunction;
+    const result = await falQueueStatus("fal-ai/flux-fill", { requestId });
 
     if (result.status === "ERROR") {
       return NextResponse.json(
-        { error: "Inpainting failed", details: result.error },
+        {
+          error: "Inpainting failed",
+          message: "The image editing process encountered an error. Please try again.",
+          retryable: true,
+        },
         { status: 500 }
       );
     }
@@ -34,25 +49,42 @@ export async function GET(
 
       if (imageUrl) {
         const supabase = createClient();
-        await supabase.storage
-          .from("staging-images")
-          .upload(`after-${requestId}.png`, await fetch(imageUrl).then((r) => r.blob()), {
-            contentType: "image/png",
-            upsert: true,
+
+        try {
+          await supabase.storage
+            .from("staging-images")
+            .upload(
+              `after-${requestId}.png`,
+              await fetch(imageUrl).then((r) => r.blob()),
+              {
+                contentType: "image/png",
+                upsert: true,
+              }
+            );
+
+          const { data: publicUrlData } = supabase.storage
+            .from("staging-images")
+            .getPublicUrl(`after-${requestId}.png`);
+
+          return NextResponse.json({
+            status: "completed",
+            imageUrl: publicUrlData.publicUrl,
           });
-
-        const { data: publicUrlData } = supabase.storage
-          .from("staging-images")
-          .getPublicUrl(`after-${requestId}.png`);
-
-        return NextResponse.json({
-          status: "completed",
-          imageUrl: publicUrlData.publicUrl,
-        });
+        } catch (storageError) {
+          console.error("Storage error:", storageError);
+          return NextResponse.json({
+            status: "completed",
+            imageUrl: imageUrl,
+          });
+        }
       }
 
       return NextResponse.json(
-        { error: "No image in result" },
+        {
+          error: "Processing incomplete",
+          message: "The image was processed but could not be retrieved. Please try again.",
+          retryable: true,
+        },
         { status: 500 }
       );
     }
@@ -62,8 +94,27 @@ export async function GET(
     });
   } catch (error) {
     console.error("Inpaint status API error:", error);
+
+    const errorMessage =
+      error instanceof Error ? error.message : "Failed to check inpainting status";
+
+    if (errorMessage.includes("not found") || errorMessage.includes("NOT_FOUND")) {
+      return NextResponse.json(
+        {
+          error: "Request not found",
+          message: "This image processing request could not be found. It may have expired.",
+          retryable: true,
+        },
+        { status: 404 }
+      );
+    }
+
     return NextResponse.json(
-      { error: "Failed to check inpainting status" },
+      {
+        error: "Status check failed",
+        message: "Unable to check image processing status. Please try again.",
+        retryable: true,
+      },
       { status: 500 }
     );
   }
