@@ -322,6 +322,15 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                     roomId={room.id}
                     projectId={project.id}
                     imageUrl={room.beforeImageUrl}
+                    onUploadComplete={(slot, publicUrl) => {
+                      applyRoomUpdate(
+                        room.id,
+                        slot === 1
+                          ? { beforeImageUrl2: publicUrl }
+                          : { beforeImageUrl: publicUrl }
+                      );
+                      router.refresh();
+                    }}
                   />
 
                   {isComplete(displayPair) && (
