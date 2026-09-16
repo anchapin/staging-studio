@@ -1,24 +1,13 @@
 "use server";
 
-import { createServerClient } from "@supabase/ssr";
+import { createSupabaseRequestClient } from "@/lib/supabase";
 import { revalidatePath } from "next/cache";
 
 export async function getSignedUploadUrl(
   roomId: string,
   fileName: string
 ) {
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return [];
-        },
-        setAll() {},
-      },
-    }
-  );
+  const supabase = await createSupabaseRequestClient();
 
   const { data: userData } = await supabase.auth.getUser();
   if (!userData.user) {
@@ -46,18 +35,7 @@ export async function confirmRoomPhotoUpload(
   projectId: string,
   storagePath: string
 ) {
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return [];
-        },
-        setAll() {},
-      },
-    }
-  );
+  const supabase = await createSupabaseRequestClient();
 
   const { data: userData } = await supabase.auth.getUser();
   if (!userData.user) {
