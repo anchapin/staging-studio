@@ -1,4 +1,6 @@
+import { cache } from "react";
 import { notFound } from "next/navigation";
+import type { Metadata } from "next";
 
 import { prisma } from "@/lib/prisma";
 import {
@@ -14,6 +16,60 @@ import {
 interface LookbookPreviewPageProps {
   params: Promise<{ id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
+}
+
+/**
+ * Single Prisma fetch shared by generateMetadata and the page via React
+ * `cache()` — deduped to one query per request, so the title adds no
+ * fetch waterfall.
+ */
+const getPreviewProject = cache(async (id: string) =>
+  prisma.project.findUnique({
+    where: { id },
+    include: {
+      rooms: true,
+      user: {
+        select: {
+          firmName: true,
+          ownerName: true,
+          psychologyPageContent: true,
+          signoffContent: true,
+        },
+      },
+    },
+  })
+);
+
+/**
+ * Token is verified before the address is read: an invalid, expired, or
+ * mismatched token never leaks a propertyAddress into the title (the page
+ * itself 404s in that case).
+ */
+export async function generateMetadata({
+  params,
+  searchParams,
+}: LookbookPreviewPageProps): Promise<Metadata> {
+  const [{ id }, resolvedSearchParams] = await Promise.all([
+    params,
+    searchParams,
+  ]);
+
+  const rawToken = resolvedSearchParams[PREVIEW_TOKEN_QUERY_PARAM];
+  const token = Array.isArray(rawToken) ? rawToken[0] : rawToken;
+
+  const verification = await verifyPreviewToken(token);
+  if (!verification.valid || verification.projectId !== id) {
+    return { title: "Lookbook Preview" };
+  }
+
+  const project = await getPreviewProject(id);
+  if (!project) {
+    return { title: "Lookbook Preview" };
+  }
+
+  return {
+    title: { absolute: `Lookbook Preview · ${project.propertyAddress}` },
+  };
 }
 
 /**
@@ -41,20 +97,7 @@ export default async function LookbookPreviewPage({
     notFound();
   }
 
-  const project = await prisma.project.findUnique({
-    where: { id },
-    include: {
-      rooms: true,
-      user: {
-        select: {
-          firmName: true,
-          ownerName: true,
-          psychologyPageContent: true,
-          signoffContent: true,
-        },
-      },
-    },
-  });
+  const project = await getPreviewProject(id);
   if (!project) {
     notFound();
   }
