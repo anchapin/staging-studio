@@ -179,7 +179,10 @@ export default function NewProjectPage() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-stone-700">
+          <label
+            htmlFor="room-0"
+            className="block text-sm font-medium text-stone-700"
+          >
             Rooms
           </label>
           <p className="mt-0.5 text-xs text-stone-500">
@@ -189,6 +192,7 @@ export default function NewProjectPage() {
             {rooms.map((room, index) => (
               <div key={index} className="flex items-center gap-2">
                 <input
+                  id={`room-${index}`}
                   type="text"
                   value={room}
                   onChange={(e) => handleRoomChange(index, e.target.value)}

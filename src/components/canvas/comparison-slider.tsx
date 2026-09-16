@@ -107,6 +107,7 @@ export function ComparisonSlider({
 
       <div
         ref={containerRef}
+        role="presentation"
         className="relative h-64 w-full cursor-col-resize select-none sm:h-96"
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
