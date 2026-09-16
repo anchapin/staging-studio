@@ -36,12 +36,20 @@ export default async function DashboardLayout({
 
   return (
     <div className="flex min-h-screen bg-stone-50">
+      {/* Skip link: first focusable element, jumps past the sidebar nav */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-stone-900 focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-white"
+      >
+        Skip to main content
+      </a>
+
       {/* Sidebar */}
       <aside className="w-64 flex-shrink-0 bg-stone-900 text-white">
         <div className="flex h-16 items-center border-b border-stone-800 px-6">
-          <h1 className="font-cinzel text-lg font-bold tracking-wide">
+          <p className="font-cinzel text-lg font-bold tracking-wide">
             Circle G Designs
-          </h1>
+          </p>
         </div>
 
         <div className="p-4">
@@ -67,7 +75,7 @@ export default async function DashboardLayout({
         </div>
 
         <nav className="px-4 pb-4">
-          <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-stone-500">
+          <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-stone-400">
             Projects
           </p>
           {userRow?.projects && userRow.projects.length > 0 ? (
@@ -80,7 +88,7 @@ export default async function DashboardLayout({
                   >
                     <span className="font-medium">{project.clientName}</span>
                     <br />
-                    <span className="text-xs text-stone-500">
+                    <span className="text-xs text-stone-400">
                       {project.propertyAddress}
                     </span>
                   </Link>
@@ -88,7 +96,7 @@ export default async function DashboardLayout({
               ))}
             </ul>
           ) : (
-            <p className="px-3 py-2 text-sm text-stone-500">No projects yet</p>
+            <p className="px-3 py-2 text-sm text-stone-400">No projects yet</p>
           )}
         </nav>
 
@@ -103,7 +111,9 @@ export default async function DashboardLayout({
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto">{children}</main>
+      <main id="main-content" tabIndex={-1} className="flex-1 overflow-auto">
+        {children}
+      </main>
     </div>
   );
 }
