@@ -129,9 +129,14 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       const result = await saveVariantSelection(room.id, index);
       if (!result.success) {
         applyRoomUpdate(room.id, { selectedVariantIndex: previousIndex });
-        showError(result.error || "Failed to save variant selection", true, () => {
-          void handleVariantSelect(room, index);
-        });
+        showError(
+          result.error || "Failed to save variant selection",
+          true,
+          () => {
+            void handleVariantSelect(room, index);
+          },
+          "Retry saving variant selection"
+        );
         return;
       }
       router.refresh();
@@ -179,9 +184,14 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Failed to save staged image";
-        showError(message, true, () => {
-          void persistInpaintResult(room, resultImageUrl);
-        });
+        showError(
+          message,
+          true,
+          () => {
+            void persistInpaintResult(room, resultImageUrl);
+          },
+          "Retry saving staged image"
+        );
       }
     },
     [project?.id, applyRoomUpdate, showError, showSuccess, router]
@@ -193,9 +203,14 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       // here we additionally record the user's directives for the room.
       void saveRoomMetadata(roomId, { rawDirectives }).then((result) => {
         if (!result.success) {
-          showError(result.error || "Failed to save staging directives", true, () => {
-            handleCopyGenerated(roomId, rawDirectives);
-          });
+          showError(
+            result.error || "Failed to save staging directives",
+            true,
+            () => {
+              handleCopyGenerated(roomId, rawDirectives);
+            },
+            "Retry saving staging directives"
+          );
         }
       });
     },

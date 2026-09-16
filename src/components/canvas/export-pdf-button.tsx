@@ -50,9 +50,14 @@ export default function ExportPdfButton({
       onExportComplete?.();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to export PDF";
-      showError(message, true, () => {
-        handleExport();
-      });
+      showError(
+        message,
+        true,
+        () => {
+          handleExport();
+        },
+        "Retry PDF export"
+      );
     } finally {
       setIsExporting(false);
     }

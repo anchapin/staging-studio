@@ -70,9 +70,14 @@ export default function GenerateCopyForm({
       onCopyGenerated?.(data.data, trimmedDirectives);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to generate copy";
-      showError(message, true, () => {
-        handleGenerate();
-      });
+      showError(
+        message,
+        true,
+        () => {
+          handleGenerate();
+        },
+        "Retry copy generation"
+      );
     } finally {
       setIsGenerating(false);
     }
