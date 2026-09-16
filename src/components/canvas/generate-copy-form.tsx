@@ -10,7 +10,7 @@ interface GenerateCopyFormProps {
   aesthetic: string;
   targetBuyer: string;
   initialDirectives?: string;
-  onCopyGenerated?: (copy: GeneratedCopy) => void;
+  onCopyGenerated?: (copy: GeneratedCopy, rawDirectives: string) => void;
 }
 
 export interface GeneratedCopy {
@@ -38,7 +38,8 @@ export default function GenerateCopyForm({
   const { toasts, showError, showSuccess, dismissToast } = useToast();
 
   const handleGenerate = useCallback(async () => {
-    if (!rawDirectives.trim()) {
+    const trimmedDirectives = rawDirectives.trim();
+    if (!trimmedDirectives) {
       showError("Please provide staging directives for this room.");
       return;
     }
@@ -51,9 +52,9 @@ export default function GenerateCopyForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           roomId,
-          roomName,
-          rawDirectives,
-          aesthetic,
+          roomName: roomName.trim().slice(0, 200),
+          rawDirectives: trimmedDirectives,
+          aesthetic: aesthetic.trim().slice(0, 200),
           targetBuyer,
         }),
       });
@@ -66,7 +67,7 @@ export default function GenerateCopyForm({
 
       setCopy(data.data);
       showSuccess("Copy generated successfully!");
-      onCopyGenerated?.(data.data);
+      onCopyGenerated?.(data.data, trimmedDirectives);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to generate copy";
       showError(message, true, () => {
@@ -88,6 +89,7 @@ export default function GenerateCopyForm({
           onChange={(e) => setRawDirectives(e.target.value)}
           placeholder="Describe the key staging priorities and changes needed for this room..."
           rows={4}
+          maxLength={2000}
           className="w-full px-3 py-2 border border-stone-300 rounded-md focus:outline-none focus:ring-2 focus:ring-stone-500 resize-none"
         />
       </div>
