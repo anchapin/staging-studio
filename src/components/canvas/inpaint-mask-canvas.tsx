@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useEffect, useCallback, useMemo } from "react";
+import { useRef, useState, useEffect, useCallback, useMemo, useId } from "react";
 import { clientPointToCanvas, computeMaskCanvasDimensions } from "@/lib/canvas-coords";
 
 interface InpaintMaskCanvasProps {
@@ -35,6 +35,16 @@ export default function InpaintMaskCanvas({
   const [brushSize, setBrushSize] = useState(initialBrushSize);
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(initialMaskDataUrl ?? null);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Keyboard painting: the virtual brush cursor lives in canvas pixel space
+  // (the same space clientPointToCanvas produces) so arrow-key deltas scale
+  // with the canvas resolution, not with client pixels.
+  const [isCanvasFocused, setIsCanvasFocused] = useState(false);
+  const [isKeyboardPainting, setIsKeyboardPainting] = useState(false);
+  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
+  const cursorRef = useRef<{ x: number; y: number } | null>(null);
+  const keyboardPaintingRef = useRef(false);
+  const hintId = useId();
 
   // Canvas resolution follows the photo's aspect ratio (capped on the long
   // edge); without one, fall back to the plain width/height props.
@@ -119,6 +129,20 @@ export default function InpaintMaskCanvas({
     ctx.stroke();
   };
 
+  // A zero-length stroked line renders inconsistently across browsers, so
+  // single-point paints (keyboard toggle-down, no movement yet) fill a disc.
+  const drawDot = (at: { x: number; y: number }) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.fillStyle = "white";
+    ctx.beginPath();
+    ctx.arc(at.x, at.y, brushSize / 2, 0, Math.PI * 2);
+    ctx.fill();
+  };
+
   const handleStart = (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
     const point = getCoordinates(e);
@@ -184,27 +208,144 @@ export default function InpaintMaskCanvas({
     onMaskChange?.(null);
   };
 
+  const centerOf = (canvas: HTMLCanvasElement) => ({
+    x: canvas.width / 2,
+    y: canvas.height / 2,
+  });
+
+  const moveCursorTo = (next: { x: number; y: number }) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const point = {
+      x: Math.min(Math.max(next.x, 0), canvas.width),
+      y: Math.min(Math.max(next.y, 0), canvas.height),
+    };
+    if (keyboardPaintingRef.current) {
+      const from = cursorRef.current ?? point;
+      draw(from, point);
+    }
+    cursorRef.current = point;
+    setCursor(point);
+  };
+
+  const liftKeyboardPaint = () => {
+    if (!keyboardPaintingRef.current) return;
+    keyboardPaintingRef.current = false;
+    setIsKeyboardPainting(false);
+    exportMask();
+  };
+
+  const toggleKeyboardPaint = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    if (keyboardPaintingRef.current) {
+      liftKeyboardPaint();
+      return;
+    }
+    const at = cursorRef.current ?? centerOf(canvas);
+    cursorRef.current = at;
+    setCursor(at);
+    keyboardPaintingRef.current = true;
+    setIsKeyboardPainting(true);
+    drawDot(at);
+  };
+
+  const ARROW_DELTAS: Record<string, [number, number]> = {
+    ArrowLeft: [-1, 0],
+    ArrowRight: [1, 0],
+    ArrowUp: [0, -1],
+    ArrowDown: [0, 1],
+  };
+
+  const handleCanvasKeyDown = (e: React.KeyboardEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const delta = ARROW_DELTAS[e.key];
+    if (delta) {
+      e.preventDefault();
+      const fraction = e.shiftKey ? 0.01 : 0.05;
+      const current = cursorRef.current ?? centerOf(canvas);
+      moveCursorTo({
+        x: current.x + delta[0] * canvas.width * fraction,
+        y: current.y + delta[1] * canvas.height * fraction,
+      });
+      return;
+    }
+
+    if (e.key === "p" || e.key === "P" || e.key === " " || e.key === "Enter") {
+      e.preventDefault();
+      toggleKeyboardPaint();
+    }
+  };
+
+  const handleCanvasFocus = () => {
+    setIsCanvasFocused(true);
+    const canvas = canvasRef.current;
+    if (canvas && !cursorRef.current) {
+      const at = centerOf(canvas);
+      cursorRef.current = at;
+      setCursor(at);
+    }
+  };
+
+  const handleCanvasBlur = () => {
+    setIsCanvasFocused(false);
+    liftKeyboardPaint();
+  };
+
+  // Brush cursor indicator is a DOM overlay, never canvas pixels, so the
+  // exported mask stays clean. Positioned/sized as percentages of the canvas
+  // box so it matches the display size in both overlay and standalone modes.
+  const cursorIndicator =
+    isCanvasFocused && cursor ? (
+      <div
+        aria-hidden="true"
+        className={`pointer-events-none absolute z-10 rounded-full border-2 border-white ${
+          isKeyboardPainting ? "bg-white/40" : ""
+        }`}
+        style={{
+          left: `${(cursor.x / dims.width) * 100}%`,
+          top: `${(cursor.y / dims.height) * 100}%`,
+          width: `${(brushSize / dims.width) * 100}%`,
+          height: `${(brushSize / dims.height) * 100}%`,
+          transform: "translate(-50%, -50%)",
+          boxShadow: "0 0 0 1px rgba(0, 0, 0, 0.6)",
+        }}
+      />
+    ) : null;
+
   const canvasElement = (
-    <canvas
-      ref={canvasRef}
-      width={dims.width}
-      height={dims.height}
-      className={
-        hasOverlay
-          ? "absolute inset-0 h-full w-full rounded-lg cursor-crosshair touch-none opacity-60"
-          : "border border-gray-300 rounded cursor-crosshair touch-none"
-      }
-      style={
-        hasOverlay ? undefined : { width: Math.min(dims.width, 512), height: Math.min(dims.height, 512) }
-      }
-      onMouseDown={handleStart}
-      onMouseMove={handleMove}
-      onMouseUp={handleEnd}
-      onMouseLeave={handleEnd}
-      onTouchStart={handleStart}
-      onTouchMove={handleMove}
-      onTouchEnd={handleEnd}
-    />
+    <>
+      <canvas
+        ref={canvasRef}
+        width={dims.width}
+        height={dims.height}
+        tabIndex={0}
+        role="application"
+        aria-label="Room mask painting canvas: arrow keys move the brush (hold Shift for fine steps), press P, Space, or Enter to start and stop painting"
+        aria-describedby={hintId}
+        className={
+          hasOverlay
+            ? "absolute inset-0 h-full w-full rounded-lg cursor-crosshair touch-none opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-500 focus-visible:ring-offset-2"
+            : "border border-gray-300 rounded cursor-crosshair touch-none focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-500 focus-visible:ring-offset-2"
+        }
+        style={
+          hasOverlay ? undefined : { width: Math.min(dims.width, 512), height: Math.min(dims.height, 512) }
+        }
+        onMouseDown={handleStart}
+        onMouseMove={handleMove}
+        onMouseUp={handleEnd}
+        onMouseLeave={handleEnd}
+        onTouchStart={handleStart}
+        onTouchMove={handleMove}
+        onTouchEnd={handleEnd}
+        onKeyDown={handleCanvasKeyDown}
+        onFocus={handleCanvasFocus}
+        onBlur={handleCanvasBlur}
+      />
+      {cursorIndicator}
+    </>
   );
 
   return (
@@ -226,8 +367,14 @@ export default function InpaintMaskCanvas({
           {canvasElement}
         </div>
       ) : (
-        canvasElement
+        <div className="relative w-fit">{canvasElement}</div>
       )}
+
+      <p id={hintId} className="text-xs text-gray-500">
+        Keyboard painting: Tab to the canvas, move the brush with the arrow keys
+        (Shift + arrow for fine steps), and press P, Space, or Enter to start or
+        stop painting. Brush Size and Clear Mask follow in the tab order.
+      </p>
 
       <div className="flex items-center gap-4">
         <label className="flex items-center gap-2 text-sm">
