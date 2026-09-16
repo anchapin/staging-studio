@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { LookbookRoomData } from "./types";
 
 interface SignoffPageProps {
@@ -33,9 +34,13 @@ export function SignoffPage({ user, project, rooms }: SignoffPageProps) {
         <div className="pt-8 space-y-4">
           {user.logoUrl && (
             <div className="flex justify-center">
-              <img
+              <Image
                 src={user.logoUrl}
                 alt={`${user.firmName} logo`}
+                width={256}
+                height={64}
+                sizes="256px"
+                loading="eager"
                 className="h-16 w-auto object-contain"
               />
             </div>

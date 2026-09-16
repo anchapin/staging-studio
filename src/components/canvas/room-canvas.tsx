@@ -1,9 +1,13 @@
 "use client";
 
 import { useState, useRef } from "react";
+import Image from "next/image";
 import imageCompression from "browser-image-compression";
 import { Upload, Loader2, X, ImageIcon } from "lucide-react";
 import { getSignedUploadUrl, confirmRoomPhotoUpload } from "@/app/actions/room-photos";
+
+const ROOM_CANVAS_IMAGE_SIZES =
+  "(max-width: 767px) calc(100vw - 320px), calc((100vw - 352px) / 2)";
 
 interface RoomCanvasProps {
   roomId: string;
@@ -178,11 +182,13 @@ export default function RoomCanvas({
   return (
     <div className="relative rounded-lg border border-stone-200 bg-stone-100 overflow-hidden">
       {imageUrl ? (
-        <div className="relative group">
-          <img
+        <div className="relative group h-64">
+          <Image
             src={imageUrl}
             alt="Room"
-            className="w-full h-64 object-cover"
+            fill
+            sizes={ROOM_CANVAS_IMAGE_SIZES}
+            className="object-cover"
           />
           <button
             onClick={() => fileInputRef.current?.click()}

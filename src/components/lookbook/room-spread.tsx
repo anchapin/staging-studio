@@ -9,6 +9,8 @@ const PRIORITY_STYLES: Record<ChecklistItem["priority"], string> = {
   Standard: "border-muted bg-muted/50",
 };
 
+const SPREAD_IMAGE_SIZES = "calc((100vw - 256px) / 2)";
+
 interface RoomSpreadProps {
   room: LookbookRoomData;
   user: LookbookRoomData["user"];
@@ -39,6 +41,8 @@ export function RoomSpread({ room, project }: RoomSpreadProps) {
               src={room.beforeImageUrl}
               alt={`${room.name} - Before staging`}
               fill
+              sizes={SPREAD_IMAGE_SIZES}
+              loading="eager"
               className="object-cover"
             />
           ) : (
@@ -59,6 +63,8 @@ export function RoomSpread({ room, project }: RoomSpreadProps) {
               src={room.afterImageUrl}
               alt={`${room.name} - After staging`}
               fill
+              sizes={SPREAD_IMAGE_SIZES}
+              loading="eager"
               className="object-cover"
             />
           ) : (
