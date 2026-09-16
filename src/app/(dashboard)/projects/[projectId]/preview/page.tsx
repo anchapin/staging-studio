@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase";
 import { CoverPage, PhilosophyPage, RoomSpread, SignoffPage } from "@/components/lookbook";
+import type { ChecklistItem, ProjectData } from "@/components/lookbook";
 
 interface Project {
   id: string;
@@ -87,39 +88,50 @@ export default function LookbookPreviewPage({ params }: LookbookPreviewPageProps
     );
   }
 
+  const projectData: ProjectData = {
+    propertyAddress: project.propertyAddress,
+    clientName: project.clientName,
+    targetBuyer: project.targetBuyer,
+    stagingAesthetic: project.stagingAesthetic,
+  };
+
   return (
     <div className="lookbook-preview">
-      <CoverPage
-        firmName={project.user.firmName}
-        propertyAddress={project.propertyAddress}
-        clientName={project.clientName}
-        stagingAesthetic={project.stagingAesthetic}
-      />
+      <CoverPage project={projectData} user={project.user} />
 
-      <PhilosophyPage
-        targetBuyer={project.targetBuyer}
-        psychologyPageContent={project.user.psychologyPageContent ?? undefined}
-      />
+      <PhilosophyPage project={projectData} user={project.user} />
 
-      {project.rooms.map((room, index) => (
+      {project.rooms.map((room) => (
         <RoomSpread
           key={room.id}
-          roomName={room.name}
-          beforeImageUrl={room.beforeImageUrl}
-          afterImageUrl={room.afterImageUrl}
-          selectedVariantIndex={room.selectedVariantIndex}
-          observedChallenge={room.observedChallenge}
-          recommendation={room.recommendation}
-          buyerPsychology={room.buyerPsychology}
-          checklistItems={room.checklistItems}
-          pageBreak={index < project.rooms.length - 1}
+          room={{
+            id: room.id,
+            name: room.name,
+            beforeImageUrl: room.beforeImageUrl,
+            afterImageUrl: room.afterImageUrl,
+            observedChallenge: room.observedChallenge,
+            recommendation: room.recommendation,
+            buyerPsychology: room.buyerPsychology,
+            checklistItems: room.checklistItems as ChecklistItem[] | null,
+            project: projectData,
+            user: project.user,
+          }}
+          user={project.user}
+          project={projectData}
         />
       ))}
 
       <SignoffPage
-        firmName={project.user.firmName}
-        ownerName={project.user.ownerName}
-        signoffContent={project.user.signoffContent ?? undefined}
+        user={project.user}
+        project={projectData}
+        rooms={project.rooms.map((room) => ({
+          id: room.id,
+          name: room.name,
+          beforeImageUrl: room.beforeImageUrl,
+          afterImageUrl: room.afterImageUrl,
+          project: projectData,
+          user: project.user,
+        }))}
       />
     </div>
   );
