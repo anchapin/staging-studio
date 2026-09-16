@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState, use } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 import { ComparisonSlider } from "@/components/canvas/comparison-slider";
+import RoomCanvas from "@/components/canvas/room-canvas";
 
 interface Room {
   id: string;
@@ -26,12 +27,21 @@ interface Project {
 
 export default function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const router = useRouter();
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchProject = async () => {
+      const supabase = createClient();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        setLoading(false);
+        return;
+      }
+
       const response = await fetch(`/api/projects/${id}`);
       if (response.ok) {
         const data = await response.json();
@@ -67,13 +77,22 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       <header className="bg-white border-b border-stone-200 px-8 py-4">
         <div className="flex items-center justify-between">
           <div>
-            <Link href="/dashboard" className="text-sm text-stone-500 hover:text-stone-700">
-              ← Back to Dashboard
+            <Link
+              href="/dashboard"
+              className="inline-flex items-center gap-2 text-sm text-stone-500 hover:text-stone-700"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back to Dashboard
             </Link>
             <h1 className="font-playfair text-2xl font-bold text-stone-800 mt-1">
               {project.propertyAddress}
             </h1>
-            <p className="text-sm text-stone-600">{project.clientName} · {project.stagingAesthetic}</p>
+            <div className="mt-1 flex items-center gap-4">
+              <p className="text-sm text-stone-600">{project.clientName}</p>
+              <span className="rounded-full bg-stone-100 px-2.5 py-0.5 text-xs font-medium text-stone-700">
+                {project.stagingAesthetic}
+              </span>
+            </div>
           </div>
           <button className="rounded-md bg-stone-800 px-4 py-2 text-sm font-medium text-white hover:bg-stone-700">
             Export PDF
@@ -83,7 +102,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
       <main className="p-8">
         <h2 className="font-playfair text-xl font-semibold text-stone-800 mb-6">Rooms</h2>
-        
+
         {project.rooms.length === 0 ? (
           <div className="rounded-lg border-2 border-dashed border-stone-300 p-12 text-center">
             <p className="text-stone-600">No rooms yet.</p>
@@ -91,12 +110,21 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         ) : (
           <div className="grid gap-8 md:grid-cols-2">
             {project.rooms.map((room) => (
-              <ComparisonSlider
-                key={room.id}
-                roomName={room.name}
-                originalImage={room.beforeImageUrl || ""}
-                variantImage={room.afterImageUrl || ""}
-              />
+              <div key={room.id} className="space-y-3">
+                <h3 className="font-medium text-stone-800">{room.name}</h3>
+                <RoomCanvas
+                  roomId={room.id}
+                  projectId={project.id}
+                  imageUrl={room.beforeImageUrl}
+                />
+                {room.beforeImageUrl && room.afterImageUrl && (
+                  <ComparisonSlider
+                    roomName={room.name}
+                    originalImage={room.beforeImageUrl}
+                    variantImage={room.afterImageUrl}
+                  />
+                )}
+              </div>
             ))}
           </div>
         )}
