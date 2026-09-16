@@ -1,6 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { resolveAuthRedirect } from "@/lib/auth-redirect";
+
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
@@ -36,22 +38,15 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Protect dashboard routes
-  if (
-    !user &&
-    (request.nextUrl.pathname.startsWith("/dashboard") ||
-      request.nextUrl.pathname.startsWith("/projects"))
-  ) {
-    return NextResponse.redirect(new URL("/login", request.url));
-  }
-
-  // Redirect logged-in users away from auth pages
-  if (
-    user &&
-    (request.nextUrl.pathname.startsWith("/login") ||
-      request.nextUrl.pathname.startsWith("/setup"))
-  ) {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+  // Redirect decision matrix (see src/lib/auth-redirect.ts):
+  // unauthenticated → /login for protected prefixes, authenticated →
+  // /dashboard for auth-page prefixes, otherwise pass through.
+  const redirectTarget = resolveAuthRedirect(
+    request.nextUrl.pathname,
+    Boolean(user)
+  );
+  if (redirectTarget) {
+    return NextResponse.redirect(new URL(redirectTarget, request.url));
   }
 
   return supabaseResponse;
