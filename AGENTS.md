@@ -23,7 +23,7 @@ npm run build
 ## Layout
 
 - All code lives under `src/` (Next.js src-dir convention): `src/app`, `src/components`, `src/lib`. The `@/*` import alias maps to `src/*`. `middleware.ts` stays at the repo root, not in `src/`.
-- `src/lib/` holds the shared singletons: `prisma.ts`, `supabase.ts` (browser client, server singleton, and the request-scoped `createSupabaseRequestClient()` factory), `ai.ts` (model), `fal.ts` (fal.ai client) — plus `api-auth.ts` (session → Prisma `User` helper), `env.ts` (call-time env validation), and pure logic modules (`checklist-schema.ts`, `room-patch-schema.ts`, `ai-route-schemas.ts`, `inpaint-polling.ts`).
+- `src/lib/` holds the shared singletons: `prisma.ts`, `supabase.ts` (browser client, server singleton, and the request-scoped `createSupabaseRequestClient()` factory), `ai.ts` (model), `fal.ts` (fal.ai client) — plus `api-auth.ts` (session → Prisma `User` helper), `env.ts` (call-time env validation), and pure logic modules (`checklist-schema.ts`, `room-patch-schema.ts`, `ai-route-schemas.ts`, `inpaint-polling.ts`, `inpaint-persistence.ts`, `auth-redirect.ts`, `preview-token.ts` (HMAC-signed PDF-preview tokens), `canvas-coords.ts`).
 - Room/room-photo/Project mutations are server actions in `src/app/actions/` (`"use server"`; all ownership-checked). Tests live in `tests/` (vitest, node env). Third-party integrations are API routes under `src/app/api/`: `projects` CRUD (+ nested `rooms`), `inpaint` (+ `[requestId]/status` polling), `generate-copy`, `export-pdf`, `setup` (+ `setup/check`).
 - `src/components/canvas/` = staging editor UI; `src/components/lookbook/` = printable PDF page components; `src/components/ui/` = shadcn components (`components.json` drives the CLI; all aliases are `@/`-based).
 
@@ -45,7 +45,7 @@ npm run build
 
 ## Env vars
 
-All in `.env.example`, copied to `.env.local`: `DATABASE_URL` (Supabase Postgres, used by Prisma), `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`, `FAL_KEY`, `BROWSERLESS_API_KEY` (used by `api/export-pdf`).
+All in `.env.example`, copied to `.env.local`: `DATABASE_URL` (Supabase Postgres, used by Prisma), `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`, `FAL_KEY`, `BROWSERLESS_API_KEY` (used by `api/export-pdf`), `NEXT_PUBLIC_APP_URL` (public origin; `api/export-pdf` requires it to be publicly reachable in production), `PREVIEW_TOKEN_SECRET` (signs short-lived lookbook-preview tokens; dev-only deterministic fallback when unset).
 
 ## Toolchain quirks
 
@@ -55,4 +55,4 @@ All in `.env.example`, copied to `.env.local`: `DATABASE_URL` (Supabase Postgres
 
 ## Domain model
 
-`prisma/schema.prisma`: `User` (firm branding + editable page templates) → `Project` (one staging job: address, client, target buyer, aesthetic) → `Room` (two before/after image variants, selected variant index, AI outputs: raw directives, observed challenge, recommendation, buyer psychology, checklist JSON). Deletes cascade down the chain.
+`prisma/schema.prisma`: `User` (firm branding + editable page templates) → `Project` (one staging job: address, client, target buyer, aesthetic) → `Room` (two before/after image variants, selected variant index, AI outputs: raw directives, observed challenge, recommendation, buyer psychology, checklist JSON) → `InpaintRequest` (fal.ai queue request mapped to a room + variant slot; status and durable result URL; cascade-deleted with its room). Deletes cascade down the chain.
