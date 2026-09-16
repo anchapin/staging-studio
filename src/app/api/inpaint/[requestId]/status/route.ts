@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fal } from "@/lib/fal";
 import { createClient } from "@/lib/supabase";
+import { getAuthedPrismaUser } from "@/lib/api-auth";
 
 interface FalStatusResult {
   status: string;
@@ -18,6 +19,17 @@ export async function GET(
   { params }: { params: Promise<{ requestId: string }> }
 ) {
   try {
+    const user = await getAuthedPrismaUser();
+    if (!user) {
+      return NextResponse.json(
+        {
+          error: "Unauthorized",
+          message: "You must be signed in to check inpainting status.",
+        },
+        { status: 401 }
+      );
+    }
+
     const { requestId } = await params;
 
     if (!requestId) {

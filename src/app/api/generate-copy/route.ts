@@ -2,6 +2,9 @@ import { generateObject } from "ai";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { aiModel } from "@/lib/ai";
+import { prisma } from "@/lib/prisma";
+import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { generateCopyRequestSchema } from "@/lib/ai-route-schemas";
 import { saveRoomCopy, type GeneratedCopy } from "@/app/actions/room";
 
 const ChecklistItemSchema = z.object({
@@ -17,19 +20,37 @@ const CopyOutputSchema = z.object({
   checklist: z.array(ChecklistItemSchema),
 });
 
-const RequestSchema = z.object({
-  roomId: z.string(),
-  roomName: z.string(),
-  rawDirectives: z.string(),
-  aesthetic: z.string(),
-  targetBuyer: z.string(),
-});
-
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const user = await getAuthedPrismaUser();
+    if (!user) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Unauthorized",
+          message: "You must be signed in to generate copy.",
+        },
+        { status: 401 }
+      );
+    }
+
     const { roomId, roomName, rawDirectives, aesthetic, targetBuyer } =
-      RequestSchema.parse(body);
+      generateCopyRequestSchema.parse(await request.json());
+
+    const room = await prisma.room.findFirst({
+      where: { id: roomId, project: { userId: user.id } },
+      select: { id: true },
+    });
+    if (!room) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Room not found",
+          message: "Room not found.",
+        },
+        { status: 404 }
+      );
+    }
 
     const { object: copy, finishReason, usage } = await generateObject({
       model: aiModel,
