@@ -1,4 +1,10 @@
 // Prisma Schema for StagingStudio
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
 // User model: firm branding and editable page templates
 model User {
   id                    String    @id @default(cuid())
