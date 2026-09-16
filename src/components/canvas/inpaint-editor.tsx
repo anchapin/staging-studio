@@ -26,6 +26,7 @@ export default function InpaintEditor({
   onInpaintComplete,
 }: InpaintEditorProps) {
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
+  const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
   const { toasts, showError, showSuccess, dismissToast } = useToast();
 
   const { isProcessing, statusText, start } = useInpaintStatus({
@@ -33,6 +34,24 @@ export default function InpaintEditor({
     showSuccess,
     showError,
   });
+
+  // Measure the source photo so the mask canvas can mirror its aspect ratio
+  // and export masks at the photo's exact pixel dimensions.
+  useEffect(() => {
+    if (!imageUrl) return;
+    const img = new Image();
+    img.onload = () => {
+      if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+        setImageDims({ width: img.naturalWidth, height: img.naturalHeight });
+      }
+    };
+    img.src = imageUrl;
+    return () => {
+      img.onload = null;
+    };
+  }, [imageUrl]);
+
+  const aspectRatio = imageDims ? imageDims.width / imageDims.height : null;
 
   // Resume an in-flight job (e.g. after a refresh): skip the submit and go
   // straight to polling the persisted requestId.
@@ -84,24 +103,16 @@ export default function InpaintEditor({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <h4 className="text-sm font-medium text-stone-700 mb-2">Original Image</h4>
-          <img
-            src={imageUrl}
-            alt="Original"
-            className="w-full max-w-md rounded-lg border border-gray-300"
-          />
-        </div>
-        <div>
-          <h4 className="text-sm font-medium text-stone-700 mb-2">Mask</h4>
-          <InpaintMaskCanvas
-            width={512}
-            height={512}
-            initialMaskDataUrl={maskDataUrl}
-            onMaskChange={setMaskDataUrl}
-          />
-        </div>
+      <div>
+        <h4 className="text-sm font-medium text-stone-700 mb-2">Original Image</h4>
+        <InpaintMaskCanvas
+          overlayImageSrc={imageUrl}
+          aspectRatio={aspectRatio}
+          naturalWidth={imageDims?.width ?? null}
+          naturalHeight={imageDims?.height ?? null}
+          initialMaskDataUrl={maskDataUrl}
+          onMaskChange={setMaskDataUrl}
+        />
       </div>
 
       <div className="flex items-center gap-4">
