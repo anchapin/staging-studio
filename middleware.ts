@@ -2,6 +2,14 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { resolveAuthRedirect } from "@/lib/auth-redirect";
+import {
+  PREVIEW_TOKEN_QUERY_PARAM,
+  verifyPreviewToken,
+} from "@/lib/preview-token";
+
+// Exact preview path: /projects/:id/preview. Segment-anchored so the token
+// bypass cannot be smuggled through prefix-match quirks like /projectsXYZ.
+const PREVIEW_PATH_PATTERN = /^\/projects\/([^/]+)\/preview$/;
 
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -38,13 +46,29 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  // Signed preview-token bypass: the PDF exporter (Browserless) is a
+  // cookie-less headless browser, so it cannot authenticate with session
+  // cookies. It instead presents a short-lived HMAC token scoped to one
+  // projectId. A valid, unexpired, projectId-matching token is treated as
+  // authenticated FOR THIS REQUEST ONLY — resolveAuthRedirect semantics are
+  // unchanged (pinned by tests/auth-redirect.test.ts).
+  const pathname = request.nextUrl.pathname;
+  let authenticated = Boolean(user);
+  const previewMatch = PREVIEW_PATH_PATTERN.exec(pathname);
+  if (!authenticated && previewMatch) {
+    const token = request.nextUrl.searchParams.get(PREVIEW_TOKEN_QUERY_PARAM);
+    if (token) {
+      const verification = await verifyPreviewToken(token);
+      if (verification.valid && verification.projectId === previewMatch[1]) {
+        authenticated = true;
+      }
+    }
+  }
+
   // Redirect decision matrix (see src/lib/auth-redirect.ts):
   // unauthenticated → /login for protected prefixes, authenticated →
   // /dashboard for auth-page prefixes, otherwise pass through.
-  const redirectTarget = resolveAuthRedirect(
-    request.nextUrl.pathname,
-    Boolean(user)
-  );
+  const redirectTarget = resolveAuthRedirect(pathname, authenticated);
   if (redirectTarget) {
     return NextResponse.redirect(new URL(redirectTarget, request.url));
   }

@@ -1,141 +1,89 @@
-"use client";
+import { notFound } from "next/navigation";
 
-import { useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase";
-import { CoverPage, PhilosophyPage, RoomSpread, SignoffPage } from "@/components/lookbook";
-import type { ProjectData } from "@/components/lookbook";
-import { parseChecklistItems } from "@/lib/checklist-schema";
+import { prisma } from "@/lib/prisma";
+import {
+  PREVIEW_TOKEN_QUERY_PARAM,
+  verifyPreviewToken,
+} from "@/lib/preview-token";
 
-interface Project {
-  id: string;
-  propertyAddress: string;
-  clientName: string;
-  targetBuyer: string;
-  stagingAesthetic: string;
-  user: {
-    firmName: string;
-    ownerName: string;
-    psychologyPageContent: string | null;
-    signoffContent: string | null;
-  };
-  rooms: Room[];
-}
-
-interface Room {
-  id: string;
-  name: string;
-  beforeImageUrl: string | null;
-  afterImageUrl: string | null;
-  selectedVariantIndex: number | null;
-  observedChallenge: string | null;
-  recommendation: string | null;
-  buyerPsychology: string | null;
-  checklistItems: { item: string; category: string; priority: string }[] | null;
-}
+import {
+  LookbookPreviewView,
+  type PreviewProject,
+} from "./lookbook-preview-view";
 
 interface LookbookPreviewPageProps {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
-export default function LookbookPreviewPage({ params }: LookbookPreviewPageProps) {
-  const [project, setProject] = useState<Project | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [projectId, setProjectId] = useState<string | null>(null);
+/**
+ * Lookbook preview, server-rendered. Access is authorized by the signed
+ * preview token (see src/lib/preview-token.ts): the token must be valid,
+ * unexpired, and scoped to THIS URL's projectId — a forged or mismatched
+ * token 404s instead of rendering an arbitrary project. Data is fetched
+ * here with Prisma so the lookbook markup reaches Browserless in the HTML
+ * response without a client-side auth + fetch chain.
+ */
+export default async function LookbookPreviewPage({
+  params,
+  searchParams,
+}: LookbookPreviewPageProps) {
+  const [{ id }, resolvedSearchParams] = await Promise.all([
+    params,
+    searchParams,
+  ]);
 
-  useEffect(() => {
-    params.then((resolved) => setProjectId(resolved.id));
-  }, [params]);
+  const rawToken = resolvedSearchParams[PREVIEW_TOKEN_QUERY_PARAM];
+  const token = Array.isArray(rawToken) ? rawToken[0] : rawToken;
 
-  useEffect(() => {
-    if (!projectId) return;
-
-    const fetchProject = async () => {
-      const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        setLoading(false);
-        return;
-      }
-
-      const response = await fetch(`/api/projects/${projectId}`);
-      if (response.ok) {
-        const data = await response.json();
-        setProject(data);
-      }
-      setLoading(false);
-    };
-
-    fetchProject();
-  }, [projectId]);
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-stone-100 flex items-center justify-center no-print">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-stone-300 border-t-stone-800" />
-      </div>
-    );
+  const verification = await verifyPreviewToken(token);
+  if (!verification.valid || verification.projectId !== id) {
+    notFound();
   }
 
+  const project = await prisma.project.findUnique({
+    where: { id },
+    include: {
+      rooms: true,
+      user: {
+        select: {
+          firmName: true,
+          ownerName: true,
+          psychologyPageContent: true,
+          signoffContent: true,
+        },
+      },
+    },
+  });
   if (!project) {
-    return (
-      <div className="min-h-screen bg-stone-100 flex items-center justify-center no-print">
-        <div className="text-center">
-          <p className="font-jakarta text-stone-600">Project not found</p>
-        </div>
-      </div>
-    );
+    notFound();
   }
 
-  const projectData: ProjectData = {
+  const previewProject: PreviewProject = {
+    id: project.id,
     propertyAddress: project.propertyAddress,
     clientName: project.clientName,
     targetBuyer: project.targetBuyer,
     stagingAesthetic: project.stagingAesthetic,
+    user: {
+      firmName: project.user.firmName,
+      ownerName: project.user.ownerName,
+      psychologyPageContent: project.user.psychologyPageContent,
+      signoffContent: project.user.signoffContent,
+    },
+    rooms: project.rooms.map((room) => ({
+      id: room.id,
+      name: room.name,
+      beforeImageUrl: room.beforeImageUrl,
+      afterImageUrl: room.afterImageUrl,
+      selectedVariantIndex: room.selectedVariantIndex,
+      observedChallenge: room.observedChallenge,
+      recommendation: room.recommendation,
+      buyerPsychology: room.buyerPsychology,
+      // Already parsed/validated by parseChecklistItems in the view.
+      checklistItems: room.checklistItems as PreviewProject["rooms"][number]["checklistItems"],
+    })),
   };
 
-  return (
-    <div className="lookbook-preview">
-      <CoverPage project={projectData} user={project.user} />
-
-      <PhilosophyPage project={projectData} user={project.user} />
-
-      {project.rooms.map((room) => (
-        <RoomSpread
-          key={room.id}
-          room={{
-            id: room.id,
-            name: room.name,
-            beforeImageUrl: room.beforeImageUrl,
-            afterImageUrl: room.afterImageUrl,
-            observedChallenge: room.observedChallenge,
-            recommendation: room.recommendation,
-            buyerPsychology: room.buyerPsychology,
-            checklistItems: parseChecklistItems(room.checklistItems, {
-              roomId: room.id,
-            }),
-            project: projectData,
-            user: project.user,
-          }}
-          user={project.user}
-          project={projectData}
-        />
-      ))}
-
-      <SignoffPage
-        user={project.user}
-        project={projectData}
-        rooms={project.rooms.map((room) => ({
-          id: room.id,
-          name: room.name,
-          beforeImageUrl: room.beforeImageUrl,
-          afterImageUrl: room.afterImageUrl,
-          project: projectData,
-          user: project.user,
-        }))}
-      />
-    </div>
-  );
+  return <LookbookPreviewView project={previewProject} />;
 }
