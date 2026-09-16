@@ -70,16 +70,19 @@ export const inpaintRequestSchema = z.object({
 /**
  * Zod schema for the `POST /api/generate-copy` request body.
  *
- * Contract: `roomId` identifies the room to persist copy to; optional
- * `roomName` (≤200 chars), `aesthetic` (≤200 chars), `rawDirectives`,
- * and `targetBuyer` provide GPT-4o-mini prompt context.
+ * Contract: `roomId` alone identifies the room. Every prompt input
+ * (`Room.name`, `Room.rawDirectives`, and the parent project's
+ * `stagingAesthetic` / `targetBuyer`) is read server-side from the
+ * persisted record, so the request body carries no prompt context and
+ * project context is not spoofable per request. `.strict()` rejects
+ * unknown keys (e.g. the legacy `roomName`/`aesthetic`/`targetBuyer`
+ * fields) outright so stale clients fail loudly instead of silently
+ * generating copy for a room other than the one they edited.
  * Side effects: none (pure validation); the OpenAI call happens in the
  * route, gated by `assertOpenAIConfigured()`/`OPENAI_API_KEY`.
  */
-export const generateCopyRequestSchema = z.object({
-  roomId: z.string(),
-  roomName: z.string().max(200),
-  rawDirectives: z.string(),
-  aesthetic: z.string().max(200),
-  targetBuyer: z.string(),
-});
+export const generateCopyRequestSchema = z
+  .object({
+    roomId: z.string().min(1),
+  })
+  .strict();

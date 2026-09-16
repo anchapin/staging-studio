@@ -53,13 +53,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { roomId: parsedRoomId, roomName, rawDirectives, aesthetic, targetBuyer } =
-      generateCopyRequestSchema.parse(await request.json());
+    const { roomId: parsedRoomId } = generateCopyRequestSchema.parse(
+      await request.json()
+    );
     roomId = parsedRoomId;
 
+    // Ownership filter follows the server-action convention
+    // (`getOwnedRoomWhere` in `app/actions/room.ts`): a roomId owned by
+    // another user matches nothing, so a foreign room is indistinguishable
+    // from a missing one and both return 404.
     const room = await prisma.room.findFirst({
       where: { id: roomId, project: { userId: user.id } },
-      select: { id: true },
+      include: {
+        project: { select: { stagingAesthetic: true, targetBuyer: true } },
+      },
     });
     if (!room) {
       return NextResponse.json(
@@ -72,14 +79,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (!room.rawDirectives?.trim()) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Missing staging directives",
+          message:
+            "This room has no staging directives yet. Add directives before generating copy.",
+        },
+        { status: 400 }
+      );
+    }
+
     const { object: copy, finishReason, usage } = await generateObject({
       model: aiModel,
       schema: CopyOutputSchema,
       prompt: buildCopyPrompt({
-        roomName,
-        aesthetic,
-        targetBuyer,
-        rawDirectives,
+        roomName: room.name,
+        aesthetic: room.project.stagingAesthetic,
+        targetBuyer: room.project.targetBuyer,
+        rawDirectives: room.rawDirectives,
       }),
     });
 

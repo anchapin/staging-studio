@@ -3,12 +3,10 @@
 import { useState, useCallback } from "react";
 import { useToast, ToastContainer } from "@/components/ui/toast";
 import { Loader2, Sparkles } from "lucide-react";
+import { saveRoomMetadata } from "@/app/actions/room";
 
 interface GenerateCopyFormProps {
   roomId: string;
-  roomName: string;
-  aesthetic: string;
-  targetBuyer: string;
   initialDirectives?: string;
   onCopyGenerated?: (copy: GeneratedCopy, rawDirectives: string) => void;
 }
@@ -26,9 +24,6 @@ export interface GeneratedCopy {
 
 export default function GenerateCopyForm({
   roomId,
-  roomName,
-  aesthetic,
-  targetBuyer,
   initialDirectives = "",
   onCopyGenerated,
 }: GenerateCopyFormProps) {
@@ -47,16 +42,20 @@ export default function GenerateCopyForm({
     setIsGenerating(true);
 
     try {
+      // The generate-copy route builds its prompt from the persisted Room
+      // record (single source of truth), so the directives must be saved
+      // before generation, not after.
+      const saveResult = await saveRoomMetadata(roomId, {
+        rawDirectives: trimmedDirectives,
+      });
+      if (!saveResult.success) {
+        throw new Error(saveResult.error || "Failed to save staging directives");
+      }
+
       const response = await fetch("/api/generate-copy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          roomId,
-          roomName: roomName.trim().slice(0, 200),
-          rawDirectives: trimmedDirectives,
-          aesthetic: aesthetic.trim().slice(0, 200),
-          targetBuyer,
-        }),
+        body: JSON.stringify({ roomId }),
       });
 
       const data = await response.json();
@@ -81,7 +80,7 @@ export default function GenerateCopyForm({
     } finally {
       setIsGenerating(false);
     }
-  }, [roomId, roomName, rawDirectives, aesthetic, targetBuyer, onCopyGenerated, showError, showSuccess]);
+  }, [roomId, rawDirectives, onCopyGenerated, showError, showSuccess]);
 
   return (
     <div className="space-y-4">
