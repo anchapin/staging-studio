@@ -5,6 +5,7 @@ import { aiModel } from "@/lib/ai";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { generateCopyRequestSchema } from "@/lib/ai-route-schemas";
+import { buildCopyPrompt } from "@/lib/prompts";
 import { checklistItemSchema } from "@/lib/checklist-schema";
 import { saveRoomCopy, type GeneratedCopy } from "@/app/actions/room";
 
@@ -50,24 +51,12 @@ export async function POST(request: NextRequest) {
     const { object: copy, finishReason, usage } = await generateObject({
       model: aiModel,
       schema: CopyOutputSchema,
-      prompt: `You are a professional home staging copywriter for a staging company.
-
-Generate structured copywriting for a room with the following details:
-- Room: ${roomName}
-- Design Aesthetic: ${aesthetic}
-- Target Buyer: ${targetBuyer}
-- Staging Directives: ${rawDirectives}
-
-Based on the room details and staging directives, generate:
-1. **observedChallenge**: Describe the key staging challenge or opportunity observed in this room
-2. **recommendation**: A compelling, actionable staging recommendation that aligns with the aesthetic and buyer profile
-3. **buyerPsychology**: Insight into what this buyer profile is looking for and how staging addresses their emotional drivers
-4. **checklist**: A prioritized action checklist with categories:
-   - DIY/Declutter: Simple fixes sellers can do themselves
-   - Rental Inventory: Items that can be rented/procured
-   - Minor Repair: Small repairs and touch-ups needed
-
-Be specific, professional, and focused on maximizing the room's appeal to ${targetBuyer}.`,
+      prompt: buildCopyPrompt({
+        roomName,
+        aesthetic,
+        targetBuyer,
+        rawDirectives,
+      }),
     });
 
     const generatedCopy: GeneratedCopy = {

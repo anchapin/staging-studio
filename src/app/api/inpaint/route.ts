@@ -4,9 +4,11 @@ import { fal } from "@/lib/fal";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { inpaintRequestSchema } from "@/lib/ai-route-schemas";
-
-const NEGATIVE_PROMPT =
-  "walls, windows, trim, doors, molding, structural columns, flooring";
+import {
+  FAL_FLUX_FILL_MODEL,
+  buildFalFillPayload,
+  buildInpaintPrompt,
+} from "@/lib/prompts";
 
 const inpaintSubmitSchema = inpaintRequestSchema.extend({
   roomId: z.string().min(1),
@@ -64,20 +66,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const prompt = `${aesthetic} style. ${promptDirectives}`;
+    const prompt = buildInpaintPrompt(aesthetic, promptDirectives);
 
     // Fire-and-forget submit: returns as soon as the job is queued (~2s),
     // instead of holding the request open for the full generation.
     const falQueueSubmit = fal.queue.submit as FalQueueSubmitFunction;
-    const submission = await falQueueSubmit("fal-ai/flux-fill", {
-      input: {
-        image_url: imageUrl,
-        mask_url: maskUrl,
-        prompt,
-        negative_prompt: NEGATIVE_PROMPT,
-        guidance: 7.5,
-        num_inference_steps: 28,
-      },
+    const submission = await falQueueSubmit(FAL_FLUX_FILL_MODEL, {
+      input: buildFalFillPayload({ imageUrl, maskUrl, prompt }),
     });
 
     // Persist the requestId → room mapping before responding so the status
