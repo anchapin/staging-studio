@@ -45,7 +45,17 @@ npm run build
 
 ## Env vars
 
-All in `.env.example`, copied to `.env.local`: `DATABASE_URL` (Supabase Postgres, used by Prisma), `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`, `FAL_KEY`, `BROWSERLESS_API_KEY` (used by `api/export-pdf`), `NEXT_PUBLIC_APP_URL` (public origin; `api/export-pdf` requires it to be publicly reachable in production), `PREVIEW_TOKEN_SECRET` (signs short-lived lookbook-preview tokens; dev-only deterministic fallback when unset).
+All in `.env.example`, copied to `.env.local` — every key below is annotated there with reader, source, and required/optional status:
+
+- `DATABASE_URL` — required. Supabase Postgres connection string, used by Prisma (`prisma/schema.prisma` datasource).
+- `NEXT_PUBLIC_SUPABASE_URL` — required. Supabase project URL; read by `middleware.ts`, `lib/supabase.ts`, `api/setup*`, `auth/callback`. Source: Supabase dashboard → Project Settings → API.
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY` — required. Anon public key (browser-safe by design), read wherever the project URL is. Same source.
+- `SUPABASE_SERVICE_ROLE_KEY` — reserved, not read by any code today; do not distribute unless you add server-side admin usage. Keep server-side only if ever used.
+- `OPENAI_API_KEY` — required. Read by `lib/ai.ts` (call-time check) for gpt-4o-mini lookbook copy. Source: platform.openai.com → API keys.
+- `FAL_KEY` — required. Read by `lib/fal.ts` (throws at import when missing) for FLUX.1 Fill inpainting. Source: fal.ai dashboard → keys.
+- `BROWSERLESS_API_KEY` — required for PDF export. Read by `api/export-pdf` (500 error when missing). Source: browserless.io → account API keys.
+- `NEXT_PUBLIC_APP_URL` — the app's public origin (not a PDF-export-only value); read by `api/export-pdf` to build the cookie-less preview URL its cloud browser fetches. Dev fallback `http://localhost:3000`; required and must be publicly reachable in production.
+- `PREVIEW_TOKEN_SECRET` — optional in dev (fixed public fallback when unset), required in production. HMAC-signs short-lived lookbook-preview tokens (`lib/preview-token.ts`); generate with `openssl rand -base64 32`.
 
 ## Toolchain quirks
 
