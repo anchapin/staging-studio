@@ -1,6 +1,6 @@
-import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { createSupabaseRequestClient } from "@/lib/supabase";
 
 // GET: List all projects (public listing for dashboard)
 export async function GET() {
@@ -23,18 +23,7 @@ export async function GET() {
 // POST: Create a new project (auth-protected)
 export async function POST(request: Request) {
   try {
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() {
-            return [];
-          },
-          setAll() {},
-        },
-      }
-    );
+    const supabase = await createSupabaseRequestClient();
 
     const {
       data: { user },
