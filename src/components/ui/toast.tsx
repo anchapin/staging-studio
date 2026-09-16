@@ -9,6 +9,7 @@ export interface Toast {
   message: string;
   retryable?: boolean;
   onRetry?: () => void;
+  retryLabel?: string;
 }
 
 interface ToastItemProps {
@@ -48,6 +49,8 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
 
   return (
     <div
+      role={toast.type === "error" ? "alert" : "status"}
+      aria-live={toast.type === "error" ? "assertive" : "polite"}
       className={`
         flex items-center gap-3 px-4 py-3 rounded-lg border shadow-lg
         ${bgColor} ${textColor}
@@ -79,6 +82,7 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
             toast.onRetry?.();
             onDismiss(toast.id);
           }}
+          aria-label={toast.retryLabel ?? "Retry"}
           className={`
             flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium
             bg-white border border-gray-200 shadow-sm
@@ -96,6 +100,7 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
           setIsVisible(false);
           setTimeout(() => onDismiss(toast.id), 300);
         }}
+        aria-label="Dismiss notification"
         className="p-1 rounded hover:bg-black/5 transition-colors"
       >
         <X className="w-4 h-4 opacity-60" />
@@ -132,8 +137,13 @@ export function useToast() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  const showError = (message: string, retryable = false, onRetry?: () => void) => {
-    return addToast({ type: "error", message, retryable, onRetry });
+  const showError = (
+    message: string,
+    retryable = false,
+    onRetry?: () => void,
+    retryLabel?: string
+  ) => {
+    return addToast({ type: "error", message, retryable, onRetry, retryLabel });
   };
 
   const showSuccess = (message: string) => {

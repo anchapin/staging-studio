@@ -32,7 +32,12 @@ export type StartInpaint = (signal: AbortSignal) => Promise<string>;
 export interface UseInpaintStatusCallbacks {
   onCompleted?: (resultImageUrl: string) => void;
   showSuccess: (message: string) => void;
-  showError: (message: string, retryable?: boolean, onRetry?: () => void) => void;
+  showError: (
+    message: string,
+    retryable?: boolean,
+    onRetry?: () => void,
+    retryLabel?: string
+  ) => void;
 }
 
 export interface UseInpaintStatusResult {
@@ -90,12 +95,17 @@ export function useInpaintStatus(
       setIsProcessing(false);
       setStatusText("");
       const message = error instanceof Error ? error.message : "Inpainting failed";
-      callbacksRef.current.showError(message, true, () => {
-        const retrySubmit = lastSubmitRef.current;
-        if (retrySubmit) {
-          void runRef.current?.(retrySubmit);
-        }
-      });
+      callbacksRef.current.showError(
+        message,
+        true,
+        () => {
+          const retrySubmit = lastSubmitRef.current;
+          if (retrySubmit) {
+            void runRef.current?.(retrySubmit);
+          }
+        },
+        "Retry inpainting"
+      );
     }
   }, []);
   runRef.current = run;
