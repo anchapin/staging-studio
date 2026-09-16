@@ -29,8 +29,10 @@
  *   so a token minted for project A cannot unlock project B.
  */
 
+/** Query param the signed token travels in on the preview URL. */
 export const PREVIEW_TOKEN_QUERY_PARAM = "token";
 
+/** Default token lifetime: 5 minutes, in seconds. */
 export const PREVIEW_TOKEN_TTL_SECONDS = 5 * 60;
 
 /**
@@ -52,6 +54,12 @@ interface PreviewTokenPayload {
   exp: number;
 }
 
+/**
+ * Discriminated result of {@link verifyPreviewToken}: on `valid: true`
+ * the `projectId` is the one that was signed and MUST be compared to the
+ * URL's own projectId; `valid: false` covers missing, malformed,
+ * forged, and expired tokens alike.
+ */
 export type PreviewTokenVerificationResult =
   | { valid: true; projectId: string }
   | { valid: false };
