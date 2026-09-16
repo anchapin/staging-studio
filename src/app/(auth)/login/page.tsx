@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase";
 
 export default function LoginPage() {
@@ -9,8 +9,15 @@ export default function LoginPage() {
   const [mode, setMode] = useState<"password" | "magic">("password");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const messageRef = useRef<HTMLDivElement>(null);
 
   const supabase = createClient();
+
+  useEffect(() => {
+    if (message) {
+      messageRef.current?.focus();
+    }
+  }, [message]);
 
   const handlePasswordSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,9 +69,16 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <div className="flex gap-2 rounded-lg bg-stone-100 p-1">
+        <div
+          className="flex gap-2 rounded-lg bg-stone-100 p-1"
+          role="group"
+          aria-label="Sign-in method"
+          aria-live="polite"
+        >
           <button
+            type="button"
             onClick={() => setMode("password")}
+            aria-pressed={mode === "password"}
             className={`flex-1 rounded-md py-2 text-sm font-medium transition-colors ${
               mode === "password"
                 ? "bg-white shadow text-stone-900"
@@ -74,7 +88,9 @@ export default function LoginPage() {
             Password
           </button>
           <button
+            type="button"
             onClick={() => setMode("magic")}
+            aria-pressed={mode === "magic"}
             className={`flex-1 rounded-md py-2 text-sm font-medium transition-colors ${
               mode === "magic"
                 ? "bg-white shadow text-stone-900"
@@ -120,6 +136,9 @@ export default function LoginPage() {
 
           {message && (
             <div
+              ref={messageRef}
+              role="alert"
+              tabIndex={-1}
               className={`rounded-md p-3 text-sm ${
                 message.type === "error"
                   ? "bg-red-50 text-red-700"

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createClient } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 
@@ -15,6 +15,13 @@ export default function SetupPage() {
   const [psychologyPageContent, setPsychologyPageContent] = useState("");
   const [signoffContent, setSignoffContent] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const errorRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (error) {
+      errorRef.current?.focus();
+    }
+  }, [error]);
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data }) => {
@@ -162,7 +169,12 @@ export default function SetupPage() {
           </div>
 
           {error && (
-            <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">
+            <div
+              ref={errorRef}
+              role="alert"
+              tabIndex={-1}
+              className="rounded-md bg-red-50 p-3 text-sm text-red-700"
+            >
               {error}
             </div>
           )}
