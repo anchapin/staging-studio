@@ -316,13 +316,15 @@ export default function InpaintMaskCanvas({
     ) : null;
 
   const canvasElement = (
-    <>
+    <div
+      role="application"
+      className={hasOverlay ? "absolute inset-0" : "relative w-fit"}
+    >
       <canvas
         ref={canvasRef}
         width={dims.width}
         height={dims.height}
         tabIndex={0}
-        role="application"
         aria-label="Room mask painting canvas: arrow keys move the brush (hold Shift for fine steps), press P, Space, or Enter to start and stop painting"
         aria-describedby={hintId}
         className={
@@ -345,7 +347,7 @@ export default function InpaintMaskCanvas({
         onBlur={handleCanvasBlur}
       />
       {cursorIndicator}
-    </>
+    </div>
   );
 
   return (

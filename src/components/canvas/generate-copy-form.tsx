@@ -86,10 +86,14 @@ export default function GenerateCopyForm({
   return (
     <div className="space-y-4">
       <div>
-        <label className="block text-sm font-medium text-stone-700 mb-1">
+        <label
+          htmlFor="staging-directives"
+          className="block text-sm font-medium text-stone-700 mb-1"
+        >
           Staging Directives
         </label>
         <textarea
+          id="staging-directives"
           value={rawDirectives}
           onChange={(e) => setRawDirectives(e.target.value)}
           placeholder="Describe the key staging priorities and changes needed for this room..."
