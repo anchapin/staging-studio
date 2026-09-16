@@ -22,7 +22,10 @@ const plusJakarta = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "StagingStudio — AI-Assisted Home Staging Lookbooks",
+  title: {
+    default: "StagingStudio — AI-Assisted Home Staging Lookbooks",
+    template: "%s · StagingStudio",
+  },
   description:
     "Generate editorial-quality staging lookbooks for real estate listings using AI inpainting and structured copywriting.",
 };
