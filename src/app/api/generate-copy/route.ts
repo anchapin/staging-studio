@@ -17,6 +17,9 @@ const CopyOutputSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
+  // Hoisted so the catch block can correlate failures with the room even
+  // when the error fires before/after the request body is parsed.
+  let roomId: string | undefined;
   try {
     const user = await getAuthedPrismaUser();
     if (!user) {
@@ -30,8 +33,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { roomId, roomName, rawDirectives, aesthetic, targetBuyer } =
+    const { roomId: parsedRoomId, roomName, rawDirectives, aesthetic, targetBuyer } =
       generateCopyRequestSchema.parse(await request.json());
+    roomId = parsedRoomId;
 
     const room = await prisma.room.findFirst({
       where: { id: roomId, project: { userId: user.id } },
@@ -89,7 +93,10 @@ export async function POST(request: NextRequest) {
       { status: 200 }
     );
   } catch (error) {
-    console.error("Generate copy error:", error);
+    console.error(
+      JSON.stringify({ event: "generate_copy_failed", roomId: roomId ?? null }),
+      error
+    );
 
     if (error instanceof z.ZodError) {
       return NextResponse.json(

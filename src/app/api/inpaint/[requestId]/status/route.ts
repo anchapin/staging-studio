@@ -20,6 +20,9 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ requestId: string }> }
 ) {
+  // Hoisted so the catch block can correlate failures with the inpaint job
+  // even when the error fires before the route params are read.
+  let requestId: string | undefined;
   try {
     const user = await getAuthedPrismaUser();
     if (!user) {
@@ -32,7 +35,8 @@ export async function GET(
       );
     }
 
-    const { requestId } = await params;
+    const { requestId: requestIdParam } = await params;
+    requestId = requestIdParam;
 
     if (!requestId) {
       return NextResponse.json(
@@ -133,7 +137,10 @@ export async function GET(
         if (uploadError || !uploadData) {
           persisted = false;
           console.error(
-            `[inpaint:${requestId}] Supabase storage upload failed:`,
+            JSON.stringify({
+              event: "inpaint_upload_failed",
+              requestId,
+            }),
             uploadError?.message ?? "upload resolved without data"
           );
         } else {
@@ -148,14 +155,20 @@ export async function GET(
           } else {
             persisted = false;
             console.error(
-              `[inpaint:${requestId}] Supabase getPublicUrl returned no public URL.`
+              JSON.stringify({
+                event: "inpaint_public_url_missing",
+                requestId,
+              })
             );
           }
         }
       } catch (storageError) {
         persisted = false;
         console.error(
-          `[inpaint:${requestId}] Failed to persist inpaint result to storage:`,
+          JSON.stringify({
+            event: "inpaint_persist_failed",
+            requestId,
+          }),
           storageError
         );
       }
@@ -168,7 +181,10 @@ export async function GET(
           });
         } catch (recordError) {
           console.error(
-            `[inpaint:${requestId}] Failed to record inpaint completion:`,
+            JSON.stringify({
+              event: "inpaint_record_failed",
+              requestId,
+            }),
             recordError
           );
         }
@@ -194,7 +210,13 @@ export async function GET(
       status: result.status,
     });
   } catch (error) {
-    console.error("Inpaint status API error:", error);
+    console.error(
+      JSON.stringify({
+        event: "inpaint_status_failed",
+        requestId: requestId ?? null,
+      }),
+      error
+    );
 
     const errorMessage =
       error instanceof Error ? error.message : "Failed to check inpainting status";

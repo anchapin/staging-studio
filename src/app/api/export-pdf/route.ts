@@ -15,6 +15,9 @@ import {
 const PROJECT_ID_PATTERN = /^c[a-z0-9]{24}$/;
 
 export async function POST(req: NextRequest) {
+  // Hoisted so the catch block can correlate failures with the project even
+  // when the error fires before/after the request body is parsed.
+  let projectId: string | undefined;
   try {
     // 1. Session auth. Fail closed before touching any paid quota.
     const user = await getAuthedPrismaUser();
@@ -30,7 +33,8 @@ export async function POST(req: NextRequest) {
 
     // 2. Shape-validate projectId BEFORE it is interpolated into the
     //    preview URL handed to an external service.
-    const { projectId } = await req.json();
+    const { projectId: requestedProjectId } = await req.json();
+    projectId = requestedProjectId;
     if (typeof projectId !== "string" || !PROJECT_ID_PATTERN.test(projectId)) {
       return NextResponse.json(
         {
@@ -59,7 +63,11 @@ export async function POST(req: NextRequest) {
     if (!appUrl || appUrl.trim() === "") {
       if (process.env.NODE_ENV === "production") {
         console.error(
-          "PDF export misconfigured: NEXT_PUBLIC_APP_URL must be set in production (public URL of this deployment)."
+          JSON.stringify({
+            event: "export_pdf_app_url_missing",
+            projectId,
+          }),
+          "NEXT_PUBLIC_APP_URL must be set in production (public URL of this deployment)."
         );
         return NextResponse.json(
           {
@@ -116,7 +124,14 @@ export async function POST(req: NextRequest) {
 
     if (!chromeResponse.ok) {
       const errorText = await chromeResponse.text();
-      console.error("Browserless API error:", chromeResponse.status, errorText);
+      console.error(
+        JSON.stringify({
+          event: "export_pdf_browserless_error",
+          projectId,
+          status: chromeResponse.status,
+        }),
+        errorText
+      );
 
       if (chromeResponse.status === 401 || chromeResponse.status === 403) {
         return NextResponse.json(
@@ -164,10 +179,12 @@ export async function POST(req: NextRequest) {
       leadingBytes !== "%PDF"
     ) {
       console.error(
-        "Browserless returned a non-PDF response:",
-        contentType,
-        pdfBuffer.byteLength,
-        "bytes"
+        JSON.stringify({
+          event: "export_pdf_non_pdf_response",
+          projectId,
+          contentType,
+          byteLength: pdfBuffer.byteLength,
+        })
       );
       return NextResponse.json(
         {
@@ -187,7 +204,13 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error) {
-    console.error("PDF export error:", error);
+    console.error(
+      JSON.stringify({
+        event: "export_pdf_failed",
+        projectId: projectId ?? null,
+      }),
+      error
+    );
 
     if (error instanceof Error && error.name === "AbortError") {
       return NextResponse.json(

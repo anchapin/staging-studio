@@ -24,6 +24,9 @@ type FalQueueSubmitFunction = (
 ) => Promise<{ request_id: string }>;
 
 export async function POST(request: NextRequest) {
+  // Hoisted so the catch block can correlate failures with the room even
+  // when the error fires before/after the request body is parsed.
+  let roomId: string | undefined;
   try {
     const user = await getAuthedPrismaUser();
     if (!user) {
@@ -49,8 +52,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { imageUrl, maskUrl, promptDirectives, aesthetic, roomId, variantSlot } =
+    const { imageUrl, maskUrl, promptDirectives, aesthetic, variantSlot } =
       parsed.data;
+    roomId = parsed.data.roomId;
 
     const room = await prisma.room.findFirst({
       where: { id: roomId, project: { userId: user.id } },
@@ -88,7 +92,10 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ requestId: submission.request_id });
   } catch (error) {
-    console.error("Inpaint API error:", error);
+    console.error(
+      JSON.stringify({ event: "inpaint_submit_failed", roomId: roomId ?? null }),
+      error
+    );
 
     const errorMessage =
       error instanceof Error ? error.message : "Failed to start inpainting request";

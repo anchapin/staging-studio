@@ -82,7 +82,10 @@ export async function saveRoomCopy(
     });
     return { success: true };
   } catch (error) {
-    console.error("Failed to save room copy:", error);
+    console.error(
+      JSON.stringify({ event: "save_room_copy_failed", roomId }),
+      error
+    );
     return failure(error instanceof Error ? error.message : "Unknown error");
   }
 }

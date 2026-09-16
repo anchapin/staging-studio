@@ -33,6 +33,10 @@ export async function GET(request: NextRequest) {
     return response;
   };
 
+  // Hoisted so the catch block can correlate failures with the user even
+  // when the error fires before the session is resolved.
+  let userEmail: string | null = null;
+
   try {
     const {
       data: { user },
@@ -41,13 +45,18 @@ export async function GET(request: NextRequest) {
     if (!user) {
       return respond({ exists: false }, { status: 401 });
     }
+    userEmail = user.email ?? null;
 
     const userRow = await prisma.user.findUnique({
       where: { email: user.email },
     });
 
     return respond({ exists: !!userRow });
-  } catch {
+  } catch (error) {
+    console.error(
+      JSON.stringify({ event: "setup_get_failed", email: userEmail }),
+      error
+    );
     return respond({ exists: false }, { status: 500 });
   }
 }
@@ -81,6 +90,10 @@ export async function POST(request: NextRequest) {
     return response;
   };
 
+  // Hoisted so the catch block can correlate failures with the user even
+  // when the error fires before the session is resolved.
+  let userEmail: string | null = null;
+
   try {
     const {
       data: { user },
@@ -89,6 +102,7 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return respond({ error: "Unauthorized" }, { status: 401 });
     }
+    userEmail = user.email ?? null;
 
     const body = await request.json();
     const { firmName, ownerName, logoUrl, psychologyPageContent, signoffContent } = body;
@@ -113,7 +127,10 @@ export async function POST(request: NextRequest) {
 
     return respond({ success: true, user: createdUser });
   } catch (error) {
-    console.error("Setup error:", error);
+    console.error(
+      JSON.stringify({ event: "setup_post_failed", email: userEmail }),
+      error
+    );
     return respond({ error: "Failed to save user setup" }, { status: 500 });
   }
 }
