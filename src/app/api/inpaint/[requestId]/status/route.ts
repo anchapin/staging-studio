@@ -4,6 +4,18 @@ import { prisma } from "@/lib/prisma";
 import { createSupabaseRequestClient } from "@/lib/supabase";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { decideInpaintPersistence } from "@/lib/inpaint-persistence";
+import { classifyIntegrationError } from "@/lib/error-classify";
+
+const INPAINT_STATUS_ERROR_COPY = {
+  notFound: {
+    error: "Request not found",
+    message: "This image processing request could not be found. It may have expired.",
+  },
+  unknown: {
+    error: "Status check failed",
+    message: "Unable to check image processing status. Please try again.",
+  },
+};
 
 interface FalStatusResult {
   status: string;
@@ -218,27 +230,15 @@ export async function GET(
       error
     );
 
-    const errorMessage =
-      error instanceof Error ? error.message : "Failed to check inpainting status";
-
-    if (errorMessage.includes("not found") || errorMessage.includes("NOT_FOUND")) {
-      return NextResponse.json(
-        {
-          error: "Request not found",
-          message: "This image processing request could not be found. It may have expired.",
-          retryable: true,
-        },
-        { status: 404 }
-      );
-    }
+    const classified = classifyIntegrationError(error, INPAINT_STATUS_ERROR_COPY);
 
     return NextResponse.json(
       {
-        error: "Status check failed",
-        message: "Unable to check image processing status. Please try again.",
-        retryable: true,
+        error: classified.error,
+        message: classified.message,
+        retryable: classified.retryable,
       },
-      { status: 500 }
+      { status: classified.status }
     );
   }
 }

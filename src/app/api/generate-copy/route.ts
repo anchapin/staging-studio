@@ -7,7 +7,27 @@ import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { generateCopyRequestSchema } from "@/lib/ai-route-schemas";
 import { buildCopyPrompt } from "@/lib/prompts";
 import { checklistItemSchema } from "@/lib/checklist-schema";
+import { classifyIntegrationError } from "@/lib/error-classify";
 import { saveRoomCopy, type GeneratedCopy } from "@/app/actions/room";
+
+const COPY_OUTPUT_ERROR_COPY = {
+  rateLimit: {
+    error: "Rate limit exceeded",
+    message: "The AI service is temporarily busy. Please wait a moment and try again.",
+  },
+  auth: {
+    error: "Configuration error",
+    message: "The AI service is not properly configured. Please contact support.",
+  },
+  timeout: {
+    error: "Request timeout",
+    message: "The AI took too long to generate copy. Please try again.",
+  },
+  unknown: {
+    error: "Generation failed",
+    message: "We couldn't generate the staging copy. Please try again.",
+  },
+};
 
 const CopyOutputSchema = z.object({
   observedChallenge: z.string(),
@@ -109,59 +129,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
-
-    if (
-      errorMessage.includes("rate") ||
-      errorMessage.includes("limit") ||
-      errorMessage.includes("quota")
-    ) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Rate limit exceeded",
-          message: "The AI service is temporarily busy. Please wait a moment and try again.",
-          retryable: true,
-        },
-        { status: 429 }
-      );
-    }
-
-    if (
-      errorMessage.includes("credentials") ||
-      errorMessage.includes("auth") ||
-      errorMessage.includes("API key")
-    ) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Configuration error",
-          message: "The AI service is not properly configured. Please contact support.",
-        },
-        { status: 401 }
-      );
-    }
-
-    if (errorMessage.includes("timeout") || errorMessage.includes("TIMEOUT")) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Request timeout",
-          message: "The AI took too long to generate copy. Please try again.",
-          retryable: true,
-        },
-        { status: 408 }
-      );
-    }
+    const classified = classifyIntegrationError(error, COPY_OUTPUT_ERROR_COPY);
 
     return NextResponse.json(
       {
         success: false,
-        error: "Generation failed",
-        message: "We couldn't generate the staging copy. Please try again.",
-        retryable: true,
+        error: classified.error,
+        message: classified.message,
+        retryable: classified.retryable,
       },
-      { status: 500 }
+      { status: classified.status }
     );
   }
 }

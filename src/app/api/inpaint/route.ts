@@ -4,11 +4,27 @@ import { fal } from "@/lib/fal";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { inpaintRequestSchema } from "@/lib/ai-route-schemas";
+import { classifyIntegrationError } from "@/lib/error-classify";
 import {
   FAL_FLUX_FILL_MODEL,
   buildFalFillPayload,
   buildInpaintPrompt,
 } from "@/lib/prompts";
+
+const INPAINT_ERROR_COPY = {
+  auth: {
+    error: "Authentication failed",
+    message: "Unable to connect to the image editing service. Please check your configuration.",
+  },
+  timeout: {
+    error: "Request timeout",
+    message: "The image editing service is taking too long to respond. Please try again.",
+  },
+  unknown: {
+    error: "Inpainting failed",
+    message: "We couldn't process your image. Please try again.",
+  },
+};
 
 const inpaintSubmitSchema = inpaintRequestSchema.extend({
   roomId: z.string().min(1),
@@ -97,35 +113,15 @@ export async function POST(request: NextRequest) {
       error
     );
 
-    const errorMessage =
-      error instanceof Error ? error.message : "Failed to start inpainting request";
-
-    if (errorMessage.includes("credentials") || errorMessage.includes("auth")) {
-      return NextResponse.json(
-        {
-          error: "Authentication failed",
-          message: "Unable to connect to the image editing service. Please check your configuration.",
-        },
-        { status: 401 }
-      );
-    }
-
-    if (errorMessage.includes("timeout") || errorMessage.includes("TIMEOUT")) {
-      return NextResponse.json(
-        {
-          error: "Request timeout",
-          message: "The image editing service is taking too long to respond. Please try again.",
-        },
-        { status: 408 }
-      );
-    }
+    const classified = classifyIntegrationError(error, INPAINT_ERROR_COPY);
 
     return NextResponse.json(
       {
-        error: "Inpainting failed",
-        message: "We couldn't process your image. Please try again.",
+        error: classified.error,
+        message: classified.message,
+        retryable: classified.retryable,
       },
-      { status: 500 }
+      { status: classified.status }
     );
   }
 }
