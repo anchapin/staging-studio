@@ -44,6 +44,11 @@ coverage/
 *.log
 .vercel
 
+# Local AI agent tooling state (per-contributor; AGENTS.md stays tracked)
+.agents/
+.claude/
+.cursor/
+
 # generated toolchain artifacts
 next-env.d.ts
 tsconfig.tsbuildinfo
