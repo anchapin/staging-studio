@@ -67,7 +67,11 @@ export async function middleware(request: NextRequest) {
 
   // Redirect decision matrix (see src/lib/auth-redirect.ts):
   // unauthenticated → /login for protected prefixes, authenticated →
-  // /dashboard for auth-page prefixes, otherwise pass through.
+  // /dashboard for the /login prefix, otherwise pass through. `/setup`
+  // passes through in both directions: middleware cannot consult
+  // Postgres (edge runtime), so the setup page self-guards server-side
+  // (resolveSetupPageTarget) — this is what lets an authenticated user
+  // WITHOUT a Prisma User row reach setup instead of dead-ending.
   const redirectTarget = resolveAuthRedirect(pathname, authenticated);
   if (redirectTarget) {
     return NextResponse.redirect(new URL(redirectTarget, request.url));

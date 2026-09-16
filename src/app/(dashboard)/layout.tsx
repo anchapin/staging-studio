@@ -34,6 +34,14 @@ export default async function DashboardLayout({
     },
   });
 
+  // Authenticated but never provisioned (password-first signup, fresh
+  // DB): every mutation would 404 with "User not found in database".
+  // Middleware passes /setup through for authenticated users, so send
+  // them to complete setup instead of rendering a dead-end.
+  if (!userRow) {
+    redirect("/setup");
+  }
+
   return (
     <div className="flex min-h-screen bg-stone-50">
       {/* Skip link: first focusable element, jumps past the sidebar nav */}
