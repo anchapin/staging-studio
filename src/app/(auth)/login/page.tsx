@@ -1,14 +1,27 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase";
+import { resolveLoginErrorMessage } from "@/lib/login-error";
 
-export default function LoginPage() {
+function LoginForm() {
+  const searchParams = useSearchParams();
+  const errorParam = searchParams.get("error");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState<"password" | "magic">("password");
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  // A failed /auth/callback exchange lands back here with
+  // ?error=auth_callback_failed — surface it in the same banner used for
+  // client-side sign-in errors instead of a silent form (issue #91).
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(
+    () => {
+      if (!errorParam) return null;
+      const text = resolveLoginErrorMessage(errorParam);
+      return text ? { type: "error" as const, text } : null;
+    }
+  );
   const messageRef = useRef<HTMLDivElement>(null);
 
   const supabase = createClient();
@@ -163,5 +176,15 @@ export default function LoginPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  // useSearchParams requires a Suspense boundary for the prerendered
+  // client shell; the form mounts inside it once the URL is available.
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   );
 }
