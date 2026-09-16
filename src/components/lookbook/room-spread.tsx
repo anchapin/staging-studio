@@ -1,5 +1,6 @@
 import Image from "next/image";
 import { parseChecklistItems } from "@/lib/checklist-schema";
+import { extractPillars } from "@/lib/lookbook-pillars";
 import { LookbookRoomData, ChecklistItem } from "./types";
 
 const PRIORITY_STYLES: Record<ChecklistItem["priority"], string> = {
@@ -121,56 +122,3 @@ export function RoomSpread({ room, project }: RoomSpreadProps) {
   );
 }
 
-function extractPillars(room: LookbookRoomData): Array<{ title: string; description: string }> {
-  const pillars: Array<{ title: string; description: string }> = [];
-
-  if (room.observedChallenge) {
-    pillars.push({
-      title: "Observed Challenge",
-      description: room.observedChallenge,
-    });
-  }
-
-  if (room.recommendation) {
-    pillars.push({
-      title: "Our Approach",
-      description: room.recommendation,
-    });
-  }
-
-  if (room.buyerPsychology) {
-    pillars.push({
-      title: "Buyer Psychology",
-      description: room.buyerPsychology,
-    });
-  }
-
-  if (room.rawDirectives) {
-    pillars.push({
-      title: "Key Directives",
-      description: room.rawDirectives,
-    });
-  }
-
-  while (pillars.length < 3 && pillars.length > 0) {
-    const extra = {
-      title: "Design Priority",
-      description: "Attention to detail ensures lasting impressions that resonate with discerning buyers.",
-    };
-    if (!pillars.find((p) => p.title === extra.title)) {
-      pillars.push(extra);
-    } else {
-      break;
-    }
-  }
-
-  if (pillars.length === 0) {
-    return [
-      { title: "First Impression", description: "Creating an inviting atmosphere that welcomes potential buyers from the moment they enter." },
-      { title: "Lifestyle Appeal", description: "Highlighting the unique character of the space while allowing buyers to envision their own story." },
-      { title: "Quality Craftsmanship", description: "Every detail reflects the quality they can expect from the entire home." },
-    ];
-  }
-
-  return pillars.slice(0, 3);
-}
