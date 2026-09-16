@@ -7,7 +7,7 @@ interface RoomSpreadProps {
   project: LookbookRoomData["project"];
 }
 
-export function RoomSpread({ room, user, project }: RoomSpreadProps) {
+export function RoomSpread({ room, project }: RoomSpreadProps) {
   const pillars = extractPillars(room);
   const checklist = (room.checklistItems || []) as ChecklistItem[];
 

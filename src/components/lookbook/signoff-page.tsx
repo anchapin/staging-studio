@@ -7,7 +7,7 @@ interface SignoffPageProps {
 }
 
 export function SignoffPage({ user, project, rooms }: SignoffPageProps) {
-  const content = user.signoffContent || getDefaultSignoff(user, project, rooms);
+  const content = user.signoffContent || getDefaultSignoff(user, project);
 
   return (
     <div className="lookbook-page min-h-screen flex flex-col items-center justify-center bg-stone-50 p-12">
@@ -80,8 +80,7 @@ export function SignoffPage({ user, project, rooms }: SignoffPageProps) {
 
 function getDefaultSignoff(
   user: LookbookRoomData["user"],
-  project: LookbookRoomData["project"],
-  rooms: LookbookRoomData[]
+  project: LookbookRoomData["project"]
 ): string {
   return `This lookbook represents our collaborative vision for ${project.propertyAddress}.
 

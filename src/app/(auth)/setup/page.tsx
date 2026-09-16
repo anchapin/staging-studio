@@ -40,7 +40,7 @@ export default function SetupPage() {
     if (logoFile) {
       const ext = logoFile.name.split(".").pop();
       const fileName = `${session?.user?.email}-logo-${Date.now()}.${ext}`;
-      const { data: uploadData, error: uploadError } = await supabase.storage
+      const { error: uploadError } = await supabase.storage
         .from("logos")
         .upload(fileName, logoFile, { upsert: true });
 
