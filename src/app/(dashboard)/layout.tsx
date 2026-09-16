@@ -93,6 +93,12 @@ export default async function DashboardLayout({
         </nav>
 
         <div className="absolute bottom-0 w-64 border-t border-stone-800 p-4">
+          <Link
+            href="/settings"
+            className="mb-1 block rounded-md px-3 py-2 text-sm font-medium text-stone-400 hover:bg-stone-800 hover:text-white"
+          >
+            Settings
+          </Link>
           <a
             href="/api/auth/signout"
             className="block rounded-md px-3 py-2 text-sm font-medium text-stone-400 hover:bg-stone-800 hover:text-white"

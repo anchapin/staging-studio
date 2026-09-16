@@ -16,7 +16,8 @@
  *
  * Contract: see the module doc above — guards are PREFIX matches, so
  * e.g. `/projectsXYZ` is treated as protected. Protected prefixes are
- * `/dashboard` and `/projects`; the auth-page prefix is `/login`.
+ * `/dashboard`, `/projects`, and `/settings`; the auth-page prefix is
+ * `/login`.
  * Protected + unauthenticated → `/login`; `/login` + authenticated →
  * `/dashboard`; otherwise no redirect.
  *
@@ -43,7 +44,9 @@ export function resolveAuthRedirect(
   // Unauthenticated users hitting protected route prefixes → login
   if (
     !isAuthenticated &&
-    (pathname.startsWith("/dashboard") || pathname.startsWith("/projects"))
+    (pathname.startsWith("/dashboard") ||
+      pathname.startsWith("/projects") ||
+      pathname.startsWith("/settings"))
   ) {
     return "/login";
   }

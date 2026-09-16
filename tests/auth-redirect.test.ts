@@ -25,6 +25,7 @@ const cases: Array<{
   { pathname: "/projects", isAuthenticated: false, expected: "/login" },
   { pathname: "/projects/abc", isAuthenticated: false, expected: "/login" },
   { pathname: "/projects/new", isAuthenticated: false, expected: "/login" },
+  { pathname: "/settings", isAuthenticated: false, expected: "/login" },
 
   // Unauthenticated → public paths pass through
   { pathname: "/", isAuthenticated: false, expected: null },
@@ -45,6 +46,7 @@ const cases: Array<{
   // Authenticated → app paths pass through
   { pathname: "/dashboard", isAuthenticated: true, expected: null },
   { pathname: "/projects/new", isAuthenticated: true, expected: null },
+  { pathname: "/settings", isAuthenticated: true, expected: null },
   { pathname: "/", isAuthenticated: true, expected: null },
 
   // Surprising PREFIX-match semantics (startsWith everywhere) — pinned as-is.
@@ -60,6 +62,12 @@ const cases: Array<{
     isAuthenticated: false,
     expected: "/login",
     note: "prefix match: /dashboard matches /dashboardfoo",
+  },
+  {
+    pathname: "/settingsXYZ",
+    isAuthenticated: false,
+    expected: "/login",
+    note: "prefix match: /settings matches /settingsXYZ (same startsWith quirk as /projects and /dashboard)",
   },
   {
     pathname: "/loginfoo",
