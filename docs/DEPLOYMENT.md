@@ -2,6 +2,8 @@
 
 How to deploy StagingStudio and — more importantly — how to get PDF export working, which is the one part of the app whose correctness depends on a deployment-level setting that fails far from its cause.
 
+Coming from a fresh clone? [docs/SUPABASE-SETUP.md](SUPABASE-SETUP.md) is the counterpart from-zero guide — creating the Supabase project, email auth + redirect URLs, the `room-photos`/`logos` storage buckets, service keys, and the first local run. This document assumes those services exist and covers deploying the app against them.
+
 ## The one thing to get right: `NEXT_PUBLIC_APP_URL`
 
 PDF export (`POST /api/export-pdf`, `src/app/api/export-pdf/route.ts`) does not render the lookbook itself. It hands a URL to Browserless.io's **cloud-hosted headless Chrome**, which fetches the printable lookbook page (`/projects/[id]/preview`) and prints it to PDF. That cloud browser is a separate machine: it has no access to `localhost`, your dev machine, or any private network.
