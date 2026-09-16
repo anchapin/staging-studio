@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import InpaintMaskCanvas from "./inpaint-mask-canvas";
 import { useToast, ToastContainer } from "@/components/ui/toast";
 import { Loader2 } from "lucide-react";
+import { useInpaintStatus } from "./use-inpaint-status";
 
 interface InpaintEditorProps {
   roomId: string;
@@ -22,9 +23,13 @@ export default function InpaintEditor({
 }: InpaintEditorProps) {
   void _roomId;
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [status, setStatus] = useState<string>("");
   const { toasts, showError, showSuccess, dismissToast } = useToast();
+
+  const { isProcessing, statusText, start } = useInpaintStatus({
+    onCompleted: onInpaintComplete,
+    showSuccess,
+    showError,
+  });
 
   const handleInpaint = useCallback(async () => {
     if (!maskDataUrl) {
@@ -37,10 +42,7 @@ export default function InpaintEditor({
       return;
     }
 
-    setIsProcessing(true);
-    setStatus("Starting inpainting...");
-
-    try {
+    await start(async (signal) => {
       const startResponse = await fetch("/api/inpaint", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -50,6 +52,7 @@ export default function InpaintEditor({
           promptDirectives,
           aesthetic,
         }),
+        signal,
       });
 
       const startData = await startResponse.json();
@@ -58,43 +61,9 @@ export default function InpaintEditor({
         throw new Error(startData.message || startData.error || "Failed to start inpainting");
       }
 
-      const { requestId } = startData;
-      setStatus("Processing image...");
-
-      const pollStatus = async () => {
-        const statusResponse = await fetch(`/api/inpaint/${requestId}/status`);
-        const statusData = await statusResponse.json();
-
-        if (!statusResponse.ok) {
-          throw new Error(statusData.message || statusData.error || "Failed to check status");
-        }
-
-        if (statusData.status === "completed") {
-          showSuccess("Inpainting completed successfully!");
-          onInpaintComplete?.(statusData.imageUrl);
-          setIsProcessing(false);
-          setStatus("");
-          return;
-        }
-
-        if (statusData.status === "ERROR") {
-          throw new Error(statusData.message || "Inpainting failed");
-        }
-
-        setStatus(`Processing: ${statusData.status}`);
-        setTimeout(pollStatus, 1000);
-      };
-
-      pollStatus();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Inpainting failed";
-      showError(message, true, () => {
-        handleInpaint();
-      });
-      setIsProcessing(false);
-      setStatus("");
-    }
-  }, [maskDataUrl, imageUrl, promptDirectives, aesthetic, onInpaintComplete, showError, showSuccess]);
+      return startData.requestId as string;
+    });
+  }, [maskDataUrl, imageUrl, promptDirectives, aesthetic, start, showError]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -141,8 +110,8 @@ export default function InpaintEditor({
           )}
         </button>
 
-        {isProcessing && status && (
-          <span className="text-sm text-stone-600">{status}</span>
+        {isProcessing && statusText && (
+          <span className="text-sm text-stone-600">{statusText}</span>
         )}
       </div>
 
