@@ -1,114 +1,134 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { cn } from "@/lib/utils";
-import { VariantPicker } from "./variant-picker";
+import { useCallback, useRef, useState } from "react";
 
 interface ComparisonSliderProps {
-  beforeImageUrl: string;
-  afterImageUrl: string;
-  beforeImageUrl2?: string;
-  afterImageUrl2?: string;
-  selectedVariantIndex: number;
-  onVariantChange: (index: number) => void;
-  roomName: string;
-  className?: string;
+  originalImage: string;
+  variantImage: string;
+  roomName?: string;
 }
 
 export function ComparisonSlider({
-  beforeImageUrl,
-  afterImageUrl,
-  beforeImageUrl2,
-  afterImageUrl2,
-  selectedVariantIndex,
-  onVariantChange,
+  originalImage,
+  variantImage,
   roomName,
-  className,
 }: ComparisonSliderProps) {
   const [sliderPosition, setSliderPosition] = useState(50);
   const containerRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
 
-  const currentBefore = selectedVariantIndex === 0 ? beforeImageUrl : (beforeImageUrl2 || beforeImageUrl);
-  const currentAfter = selectedVariantIndex === 0 ? afterImageUrl : (afterImageUrl2 || afterImageUrl);
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isDragging.current || !containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const percentage = (x / rect.width) * 100;
-      setSliderPosition(Math.min(Math.max(percentage, 0), 100));
-    };
-
-    const handleMouseUp = () => {
-      isDragging.current = false;
-    };
-
-    document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleMouseUp);
-
-    return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
-    };
+  const updateSliderPosition = useCallback((clientX: number) => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const percentage = Math.max(0, Math.min(100, (x / rect.width) * 100));
+    setSliderPosition(percentage);
   }, []);
 
-  const handleMouseDown = () => {
-    isDragging.current = true;
-  };
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      isDragging.current = true;
+      updateSliderPosition(e.clientX);
+    },
+    [updateSliderPosition]
+  );
+
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (!isDragging.current) return;
+      updateSliderPosition(e.clientX);
+    },
+    [updateSliderPosition]
+  );
+
+  const handleMouseUp = useCallback(() => {
+    isDragging.current = false;
+  }, []);
+
+  const handleTouchStart = useCallback(
+    (e: React.TouchEvent) => {
+      isDragging.current = true;
+      updateSliderPosition(e.touches[0].clientX);
+    },
+    [updateSliderPosition]
+  );
+
+  const handleTouchMove = useCallback(
+    (e: React.TouchEvent) => {
+      if (!isDragging.current) return;
+      updateSliderPosition(e.touches[0].clientX);
+    },
+    [updateSliderPosition]
+  );
+
+  const handleTouchEnd = useCallback(() => {
+    isDragging.current = false;
+  }, []);
 
   return (
-    <div className={cn("space-y-4", className)}>
-      <div className="flex items-center justify-between">
-        <h3 className="font-playfair text-lg font-semibold text-stone-800">{roomName}</h3>
-        <VariantPicker
-          selectedIndex={selectedVariantIndex}
-          onSelect={onVariantChange}
-          variant1Label="A"
-          variant2Label="B"
-        />
-      </div>
+    <div className="relative w-full overflow-hidden rounded-lg bg-stone-100">
+      {roomName && (
+        <div className="absolute left-3 top-3 z-10 rounded-md bg-black/60 px-2 py-1 text-xs font-medium text-white">
+          {roomName}
+        </div>
+      )}
 
       <div
         ref={containerRef}
-        className="relative aspect-[4/3] overflow-hidden rounded-lg bg-stone-100"
+        className="relative h-64 w-full cursor-col-resize select-none sm:h-96"
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
       >
-        {currentBefore && currentAfter ? (
-          <>
-            <img
-              src={currentBefore}
-              alt={`${roomName} before`}
-              className="absolute inset-0 h-full w-full object-cover"
-            />
-            <div
-              className="absolute inset-0 overflow-hidden"
-              style={{ clipPath: `inset(0 ${100 - sliderPosition}% 0 0)` }}
+        <div className="absolute inset-0">
+          <img
+            src={originalImage}
+            alt="Original"
+            className="h-full w-full object-cover"
+            draggable={false}
+          />
+        </div>
+
+        <div
+          className="absolute inset-0 overflow-hidden"
+          style={{ width: `${sliderPosition}%` }}
+        >
+          <img
+            src={variantImage}
+            alt="Variant"
+            className="h-full object-cover"
+            style={{ width: containerRef.current?.offsetWidth }}
+            draggable={false}
+          />
+        </div>
+
+        <div
+          className="absolute top-0 bottom-0 w-1 cursor-col-resize bg-white shadow-[0_0_10px_rgba(0,0,0,0.3)]"
+          style={{ left: `${sliderPosition}%` }}
+        >
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white p-2 shadow-lg">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              className="h-4 w-4 text-stone-700"
             >
-              <img
-                src={currentAfter}
-                alt={`${roomName} after`}
-                className="absolute inset-0 h-full w-full object-cover"
-                style={{ width: `${100 / (sliderPosition / 100)}%` }}
-              />
-            </div>
-            <div
-              className="absolute top-0 bottom-0 w-1 bg-white shadow-lg cursor-ew-resize"
-              style={{ left: `${sliderPosition}%`, transform: "translateX(-50%)" }}
-              onMouseDown={handleMouseDown}
-            >
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white shadow-lg flex items-center justify-center">
-                <svg className="w-4 h-4 text-stone-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
-                </svg>
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className="flex items-center justify-center h-full text-stone-500">
-            No images available
+              <path d="M8 5l-5 7 5 7M16 5l5 7-5 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </div>
-        )}
+        </div>
+
+        <div className="absolute bottom-3 left-3 rounded-md bg-black/60 px-2 py-1 text-xs font-medium text-white">
+          Before
+        </div>
+        <div className="absolute bottom-3 right-3 rounded-md bg-black/60 px-2 py-1 text-xs font-medium text-white">
+          After
+        </div>
       </div>
     </div>
   );
