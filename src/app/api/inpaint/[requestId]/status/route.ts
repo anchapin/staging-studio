@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fal } from "@/lib/fal";
 import { prisma } from "@/lib/prisma";
-import { createClient } from "@/lib/supabase";
+import { createSupabaseRequestClient } from "@/lib/supabase";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { decideInpaintPersistence } from "@/lib/inpaint-persistence";
 
 interface FalStatusResult {
   status: string;
@@ -48,7 +49,11 @@ export async function GET(
     // proxy other users' requests).
     const inpaintRequest = await prisma.inpaintRequest.findUnique({
       where: { id: requestId },
-      select: { room: { select: { project: { select: { userId: true } } } } },
+      select: {
+        status: true,
+        resultUrl: true,
+        room: { select: { project: { select: { userId: true } } } },
+      },
     });
     if (!inpaintRequest || inpaintRequest.room.project.userId !== user.id) {
       return NextResponse.json(
@@ -59,6 +64,22 @@ export async function GET(
         },
         { status: 404 }
       );
+    }
+
+    // Once-only durability: an already-COMPLETED row with a stored resultUrl
+    // has a durable Supabase copy — serve it without touching fal, without
+    // re-downloading the image, and without re-uploading.
+    const persistenceDecision = decideInpaintPersistence({
+      status: inpaintRequest.status,
+      resultUrl: inpaintRequest.resultUrl,
+    });
+
+    if (persistenceDecision.kind === "return-stored") {
+      return NextResponse.json({
+        status: "completed",
+        imageUrl: persistenceDecision.url,
+        persisted: true,
+      });
     }
 
     const falQueueStatus = fal.queue.status as FalQueueStatusFunction;
@@ -76,56 +97,97 @@ export async function GET(
     }
 
     if (result.status === "COMPLETED") {
-      const imageUrl = result.images?.[0]?.url;
+      const falImageUrl = result.images?.[0]?.url;
 
-      if (imageUrl) {
-        let resolvedImageUrl = imageUrl;
-        const supabase = createClient();
+      if (!falImageUrl) {
+        return NextResponse.json(
+          {
+            error: "Processing incomplete",
+            message: "The image was processed but could not be retrieved. Please try again.",
+            retryable: true,
+          },
+          { status: 500 }
+        );
+      }
 
-        try {
-          await supabase.storage
-            .from("staging-images")
-            .upload(
-              `after-${requestId}.png`,
-              await fetch(imageUrl).then((r) => r.blob()),
-              {
-                contentType: "image/png",
-                upsert: true,
-              }
-            );
+      // First completed poll for this request: download the fal result once
+      // and persist it to Supabase storage. supabase-js v2 resolves uploads
+      // with `{ data, error }` instead of throwing, so the result must be
+      // checked explicitly — a failed upload must never be reported as a
+      // successfully written object.
+      let persisted = true;
+      let resolvedImageUrl = falImageUrl;
 
+      try {
+        const imageBlob = await fetch(falImageUrl).then((r) => r.blob());
+        const supabase = await createSupabaseRequestClient();
+        const objectPath = `after-${requestId}.png`;
+
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from("staging-images")
+          .upload(objectPath, imageBlob, {
+            contentType: "image/png",
+            upsert: true,
+          });
+
+        if (uploadError || !uploadData) {
+          persisted = false;
+          console.error(
+            `[inpaint:${requestId}] Supabase storage upload failed:`,
+            uploadError?.message ?? "upload resolved without data"
+          );
+        } else {
+          // getPublicUrl is deterministic and returns a URL even for objects
+          // that were never written — only trust it after a confirmed upload.
           const { data: publicUrlData } = supabase.storage
             .from("staging-images")
-            .getPublicUrl(`after-${requestId}.png`);
+            .getPublicUrl(objectPath);
 
-          resolvedImageUrl = publicUrlData.publicUrl;
-        } catch (storageError) {
-          console.error("Storage error:", storageError);
+          if (publicUrlData?.publicUrl) {
+            resolvedImageUrl = publicUrlData.publicUrl;
+          } else {
+            persisted = false;
+            console.error(
+              `[inpaint:${requestId}] Supabase getPublicUrl returned no public URL.`
+            );
+          }
         }
+      } catch (storageError) {
+        persisted = false;
+        console.error(
+          `[inpaint:${requestId}] Failed to persist inpaint result to storage:`,
+          storageError
+        );
+      }
 
+      if (persisted) {
         try {
           await prisma.inpaintRequest.update({
             where: { id: requestId },
             data: { status: "COMPLETED", resultUrl: resolvedImageUrl },
           });
         } catch (recordError) {
-          console.error("Failed to record inpaint completion:", recordError);
+          console.error(
+            `[inpaint:${requestId}] Failed to record inpaint completion:`,
+            recordError
+          );
         }
 
         return NextResponse.json({
           status: "completed",
           imageUrl: resolvedImageUrl,
+          persisted: true,
         });
       }
 
-      return NextResponse.json(
-        {
-          error: "Processing incomplete",
-          message: "The image was processed but could not be retrieved. Please try again.",
-          retryable: true,
-        },
-        { status: 500 }
-      );
+      // Storage persistence failed: return the fal URL explicitly marked as
+      // not persisted so the client can warn — it expires, so it must not be
+      // treated as a durable success.
+      return NextResponse.json({
+        status: "completed",
+        imageUrl: falImageUrl,
+        persisted: false,
+      });
     }
 
     return NextResponse.json({
