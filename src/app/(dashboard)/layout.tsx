@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { createServerClient } from "@supabase/ssr";
+import { createSupabaseRequestClient } from "@/lib/supabase";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -10,18 +10,7 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return [];
-        },
-        setAll() {},
-      },
-    }
-  );
+  const supabase = await createSupabaseRequestClient();
 
   const {
     data: { user },
