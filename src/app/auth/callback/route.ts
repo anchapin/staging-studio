@@ -1,20 +1,33 @@
 import { redirect } from "next/navigation";
+import { type NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const code = searchParams.get("code");
+export default async function AuthCallback(
+  request: NextRequest,
+  { searchParams }: { searchParams: Promise<{ code?: string; next?: string }> }
+) {
+  const params = await searchParams;
+  const code = params.code;
+  const redirectTo = params.next ?? "/dashboard";
 
   if (code) {
+    const supabaseResponse = NextResponse.redirect(
+      new URL(redirectTo, request.url)
+    );
+
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
         cookies: {
           getAll() {
-            return [];
+            return request.cookies.getAll();
           },
-          setAll() {},
+          setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              supabaseResponse.cookies.set(name, value, options)
+            );
+          },
         },
       }
     );
@@ -22,6 +35,7 @@ export async function GET(request: Request) {
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!error && data?.user) {
+      // Check if user exists in database; if not, redirect to setup
       const { prisma } = await import("@/lib/prisma");
       const userRecord = await prisma.user.findUnique({
         where: { email: data.user.email },
