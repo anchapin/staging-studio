@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveAuthRedirect } from "@/lib/auth-redirect";
+import {
+  resolveAuthRedirect,
+  resolveSetupPageTarget,
+} from "@/lib/auth-redirect";
 
 /**
- * Pins the middleware auth redirect decision matrix exactly as the
- * original middleware.ts implemented it. Every guard uses PREFIX
- * matching (`startsWith`) — including the auth pages — which means
+ * Pins the middleware auth redirect decision matrix exactly as
+ * `resolveAuthRedirect` implements it. Every guard uses PREFIX
+ * matching (`startsWith`) — including the auth page — which means
  * paths like `/projectsXYZ` or `/loginfoo` match guards they were
  * never meant to match. Those quirks are intentional observations,
  * not bugs being blessed: they are pinned here so any deliberate
@@ -28,9 +31,16 @@ const cases: Array<{
   { pathname: "/login", isAuthenticated: false, expected: null },
   { pathname: "/setup", isAuthenticated: false, expected: null },
 
-  // Authenticated → auth-page prefixes redirect to /dashboard
+  // Authenticated → the /login prefix redirects to /dashboard
   { pathname: "/login", isAuthenticated: true, expected: "/dashboard" },
-  { pathname: "/setup", isAuthenticated: true, expected: "/dashboard" },
+
+  // Authenticated → /setup passes through in BOTH directions: middleware
+  // runs on the edge runtime with no DB access, so it cannot tell an
+  // authenticated user WITH a Prisma User row (should bounce to
+  // /dashboard) from one WITHOUT (must reach /setup or password-first
+  // signups dead-end). The setup page self-guards server-side via
+  // resolveSetupPageTarget — issue #94.
+  { pathname: "/setup", isAuthenticated: true, expected: null },
 
   // Authenticated → app paths pass through
   { pathname: "/dashboard", isAuthenticated: true, expected: null },
@@ -60,8 +70,8 @@ const cases: Array<{
   {
     pathname: "/setuppage",
     isAuthenticated: true,
-    expected: "/dashboard",
-    note: "prefix match: /setup matches /setuppage",
+    expected: null,
+    note: "prefix match is moot for /setup: the guard was removed, so even /setuppage passes through",
   },
 
   // Case sensitivity: matching is case-sensitive; uppercase variants pass through.
@@ -99,4 +109,51 @@ describe("resolveAuthRedirect", () => {
     expect(resolveAuthRedirect("", false)).toBeNull();
     expect(resolveAuthRedirect("", true)).toBeNull();
   });
+});
+
+/**
+ * Pins the server-side /setup gate (rendered by
+ * src/app/(auth)/setup/page.tsx, which middleware deliberately defers
+ * to because the edge runtime has no DB access). Matrix: session
+ * present? × Prisma User row present?
+ */
+const setupCases: Array<{
+  isAuthenticated: boolean;
+  hasUserRow: boolean;
+  expected: string | null;
+  note?: string;
+}> = [
+  {
+    isAuthenticated: false,
+    hasUserRow: false,
+    expected: "/login",
+    note: "no session → login, regardless of row state",
+  },
+  {
+    isAuthenticated: false,
+    hasUserRow: true,
+    expected: "/login",
+    note: "no session → login even if a row somehow exists",
+  },
+  {
+    isAuthenticated: true,
+    hasUserRow: false,
+    expected: null,
+    note: "session without a User row → render the setup form (the unblocked path, issue #94)",
+  },
+  {
+    isAuthenticated: true,
+    hasUserRow: true,
+    expected: "/dashboard",
+    note: "session with a User row → setup already complete, bounce to dashboard (preserves the old middleware behavior for provisioned users)",
+  },
+];
+
+describe("resolveSetupPageTarget", () => {
+  it.each(setupCases)(
+    "auth=$isAuthenticated row=$hasUserRow → $expected",
+    ({ isAuthenticated, hasUserRow, expected }) => {
+      expect(resolveSetupPageTarget(isAuthenticated, hasUserRow)).toBe(expected);
+    }
+  );
 });
