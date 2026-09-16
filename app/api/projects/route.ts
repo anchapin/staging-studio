@@ -2,6 +2,25 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
+// GET: List all projects (public listing for dashboard)
+export async function GET() {
+  try {
+    const projects = await prisma.project.findMany({
+      include: {
+        rooms: {
+          select: { id: true, name: true },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    return NextResponse.json(projects);
+  } catch (error) {
+    console.error("Error fetching projects:", error);
+    return NextResponse.json({ error: "Failed to fetch projects" }, { status: 500 });
+  }
+}
+
+// POST: Create a new project (auth-protected)
 export async function POST(request: Request) {
   try {
     const supabase = createServerClient(
@@ -64,53 +83,6 @@ export async function POST(request: Request) {
     return NextResponse.json(project);
   } catch (error) {
     console.error("Error creating project:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
-  }
-}
-
-export async function GET(request: Request) {
-  try {
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() {
-            return [];
-          },
-          setAll() {},
-        },
-      }
-    );
-
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    });
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
-
-    const projects = await prisma.project.findMany({
-      where: { userId: user.id },
-      include: { rooms: { select: { id: true, name: true } } },
-      orderBy: { createdAt: "desc" },
-    });
-
-    return NextResponse.json(projects);
-  } catch (error) {
-    console.error("Error fetching projects:", error);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

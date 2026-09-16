@@ -46,10 +46,15 @@ model Room {
   project              Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   name                 String   // e.g. "Primary Bedroom", "Kitchen"
 
-  // Image URLs
+  // Image URLs — Variant 1
   beforeImageUrl       String?
   afterImageUrl        String?
-  selectedVariantIndex Int?     // 0 or 1 — which variant is selected for PDF
+
+  // Image URLs — Variant 2
+  beforeImageUrl2      String?
+  afterImageUrl2       String?
+
+  selectedVariantIndex Int?     @default(0) // 0 or 1 — which variant is selected for PDF
 
   // AI outputs
   rawDirectives        String?  // User's freeform bullet directives
