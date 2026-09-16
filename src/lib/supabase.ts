@@ -1,20 +1,23 @@
 import { createBrowserClient, createServerClient } from "@supabase/ssr";
+import { requireEnvVars } from "@/lib/env";
 
 const globalForSupabaseBrowser = globalThis as unknown as {
   supabaseBrowser: ReturnType<typeof createBrowserClient> | undefined;
 };
 
 export function createClient() {
+  const env = requireEnvVars("NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_ANON_KEY");
   return (
     globalForSupabaseBrowser.supabaseBrowser ??
-    createBrowserClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    )
+    createBrowserClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
   );
 }
 
-if (process.env.NODE_ENV !== "production")
+if (
+  process.env.NODE_ENV !== "production" &&
+  process.env.NEXT_PUBLIC_SUPABASE_URL &&
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+)
   globalForSupabaseBrowser.supabaseBrowser = createClient();
 
 export function createServerClientSingleton(
@@ -23,13 +26,10 @@ export function createServerClientSingleton(
     setAll(cookiesToSet: { name: string; value: string; options?: Record<string, unknown> }[]): void;
   }
 ) {
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies,
-    }
-  );
+  const env = requireEnvVars("NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  return createServerClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
+    cookies,
+  });
 }
 
 export async function createSupabaseRequestClient() {
