@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
-import { prisma } from "@/lib/prisma";
-import { createSupabaseRequestClient } from "@/lib/supabase";
+import { getProjectDetailForUser } from "@/lib/dashboard-data";
 
 import ProjectDetailView from "./project-detail-view";
 
@@ -10,43 +10,44 @@ interface ProjectDetailPageProps {
 }
 
 /**
- * Resolves the document title from the project's property address. Mirrors
- * the ownership semantics of GET /api/projects/[id]: the real JWT is
- * validated (fails closed), the Prisma `User` row is resolved by verified
- * email, and the project lookup is scoped to that user — so another user's
- * project id yields the generic fallback, never its address. Uses the
- * request-scoped Supabase client, whose cookie writes are swallowed in
- * Server Components (middleware performs the refresh).
+ * Both the metadata read and the page body await the same `cache()`d
+ * loader (issue #83), so one navigation runs the auth check and project
+ * query once — previously generateMetadata and a client fetch each did
+ * their own auth round-trip plus query. The ownership scoping mirrors GET
+ * /api/projects/[id]: another user's project id yields null, which
+ * renders the generic metadata fallback and the not-found state, never
+ * the project's data.
  */
-async function getProjectTitle(id: string): Promise<string> {
-  const supabase = await createSupabaseRequestClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user?.email) return "Project";
-
-  const userRow = await prisma.user.findUnique({
-    where: { email: user.email },
-    select: { id: true },
-  });
-  if (!userRow) return "Project";
-
-  const project = await prisma.project.findUnique({
-    where: { id, userId: userRow.id },
-    select: { propertyAddress: true },
-  });
-  return project?.propertyAddress ?? "Project";
-}
-
 export async function generateMetadata({
   params,
 }: ProjectDetailPageProps): Promise<Metadata> {
   const { id } = await params;
-  return { title: await getProjectTitle(id) };
+  const project = await getProjectDetailForUser(id);
+  return { title: project?.propertyAddress ?? "Project" };
 }
 
-export default async function ProjectDetailPage({ params }: ProjectDetailPageProps) {
+export default async function ProjectDetailPage({
+  params,
+}: ProjectDetailPageProps) {
   const { id } = await params;
-  return <ProjectDetailView id={id} />;
+  const project = await getProjectDetailForUser(id);
+
+  if (!project) {
+    // Authenticated-but-unowned/missing id. Server-rendered so first
+    // paint needs no JS; the client view's fetch states remain for
+    // interactive refetches only.
+    return (
+      <div className="p-8 text-center">
+        <h1 className="text-2xl font-bold text-stone-800">Project not found</h1>
+        <Link
+          href="/dashboard"
+          className="text-stone-600 hover:underline mt-4 inline-block"
+        >
+          Back to dashboard
+        </Link>
+      </div>
+    );
+  }
+
+  return <ProjectDetailView id={id} initialProject={project} />;
 }
