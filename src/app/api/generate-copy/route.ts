@@ -8,6 +8,7 @@ import { generateCopyRequestSchema } from "@/lib/ai-route-schemas";
 import { buildCopyPrompt } from "@/lib/prompts";
 import { checklistItemSchema } from "@/lib/checklist-schema";
 import { classifyIntegrationError } from "@/lib/error-classify";
+import { describeNoObjectGeneratedError } from "@/lib/no-object-error";
 import { saveRoomCopy, type GeneratedCopy } from "@/app/actions/room";
 
 const COPY_OUTPUT_ERROR_COPY = {
@@ -111,14 +112,25 @@ export async function POST(request: NextRequest) {
 
     const saveResult = await saveRoomCopy(roomId, generatedCopy);
     if (!saveResult.success) {
+      // The copy was generated (and paid for) but persistence failed.
+      // Return it under a distinct `save_failed` code so the client can
+      // retry save-only instead of paying to regenerate.
+      console.error(
+        JSON.stringify({
+          event: "generate_copy_save_failed",
+          roomId,
+          saveError: saveResult.error ?? null,
+        })
+      );
       return NextResponse.json(
         {
           success: false,
-          error: "Save failed",
+          error: "save_failed",
           message: "Copy was generated but could not be saved. Please try again.",
           retryable: true,
+          copy: generatedCopy,
         },
-        { status: 500 }
+        { status: 502 }
       );
     }
 
@@ -136,6 +148,22 @@ export async function POST(request: NextRequest) {
       JSON.stringify({ event: "generate_copy_failed", roomId: roomId ?? null }),
       error
     );
+
+    // A NoObjectGeneratedError means the model finished but its output
+    // could not be parsed into the schema. Its `.cause`/finishReason/text
+    // are the only way to diagnose recurring malformed-JSON incidents, so
+    // surface them in the structured log payload.
+    const noObjectFields = describeNoObjectGeneratedError(error);
+    if (noObjectFields) {
+      console.error(
+        JSON.stringify({
+          event: "generate_copy_no_object_generated",
+          roomId: roomId ?? null,
+          ...noObjectFields,
+        }),
+        error
+      );
+    }
 
     if (error instanceof z.ZodError) {
       return NextResponse.json(
