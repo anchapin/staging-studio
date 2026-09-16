@@ -33,6 +33,10 @@ export async function GET(request: NextRequest) {
     return response;
   };
 
+  // Hoisted so the catch block can correlate failures with the user even
+  // when the error fires before the session is resolved.
+  let userEmail: string | null = null;
+
   try {
     const {
       data: { user },
@@ -41,6 +45,7 @@ export async function GET(request: NextRequest) {
     if (!user) {
       return respond({ exists: false }, { status: 401 });
     }
+    userEmail = user.email ?? null;
 
     const userRow = await prisma.user.findUnique({
       where: { email: user.email },
@@ -51,7 +56,11 @@ export async function GET(request: NextRequest) {
     }
 
     return respond({ exists: true });
-  } catch {
+  } catch (error) {
+    console.error(
+      JSON.stringify({ event: "setup_check_failed", email: userEmail }),
+      error
+    );
     return respond({ exists: false }, { status: 500 });
   }
 }
