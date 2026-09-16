@@ -66,6 +66,37 @@ export function ComparisonSlider({
     isDragging.current = false;
   }, []);
 
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      const step = e.shiftKey ? 1 : 5;
+      let next: number;
+      switch (e.key) {
+        case "ArrowLeft":
+          next = Math.max(0, sliderPosition - step);
+          break;
+        case "ArrowRight":
+          next = Math.min(100, sliderPosition + step);
+          break;
+        case "Home":
+          next = 0;
+          break;
+        case "End":
+          next = 100;
+          break;
+        default:
+          return;
+      }
+      e.preventDefault();
+      setSliderPosition(next);
+    },
+    [sliderPosition]
+  );
+
+  const sliderLabel = roomName
+    ? `${roomName} before/after comparison slider`
+    : "Before/after comparison slider";
+  const sliderValue = Math.round(sliderPosition);
+
   return (
     <div className="relative w-full overflow-hidden rounded-lg bg-stone-100">
       {roomName && (
@@ -88,7 +119,7 @@ export function ComparisonSlider({
         <div className="absolute inset-0">
           <img
             src={originalImage}
-            alt="Original"
+            alt={roomName ? `${roomName} before staging` : "Before staging"}
             className="h-full w-full object-cover"
             draggable={false}
           />
@@ -100,7 +131,7 @@ export function ComparisonSlider({
         >
           <img
             src={variantImage}
-            alt="Variant"
+            alt={roomName ? `${roomName} after staging` : "After staging"}
             className="h-full object-cover"
             style={{ width: containerRef.current?.offsetWidth }}
             draggable={false}
@@ -108,7 +139,15 @@ export function ComparisonSlider({
         </div>
 
         <div
-          className="absolute top-0 bottom-0 w-1 cursor-col-resize bg-white shadow-[0_0_10px_rgba(0,0,0,0.3)]"
+          role="slider"
+          tabIndex={0}
+          aria-label={sliderLabel}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={sliderValue}
+          aria-valuetext={`Showing ${sliderValue}% after image`}
+          onKeyDown={handleKeyDown}
+          className="absolute top-0 bottom-0 w-1 cursor-col-resize bg-white shadow-[0_0_10px_rgba(0,0,0,0.3)] focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-700 focus-visible:ring-offset-2"
           style={{ left: `${sliderPosition}%` }}
         >
           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white p-2 shadow-lg">
