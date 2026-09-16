@@ -5,19 +5,14 @@ import { aiModel } from "@/lib/ai";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { generateCopyRequestSchema } from "@/lib/ai-route-schemas";
+import { checklistItemSchema } from "@/lib/checklist-schema";
 import { saveRoomCopy, type GeneratedCopy } from "@/app/actions/room";
-
-const ChecklistItemSchema = z.object({
-  item: z.string(),
-  category: z.enum(["DIY/Declutter", "Rental Inventory", "Minor Repair"]),
-  priority: z.enum(["Critical", "High", "Standard"]),
-});
 
 const CopyOutputSchema = z.object({
   observedChallenge: z.string(),
   recommendation: z.string(),
   buyerPsychology: z.string(),
-  checklist: z.array(ChecklistItemSchema),
+  checklist: z.array(checklistItemSchema),
 });
 
 export async function POST(request: NextRequest) {

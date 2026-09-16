@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase";
 import { CoverPage, PhilosophyPage, RoomSpread, SignoffPage } from "@/components/lookbook";
-import type { ChecklistItem, ProjectData } from "@/components/lookbook";
+import type { ProjectData } from "@/components/lookbook";
+import { parseChecklistItems } from "@/lib/checklist-schema";
 
 interface Project {
   id: string;
@@ -112,7 +113,9 @@ export default function LookbookPreviewPage({ params }: LookbookPreviewPageProps
             observedChallenge: room.observedChallenge,
             recommendation: room.recommendation,
             buyerPsychology: room.buyerPsychology,
-            checklistItems: room.checklistItems as ChecklistItem[] | null,
+            checklistItems: parseChecklistItems(room.checklistItems, {
+              roomId: room.id,
+            }),
             project: projectData,
             user: project.user,
           }}
