@@ -1,14 +1,9 @@
 import { redirect } from "next/navigation";
 import { createServerClient } from "@supabase/ssr";
-import { prisma } from "@/lib/prisma";
 
-export default async function AuthCallback({
-  searchParams,
-}: {
-  searchParams: Promise<{ code?: string; next?: string }>;
-}) {
-  const params = await searchParams;
-  const code = params.code;
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const code = searchParams.get("code");
 
   if (code) {
     const supabase = createServerClient(
@@ -27,7 +22,7 @@ export default async function AuthCallback({
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!error && data?.user) {
-      // Check if user has a User record (first-run check)
+      const { prisma } = await import("@/lib/prisma");
       const userRecord = await prisma.user.findUnique({
         where: { email: data.user.email },
       });
