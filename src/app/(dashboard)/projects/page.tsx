@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase";
 import Link from "next/link";
 
@@ -35,11 +35,24 @@ async function fetchProjects(): Promise<Project[]> {
   return response.json();
 }
 
-export default function DashboardPage() {
-  const { data: projects, isLoading, error } = useQuery({
-    queryKey: ["projects"],
-    queryFn: fetchProjects,
-  });
+export default function ProjectsPage() {
+  const [projects, setProjects] = useState<Project[] | null>(null);
+  const [error, setError] = useState(false);
+  const isLoading = projects === null && !error;
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchProjects()
+      .then((data) => {
+        if (!cancelled) setProjects(data);
+      })
+      .catch(() => {
+        if (!cancelled) setError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className="p-8">
