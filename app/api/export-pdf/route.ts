@@ -6,7 +6,10 @@ export async function POST(req: NextRequest) {
 
     if (!projectId) {
       return NextResponse.json(
-        { error: "projectId is required" },
+        {
+          error: "Missing projectId",
+          message: "Project ID is required to generate PDF",
+        },
         { status: 400 }
       );
     }
@@ -18,7 +21,10 @@ export async function POST(req: NextRequest) {
 
     if (!apiKey) {
       return NextResponse.json(
-        { error: "BROWSERLESS_API_KEY is not configured" },
+        {
+          error: "Configuration missing",
+          message: "PDF export service is not properly configured. Please contact support.",
+        },
         { status: 500 }
       );
     }
@@ -51,8 +57,34 @@ export async function POST(req: NextRequest) {
     if (!chromeResponse.ok) {
       const errorText = await chromeResponse.text();
       console.error("Browserless API error:", chromeResponse.status, errorText);
+
+      if (chromeResponse.status === 401 || chromeResponse.status === 403) {
+        return NextResponse.json(
+          {
+            error: "Authentication failed",
+            message: "PDF export service authentication failed. Please contact support.",
+          },
+          { status: chromeResponse.status }
+        );
+      }
+
+      if (chromeResponse.status === 429) {
+        return NextResponse.json(
+          {
+            error: "Rate limit exceeded",
+            message: "PDF export service is busy. Please wait a moment and try again.",
+            retryable: true,
+          },
+          { status: 429 }
+        );
+      }
+
       return NextResponse.json(
-        { error: "Failed to generate PDF", details: errorText },
+        {
+          error: "PDF generation failed",
+          message: "Unable to generate PDF at this time. Please try again.",
+          retryable: true,
+        },
         { status: chromeResponse.status }
       );
     }
@@ -68,8 +100,27 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     console.error("PDF export error:", error);
+
+    const errorMessage =
+      error instanceof Error ? error.message : "Internal server error";
+
+    if (errorMessage.includes("fetch") || errorMessage.includes("network")) {
+      return NextResponse.json(
+        {
+          error: "Network error",
+          message: "Unable to reach the PDF export service. Please check your connection and try again.",
+          retryable: true,
+        },
+        { status: 503 }
+      );
+    }
+
     return NextResponse.json(
-      { error: "Internal server error" },
+      {
+        error: "PDF export failed",
+        message: "An unexpected error occurred while generating the PDF. Please try again.",
+        retryable: true,
+      },
       { status: 500 }
     );
   }

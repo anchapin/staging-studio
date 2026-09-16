@@ -66,7 +66,9 @@ Be specific, professional, and focused on maximizing the room's appeal to ${targ
       return NextResponse.json(
         {
           success: false,
-          error: `Copy generated but failed to save: ${saveResult.error}`,
+          error: "Save failed",
+          message: "Copy was generated but could not be saved. Please try again.",
+          retryable: true,
         },
         { status: 500 }
       );
@@ -86,16 +88,66 @@ Be specific, professional, and focused on maximizing the room's appeal to ${targ
 
     if (error instanceof z.ZodError) {
       return NextResponse.json(
-        { success: false, error: "Invalid request body", details: error.errors },
+        {
+          success: false,
+          error: "Invalid request",
+          message: "Some required information is missing or invalid. Please check your inputs.",
+        },
         { status: 400 }
+      );
+    }
+
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+
+    if (
+      errorMessage.includes("rate") ||
+      errorMessage.includes("limit") ||
+      errorMessage.includes("quota")
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Rate limit exceeded",
+          message: "The AI service is temporarily busy. Please wait a moment and try again.",
+          retryable: true,
+        },
+        { status: 429 }
+      );
+    }
+
+    if (
+      errorMessage.includes("credentials") ||
+      errorMessage.includes("auth") ||
+      errorMessage.includes("API key")
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Configuration error",
+          message: "The AI service is not properly configured. Please contact support.",
+        },
+        { status: 401 }
+      );
+    }
+
+    if (errorMessage.includes("timeout") || errorMessage.includes("TIMEOUT")) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Request timeout",
+          message: "The AI took too long to generate copy. Please try again.",
+          retryable: true,
+        },
+        { status: 408 }
       );
     }
 
     return NextResponse.json(
       {
         success: false,
-        error:
-          error instanceof Error ? error.message : "Failed to generate copy",
+        error: "Generation failed",
+        message: "We couldn't generate the staging copy. Please try again.",
+        retryable: true,
       },
       { status: 500 }
     );

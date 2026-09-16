@@ -6,6 +6,7 @@ interface InpaintMaskCanvasProps {
   width?: number;
   height?: number;
   brushSize?: number;
+  initialMaskDataUrl?: string | null;
   onMaskChange?: (maskDataUrl: string | null) => void;
 }
 
@@ -13,26 +14,41 @@ export default function InpaintMaskCanvas({
   width = 512,
   height = 512,
   brushSize: initialBrushSize = 20,
+  initialMaskDataUrl,
   onMaskChange,
 }: InpaintMaskCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [brushSize, setBrushSize] = useState(initialBrushSize);
-  const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
+  const [maskDataUrl, setMaskDataUrl] = useState<string | null>(initialMaskDataUrl ?? null);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+  const [isInitialized, setIsInitialized] = useState(false);
 
   const initCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.fillStyle = "black";
-    ctx.fillRect(0, 0, width, height);
-  }, [width, height]);
+
+    if (initialMaskDataUrl) {
+      const img = new Image();
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, width, height);
+        setIsInitialized(true);
+      };
+      img.src = initialMaskDataUrl;
+    } else {
+      ctx.fillStyle = "black";
+      ctx.fillRect(0, 0, width, height);
+      setIsInitialized(true);
+    }
+  }, [width, height, initialMaskDataUrl]);
 
   useEffect(() => {
-    initCanvas();
-  }, [initCanvas]);
+    if (!isInitialized) {
+      initCanvas();
+    }
+  }, [initCanvas, isInitialized]);
 
   const getCoordinates = (
     e: React.MouseEvent | React.TouchEvent
@@ -114,7 +130,12 @@ export default function InpaintMaskCanvas({
   }, [onMaskChange]);
 
   const clearMask = () => {
-    initCanvas();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.fillStyle = "black";
+    ctx.fillRect(0, 0, width, height);
     setMaskDataUrl(null);
     onMaskChange?.(null);
   };
@@ -152,24 +173,18 @@ export default function InpaintMaskCanvas({
 
         <button
           onClick={clearMask}
-          className="px-4 py-2 text-sm bg-gray-200 hover:bg-gray-300 rounded transition-colors"
+          className="px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors"
         >
           Clear Mask
         </button>
-
-        <button
-          onClick={exportMask}
-          className="px-4 py-2 text-sm bg-blue-500 hover:bg-blue-600 text-white rounded transition-colors"
-        >
-          Export Mask
-        </button>
       </div>
 
-      {maskDataUrl && (
-        <div className="text-sm text-gray-500">
-          Mask ready ({maskDataUrl.length} chars)
-        </div>
-      )}
+      <input type="hidden" value={maskDataUrl ?? ""} />
     </div>
   );
+}
+
+export function useMaskState() {
+  const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
+  return { maskDataUrl, setMaskDataUrl };
 }

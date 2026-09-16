@@ -4,6 +4,11 @@ import { fal } from "@/lib/fal";
 const NEGATIVE_PROMPT =
   "walls, windows, trim, doors, molding, structural columns, flooring";
 
+type FalSubscribeFunction = (
+  id: string,
+  options: Record<string, unknown>
+) => Promise<{ requestId: string }>;
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -11,14 +16,18 @@ export async function POST(request: NextRequest) {
 
     if (!imageUrl || !maskUrl || !promptDirectives || !aesthetic) {
       return NextResponse.json(
-        { error: "Missing required fields: imageUrl, maskUrl, promptDirectives, aesthetic" },
+        {
+          error: "Missing required fields",
+          message: "Please provide imageUrl, maskUrl, promptDirectives, and aesthetic",
+        },
         { status: 400 }
       );
     }
 
     const prompt = `${aesthetic} style. ${promptDirectives}`;
 
-    const result = await fal.subscribe("fal-ai/flux-fill", {
+    const falSubscribe = fal.subscribe as FalSubscribeFunction;
+    const result = await falSubscribe("fal-ai/flux-fill", {
       input: {
         image_url: imageUrl,
         mask_url: maskUrl,
@@ -28,14 +37,40 @@ export async function POST(request: NextRequest) {
         num_inference_steps: 28,
       },
       pollInterval: 1000,
-      maxRetries: 60,
     });
 
     return NextResponse.json({ requestId: result.requestId });
   } catch (error) {
     console.error("Inpaint API error:", error);
+
+    const errorMessage =
+      error instanceof Error ? error.message : "Failed to start inpainting request";
+
+    if (errorMessage.includes("credentials") || errorMessage.includes("auth")) {
+      return NextResponse.json(
+        {
+          error: "Authentication failed",
+          message: "Unable to connect to the image editing service. Please check your configuration.",
+        },
+        { status: 401 }
+      );
+    }
+
+    if (errorMessage.includes("timeout") || errorMessage.includes("TIMEOUT")) {
+      return NextResponse.json(
+        {
+          error: "Request timeout",
+          message: "The image editing service is taking too long to respond. Please try again.",
+        },
+        { status: 408 }
+      );
+    }
+
     return NextResponse.json(
-      { error: "Failed to start inpainting request" },
+      {
+        error: "Inpainting failed",
+        message: "We couldn't process your image. Please try again.",
+      },
       { status: 500 }
     );
   }
