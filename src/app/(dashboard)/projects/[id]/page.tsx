@@ -43,37 +43,6 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     fetchProject();
   }, [id]);
 
-  const handleVariantChange = async (roomId: string, variantIndex: number) => {
-    try {
-      const room = project?.rooms.find((r) => r.id === roomId);
-      if (!room) return;
-
-      await fetch(`/api/projects/${id}/rooms/${roomId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          selectedVariantIndex: variantIndex,
-          beforeImageUrl: room.beforeImageUrl,
-          afterImageUrl: room.afterImageUrl,
-          beforeImageUrl2: room.beforeImageUrl2,
-          afterImageUrl2: room.afterImageUrl2,
-        }),
-      });
-
-      setProject((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          rooms: prev.rooms.map((r) =>
-            r.id === roomId ? { ...r, selectedVariantIndex: variantIndex } : r
-          ),
-        };
-      });
-    } catch (error) {
-      console.error("Error updating variant:", error);
-    }
-  };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -125,12 +94,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
               <ComparisonSlider
                 key={room.id}
                 roomName={room.name}
-                beforeImageUrl={room.beforeImageUrl || ""}
-                afterImageUrl={room.afterImageUrl || ""}
-                beforeImageUrl2={room.beforeImageUrl2 || undefined}
-                afterImageUrl2={room.afterImageUrl2 || undefined}
-                selectedVariantIndex={room.selectedVariantIndex || 0}
-                onVariantChange={(index) => handleVariantChange(room.id, index)}
+                originalImage={room.beforeImageUrl || ""}
+                variantImage={room.afterImageUrl || ""}
               />
             ))}
           </div>

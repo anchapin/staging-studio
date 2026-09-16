@@ -45,8 +45,7 @@ export default function RoomCanvas({
 
       const { signedUrl, storagePath } = await getSignedUploadUrl(
         roomId,
-        compressedFile.name,
-        compressedFile.type
+        compressedFile.name
       );
 
       setUploadProgress(70);

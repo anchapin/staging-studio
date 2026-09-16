@@ -5,8 +5,7 @@ import { revalidatePath } from "next/cache";
 
 export async function getSignedUploadUrl(
   roomId: string,
-  fileName: string,
-  contentType: string
+  fileName: string
 ) {
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -32,7 +31,6 @@ export async function getSignedUploadUrl(
   const { data, error } = await supabase.storage
     .from("room-photos")
     .createSignedUploadUrl(storagePath, {
-      contentType,
       upsert: true,
     });
 
