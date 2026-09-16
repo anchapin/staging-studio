@@ -65,6 +65,8 @@ A printable lookbook composed of cover, philosophy, room-spread, and sign-off pa
 
 ## Getting Started
 
+Starting from zero? Follow [docs/SUPABASE-SETUP.md](docs/SUPABASE-SETUP.md) first — it walks through creating the Supabase project, email auth (password + magic link) with the `/auth/callback` redirect, the `room-photos`/`logos` storage buckets, where each service key comes from, and the first-run flow, so the commands below actually work.
+
 ```bash
 # Install dependencies
 npm install
