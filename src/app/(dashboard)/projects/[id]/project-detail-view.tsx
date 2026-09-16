@@ -15,6 +15,7 @@ import GenerateCopyForm, {
 import ExportPdfButton from "@/components/canvas/export-pdf-button";
 import { useToast, ToastContainer } from "@/components/ui/toast";
 import { saveVariantSelection } from "@/app/actions/room";
+import { projectFetchStateFromStatus } from "@/lib/project-fetch-state";
 
 const MAX_DIRECTIVE_LENGTH = 2000;
 
@@ -69,32 +70,54 @@ export default function ProjectDetailView({ id }: { id: string }) {
   const router = useRouter();
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
+  /**
+   * Null while loading or once loaded. When set, `status` is the failing
+   * response's HTTP status — or null when the fetch threw (network error).
+   * Only a real 404 renders the not-found state; everything else is a
+   * retryable load failure (issue #90).
+   */
+  const [loadError, setLoadError] = useState<{ status: number | null } | null>(
+    null
+  );
   const [editorRoomId, setEditorRoomId] = useState<string | null>(null);
   const [directives, setDirectives] = useState<Record<string, string>>({});
   const { toasts, showError, showSuccess, showInfo, dismissToast } = useToast();
 
-  useEffect(() => {
-    const fetchProject = async () => {
+  const loadProject = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
       const supabase = createClient();
       const {
         data: { user },
       } = await supabase.auth.getUser();
 
       if (!user) {
-        setLoading(false);
+        // Session missing/expired: same treatment as the API's 401 — a
+        // load failure the user can retry after signing back in, never
+        // "project not found".
+        setLoadError({ status: 401 });
         return;
       }
 
       const response = await fetch(`/api/projects/${id}`);
-      if (response.ok) {
-        const data = await response.json();
-        setProject(data);
+      if (!response.ok) {
+        setLoadError({ status: response.status });
+        return;
       }
+      setProject(await response.json());
+    } catch {
+      // Thrown network error (dropped connection, offline, DNS): no
+      // status at all — retryable, never not-found.
+      setLoadError({ status: null });
+    } finally {
       setLoading(false);
-    };
-
-    fetchProject();
+    }
   }, [id]);
+
+  useEffect(() => {
+    void loadProject();
+  }, [loadProject]);
 
   const applyRoomUpdate = useCallback((roomId: string, patch: Partial<Room>) => {
     setProject((prev) =>
@@ -197,6 +220,48 @@ export default function ProjectDetailView({ id }: { id: string }) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-stone-300 border-t-stone-800" />
+      </div>
+    );
+  }
+
+  if (!project && loadError) {
+    if (projectFetchStateFromStatus(loadError.status) === "not-found") {
+      return (
+        <div className="p-8 text-center">
+          <h1 className="text-2xl font-bold text-stone-800">Project not found</h1>
+          <Link href="/dashboard" className="text-stone-600 hover:underline mt-4 inline-block">
+            Back to dashboard
+          </Link>
+        </div>
+      );
+    }
+
+    return (
+      <div className="p-8">
+        <div
+          role="alert"
+          className="mx-auto mt-8 max-w-lg rounded-lg border border-red-200 bg-red-50 p-6 text-center"
+        >
+          <p className="text-red-700">Couldn&apos;t load this project.</p>
+          {loadError.status === 401 && (
+            <p className="mt-1 text-sm text-red-600">
+              Your session may have expired — sign in again if retrying
+              doesn&apos;t work.
+            </p>
+          )}
+          <button
+            onClick={() => void loadProject()}
+            className="mt-4 rounded-md bg-stone-800 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-700"
+          >
+            Retry
+          </button>
+          <Link
+            href="/dashboard"
+            className="mt-4 block text-stone-600 hover:underline text-sm"
+          >
+            Back to dashboard
+          </Link>
+        </div>
       </div>
     );
   }
