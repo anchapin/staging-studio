@@ -9,17 +9,52 @@ interface RoomCanvasProps {
   roomId: string;
   projectId: string;
   imageUrl?: string | null;
+  variantSlot?: 0 | 1;
 }
 
 export default function RoomCanvas({
   roomId,
   projectId,
   imageUrl,
+  variantSlot = 0,
 }: RoomCanvasProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [pendingConfirm, setPendingConfirm] = useState<{
+    storagePath: string;
+    slot: 0 | 1;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleRetryLink = async () => {
+    if (!pendingConfirm) return;
+
+    setError(null);
+    setIsUploading(true);
+
+    try {
+      const result = await confirmRoomPhotoUpload(
+        roomId,
+        projectId,
+        pendingConfirm.storagePath,
+        pendingConfirm.slot
+      );
+
+      if (!result.success) {
+        setError(result.error);
+        return;
+      }
+
+      setPendingConfirm(null);
+      setUploadProgress(100);
+      window.location.reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to link upload");
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const handleFileSelect = async (
     event: React.ChangeEvent<HTMLInputElement>
@@ -30,6 +65,7 @@ export default function RoomCanvas({
     setError(null);
     setIsUploading(true);
     setUploadProgress(0);
+    setPendingConfirm(null);
 
     try {
       const options = {
@@ -43,10 +79,17 @@ export default function RoomCanvas({
 
       setUploadProgress(50);
 
-      const { signedUrl, storagePath } = await getSignedUploadUrl(
+      const signedUrlResult = await getSignedUploadUrl(
         roomId,
-        compressedFile.name
+        compressedFile.name,
+        variantSlot
       );
+
+      if (!signedUrlResult.success) {
+        throw new Error(signedUrlResult.error);
+      }
+
+      const { signedUrl, storagePath } = signedUrlResult;
 
       setUploadProgress(70);
 
@@ -64,9 +107,20 @@ export default function RoomCanvas({
       }
 
       setUploadProgress(90);
+      setPendingConfirm({ storagePath, slot: variantSlot });
 
-      await confirmRoomPhotoUpload(roomId, projectId, storagePath);
+      const confirmResult = await confirmRoomPhotoUpload(
+        roomId,
+        projectId,
+        storagePath,
+        variantSlot
+      );
 
+      if (!confirmResult.success) {
+        throw new Error(confirmResult.error);
+      }
+
+      setPendingConfirm(null);
       setUploadProgress(100);
       window.location.reload();
     } catch (err) {
@@ -131,6 +185,15 @@ export default function RoomCanvas({
         <div className="absolute top-2 right-2 bg-red-500 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
           <X className="w-3 h-3" />
           {error}
+          {pendingConfirm && (
+            <button
+              onClick={() => void handleRetryLink()}
+              disabled={isUploading}
+              className="ml-1 underline hover:opacity-80 disabled:opacity-50"
+            >
+              Retry link
+            </button>
+          )}
         </div>
       )}
 
