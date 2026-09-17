@@ -22,12 +22,17 @@ const imageUrlSchema = z
  *
  * Purpose: validates the JSON body of a room patch so only allowlisted
  * fields (`selectedVariantIndex`, the four before/after image URLs) are
- * ever written to `Room`. `.strict()` rejects unknown keys outright.
+ * ever written to `Room`. All fields are optional (clients patch only
+ * what changed — e.g. `persistInpaintResult` saves a single after URL);
+ * `.strict()` rejects unknown keys outright.
  *
  * Contract: every image URL must be HTTPS on `*.supabase.co` or
  * `*.fal.ai`, mirroring `next.config.ts` `images.remotePatterns` — a URL
  * from any other host fails validation (otherwise `next/image` would
- * throw at render time). `selectedVariantIndex` must be 0 or 1.
+ * throw at render time). `selectedVariantIndex` must be 0 or 1. An
+ * entirely empty body (`{}`) parses, so the PATCH route must reject it
+ * before handing `parsed.data` to Prisma (`updateMany` throws on empty
+ * `data`).
  *
  * Side effects: none — pure validation; no env vars needed.
  */
@@ -39,6 +44,7 @@ export const roomPatchSchema = z
     beforeImageUrl2: imageUrlSchema,
     afterImageUrl2: imageUrlSchema,
   })
+  .partial()
   .strict();
 
 /** The validated shape of a room patch request body ({@link roomPatchSchema}). */

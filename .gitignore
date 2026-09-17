@@ -55,4 +55,4 @@ tsconfig.tsbuildinfo
 
 # editor artifacts / env copies
 *.rswp
-..env.local*
+.env.local*

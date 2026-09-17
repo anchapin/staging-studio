@@ -16,6 +16,29 @@ describe("roomPatchSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("accepts the partial body persistInpaintResult sends for variant slot 0", () => {
+    const result = roomPatchSchema.safeParse({
+      afterImageUrl: "https://v3.fal.ai/output/after.png",
+      selectedVariantIndex: 0,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts the partial body persistInpaintResult sends for variant slot 1", () => {
+    const result = roomPatchSchema.safeParse({
+      beforeImageUrl2: "https://abc123.supabase.co/storage/v1/object/public/rooms/before.jpg",
+      afterImageUrl2: "https://v3.fal.ai/output/after.png",
+      selectedVariantIndex: 1,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("permits an entirely empty body (the PATCH route guard must reject it before updateMany)", () => {
+    const result = roomPatchSchema.safeParse({});
+    expect(result.success).toBe(true);
+    expect(Object.keys(result.success ? result.data : {})).toHaveLength(0);
+  });
+
   it("rejects an image URL with a disallowed host", () => {
     const result = roomPatchSchema.safeParse({
       ...validBody,
