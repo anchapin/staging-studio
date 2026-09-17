@@ -5,7 +5,7 @@ export const BROWSERLESS_TIMEOUT_MS = 60_000;
 export interface BrowserlessPdfBody {
   url: string;
   gotoOptions: { waitUntil: "networkidle0" };
-  pdfOptions: {
+  options: {
     printBackground: boolean;
     format: "Letter";
     margin: {
@@ -41,12 +41,15 @@ export function buildBrowserlessPdfUrl(): string {
  * Side effects: none (pure).
  */
 export function buildBrowserlessPdfBody(previewUrl: string): BrowserlessPdfBody {
+  // "options" (not the legacy "pdfOptions"): Browserless v2's /pdf schema
+  // rejects additional properties, and pdfOptions now 400s with
+  // "must NOT have additional properties".
   return {
     url: previewUrl,
     gotoOptions: {
       waitUntil: "networkidle0",
     },
-    pdfOptions: {
+    options: {
       printBackground: true,
       format: "Letter",
       margin: {
