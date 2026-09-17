@@ -23,6 +23,7 @@ export interface PreviewProject {
   user: {
     firmName: string;
     ownerName: string;
+    logoUrl?: string | null;
     psychologyPageContent: string | null;
     signoffContent: string | null;
   };
