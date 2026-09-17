@@ -8,10 +8,12 @@ export interface CopyPromptInput {
 export const NEGATIVE_PROMPT =
   "walls, windows, trim, doors, molding, structural columns, flooring";
 
-// FLUX.1 Fill [dev] queue endpoint. Requires @fal-ai/serverless-client
-// >= 0.15 — older 0.6.x mangles multi-segment ids into
-// "https://fal-ai/<model>.<host>/..." (ENOTFOUND fal-ai).
-export const FAL_FLUX_FILL_MODEL = "fal-ai/flux/1/fill";
+// FLUX.1 Fill [dev] with LoRAs — the live fal endpoint (the old
+// "fal-ai/flux/1/fill" route was removed from fal's queue; submit
+// succeeded but execution 404'd with "Path /1/fill not found").
+// Requires @fal-ai/serverless-client >= 0.15 — older 0.6.x mangles
+// multi-segment ids into "https://fal-ai/<model>.<host>/..." (ENOTFOUND).
+export const FAL_FLUX_FILL_MODEL = "fal-ai/flux-lora-fill";
 
 export interface FalFillPayloadInput {
   imageUrl: string;
