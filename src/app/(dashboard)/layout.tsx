@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getDashboardUserWithProjects } from "@/lib/dashboard-data";
+import { SignOutButton } from "@/components/dashboard/sign-out-button";
 
 export const dynamic = "force-dynamic";
 
@@ -99,12 +100,7 @@ export default async function DashboardLayout({
           >
             Settings
           </Link>
-          <a
-            href="/api/auth/signout"
-            className="block rounded-md px-3 py-2 text-sm font-medium text-stone-400 hover:bg-stone-800 hover:text-white"
-          >
-            Sign Out
-          </a>
+          <SignOutButton />
         </div>
       </aside>
 
