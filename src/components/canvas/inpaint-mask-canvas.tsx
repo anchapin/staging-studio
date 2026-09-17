@@ -1,12 +1,27 @@
 "use client";
 
 import { useRef, useState, useEffect, useCallback, useMemo, useId } from "react";
-import { clientPointToCanvas, computeMaskCanvasDimensions } from "@/lib/canvas-coords";
+import {
+  canvasPointToNatural,
+  clientPointToCanvas,
+  computeMaskCanvasDimensions,
+  type CanvasPoint,
+} from "@/lib/canvas-coords";
 import { estimateMaskCoverage, shouldWarnLowCoverage } from "@/lib/mask-coverage";
-import { floodFillMask, maskGridFromPixels } from "@/lib/mask-flood-fill";
+import { floodFillMask, maskGridFromPixels, mergeMaskGrids } from "@/lib/mask-flood-fill";
 
-/** Tools for building the mask: freehand paint or flood-fill inside an outline. */
-type MaskTool = "brush" | "fill";
+/** Tools for building the mask: freehand paint, flood-fill, or click-to-segment. */
+type MaskTool = "brush" | "fill" | "select";
+
+/**
+ * A completed click-to-segment response to paint onto the mask (issue
+ * #183). `id` must change per request so each successful response applies
+ * exactly once; `maskDataUrl` is a white-on-black PNG data URL.
+ */
+export interface SegmentMaskRequest {
+  id: number;
+  maskDataUrl: string;
+}
 
 interface InpaintMaskCanvasProps {
   width?: number;
@@ -27,6 +42,15 @@ interface InpaintMaskCanvasProps {
    * available content width instead of the compact card cap (`max-w-md`).
    */
   fullWidth?: boolean;
+  /**
+   * Select Object tool (issue #183): called on click with the point in the
+   * photo's natural pixel space. The parent issues the /api/segment call.
+   */
+  onSegmentSelect?: (point: CanvasPoint) => void;
+  /** True while segmenting (or inpainting) runs; select clicks are ignored. */
+  segmentDisabled?: boolean;
+  /** A successful segment response to merge onto the active mask grid. */
+  segmentMaskRequest?: SegmentMaskRequest | null;
 }
 
 export default function InpaintMaskCanvas({
@@ -40,12 +64,22 @@ export default function InpaintMaskCanvas({
   naturalHeight,
   overlayImageSrc,
   fullWidth = false,
+  onSegmentSelect,
+  segmentDisabled = false,
+  segmentMaskRequest = null,
 }: InpaintMaskCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [brushSize, setBrushSize] = useState(initialBrushSize);
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(initialMaskDataUrl ?? null);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Cost guardrail for the paid SAM call (issue #183): a repeat click on
+  // the exact same point is deduped (the endpoint is deterministic, so the
+  // identical point would return an identical mask). Any manual paint,
+  // clear, or geometry change resets the key so re-selection stays
+  // possible.
+  const lastSegmentPointRef = useRef<CanvasPoint | null>(null);
 
   // Masking-guidance state: which tool is active, whether anything has been
   // painted yet (drives the empty-state hint), and whether the exported mask
@@ -107,6 +141,7 @@ export default function InpaintMaskCanvas({
     // state to match what will actually be on screen.
     setHasPainted(Boolean(initial));
     setLowCoverage(false);
+    lastSegmentPointRef.current = null;
   }, [dims.width, dims.height]);
 
   // Initialize once on mount, and re-initialize when the geometry changes
@@ -208,17 +243,46 @@ export default function InpaintMaskCanvas({
     e.preventDefault();
     const point = getCoordinates(e);
     if (!point) return;
+    if (activeTool === "select") {
+      handleSegmentClick(point);
+      return;
+    }
     if (activeTool === "fill") {
+      lastSegmentPointRef.current = null;
       if (performFill(point)) {
         setHasPainted(true);
         exportMask();
       }
       return;
     }
+    lastSegmentPointRef.current = null;
     setIsDrawing(true);
     lastPointRef.current = point;
     setHasPainted(true);
     draw(point, point);
+  };
+
+  // Select Object tool: converts the clicked canvas point into the photo's
+  // natural pixel space (what the SAM point prompt expects), dedupes repeat
+  // clicks on the same point, and hands off to the parent's /api/segment
+  // call. The canvas is only repainted when the parent comes back with a
+  // successful response (via segmentMaskRequest), so failures leave it
+  // untouched.
+  const handleSegmentClick = (canvasPoint: CanvasPoint) => {
+    if (!onSegmentSelect || segmentDisabled) return;
+    const naturalWidthValue = naturalWidth && naturalWidth > 0 ? naturalWidth : dims.width;
+    const naturalHeightValue = naturalHeight && naturalHeight > 0 ? naturalHeight : dims.height;
+    const point = canvasPointToNatural(
+      canvasPoint,
+      dims.width,
+      dims.height,
+      naturalWidthValue,
+      naturalHeightValue
+    );
+    const last = lastSegmentPointRef.current;
+    if (last && last.x === point.x && last.y === point.y) return;
+    lastSegmentPointRef.current = point;
+    onSegmentSelect(point);
   };
 
   const handleMove = (e: React.MouseEvent | React.TouchEvent) => {
@@ -290,8 +354,62 @@ export default function InpaintMaskCanvas({
     setMaskDataUrl(null);
     setHasPainted(false);
     setLowCoverage(false);
+    lastSegmentPointRef.current = null;
     onMaskChange?.(null);
   };
+
+  // Applies a successful segment response: draws the returned white-on-black
+  // mask at canvas resolution, OR-merges it onto the existing painted grid
+  // (manual strokes survive), and re-exports. Failure paths (parent never
+  // sends a request, image load error) leave the canvas pixels untouched.
+  useEffect(() => {
+    if (!segmentMaskRequest) return;
+    let cancelled = false;
+    const applySegmentMask = (img: HTMLImageElement) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      const base = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const segment = document.createElement("canvas");
+      segment.width = canvas.width;
+      segment.height = canvas.height;
+      const segmentCtx = segment.getContext("2d");
+      if (!segmentCtx) return;
+      segmentCtx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const segmentData = segmentCtx.getImageData(0, 0, canvas.width, canvas.height);
+
+      const merged = mergeMaskGrids(
+        maskGridFromPixels(base.data, canvas.width, canvas.height),
+        maskGridFromPixels(segmentData.data, canvas.width, canvas.height)
+      );
+      if (!merged) return;
+
+      const data = base.data;
+      for (let i = 0; i < merged.mask.length; i++) {
+        if (merged.mask[i] === 1) {
+          const o = i * 4;
+          data[o] = 255;
+          data[o + 1] = 255;
+          data[o + 2] = 255;
+          data[o + 3] = 255;
+        }
+      }
+      ctx.putImageData(base, 0, 0);
+      setHasPainted(true);
+      exportMask();
+    };
+
+    const img = new Image();
+    img.onload = () => {
+      if (!cancelled) applySegmentMask(img);
+    };
+    img.src = segmentMaskRequest.maskDataUrl;
+    return () => {
+      cancelled = true;
+    };
+  }, [segmentMaskRequest, exportMask]);
 
   const centerOf = (canvas: HTMLCanvasElement) => ({
     x: canvas.width / 2,
@@ -323,16 +441,25 @@ export default function InpaintMaskCanvas({
   const toggleKeyboardPaint = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    if (activeTool === "select") {
+      const at = cursorRef.current ?? centerOf(canvas);
+      cursorRef.current = at;
+      setCursor(at);
+      handleSegmentClick(at);
+      return;
+    }
     if (activeTool === "fill") {
       const at = cursorRef.current ?? centerOf(canvas);
       cursorRef.current = at;
       setCursor(at);
+      lastSegmentPointRef.current = null;
       if (performFill(at)) {
         setHasPainted(true);
         exportMask();
       }
       return;
     }
+    lastSegmentPointRef.current = null;
     if (keyboardPaintingRef.current) {
       liftKeyboardPaint();
       return;
@@ -416,7 +543,9 @@ export default function InpaintMaskCanvas({
   const canvasAriaLabel =
     activeTool === "fill"
       ? "Room mask canvas with the Fill Region tool active: draw a continuous outline around the object, arrow keys move the cursor, press P, Space, or Enter to fill the region under the cursor"
-      : "Room mask painting canvas: arrow keys move the brush (hold Shift for fine steps), press P, Space, or Enter to start and stop painting";
+      : activeTool === "select"
+        ? "Room mask canvas with the Select Object tool active: click an object in the photo to paint its detected shape onto the mask, arrow keys move the cursor, press P, Space, or Enter to select the object under the cursor"
+        : "Room mask painting canvas: arrow keys move the brush (hold Shift for fine steps), press P, Space, or Enter to start and stop painting";
 
   const canvasElement = (
     <div
@@ -463,7 +592,9 @@ export default function InpaintMaskCanvas({
               hasOverlay ? "" : "border border-white/30"
             }`}
           >
-            Drag to paint over the object you want changed
+            {activeTool === "select"
+              ? "Click an object to select it for masking"
+              : "Drag to paint over the object you want changed"}
           </span>
         </div>
       )}
@@ -511,7 +642,8 @@ export default function InpaintMaskCanvas({
         entire object or area you want changed — everything painted is
         regenerated, everything else is preserved. A thin outline won&apos;t
         change the interior, so cover the whole object (or draw an outline and
-        use Fill Region on its inside).
+        use Fill Region on its inside). Select Object detects a clicked
+        object&apos;s shape for you and paints it onto the mask.
       </p>
 
       {lowCoverage && (
@@ -553,6 +685,19 @@ export default function InpaintMaskCanvas({
             }
           >
             Fill Region
+          </button>
+          <button
+            type="button"
+            aria-pressed={activeTool === "select"}
+            disabled={segmentDisabled}
+            onClick={() => setActiveTool("select")}
+            className={
+              activeTool === "select"
+                ? "px-3 py-1.5 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                : "px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+            }
+          >
+            Select Object
           </button>
         </div>
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_MASK_CANVAS_LONG_EDGE,
+  canvasPointToNatural,
   clientPointToCanvas,
   computeMaskCanvasDimensions,
 } from "@/lib/canvas-coords";
@@ -88,5 +89,52 @@ describe("computeMaskCanvasDimensions", () => {
   it("honors a custom max long edge", () => {
     expect(computeMaskCanvasDimensions(4 / 3, 512)).toEqual({ width: 512, height: 384 });
     expect(computeMaskCanvasDimensions(3 / 4, 512)).toEqual({ width: 384, height: 512 });
+  });
+});
+
+describe("canvasPointToNatural", () => {
+  it("scales canvas pixels up to the photo's natural resolution", () => {
+    // 1024x768 canvas for a 4096x3072 photo: 4x per axis.
+    expect(canvasPointToNatural({ x: 512, y: 384 }, 1024, 768, 4096, 3072)).toEqual({
+      x: 2048,
+      y: 1536,
+    });
+  });
+
+  it("scales canvas pixels down for canvases larger than the photo", () => {
+    // 1024-wide canvas for an 800-wide photo.
+    expect(canvasPointToNatural({ x: 512, y: 384 }, 1024, 768, 800, 600)).toEqual({
+      x: 400,
+      y: 300,
+    });
+  });
+
+  it("rounds fractional results to integer natural pixels", () => {
+    expect(canvasPointToNatural({ x: 333, y: 111 }, 1000, 1000, 1000, 1000)).toEqual({
+      x: 333,
+      y: 111,
+    });
+    expect(canvasPointToNatural({ x: 512, y: 256 }, 1024, 768, 4096, 3072)).toEqual({
+      x: 2048,
+      y: 1024,
+    });
+    // 1/3 scale: 100 -> 33.333 -> 33.
+    expect(canvasPointToNatural({ x: 100, y: 0 }, 1023, 1023, 341, 341)).toEqual({ x: 33, y: 0 });
+  });
+
+  it("clamps to the natural bounds on every edge", () => {
+    expect(canvasPointToNatural({ x: 0, y: 0 }, 1024, 768, 4096, 3072)).toEqual({ x: 0, y: 0 });
+    expect(canvasPointToNatural({ x: 1024, y: 768 }, 1024, 768, 4096, 3072)).toEqual({
+      x: 4096,
+      y: 3072,
+    });
+    expect(canvasPointToNatural({ x: 1100, y: -10 }, 1024, 768, 4096, 3072)).toEqual({
+      x: 4096,
+      y: 0,
+    });
+  });
+
+  it("returns the origin when the canvas is degenerate", () => {
+    expect(canvasPointToNatural({ x: 50, y: 50 }, 0, 0, 4096, 3072)).toEqual({ x: 0, y: 0 });
   });
 });

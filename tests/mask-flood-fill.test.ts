@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { maskGridFromPixels, floodFillMask } from "@/lib/mask-flood-fill";
+import { maskGridFromPixels, floodFillMask, mergeMaskGrids } from "@/lib/mask-flood-fill";
 
 const makeRgba = (pixels: Array<[number, number, number, number]>) =>
   new Uint8ClampedArray(pixels.flat());
@@ -132,5 +132,45 @@ describe("floodFillMask", () => {
     if (!result) return;
     expect(result.filledCount).toBe(6);
     expect(Array.from(result.mask)).toEqual([1, 1, 1, 1, 1, 1]);
+  });
+});
+
+describe("mergeMaskGrids", () => {
+  it("paints cells present in either grid (OR semantics)", () => {
+    const base = new Uint8Array([1, 0, 0, 0]);
+    const addition = new Uint8Array([0, 1, 0, 0]);
+    const result = mergeMaskGrids(base, addition);
+    expect(result).not.toBeNull();
+    if (!result) return;
+    expect(Array.from(result.mask)).toEqual([1, 1, 0, 0]);
+    expect(result.addedCount).toBe(1);
+  });
+
+  it("keeps manual strokes and adds only the segment's new cells", () => {
+    const base = new Uint8Array([0, 1, 1, 0]);
+    const addition = new Uint8Array([1, 1, 0, 0]);
+    const result = mergeMaskGrids(base, addition);
+    expect(result).not.toBeNull();
+    if (!result) return;
+    expect(Array.from(result.mask)).toEqual([1, 1, 1, 0]);
+    expect(result.addedCount).toBe(1);
+  });
+
+  it("is pure: neither input grid is mutated", () => {
+    const base = new Uint8Array([1, 0, 0, 1]);
+    const addition = new Uint8Array([0, 0, 1, 0]);
+    const baseSnapshot = base.slice();
+    const additionSnapshot = addition.slice();
+    mergeMaskGrids(base, addition);
+    expect(Array.from(base)).toEqual(Array.from(baseSnapshot));
+    expect(Array.from(addition)).toEqual(Array.from(additionSnapshot));
+  });
+
+  it("returns null when the grids disagree in length", () => {
+    expect(mergeMaskGrids(new Uint8Array(4), new Uint8Array(3))).toBeNull();
+    expect(mergeMaskGrids(new Uint8Array(0), new Uint8Array(0))).toEqual({
+      mask: new Uint8Array(0),
+      addedCount: 0,
+    });
   });
 });

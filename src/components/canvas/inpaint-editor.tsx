@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import InpaintMaskCanvas from "./inpaint-mask-canvas";
+import InpaintMaskCanvas, { type SegmentMaskRequest } from "./inpaint-mask-canvas";
 import { useToast, ToastContainer } from "@/components/ui/toast";
 import { Loader2 } from "lucide-react";
 import { useInpaintStatus } from "./use-inpaint-status";
@@ -53,6 +53,13 @@ export default function InpaintEditor({
   const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
   const { toasts, showError, showSuccess, dismissToast } = useToast();
 
+  // Click-to-segment state (issue #183): one in-flight SAM request at a
+  // time; a successful response is handed to the mask canvas as a new
+  // SegmentMaskRequest so it merges onto the existing grid.
+  const [isSegmenting, setIsSegmenting] = useState(false);
+  const [segmentRequest, setSegmentRequest] = useState<SegmentMaskRequest | null>(null);
+  const segmentRequestIdRef = useRef(0);
+
   // The source in effect for the CURRENT run, captured at start time so the
   // completion callback reports the right one even if the selector (or the
   // pending-request props) change while a run is in flight.
@@ -99,9 +106,54 @@ export default function InpaintEditor({
     (next: InpaintSource) => {
       if (inpaintSourcesEqual(next, source)) return;
       setMaskDataUrl(null);
+      setSegmentRequest(null);
       onSourceChange?.(next);
     },
     [source, onSourceChange]
+  );
+
+  // Select Object (issue #183): sends the clicked point (already in the
+  // photo's natural pixel space) plus the room reference to /api/segment.
+  // On failure the error is surfaced and the canvas is left unchanged — a
+  // segment response is only forwarded to the canvas on success.
+  const handleSegmentSelect = useCallback(
+    async (point: { x: number; y: number }) => {
+      if (isProcessing || isSegmenting) return;
+      if (!imageDims) {
+        showError("The image is still loading. Please try again.");
+        return;
+      }
+      setIsSegmenting(true);
+      try {
+        const response = await fetch("/api/segment", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            roomId,
+            imageUrl,
+            point,
+            imageWidth: imageDims.width,
+            imageHeight: imageDims.height,
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.message || data.error || "Failed to select the object.");
+        }
+        segmentRequestIdRef.current += 1;
+        setSegmentRequest({
+          id: segmentRequestIdRef.current,
+          maskDataUrl: data.maskDataUrl,
+        });
+      } catch (error) {
+        showError(
+          error instanceof Error ? error.message : "Object selection failed. Please try again."
+        );
+      } finally {
+        setIsSegmenting(false);
+      }
+    },
+    [isProcessing, isSegmenting, imageDims, roomId, imageUrl, showError]
   );
 
   const handleInpaint = useCallback(async () => {
@@ -186,6 +238,9 @@ export default function InpaintEditor({
           naturalHeight={imageDims?.height ?? null}
           initialMaskDataUrl={maskDataUrl}
           onMaskChange={setMaskDataUrl}
+          onSegmentSelect={handleSegmentSelect}
+          segmentDisabled={isProcessing || isSegmenting}
+          segmentMaskRequest={segmentRequest}
           fullWidth={fullWidth}
         />
       </div>
@@ -193,11 +248,11 @@ export default function InpaintEditor({
       <div className="flex items-center gap-4">
         <button
           onClick={handleInpaint}
-          disabled={isProcessing || !maskDataUrl}
+          disabled={isProcessing || isSegmenting || !maskDataUrl}
           className={`
             flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium
             transition-colors
-            ${isProcessing || !maskDataUrl
+            ${isProcessing || isSegmenting || !maskDataUrl
               ? "bg-stone-300 text-stone-500 cursor-not-allowed"
               : "bg-stone-800 text-white hover:bg-stone-700"
             }
@@ -215,6 +270,12 @@ export default function InpaintEditor({
 
         {isProcessing && statusText && (
           <span className="text-sm text-stone-600">{statusText}</span>
+        )}
+
+        {isSegmenting && (
+          <span role="status" className="text-sm text-stone-600">
+            Identifying the object you clicked...
+          </span>
         )}
       </div>
 

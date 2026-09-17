@@ -81,3 +81,28 @@ export function computeMaskCanvasDimensions(
     height: maxLongEdge,
   };
 }
+
+/**
+ * Maps a point in canvas pixel space to the source photo's natural pixel
+ * space, rounding and clamping to the natural bounds.
+ *
+ * Purpose: SAM point prompts (issue #183) are expressed in the image's
+ * natural pixels, while clicks arrive in the (lower-resolution) canvas
+ * pixel space. Canvas and photo share an aspect ratio, so this is a
+ * uniform per-axis scale.
+ */
+export function canvasPointToNatural(
+  point: CanvasPoint,
+  canvasWidth: number,
+  canvasHeight: number,
+  naturalWidth: number,
+  naturalHeight: number
+): CanvasPoint {
+  const scaleX = canvasWidth > 0 ? naturalWidth / canvasWidth : 0;
+  const scaleY = canvasHeight > 0 ? naturalHeight / canvasHeight : 0;
+
+  return {
+    x: clamp(Math.round(point.x * scaleX), 0, Math.max(0, naturalWidth)),
+    y: clamp(Math.round(point.y * scaleY), 0, Math.max(0, naturalHeight)),
+  };
+}

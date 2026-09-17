@@ -195,6 +195,94 @@ export function interceptInpaint(page: Page): InpaintInterception {
   };
 }
 
+interface SegmentCaptureState {
+  submitPayload: Record<string, unknown> | null;
+  requestCount: number;
+  mode: "success" | "failure";
+  maskDataUrl: string;
+}
+
+export interface SegmentInterception {
+  /** Captured JSON body of the browser's POST /api/segment. */
+  submitBody(): Record<string, unknown>;
+  /** How many /api/segment requests the browser has issued so far. */
+  requestCount(): number;
+  /** Switches responses back to the success fixture (default). */
+  respondWithSuccess(): void;
+  /** Switches responses to a simulated SAM failure. */
+  respondWithFailure(): void;
+  /** Replaces the mask data URL returned on success (default: a 2x2 PNG with one white quadrant). */
+  setMaskFixture(dataUrl: string): void;
+}
+
+// 2x2 RGB PNG with its top-left pixel white and the rest black — after
+// scaling onto the mask canvas this yields ~25% white coverage.
+const SEGMENT_MASK_FIXTURE_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAADklEQVR4nGP4DwYMEAAAPs8F+9t6hu0AAAAASUVORK5CYII=";
+
+/**
+ * Intercepts the SAM-backed segment route (issue #183) at the browser
+ * network layer so fal.ai and the real route handler are never contacted.
+ * Success mode fulfills with a mask fixture data URL (white quadrant on
+ * black, ~25% coverage after scaling) so the canvas merge is observable
+ * through the exported inpaint mask.
+ */
+export function interceptSegment(page: Page): SegmentInterception {
+  const state: SegmentCaptureState = {
+    submitPayload: null,
+    requestCount: 0,
+    mode: "success",
+    maskDataUrl: SEGMENT_MASK_FIXTURE_DATA_URL,
+  };
+
+  page.route("**/api/segment", (route) => {
+    if (route.request().method() !== "POST") {
+      void route.fallback();
+      return;
+    }
+    state.requestCount += 1;
+    state.submitPayload = JSON.parse(route.request().postData() ?? "{}") as Record<
+      string,
+      unknown
+    >;
+    if (state.mode === "failure") {
+      void route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: "Segmentation failed",
+          message: "Simulated SAM failure (e2e).",
+        }),
+      });
+      return;
+    }
+    void route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ maskDataUrl: state.maskDataUrl }),
+    });
+  });
+
+  return {
+    submitBody() {
+      if (!state.submitPayload) throw new Error("POST /api/segment was never captured");
+      return state.submitPayload;
+    },
+    requestCount() {
+      return state.requestCount;
+    },
+    respondWithSuccess() {
+      state.mode = "success";
+    },
+    respondWithFailure() {
+      state.mode = "failure";
+    },
+    setMaskFixture(dataUrl: string) {
+      state.maskDataUrl = dataUrl;
+    },
+  };
+}
+
 /**
  * Intercepts the OpenAI-backed copy route; the browser call never reaches
  * the real route handler, so no OPENAI_API_KEY is exercised.
