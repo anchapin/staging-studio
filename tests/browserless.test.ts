@@ -32,7 +32,7 @@ describe("buildBrowserlessPdfBody", () => {
       gotoOptions: {
         waitUntil: "networkidle0",
       },
-      pdfOptions: {
+      options: {
         printBackground: true,
         format: "Letter",
         margin: {
@@ -48,9 +48,9 @@ describe("buildBrowserlessPdfBody", () => {
   it("uses Letter format with printBackground and zero margins", () => {
     const body = buildBrowserlessPdfBody("https://example.com/preview");
 
-    expect(body.pdfOptions.format).toBe("Letter");
-    expect(body.pdfOptions.printBackground).toBe(true);
-    expect(Object.values(body.pdfOptions.margin).every((m) => m === "0")).toBe(
+    expect(body.options.format).toBe("Letter");
+    expect(body.options.printBackground).toBe(true);
+    expect(Object.values(body.options.margin).every((m) => m === "0")).toBe(
       true
     );
   });
