@@ -32,6 +32,7 @@ const getPreviewProject = cache(async (id: string) =>
         select: {
           firmName: true,
           ownerName: true,
+          logoUrl: true,
           psychologyPageContent: true,
           signoffContent: true,
         },
@@ -148,6 +149,7 @@ export default async function LookbookPreviewPage({
     user: {
       firmName: project.user.firmName,
       ownerName: project.user.ownerName,
+      logoUrl: project.user.logoUrl,
       psychologyPageContent: project.user.psychologyPageContent,
       signoffContent: project.user.signoffContent,
     },
