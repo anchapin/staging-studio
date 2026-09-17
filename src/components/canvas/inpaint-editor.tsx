@@ -10,6 +10,10 @@ import {
   inpaintSourcesEqual,
   type InpaintSource,
 } from "@/lib/inpaint-source";
+import {
+  DEFAULT_MASK_EXPANSION_RADIUS,
+  MAX_MASK_EXPANSION_RADIUS,
+} from "@/lib/mask-dilation";
 
 interface InpaintEditorProps {
   roomId: string;
@@ -51,6 +55,10 @@ export default function InpaintEditor({
 }: InpaintEditorProps) {
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
   const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
+  // Issue #180: outward mask growth (in mask-canvas pixels) applied before
+  // the mask is dispatched, so bezels/frames at the painted boundary are
+  // regenerated too. 0 restores the un-dilated mask.
+  const [maskExpansion, setMaskExpansion] = useState(DEFAULT_MASK_EXPANSION_RADIUS);
   const { toasts, showError, showSuccess, dismissToast } = useToast();
 
   // Click-to-segment state (issue #183): one in-flight SAM request at a
@@ -229,7 +237,7 @@ export default function InpaintEditor({
         </fieldset>
       )}
 
-      <div>
+      <div className="flex flex-col gap-3">
         <h4 className="text-sm font-medium text-stone-700 mb-2">Source Image</h4>
         <InpaintMaskCanvas
           overlayImageSrc={imageUrl}
@@ -241,8 +249,28 @@ export default function InpaintEditor({
           onSegmentSelect={handleSegmentSelect}
           segmentDisabled={isProcessing || isSegmenting}
           segmentMaskRequest={segmentRequest}
+          expansionRadius={maskExpansion}
           fullWidth={fullWidth}
         />
+
+        <label className="flex items-center gap-2 text-sm text-stone-700">
+          Mask Expansion:
+          <input
+            type="range"
+            min={0}
+            max={MAX_MASK_EXPANSION_RADIUS}
+            value={maskExpansion}
+            onChange={(e) => setMaskExpansion(Number(e.target.value))}
+            aria-describedby="mask-expansion-hint"
+            className="w-32"
+          />
+          <span className="w-10 text-right">{maskExpansion}px</span>
+        </label>
+        <p id="mask-expansion-hint" className="text-xs text-gray-500">
+          Grows the mask outward before submitting so frames, bezels, and
+          mounts at the painted edge are replaced too. 0 keeps the mask
+          exactly as painted.
+        </p>
       </div>
 
       <div className="flex items-center gap-4">

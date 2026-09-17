@@ -11,6 +11,10 @@ import {
 } from "@/lib/canvas-coords";
 import { estimateMaskCoverage, shouldWarnLowCoverage } from "@/lib/mask-coverage";
 import { floodFillMask, maskGridFromPixels, mergeMaskGrids } from "@/lib/mask-flood-fill";
+import {
+  DEFAULT_MASK_EXPANSION_RADIUS,
+  dilateMaskGrid,
+} from "@/lib/mask-dilation";
 
 /** Tools for building the mask: freehand paint, flood-fill, or click-to-segment. */
 type MaskTool = "brush" | "fill" | "select";
@@ -53,6 +57,12 @@ interface InpaintMaskCanvasProps {
   segmentDisabled?: boolean;
   /** A successful segment response to merge onto the active mask grid. */
   segmentMaskRequest?: SegmentMaskRequest | null;
+  /**
+   * Outward mask growth in mask-canvas pixels applied at export time
+   * (issue #180): makes FLUX.1 Fill regenerate bezels/frames at the painted
+   * boundary instead of preserving them. 0 restores the un-dilated mask.
+   */
+  expansionRadius?: number;
 }
 
 export default function InpaintMaskCanvas({
@@ -69,6 +79,7 @@ export default function InpaintMaskCanvas({
   onSegmentSelect,
   segmentDisabled = false,
   segmentMaskRequest = null,
+  expansionRadius = DEFAULT_MASK_EXPANSION_RADIUS,
 }: InpaintMaskCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -340,6 +351,7 @@ export default function InpaintMaskCanvas({
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
+    if (!ctx) return;
 
     // fal-ai/flux-fill expects the mask geometry to match the source image,
     // so rescale the painted mask to the photo's natural pixel dimensions.
@@ -348,16 +360,50 @@ export default function InpaintMaskCanvas({
     const exportHeight =
       naturalHeight && naturalHeight > 0 ? Math.max(1, Math.round(naturalHeight)) : canvas.height;
 
+    // Issue #180: grow the painted mask outward before export so bezels,
+    // frames, brackets, and mounts at the painted boundary are regenerated
+    // instead of preserved. Dilation runs in logical mask-canvas pixel space
+    // (dims) BEFORE the scale-to-natural-dimensions step and only rewrites
+    // mask pixels — the source photo is never touched. A radius of 0 keeps
+    // the live canvas as the export source (today's exact output).
+    let maskSource: HTMLCanvasElement = canvas;
+    if (expansionRadius > 0) {
+      const paint = document.createElement("canvas");
+      paint.width = dims.width;
+      paint.height = dims.height;
+      const paintCtx = paint.getContext("2d");
+      if (!paintCtx) return;
+      paintCtx.drawImage(canvas, 0, 0, dims.width, dims.height);
+      const paintData = paintCtx.getImageData(0, 0, dims.width, dims.height);
+      const grid = maskGridFromPixels(paintData.data, dims.width, dims.height);
+      const dilated = dilateMaskGrid(grid, dims.width, dims.height, expansionRadius);
+      if (!dilated) return;
+
+      const grown = paintCtx.createImageData(dims.width, dims.height);
+      const grownData = grown.data;
+      for (let i = 0; i < dilated.mask.length; i++) {
+        const o = i * 4;
+        if (dilated.mask[i] === 1) {
+          grownData[o] = 255;
+          grownData[o + 1] = 255;
+          grownData[o + 2] = 255;
+        }
+        grownData[o + 3] = 255;
+      }
+      paintCtx.putImageData(grown, 0, 0);
+      maskSource = paint;
+    }
+
     let dataUrl: string;
-    if (exportWidth === canvas.width && exportHeight === canvas.height) {
-      dataUrl = canvas.toDataURL("image/png");
+    if (exportWidth === maskSource.width && exportHeight === maskSource.height) {
+      dataUrl = maskSource.toDataURL("image/png");
     } else {
       const scaled = document.createElement("canvas");
       scaled.width = exportWidth;
       scaled.height = exportHeight;
       const scaledCtx = scaled.getContext("2d");
       if (!scaledCtx) return;
-      scaledCtx.drawImage(canvas, 0, 0, exportWidth, exportHeight);
+      scaledCtx.drawImage(maskSource, 0, 0, exportWidth, exportHeight);
       dataUrl = scaled.toDataURL("image/png");
     }
 
@@ -376,7 +422,25 @@ export default function InpaintMaskCanvas({
       );
       setLowCoverage(shouldWarnLowCoverage(coverage));
     }
-  }, [naturalWidth, naturalHeight, onMaskChange]);
+  }, [naturalWidth, naturalHeight, onMaskChange, expansionRadius, dims.width, dims.height]);
+
+  // Re-export when the expansion radius changes so the dispatched mask
+  // always reflects the current dilation setting (issue #180). Refs keep the
+  // effect from firing on mount or on unrelated geometry changes — the mask
+  // is only re-exported once something has actually been painted.
+  const hasPaintedRef = useRef(hasPainted);
+  useEffect(() => {
+    hasPaintedRef.current = hasPainted;
+  }, [hasPainted]);
+
+  const lastAppliedRadiusRef = useRef(expansionRadius);
+  useEffect(() => {
+    const previous = lastAppliedRadiusRef.current;
+    lastAppliedRadiusRef.current = expansionRadius;
+    if (previous === expansionRadius) return;
+    if (!hasPaintedRef.current) return;
+    exportMask();
+  }, [expansionRadius, exportMask]);
 
   const clearMask = () => {
     const canvas = canvasRef.current;
