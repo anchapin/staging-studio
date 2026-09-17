@@ -92,8 +92,24 @@ Deploying to production? See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — every 
 npm run lint        # next lint
 npm run typecheck   # tsc --noEmit
 npm test            # vitest run (tests live in tests/)
+npm run e2e         # Playwright browser suite (tests/e2e) — see below
 npm run build       # production build
 npm run db:studio   # Prisma Studio
 ```
+
+## End-to-end browser suite (issue #165)
+
+`npm run e2e` runs a hermetic Playwright harness (`tests/e2e/`) against a production build of the app. It covers the staging flows the PoC browser driver could not reliably automate — real trusted mouse events painting the mask canvas (asserted by sampling white coverage in the actual `POST /api/inpaint` body), `setInputFiles` uploads (asserted byte-identical against what storage received), and a scripted rehearsal drill (login → project → upload → inpaint → copy → export) plus the #163 failure drills (terminal inpaint error, export outage → error reveal with retry).
+
+**Hermeticity:** no real credentials or paid services. A local mock Supabase (`tests/e2e/mock-supabase.ts`) serves GoTrue auth (self-signed JWTs) and Storage (hashes every stored object); Postgres runs in a disposable Docker container that global setup creates, pushes the schema to, and seeds with fixed rows; fal.ai, OpenAI, and Browserless are simulated by intercepting their API routes at the browser network layer, so the dummy API keys are never exercised.
+
+**Requirements:** Docker (for the throwaway Postgres) and Playwright browsers (`npx playwright install chromium`).
+
+```bash
+npm run e2e          # headless run (single worker — deterministic)
+npm run e2e:headed   # watch it drive the real UI
+```
+
+Artifacts (traces/screenshots on failure, HTML report) land in `test-results/` and `playwright-report/`, both gitignored.
 
 See [issues](../../issues) for the full development roadmap.

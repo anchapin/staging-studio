@@ -9,6 +9,8 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "e2e": "playwright test",
+    "e2e:headed": "playwright test --headed",
     "postinstall": "prisma generate",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
@@ -35,6 +37,7 @@
     "zod": "^3.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4.0.0",
     "@types/node": "^20.0.0",
     "@types/react": "^18.2.0",

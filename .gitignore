@@ -36,6 +36,12 @@ yarn-error.log*
 coverage/
 .nyc_output/
 
+# Playwright e2e artifacts (issue #165)
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
 # Prisma
 *.db
 *.db-journal
