@@ -32,6 +32,15 @@ const inpaintSubmitSchema = inpaintRequestSchema.extend({
     .number()
     .int()
     .refine((value) => value === 0 || value === 1),
+  // Issue #170: null/omitted = the run edits the original before photo;
+  // 0/1 = the run edits that variant's staged result (persisted so a
+  // pendingRequestId resume applies the same persistence semantics).
+  sourceSlot: z
+    .number()
+    .int()
+    .refine((value) => value === 0 || value === 1)
+    .nullable()
+    .optional(),
 });
 
 type FalQueueSubmitFunction = (
@@ -61,7 +70,7 @@ export async function POST(request: NextRequest) {
         {
           error: "Invalid request",
           message:
-            "Please provide a valid imageUrl, maskUrl, promptDirectives, aesthetic, roomId, and variantSlot.",
+            "Please provide a valid imageUrl, maskUrl, promptDirectives, aesthetic, roomId, variantSlot, and sourceSlot.",
           issues: parsed.error.issues,
         },
         { status: 400 }
@@ -70,11 +79,12 @@ export async function POST(request: NextRequest) {
 
     const { imageUrl, maskUrl, promptDirectives, aesthetic, variantSlot } =
       parsed.data;
+    const sourceSlot = parsed.data.sourceSlot ?? null;
     roomId = parsed.data.roomId;
 
     const room = await prisma.room.findFirst({
       where: { id: roomId, project: { userId: user.id } },
-      select: { id: true },
+      select: { id: true, afterImageUrl: true, afterImageUrl2: true },
     });
     if (!room) {
       return NextResponse.json(
@@ -83,6 +93,22 @@ export async function POST(request: NextRequest) {
           message: "The requested room could not be found.",
         },
         { status: 404 }
+      );
+    }
+
+    // A variant-source run (issue #170) edits that variant's staged result —
+    // reject up front when the slot has no result to edit from, so a run can
+    // never claim a source it cannot have.
+    if (
+      (sourceSlot === 0 && !room.afterImageUrl) ||
+      (sourceSlot === 1 && !room.afterImageUrl2)
+    ) {
+      return NextResponse.json(
+        {
+          error: "Invalid source",
+          message: "The selected variant has no staged result to edit from.",
+        },
+        { status: 400 }
       );
     }
 
@@ -102,6 +128,7 @@ export async function POST(request: NextRequest) {
         id: submission.request_id,
         roomId: room.id,
         variantSlot,
+        sourceSlot,
         status: "IN_QUEUE",
       },
     });
