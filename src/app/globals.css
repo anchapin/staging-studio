@@ -117,10 +117,16 @@
     display: none !important;
   }
 
-  /* Full bleed for lookbook pages */
+  /* Full-bleed lookbook pages: the standalone /preview route is already
+     full viewport width, so no negative-margin compensation — each page
+     ends with a hard break and the last one avoids a trailing blank. */
   .lookbook-page {
     width: 100vw;
-    margin-left: calc(-50vw + 50%);
-    margin-right: calc(-50vw + 50%);
+    margin: 0;
+    page-break-after: always;
+  }
+
+  .lookbook-page:last-child {
+    page-break-after: auto;
   }
 }

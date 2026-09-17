@@ -9,7 +9,9 @@ const PRIORITY_STYLES: Record<ChecklistItem["priority"], string> = {
   Standard: "border-muted bg-muted/50",
 };
 
-const SPREAD_IMAGE_SIZES = "calc((100vw - 256px) / 2)";
+// Standalone /preview route: no dashboard sidebar — spreads span the full
+// viewport width.
+const SPREAD_IMAGE_SIZES = "calc(100vw / 2)";
 
 interface RoomSpreadProps {
   room: LookbookRoomData;
@@ -34,7 +36,7 @@ export function RoomSpread({ room, project }: RoomSpreadProps) {
         </div>
       </div>
 
-      <div className="flex-1 grid grid-cols-2 gap-0">
+      <div className="avoid-break flex-1 grid grid-cols-2 gap-0">
         <div className="relative aspect-[4/3] bg-muted">
           {room.beforeImageUrl ? (
             <Image
@@ -80,7 +82,7 @@ export function RoomSpread({ room, project }: RoomSpreadProps) {
         </div>
       </div>
 
-      <div className="p-8 bg-white border-t border-border">
+      <div className="avoid-break p-8 bg-white border-t border-border">
         <div className="grid grid-cols-3 gap-8">
           {pillars.map((pillar, index) => (
             <div key={index} className="space-y-3">
@@ -103,7 +105,7 @@ export function RoomSpread({ room, project }: RoomSpreadProps) {
       </div>
 
       {checklist.length > 0 && (
-        <div className="p-8 bg-stone-50 border-t border-border">
+        <div className="avoid-break p-8 bg-stone-50 border-t border-border">
           <h4 className="font-cinzel text-xs tracking-widest uppercase text-muted-foreground mb-4">
             Staging Checklist
           </h4>
