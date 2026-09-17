@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import Link from "next/link";
 import { getDashboardUserWithProjects } from "@/lib/dashboard-data";
 
@@ -9,12 +10,21 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // Cookie-less PDF render (Browserless) presents a signed preview token
+  // that middleware verifies and stamps as the x-preview-verified request
+  // header. The preview page re-verifies the token before rendering, so a
+  // verified stamp skips the session gate below; any client-forged value
+  // is deleted by middleware and the page still 404s on its own verify.
+  const previewVerifiedProjectId = (await headers()).get(
+    "x-preview-verified"
+  );
+
   // Shared, request-cached loader (issue #83): the pages this layout wraps
   // (/projects, /projects/[id]) await the same function and reuse this
   // result — one auth round-trip + one Prisma query per navigation.
   const { sessionEmail, userRow } = await getDashboardUserWithProjects();
 
-  if (!sessionEmail) {
+  if (!sessionEmail && !previewVerifiedProjectId) {
     redirect("/login");
   }
 
@@ -22,7 +32,7 @@ export default async function DashboardLayout({
   // DB): every mutation would 404 with "User not found in database".
   // Middleware passes /setup through for authenticated users, so send
   // them to complete setup instead of rendering a dead-end.
-  if (!userRow) {
+  if (!userRow && !previewVerifiedProjectId) {
     redirect("/setup");
   }
 
@@ -37,7 +47,8 @@ export default async function DashboardLayout({
       </a>
 
       {/* Sidebar */}
-      <aside className="w-64 flex-shrink-0 bg-stone-900 text-white">
+      {/* Sidebar (hidden in print — the PDF is lookbook-only) */}
+      <aside className="no-print w-64 flex-shrink-0 bg-stone-900 text-white">
         <div className="flex h-16 items-center border-b border-stone-800 px-6">
           <p className="font-cinzel text-lg font-bold tracking-wide">
             Circle G Designs
