@@ -6,7 +6,14 @@ export interface CopyPromptInput {
 }
 
 export const NEGATIVE_PROMPT =
-  "walls, windows, trim, doors, molding, structural columns, flooring";
+  "walls, windows, trim, doors, molding, structural columns, flooring, bezel, monitor frame, TV border, screen casing, electronics, wires, cables, black plastic trim, raw canvas texture";
+
+// Framing/physicality language appended to every inpaint prompt: without
+// it, FLUX renders replacements (e.g. "a painting") as raw canvas texture
+// pasted onto the wall — no frame, no depth, no wall blending.
+const FRAMING_CONTEXT =
+  "Presented as a finished object with its own frame and mounting, " +
+  "integrated natural shadows and depth, clean surrounding wall.";
 
 // FLUX.1 Fill [dev] with LoRAs — the live fal endpoint (the old
 // "fal-ai/flux/1/fill" route was removed from fal's queue; submit
@@ -66,19 +73,22 @@ Be specific, professional, and focused on maximizing the room's appeal to ${targ
 
 /**
  * Builds the FLUX.1 Fill prompt from the room's aesthetic and staging
- * directives.
+ * directives, appending {@link FRAMING_CONTEXT} so masked replacements
+ * render as physical, framed objects integrated into the wall instead of
+ * raw texture pasted onto the masked area.
  *
- * Contract: returns `${aesthetic} style. ${directives}` with any trailing
- * whitespace removed — in particular, empty directives yield
- * `"${aesthetic} style."` with no trailing space (the naive template
- * interpolation used to leak one into every empty-directive prompt).
+ * Contract: returns `${aesthetic} style. ${directives}` followed by the
+ * fixed framing sentence, with any trailing whitespace removed — in
+ * particular, empty directives yield
+ * `"${aesthetic} style. ${FRAMING_CONTEXT}"` with no trailing space.
  * Side effects: none (pure).
  */
 export function buildInpaintPrompt(
   aesthetic: string,
   directives: string
 ): string {
-  return `${aesthetic} style. ${directives}`.replace(/\s+$/, "");
+  const base = `${aesthetic} style. ${directives}`.replace(/\s+$/, "");
+  return `${base} ${FRAMING_CONTEXT}`;
 }
 
 /**
