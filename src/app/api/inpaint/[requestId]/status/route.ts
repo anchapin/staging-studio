@@ -5,6 +5,7 @@ import { createSupabaseRequestClient } from "@/lib/supabase";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { decideInpaintPersistence } from "@/lib/inpaint-persistence";
 import { classifyIntegrationError } from "@/lib/error-classify";
+import { FAL_FLUX_FILL_MODEL } from "@/lib/prompts";
 
 const INPAINT_STATUS_ERROR_COPY = {
   notFound: {
@@ -27,6 +28,11 @@ type FalQueueStatusFunction = (
   id: string,
   options: { requestId: string }
 ) => Promise<FalStatusResult>;
+
+type FalQueueResultFunction = (
+  id: string,
+  options: { requestId: string }
+) => Promise<{ images?: Array<{ url: string }> } | null>;
 
 export async function GET(
   request: NextRequest,
@@ -99,9 +105,10 @@ export async function GET(
     }
 
     const falQueueStatus = fal.queue.status as FalQueueStatusFunction;
-    const result = await falQueueStatus("fal-ai/flux-fill", { requestId });
+    const falQueueResult = fal.queue.result as FalQueueResultFunction;
+    const statusResponse = await falQueueStatus(FAL_FLUX_FILL_MODEL, { requestId });
 
-    if (result.status === "ERROR") {
+    if (statusResponse.status === "ERROR") {
       return NextResponse.json(
         {
           error: "Inpainting failed",
@@ -112,8 +119,14 @@ export async function GET(
       );
     }
 
-    if (result.status === "COMPLETED") {
-      const falImageUrl = result.images?.[0]?.url;
+    if (statusResponse.status === "COMPLETED") {
+      // The queue status payload does not include the generated image —
+      // fetch it from the result endpoint (fal serves it right after the
+      // status flips to COMPLETED).
+      const falResult = await falQueueResult(FAL_FLUX_FILL_MODEL, {
+        requestId,
+      }).catch(() => null);
+      const falImageUrl = falResult?.images?.[0]?.url;
 
       if (!falImageUrl) {
         return NextResponse.json(
@@ -219,7 +232,7 @@ export async function GET(
     }
 
     return NextResponse.json({
-      status: result.status,
+      status: statusResponse.status,
     });
   } catch (error) {
     console.error(
