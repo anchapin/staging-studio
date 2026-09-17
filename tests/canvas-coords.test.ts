@@ -4,7 +4,9 @@ import {
   MAX_MASK_CANVAS_LONG_EDGE,
   canvasPointToNatural,
   clientPointToCanvas,
+  computeBackingStoreDimensions,
   computeMaskCanvasDimensions,
+  logicalPointToBackingStore,
 } from "@/lib/canvas-coords";
 
 // A 448x336 display rect (4:3) mapped onto a 1024x768 canvas: both scale by 16/7.
@@ -48,6 +50,104 @@ describe("clientPointToCanvas", () => {
   it("returns the origin for a degenerate zero-sized rect", () => {
     const zeroRect = { left: 10, top: 10, width: 0, height: 0 };
     expect(clientPointToCanvas(50, 60, zeroRect, 1024, 768)).toEqual({ x: 0, y: 0 });
+  });
+
+  // Issue #181 scale-basis pin: pointers map into the LOGICAL canvas space.
+  // The DPR-scaled backing store never changes the mapping target — the
+  // component's context transform carries logical coordinates onto device
+  // pixels instead.
+  it("keeps mapping into logical canvas space regardless of backing-store scale", () => {
+    const backing = computeBackingStoreDimensions(1024, 768, 2);
+    expect(backing).toEqual({ width: 2048, height: 1536 });
+    // Same rect, same result: 1x and 2x displays agree on logical coords.
+    expect(clientPointToCanvas(324, 218, rect, 1024, 768)).toEqual({ x: 512, y: 384 });
+    expect(clientPointToCanvas(324, 218, rect, backing.width, backing.height)).toEqual({
+      x: 1024,
+      y: 768,
+    });
+  });
+});
+
+describe("computeBackingStoreDimensions", () => {
+  it("keeps the backing store equal to logical size at 1x", () => {
+    expect(computeBackingStoreDimensions(1024, 576, 1)).toEqual({ width: 1024, height: 576 });
+  });
+
+  it("doubles the backing store at 2x (Retina)", () => {
+    expect(computeBackingStoreDimensions(1024, 576, 2)).toEqual({ width: 2048, height: 1152 });
+    expect(computeBackingStoreDimensions(512, 512, 2)).toEqual({ width: 1024, height: 1024 });
+  });
+
+  it("rounds fractional device pixel ratios to integer pixels", () => {
+    expect(computeBackingStoreDimensions(100, 51, 1.25)).toEqual({ width: 125, height: 64 });
+    expect(computeBackingStoreDimensions(683, 1024, 1.5)).toEqual({ width: 1025, height: 1536 });
+  });
+
+  it("treats non-finite or non-positive ratios as 1x", () => {
+    expect(computeBackingStoreDimensions(512, 384, 0)).toEqual({ width: 512, height: 384 });
+    expect(computeBackingStoreDimensions(512, 384, -2)).toEqual({ width: 512, height: 384 });
+    expect(computeBackingStoreDimensions(512, 384, Number.NaN)).toEqual({
+      width: 512,
+      height: 384,
+    });
+    expect(computeBackingStoreDimensions(512, 384, Number.POSITIVE_INFINITY)).toEqual({
+      width: 512,
+      height: 384,
+    });
+  });
+
+  it("never returns a zero-sized buffer", () => {
+    expect(computeBackingStoreDimensions(0, 0, 2)).toEqual({ width: 1, height: 1 });
+  });
+});
+
+describe("logicalPointToBackingStore", () => {
+  it("scales logical points onto the physical pixel grid", () => {
+    const backing = { width: 2048, height: 1152 };
+    expect(logicalPointToBackingStore({ x: 512, y: 288 }, 2, backing)).toEqual({
+      x: 1024,
+      y: 576,
+    });
+  });
+
+  it("floors to the containing device pixel", () => {
+    const backing = { width: 2048, height: 1152 };
+    expect(logicalPointToBackingStore({ x: 100.9, y: 50.2 }, 2, backing)).toEqual({
+      x: 201,
+      y: 100,
+    });
+  });
+
+  it("clamps to the last backing-store pixel at the edges", () => {
+    const backing = { width: 2048, height: 1152 };
+    expect(logicalPointToBackingStore({ x: 1024, y: 576 }, 2, backing)).toEqual({
+      x: 2047,
+      y: 1151,
+    });
+    expect(logicalPointToBackingStore({ x: -5, y: -1 }, 2, backing)).toEqual({ x: 0, y: 0 });
+    expect(logicalPointToBackingStore({ x: 5000, y: 5000 }, 2, backing)).toEqual({
+      x: 2047,
+      y: 1151,
+    });
+  });
+
+  it("treats an invalid ratio as 1x", () => {
+    const backing = { width: 1024, height: 576 };
+    expect(logicalPointToBackingStore({ x: 100.7, y: 50 }, 0, backing)).toEqual({
+      x: 100,
+      y: 50,
+    });
+    expect(logicalPointToBackingStore({ x: 100.7, y: 50 }, Number.NaN, backing)).toEqual({
+      x: 100,
+      y: 50,
+    });
+  });
+
+  it("stays in bounds even for a degenerate 1x1 backing store", () => {
+    expect(logicalPointToBackingStore({ x: 999, y: 999 }, 2, { width: 1, height: 1 })).toEqual({
+      x: 0,
+      y: 0,
+    });
   });
 });
 

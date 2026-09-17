@@ -10,6 +10,7 @@ import {
   login,
   openFocusedEditor,
   paintMaskZigzag,
+  whitePixelGeometry,
   whitePixelShare,
 } from "../helpers";
 
@@ -137,6 +138,139 @@ test.describe("mask painting", () => {
 
     // The empty-state hint comes back only when nothing is painted.
     await expect(page.getByText("Drag to paint over the object you want changed")).toBeVisible();
+  });
+});
+
+/**
+ * HiDPI mask alignment (issue #181).
+ *
+ * The mask canvas backs its buffer at devicePixelRatio (physical pixels)
+ * while painting stays in logical canvas space. At 2x DPR these tests pin
+ * the two alignment guarantees: (1) a stroke painted at a known viewport
+ * point exports to the matching photo region — the mask lands under the
+ * cursor — and (2) Fill Region seeds land on the pixel under the cursor,
+ * flooding exactly the region that click is inside.
+ */
+test.describe("mask painting on high-DPI displays", () => {
+  test.use({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2 });
+
+  async function openEditorWithDirectives(page: import("@playwright/test").Page): Promise<void> {
+    await login(page);
+    await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
+    const directives = page.getByLabel("Staging directives (required)");
+    await expect(directives).toBeVisible();
+    await directives.fill("Add a neutral linen sofa and a warm wood coffee table.");
+  }
+
+  function brushCanvas(page: import("@playwright/test").Page) {
+    return page
+      .getByRole("application")
+      .locator('canvas[aria-label^="Room mask painting canvas"]');
+  }
+
+  test("backing store is device-pixel scaled and a centered stroke masks the photo center", async ({
+    page,
+  }) => {
+    const inpaint = interceptInpaint(page);
+    await openEditorWithDirectives(page);
+
+    const canvas = brushCanvas(page);
+    await expect(canvas).toBeVisible();
+    await canvas.scrollIntoViewIfNeeded();
+    const box = (await canvas.boundingBox())!;
+
+    // Crispness: the backing store must be at least the display's physical
+    // pixel resolution (CSS size x devicePixelRatio), i.e. never upscaled.
+    const geometry = await canvas.evaluate((el) => ({
+      backingWidth: (el as HTMLCanvasElement).width,
+      backingHeight: (el as HTMLCanvasElement).height,
+      cssWidth: el.getBoundingClientRect().width,
+      cssHeight: el.getBoundingClientRect().height,
+      dpr: window.devicePixelRatio,
+    }));
+    expect(geometry.dpr).toBe(2);
+    expect(geometry.backingWidth).toBeGreaterThanOrEqual(
+      Math.round(geometry.cssWidth * geometry.dpr)
+    );
+    expect(geometry.backingHeight).toBeGreaterThanOrEqual(
+      Math.round(geometry.cssHeight * geometry.dpr)
+    );
+
+    // Paint a short stroke centered exactly at the canvas midpoint with
+    // real trusted mouse input.
+    const cx = box.x + box.width / 2;
+    const cy = box.y + box.height / 2;
+    await page.mouse.move(cx, cy);
+    await page.mouse.down();
+    await page.mouse.move(cx + 3, cy, { steps: 2 });
+    await page.mouse.up();
+
+    const applyButton = page.getByRole("button", { name: "Apply Inpainting" });
+    await expect(applyButton).toBeEnabled();
+    await applyButton.click();
+    await expect(page.getByText("Inpainting completed successfully!")).toBeVisible({
+      timeout: 20_000,
+    });
+
+    // The exported mask (rescaled to the photo's natural pixels) must have
+    // its white centroid at the photo center — the painted pixel landed
+    // under the cursor — and stay a localized blob (no bleed).
+    const mask = await whitePixelGeometry(page, inpaint.maskDataUrl());
+    expect(mask.centroid.x).toBeGreaterThan(0.45);
+    expect(mask.centroid.x).toBeLessThan(0.55);
+    expect(mask.centroid.y).toBeGreaterThan(0.45);
+    expect(mask.centroid.y).toBeLessThan(0.55);
+    expect(mask.bbox.maxX - mask.bbox.minX).toBeLessThan(0.15);
+    expect(mask.bbox.maxY - mask.bbox.minY).toBeLessThan(0.15);
+    expect(mask.share).toBeGreaterThan(0.0005);
+    expect(mask.share).toBeLessThan(0.15);
+  });
+
+  test("Fill Region seed lands under the cursor and floods only the region containing it", async ({
+    page,
+  }) => {
+    const inpaint = interceptInpaint(page);
+    await openEditorWithDirectives(page);
+
+    const canvas = brushCanvas(page);
+    await expect(canvas).toBeVisible();
+    await canvas.scrollIntoViewIfNeeded();
+    const box = (await canvas.boundingBox())!;
+
+    // Two full-height vertical strokes at 25% and 75% split the canvas
+    // into three regions (≈24% / ≈48% / ≈24% of the area). A seed inside
+    // the middle band floods ≈48%; a seed mis-mapped onto an outer region
+    // (or onto a painted line, which floods nothing) fails the bounds.
+    for (const fraction of [0.25, 0.75]) {
+      const x = box.x + box.width * fraction;
+      await page.mouse.move(x, box.y + 1);
+      await page.mouse.down();
+      await page.mouse.move(x, box.y + box.height - 1, { steps: 8 });
+      await page.mouse.up();
+    }
+
+    await page.getByRole("button", { name: "Fill Region" }).click();
+    const fillCanvas = page
+      .getByRole("application")
+      .locator('canvas[aria-label^="Room mask canvas with the Fill Region tool"]');
+    await expect(fillCanvas).toBeVisible();
+    await fillCanvas.scrollIntoViewIfNeeded();
+    const fillBox = (await fillCanvas.boundingBox())!;
+    await page.mouse.click(
+      fillBox.x + fillBox.width * 0.5,
+      fillBox.y + fillBox.height * 0.5
+    );
+
+    const applyButton = page.getByRole("button", { name: "Apply Inpainting" });
+    await expect(applyButton).toBeEnabled();
+    await applyButton.click();
+    await expect(page.getByText("Inpainting completed successfully!")).toBeVisible({
+      timeout: 20_000,
+    });
+
+    const share = await whitePixelShare(page, inpaint.maskDataUrl());
+    expect(share).toBeGreaterThan(0.35);
+    expect(share).toBeLessThan(0.6);
   });
 });
 
