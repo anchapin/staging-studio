@@ -23,6 +23,16 @@ export async function PATCH(
       );
     }
 
+    // The schema is partial (all fields optional), so `{}` parses — but
+    // Prisma's `updateMany` throws on empty `data`, and a no-op patch is
+    // a client bug worth surfacing.
+    if (Object.keys(parsed.data).length === 0) {
+      return NextResponse.json(
+        { error: "Invalid request body", issues: [{ message: "At least one field is required" }] },
+        { status: 400 }
+      );
+    }
+
     const ownershipWhere = {
       id: roomId,
       project: { id: projectId, userId: user.id },
