@@ -103,6 +103,9 @@ const projectDetailSelect = {
       beforeImageUrl2: true,
       afterImageUrl2: true,
       selectedVariantIndex: true,
+      // Issue #169: the focused editor's directives textarea initializes
+      // from the room's saved directives when nothing was typed in-session.
+      rawDirectives: true,
       observedChallenge: true,
       recommendation: true,
       buyerPsychology: true,
