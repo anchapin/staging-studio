@@ -17,7 +17,7 @@
   "dependencies": {
     "@ai-sdk/openai": "^4.0.67",
     "@base-ui/react": "^1.8.0",
-    "@fal-ai/serverless-client": "^0.6.0",
+    "@fal-ai/serverless-client": "^0.15.0",
     "@prisma/client": "^5.0.0",
     "@supabase/ssr": "^0.6.0",
     "@supabase/supabase-js": "^2.0.0",
