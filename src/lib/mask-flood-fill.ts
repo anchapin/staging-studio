@@ -40,6 +40,34 @@ export function maskGridFromPixels(
 }
 
 /**
+ * Merges two binary mask grids with OR semantics: a cell is painted in the
+ * result when it is painted in either input.
+ *
+ * Purpose: the "Select Object" tool (issue #183) paints the SAM-detected
+ * mask onto the existing painted mask without erasing manual strokes.
+ * Pure: returns a fresh grid plus `addedCount`, the number of cells the
+ * addition painted that the base left unpainted. Returns null when the
+ * grids disagree in length.
+ */
+export function mergeMaskGrids(
+  base: Uint8Array,
+  addition: Uint8Array
+): { mask: Uint8Array; addedCount: number } | null {
+  if (base.length !== addition.length) return null;
+
+  const mask = new Uint8Array(base.length);
+  let addedCount = 0;
+  for (let i = 0; i < base.length; i++) {
+    if (base[i] === 1 || addition[i] === 1) {
+      mask[i] = 1;
+      if (base[i] === 0) addedCount++;
+    }
+  }
+
+  return { mask, addedCount };
+}
+
+/**
  * Flood fills the unpainted region connected (4-way) to the seed cell with
  * painted cells. Pure: returns a copy of the grid; the input is not
  * mutated. Returns null when the seed is out of bounds or already painted

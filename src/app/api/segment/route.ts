@@ -1,0 +1,151 @@
+import { NextRequest, NextResponse } from "next/server";
+import { fal, assertFalConfigured } from "@/lib/fal";
+import { prisma } from "@/lib/prisma";
+import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { segmentRequestSchema } from "@/lib/ai-route-schemas";
+import { classifyIntegrationError } from "@/lib/error-classify";
+import {
+  FAL_SAM_MODEL,
+  buildFalSegmentPayload,
+  parseFalSegmentResponse,
+} from "@/lib/segment-mask";
+
+const SEGMENT_ERROR_COPY = {
+  auth: {
+    error: "Authentication failed",
+    message:
+      "Unable to connect to the object selection service. Please check your configuration.",
+  },
+  timeout: {
+    error: "Request timeout",
+    message: "The object selection service is taking too long to respond. Please try again.",
+  },
+  unknown: {
+    error: "Segmentation failed",
+    message:
+      "We couldn't identify the object you clicked. Please try clicking directly on the object.",
+  },
+};
+
+// SAM responses are small binary mask images; a ceiling this generous only
+// trips on provider misbehavior, never on real masks.
+const MAX_MASK_RESPONSE_BYTES = 10 * 1024 * 1024;
+
+// SAM segmentation completes in seconds; bound the wait so a hung provider
+// degrades to the retryable timeout copy instead of pinning the editor.
+const SEGMENT_TIMEOUT_MS = 60_000;
+
+type FalSubscribeFunction = (
+  id: string,
+  options: { input: Record<string, unknown>; abortSignal?: AbortSignal }
+) => Promise<unknown>;
+
+/**
+ * Fetches the fal-hosted mask image and re-encodes it as a data URL so the
+ * browser can composite it onto the mask canvas without a cross-origin
+ * image load (which would depend on remote CORS headers and could taint
+ * the canvas).
+ * Side effects: performs one outbound HTTP fetch; throws on non-image or
+ * oversized responses so the caller's catch block classifies the failure.
+ */
+async function fetchMaskAsDataUrl(url: string): Promise<string> {
+  const response = await fetch(url, { signal: AbortSignal.timeout(SEGMENT_TIMEOUT_MS) });
+  if (!response.ok) {
+    throw new Error(`Mask image request failed with HTTP ${response.status}`);
+  }
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.startsWith("image/")) {
+    throw new Error("Mask image response has an unexpected content type");
+  }
+  const buffer = await response.arrayBuffer();
+  if (buffer.byteLength > MAX_MASK_RESPONSE_BYTES) {
+    throw new Error("Mask image response is unexpectedly large");
+  }
+  const base64 = Buffer.from(buffer).toString("base64");
+  const mime = contentType.split(";")[0].trim() || "image/png";
+  return `data:${mime};base64,${base64}`;
+}
+
+export async function POST(request: NextRequest) {
+  // Hoisted so the catch block can correlate failures with the room even
+  // when the error fires before/after the request body is parsed.
+  let roomId: string | undefined;
+  try {
+    const user = await getAuthedPrismaUser();
+    if (!user) {
+      return NextResponse.json(
+        {
+          error: "Unauthorized",
+          message: "You must be signed in to select objects.",
+        },
+        { status: 401 }
+      );
+    }
+
+    const parsed = segmentRequestSchema.safeParse(await request.json());
+    if (!parsed.success) {
+      return NextResponse.json(
+        {
+          error: "Invalid request",
+          message:
+            "Please provide a valid roomId, imageUrl, click point, and image dimensions.",
+          issues: parsed.error.issues,
+        },
+        { status: 400 }
+      );
+    }
+
+    const { imageUrl, point } = parsed.data;
+    roomId = parsed.data.roomId;
+
+    const room = await prisma.room.findFirst({
+      where: { id: roomId, project: { userId: user.id } },
+      select: { id: true },
+    });
+    if (!room) {
+      return NextResponse.json(
+        {
+          error: "Room not found",
+          message: "The requested room could not be found.",
+        },
+        { status: 404 }
+      );
+    }
+
+    assertFalConfigured();
+
+    // Synchronous SAM call: segmentation completes in seconds, so a direct
+    // queue-aware subscribe keeps the flow single-round-trip instead of the
+    // submit/poll pair the long-running inpaint run needs.
+    const falSubscribe = fal.subscribe as FalSubscribeFunction;
+    const result = await falSubscribe(FAL_SAM_MODEL, {
+      input: buildFalSegmentPayload({ imageUrl, point }),
+      abortSignal: AbortSignal.timeout(SEGMENT_TIMEOUT_MS),
+    });
+
+    const mask = parseFalSegmentResponse(result);
+    if (!mask) {
+      throw new Error("Segmentation response did not include a mask image");
+    }
+
+    const maskDataUrl = await fetchMaskAsDataUrl(mask.maskUrl);
+
+    return NextResponse.json({ maskDataUrl });
+  } catch (error) {
+    console.error(
+      JSON.stringify({ event: "segment_failed", roomId: roomId ?? null }),
+      error
+    );
+
+    const classified = classifyIntegrationError(error, SEGMENT_ERROR_COPY);
+
+    return NextResponse.json(
+      {
+        error: classified.error,
+        message: classified.message,
+        retryable: classified.retryable,
+      },
+      { status: classified.status }
+    );
+  }
+}
