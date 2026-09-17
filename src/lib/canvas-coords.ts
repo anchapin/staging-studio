@@ -83,6 +83,47 @@ export function computeMaskCanvasDimensions(
 }
 
 /**
+ * Physical (device-pixel) backing-store size for a canvas laid out at the
+ * given logical (CSS-pixel) dimensions under a device pixel ratio (issue
+ * #181). The 2D context should be scaled by the same ratio so drawing can
+ * stay in logical coordinates while strokes land on physical pixels.
+ *
+ * A non-finite or non-positive ratio falls back to 1 so SSR/pre-mount
+ * rendering and hostile values never produce a zero-sized buffer.
+ */
+export function computeBackingStoreDimensions(
+  width: number,
+  height: number,
+  devicePixelRatio: number
+): CanvasDimensions {
+  const ratio =
+    Number.isFinite(devicePixelRatio) && devicePixelRatio > 0 ? devicePixelRatio : 1;
+  return {
+    width: Math.max(1, Math.round(width * ratio)),
+    height: Math.max(1, Math.round(height * ratio)),
+  };
+}
+
+/**
+ * Maps a point in logical canvas space to the physical backing-store pixel
+ * that contains it: scaled by the device pixel ratio, floored to an integer
+ * pixel index, and clamped inside the backing-store bounds (so the result
+ * is always a safe grid/seed index for flood fill, issue #181).
+ */
+export function logicalPointToBackingStore(
+  point: CanvasPoint,
+  devicePixelRatio: number,
+  backing: CanvasDimensions
+): CanvasPoint {
+  const ratio =
+    Number.isFinite(devicePixelRatio) && devicePixelRatio > 0 ? devicePixelRatio : 1;
+  return {
+    x: clamp(Math.floor(point.x * ratio), 0, Math.max(0, backing.width - 1)),
+    y: clamp(Math.floor(point.y * ratio), 0, Math.max(0, backing.height - 1)),
+  };
+}
+
+/**
  * Maps a point in canvas pixel space to the source photo's natural pixel
  * space, rounding and clamping to the natural bounds.
  *

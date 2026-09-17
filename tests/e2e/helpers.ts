@@ -391,6 +391,71 @@ export async function whitePixelShare(page: Page, dataUrl: string): Promise<numb
   }, dataUrl);
 }
 
+export interface WhitePixelGeometry {
+  /** White pixels / total pixels, 0..1. */
+  share: number;
+  /** White-pixel centroid normalized to the mask (0..1 per axis). */
+  centroid: { x: number; y: number };
+  /** Normalized white-pixel bounding box (0..1 per axis). */
+  bbox: { minX: number; maxX: number; minY: number; maxY: number };
+}
+
+/**
+ * Decodes a PNG data URL INSIDE the browser and locates its white pixels
+ * geometrically — normalized share, centroid, and bounding box. Issue #181
+ * uses this to prove a stroke painted at a known viewport point exports to
+ * the matching photo region (mask lands under the cursor) at 2x DPR.
+ */
+export async function whitePixelGeometry(page: Page, dataUrl: string): Promise<WhitePixelGeometry> {
+  return page.evaluate(async (src) => {
+    const image = new Image();
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error("mask data URL failed to decode"));
+      image.src = src;
+    });
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("no 2d context");
+    ctx.drawImage(image, 0, 0);
+    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    let white = 0;
+    let sumX = 0;
+    let sumY = 0;
+    let minX = canvas.width;
+    let maxX = -1;
+    let minY = canvas.height;
+    let maxY = -1;
+    for (let y = 0; y < canvas.height; y++) {
+      for (let x = 0; x < canvas.width; x++) {
+        const i = (y * canvas.width + x) * 4;
+        if (data[i] > 200 && data[i + 1] > 200 && data[i + 2] > 200) {
+          white++;
+          sumX += x;
+          sumY += y;
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    if (white === 0) throw new Error("mask contains no white pixels");
+    return {
+      share: white / (canvas.width * canvas.height),
+      centroid: { x: sumX / white / canvas.width, y: sumY / white / canvas.height },
+      bbox: {
+        minX: minX / canvas.width,
+        maxX: maxX / canvas.width,
+        minY: minY / canvas.height,
+        maxY: maxY / canvas.height,
+      },
+    };
+  }, dataUrl);
+}
+
 export interface MockStorageEntry {
   bucket: string;
   path: string;

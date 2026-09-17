@@ -4,7 +4,9 @@ import { useRef, useState, useEffect, useCallback, useMemo, useId } from "react"
 import {
   canvasPointToNatural,
   clientPointToCanvas,
+  computeBackingStoreDimensions,
   computeMaskCanvasDimensions,
+  logicalPointToBackingStore,
   type CanvasPoint,
 } from "@/lib/canvas-coords";
 import { estimateMaskCoverage, shouldWarnLowCoverage } from "@/lib/mask-coverage";
@@ -109,6 +111,26 @@ export default function InpaintMaskCanvas({
     [aspectRatio, width, height]
   );
 
+  // HiDPI support (issue #181): all painting happens in LOGICAL canvas
+  // space (dims, the same space clientPointToCanvas produces). The backing
+  // store is scaled up to device pixels and the 2D context is transformed
+  // by the same ratio, so strokes render crisp at native resolution and
+  // pointer coordinates land under the cursor on any display scaling.
+  // devicePixelRatio is read after mount (SSR/pre-hydration renders as 1)
+  // and tracked across zoom / monitor changes via resize.
+  const [devicePixelRatio, setDevicePixelRatio] = useState(1);
+  useEffect(() => {
+    const syncRatio = () => setDevicePixelRatio(window.devicePixelRatio || 1);
+    syncRatio();
+    window.addEventListener("resize", syncRatio);
+    return () => window.removeEventListener("resize", syncRatio);
+  }, []);
+
+  const backing = useMemo(
+    () => computeBackingStoreDimensions(dims.width, dims.height, devicePixelRatio),
+    [dims.width, dims.height, devicePixelRatio]
+  );
+
   const hasOverlay = Boolean(overlayImageSrc);
 
   // Latest initial mask without making initCanvas depend on it — re-running
@@ -124,6 +146,11 @@ export default function InpaintMaskCanvas({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
+    // Painting stays in logical (dims) coordinates; this transform maps it
+    // onto the DPR-scaled backing store. Setting the canvas size (below,
+    // via React) resets the context, so re-apply it on every (re)init.
+    const dpr = backing.width / dims.width || 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const initial = initialMaskRef.current;
     if (initial) {
       const img = new Image();
@@ -142,7 +169,7 @@ export default function InpaintMaskCanvas({
     setHasPainted(Boolean(initial));
     setLowCoverage(false);
     lastSegmentPointRef.current = null;
-  }, [dims.width, dims.height]);
+  }, [dims.width, dims.height, backing]);
 
   // Initialize once on mount, and re-initialize when the geometry changes
   // (e.g. the photo's aspect ratio resolves after the image loads) or when
@@ -161,13 +188,18 @@ export default function InpaintMaskCanvas({
 
     const rect = canvas.getBoundingClientRect();
 
+    // Scale basis (issue #181): pointers map into the LOGICAL canvas space
+    // (dims), never the DPR-scaled backing store (canvas.width/height). The
+    // context transform carries logical coordinates onto physical pixels,
+    // so painted strokes land exactly under the cursor at any device
+    // pixel ratio.
     if ("touches" in e) {
       const touch = e.touches[0];
       if (!touch) return null;
-      return clientPointToCanvas(touch.clientX, touch.clientY, rect, canvas.width, canvas.height);
+      return clientPointToCanvas(touch.clientX, touch.clientY, rect, dims.width, dims.height);
     }
 
-    return clientPointToCanvas(e.clientX, e.clientY, rect, canvas.width, canvas.height);
+    return clientPointToCanvas(e.clientX, e.clientY, rect, dims.width, dims.height);
   };
 
   const draw = (
@@ -215,12 +247,14 @@ export default function InpaintMaskCanvas({
     const ctx = canvas.getContext("2d");
     if (!ctx) return false;
 
-    const seedX = Math.min(canvas.width - 1, Math.max(0, Math.floor(point.x)));
-    const seedY = Math.min(canvas.height - 1, Math.max(0, Math.floor(point.y)));
+    // getImageData/putImageData operate on PHYSICAL pixels and ignore the
+    // context transform, so the logical-space seed is mapped into backing
+    // store pixels before flooding (issue #181).
+    const seed = logicalPointToBackingStore(point, devicePixelRatio, backing);
 
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const grid = maskGridFromPixels(imageData.data, canvas.width, canvas.height);
-    const result = floodFillMask(grid, canvas.width, canvas.height, seedX, seedY);
+    const result = floodFillMask(grid, canvas.width, canvas.height, seed.x, seed.y);
     if (!result || result.filledCount === 0) return false;
 
     // Snap filled (and already-painted) cells to pure white so the exported
@@ -411,17 +445,18 @@ export default function InpaintMaskCanvas({
     };
   }, [segmentMaskRequest, exportMask]);
 
-  const centerOf = (canvas: HTMLCanvasElement) => ({
-    x: canvas.width / 2,
-    y: canvas.height / 2,
+  // The virtual brush cursor lives in LOGICAL canvas space — the same
+  // space clientPointToCanvas produces and the DOM cursor indicator
+  // positions against (issue #181 keeps it DPR-independent).
+  const centerOf = () => ({
+    x: dims.width / 2,
+    y: dims.height / 2,
   });
 
   const moveCursorTo = (next: { x: number; y: number }) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
     const point = {
-      x: Math.min(Math.max(next.x, 0), canvas.width),
-      y: Math.min(Math.max(next.y, 0), canvas.height),
+      x: Math.min(Math.max(next.x, 0), dims.width),
+      y: Math.min(Math.max(next.y, 0), dims.height),
     };
     if (keyboardPaintingRef.current) {
       const from = cursorRef.current ?? point;
@@ -439,17 +474,16 @@ export default function InpaintMaskCanvas({
   };
 
   const toggleKeyboardPaint = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvasRef.current) return;
     if (activeTool === "select") {
-      const at = cursorRef.current ?? centerOf(canvas);
+      const at = cursorRef.current ?? centerOf();
       cursorRef.current = at;
       setCursor(at);
       handleSegmentClick(at);
       return;
     }
     if (activeTool === "fill") {
-      const at = cursorRef.current ?? centerOf(canvas);
+      const at = cursorRef.current ?? centerOf();
       cursorRef.current = at;
       setCursor(at);
       lastSegmentPointRef.current = null;
@@ -464,7 +498,7 @@ export default function InpaintMaskCanvas({
       liftKeyboardPaint();
       return;
     }
-    const at = cursorRef.current ?? centerOf(canvas);
+    const at = cursorRef.current ?? centerOf();
     cursorRef.current = at;
     setCursor(at);
     keyboardPaintingRef.current = true;
@@ -481,17 +515,14 @@ export default function InpaintMaskCanvas({
   };
 
   const handleCanvasKeyDown = (e: React.KeyboardEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
     const delta = ARROW_DELTAS[e.key];
     if (delta) {
       e.preventDefault();
       const fraction = e.shiftKey ? 0.01 : 0.05;
-      const current = cursorRef.current ?? centerOf(canvas);
+      const current = cursorRef.current ?? centerOf();
       moveCursorTo({
-        x: current.x + delta[0] * canvas.width * fraction,
-        y: current.y + delta[1] * canvas.height * fraction,
+        x: current.x + delta[0] * dims.width * fraction,
+        y: current.y + delta[1] * dims.height * fraction,
       });
       return;
     }
@@ -506,7 +537,7 @@ export default function InpaintMaskCanvas({
     setIsCanvasFocused(true);
     const canvas = canvasRef.current;
     if (canvas && !cursorRef.current) {
-      const at = centerOf(canvas);
+      const at = centerOf();
       cursorRef.current = at;
       setCursor(at);
     }
@@ -554,8 +585,8 @@ export default function InpaintMaskCanvas({
     >
       <canvas
         ref={canvasRef}
-        width={dims.width}
-        height={dims.height}
+        width={backing.width}
+        height={backing.height}
         tabIndex={0}
         aria-label={canvasAriaLabel}
         aria-describedby={`${maskingHintId} ${hintId}`}
