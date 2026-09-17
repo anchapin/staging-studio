@@ -110,7 +110,7 @@ describe("buildFalFillPayload", () => {
   });
 
   it("exposes the exact flux-fill model id used by the queue submit", () => {
-    expect(FAL_FLUX_FILL_MODEL).toBe("fal-ai/flux-fill");
+    expect(FAL_FLUX_FILL_MODEL).toBe("fal-ai/flux/1/fill");
   });
 
   it("carries exactly the six documented keys — no payload drift", () => {

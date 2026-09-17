@@ -8,7 +8,10 @@ export interface CopyPromptInput {
 export const NEGATIVE_PROMPT =
   "walls, windows, trim, doors, molding, structural columns, flooring";
 
-export const FAL_FLUX_FILL_MODEL = "fal-ai/flux-fill";
+// FLUX.1 Fill [dev] queue endpoint. Requires @fal-ai/serverless-client
+// >= 0.15 — older 0.6.x mangles multi-segment ids into
+// "https://fal-ai/<model>.<host>/..." (ENOTFOUND fal-ai).
+export const FAL_FLUX_FILL_MODEL = "fal-ai/flux/1/fill";
 
 export interface FalFillPayloadInput {
   imageUrl: string;
