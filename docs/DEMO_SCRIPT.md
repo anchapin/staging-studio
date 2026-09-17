@@ -8,7 +8,7 @@ URL: `https://staging-studio-kappa.vercel.app` (bookmarked; exact URL, no traili
 - [ ] Laptop charged + external mouse; printer ON with paper (letter)
 - [ ] Production URL bookmarked and logged-in state fresh
 - [ ] Fallback PDF on disk: `demo-assets/fallback-lookbook.pdf`
-- [ ] Demo project open check: "1506 Porters Mill Ter" shows Living Room + Kitchen with images
+- [ ] Demo project open check: "1506 Porters Mill Ter" shows Living Room + Bedroom with images
 
 ## Beats
 
@@ -26,7 +26,7 @@ Narrate during the queue wait (~35s measured): "it's reading her intent, re-stag
 
 **5. Copy generation live (20s).** Click **Generate Copy**. Read the *Challenge → Recommendation → Psychology* trio aloud — "this is the client-ready language, in our voice, in seconds."
 
-**6. Kitchen reveal (1 min).** Second room — already staged. Shows depth: the lookbook is a *document*, not a one-off trick.
+**6. Bedroom reveal (1 min).** Second room — already staged. Narrative: "the sellers were using it as an office; buyers need to see the bedroom." Shows depth: the lookbook is a *document*, not a one-off trick.
 
 **7. Preview lookbook (1 min).** Open **Preview Lookbook**. Scroll: cover (logo + firm name), philosophy page, room spread with before/after, sign-off. "This is the deliverable."
 
