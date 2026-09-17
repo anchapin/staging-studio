@@ -28,6 +28,11 @@ interface InpaintEditorProps {
   /** Source of the pending run, reconstructed from its persisted row. */
   pendingSource?: InpaintSource | null;
   onInpaintComplete?: (resultImageUrl: string, source: InpaintSource) => void;
+  /**
+   * Full-width focused layout (issue #169): the mask canvas spans the
+   * available content width instead of the compact card cap.
+   */
+  fullWidth?: boolean;
 }
 
 export default function InpaintEditor({
@@ -42,6 +47,7 @@ export default function InpaintEditor({
   pendingRequestId,
   pendingSource,
   onInpaintComplete,
+  fullWidth = false,
 }: InpaintEditorProps) {
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
   const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
@@ -180,6 +186,7 @@ export default function InpaintEditor({
           naturalHeight={imageDims?.height ?? null}
           initialMaskDataUrl={maskDataUrl}
           onMaskChange={setMaskDataUrl}
+          fullWidth={fullWidth}
         />
       </div>
 

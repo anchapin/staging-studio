@@ -9,12 +9,24 @@ import { getSignedUploadUrl, confirmRoomPhotoUpload } from "@/app/actions/room-p
 const ROOM_CANVAS_IMAGE_SIZES =
   "(max-width: 767px) calc(100vw - 320px), calc((100vw - 352px) / 2)";
 
+/**
+ * Focused-room layout (issue #169): the photo spans the full content width
+ * (sidebar + page padding removed) instead of one half of the grid.
+ */
+const FOCUSED_ROOM_IMAGE_SIZES = "(max-width: 767px) calc(100vw - 320px), calc(100vw - 320px)";
+
 interface RoomCanvasProps {
   roomId: string;
   projectId: string;
   imageUrl?: string | null;
   variantSlot?: 0 | 1;
   onUploadComplete?: (slot: 0 | 1, publicUrl: string) => void;
+  /**
+   * Focused-room layout (issue #169): render the photo at a taller frame
+   * sized for the full content width instead of the compact grid-card
+   * height.
+   */
+  largeImage?: boolean;
 }
 
 export default function RoomCanvas({
@@ -23,6 +35,7 @@ export default function RoomCanvas({
   imageUrl,
   variantSlot = 0,
   onUploadComplete,
+  largeImage = false,
 }: RoomCanvasProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -39,6 +52,9 @@ export default function RoomCanvas({
   } | null>(null);
   const [liveMessage, setLiveMessage] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const frameHeight = largeImage ? "h-96" : "h-64";
+  const imageSizes = largeImage ? FOCUSED_ROOM_IMAGE_SIZES : ROOM_CANVAS_IMAGE_SIZES;
 
   const putToStorage = async (file: File, signedUrl: string) => {
     const arrayBuffer = await file.arrayBuffer();
@@ -182,12 +198,12 @@ export default function RoomCanvas({
   return (
     <div className="relative rounded-lg border border-stone-200 bg-stone-100 overflow-hidden">
       {imageUrl ? (
-        <div className="relative group h-64">
+        <div className={`relative group ${frameHeight}`}>
           <Image
             src={imageUrl}
             alt="Room"
             fill
-            sizes={ROOM_CANVAS_IMAGE_SIZES}
+            sizes={imageSizes}
             className="object-cover"
           />
           <button
@@ -202,7 +218,7 @@ export default function RoomCanvas({
       ) : (
         <button
           onClick={() => fileInputRef.current?.click()}
-          className="w-full h-64 flex flex-col items-center justify-center gap-3 text-stone-500 hover:text-stone-700 hover:bg-stone-200/50 transition-colors"
+          className={`w-full ${frameHeight} flex flex-col items-center justify-center gap-3 text-stone-500 hover:text-stone-700 hover:bg-stone-200/50 transition-colors`}
           disabled={isUploading}
         >
           {isUploading ? (

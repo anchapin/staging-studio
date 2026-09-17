@@ -22,6 +22,11 @@ interface InpaintMaskCanvasProps {
   naturalHeight?: number | null;
   /** Photo rendered underneath the mask so the canvas overlays it exactly. */
   overlayImageSrc?: string | null;
+  /**
+   * Full-width focused layout (issue #169): the photo + mask span the
+   * available content width instead of the compact card cap (`max-w-md`).
+   */
+  fullWidth?: boolean;
 }
 
 export default function InpaintMaskCanvas({
@@ -34,6 +39,7 @@ export default function InpaintMaskCanvas({
   naturalWidth,
   naturalHeight,
   overlayImageSrc,
+  fullWidth = false,
 }: InpaintMaskCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -465,10 +471,20 @@ export default function InpaintMaskCanvas({
   );
 
   return (
-    <div className="flex flex-col gap-4 w-fit max-w-full">
+    <div
+      className={
+        fullWidth
+          ? "flex w-full flex-col gap-4"
+          : "flex w-fit max-w-full flex-col gap-4"
+      }
+    >
       {hasOverlay ? (
         <div
-          className="relative w-full max-w-md min-h-48"
+          className={
+            fullWidth
+              ? "relative w-full min-h-48"
+              : "relative w-full max-w-md min-h-48"
+          }
           style={
             aspectRatio && aspectRatio > 0
               ? { aspectRatio: `${dims.width} / ${dims.height}` }
