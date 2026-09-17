@@ -48,7 +48,9 @@ export async function GET(
               where: { status: { in: ["IN_QUEUE", "IN_PROGRESS"] } },
               orderBy: { createdAt: "desc" },
               take: 1,
-              select: { id: true },
+              // sourceSlot (issue #170) lets a pendingRequestId resume persist
+              // the result with the same source semantics the run started with.
+              select: { id: true, variantSlot: true, sourceSlot: true },
             },
           },
         },

@@ -16,6 +16,14 @@ import ExportPdfButton from "@/components/canvas/export-pdf-button";
 import { useToast, ToastContainer } from "@/components/ui/toast";
 import { saveVariantSelection } from "@/app/actions/room";
 import { projectFetchStateFromStatus } from "@/lib/project-fetch-state";
+import {
+  buildInpaintResultPatch,
+  inpaintSourceFromRequestRow,
+  listInpaintSources,
+  resolveInpaintSourceUrl,
+  resolveInpaintTargetSlot,
+  type InpaintSource,
+} from "@/lib/inpaint-source";
 
 const MAX_DIRECTIVE_LENGTH = 2000;
 
@@ -27,7 +35,11 @@ interface Room {
   beforeImageUrl2: string | null;
   afterImageUrl2: string | null;
   selectedVariantIndex: number | null;
-  inpaintRequests?: { id: string }[];
+  inpaintRequests?: {
+    id: string;
+    variantSlot: number;
+    sourceSlot: number | null;
+  }[];
 }
 
 interface Project {
@@ -53,17 +65,6 @@ function variantPairsOf(room: Room): [VariantPair, VariantPair] {
 
 function isComplete(pair: VariantPair): pair is { before: string; after: string } {
   return Boolean(pair.before && pair.after);
-}
-
-/**
- * Which variant slot a fresh inpaint result should land in: the first empty
- * "after" slot, or — when both are full — the slot NOT currently selected,
- * so the lookbook selection stays stable.
- */
-function pickVariantSlot(room: Room): 0 | 1 {
-  if (!room.afterImageUrl) return 0;
-  if (!room.afterImageUrl2) return 1;
-  return room.selectedVariantIndex === 1 ? 0 : 1;
 }
 
 /**
@@ -96,6 +97,11 @@ export default function ProjectDetailView({
   );
   const [editorRoomId, setEditorRoomId] = useState<string | null>(null);
   const [directives, setDirectives] = useState<Record<string, string>>({});
+  // Per-room inpaint source choice (issue #170): original photo by default,
+  // or a completed staged variant for progressive editing.
+  const [inpaintSourceByRoom, setInpaintSourceByRoom] = useState<
+    Record<string, InpaintSource>
+  >({});
   const { toasts, showError, showSuccess, showInfo, dismissToast } = useToast();
 
   /**
@@ -182,16 +188,9 @@ export default function ProjectDetailView({
   );
 
   const persistInpaintResult = useCallback(
-    async (room: Room, resultImageUrl: string) => {
-      const slot = pickVariantSlot(room);
-      const body =
-        slot === 0
-          ? { afterImageUrl: resultImageUrl, selectedVariantIndex: 0 }
-          : {
-              beforeImageUrl2: room.beforeImageUrl,
-              afterImageUrl2: resultImageUrl,
-              selectedVariantIndex: 1,
-            };
+    async (room: Room, resultImageUrl: string, source: InpaintSource) => {
+      const slot = resolveInpaintTargetSlot(room, source);
+      const body = buildInpaintResultPatch(room, resultImageUrl, source);
 
       try {
         const response = await fetch(
@@ -225,7 +224,7 @@ export default function ProjectDetailView({
           message,
           true,
           () => {
-            void persistInpaintResult(room, resultImageUrl);
+            void persistInpaintResult(room, resultImageUrl, source);
           },
           "Retry saving staged image"
         );
@@ -354,6 +353,17 @@ export default function ProjectDetailView({
               const isEditorOpen = editorRoomId === room.id;
               const roomDirectives = directives[room.id] ?? "";
 
+              // Issue #170: the source the editor edits from (original photo
+              // or a completed staged variant) and the slot its result lands
+              // in are both derived from the per-room source choice.
+              const inpaintSource = inpaintSourceByRoom[room.id] ?? { kind: "original" as const };
+              const pendingRequest = room.inpaintRequests?.[0] ?? null;
+              const pendingSource = pendingRequest
+                ? inpaintSourceFromRequestRow(pendingRequest)
+                : null;
+              const inpaintImageUrl =
+                resolveInpaintSourceUrl(room, inpaintSource) ?? room.beforeImageUrl;
+
               return (
                 <div key={room.id} className="space-y-3">
                   <div className="flex items-center justify-between">
@@ -445,13 +455,22 @@ export default function ProjectDetailView({
                             </h4>
                             <InpaintEditor
                               roomId={room.id}
-                              imageUrl={room.beforeImageUrl}
+                              imageUrl={inpaintImageUrl ?? ""}
                               aesthetic={project.stagingAesthetic}
                               promptDirectives={roomDirectives.trim()}
-                              variantSlot={pickVariantSlot(room)}
-                              pendingRequestId={room.inpaintRequests?.[0]?.id ?? null}
-                              onInpaintComplete={(resultImageUrl) =>
-                                void persistInpaintResult(room, resultImageUrl)
+                              variantSlot={resolveInpaintTargetSlot(room, inpaintSource)}
+                              source={inpaintSource}
+                              sourceOptions={listInpaintSources(room)}
+                              onSourceChange={(next) =>
+                                setInpaintSourceByRoom((prev) => ({
+                                  ...prev,
+                                  [room.id]: next,
+                                }))
+                              }
+                              pendingRequestId={pendingRequest?.id ?? null}
+                              pendingSource={pendingSource}
+                              onInpaintComplete={(resultImageUrl, runSource) =>
+                                void persistInpaintResult(room, resultImageUrl, runSource)
                               }
                             />
                           </div>

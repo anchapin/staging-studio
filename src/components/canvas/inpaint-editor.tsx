@@ -1,19 +1,33 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import InpaintMaskCanvas from "./inpaint-mask-canvas";
 import { useToast, ToastContainer } from "@/components/ui/toast";
 import { Loader2 } from "lucide-react";
 import { useInpaintStatus } from "./use-inpaint-status";
+import {
+  inpaintSourceLabel,
+  inpaintSourcesEqual,
+  type InpaintSource,
+} from "@/lib/inpaint-source";
 
 interface InpaintEditorProps {
   roomId: string;
+  /** The resolved source image the mask applies to (before photo or staged variant). */
   imageUrl: string;
   aesthetic: string;
   promptDirectives: string;
+  /** The "after" slot this run's result will land in (resolved by the parent). */
   variantSlot: 0 | 1;
+  /** Currently selected source; the parent owns this state (issue #170). */
+  source: InpaintSource;
+  /** Available source options (original photo + staged variants). */
+  sourceOptions: InpaintSource[];
+  onSourceChange?: (source: InpaintSource) => void;
   pendingRequestId?: string | null;
-  onInpaintComplete?: (resultImageUrl: string) => void;
+  /** Source of the pending run, reconstructed from its persisted row. */
+  pendingSource?: InpaintSource | null;
+  onInpaintComplete?: (resultImageUrl: string, source: InpaintSource) => void;
 }
 
 export default function InpaintEditor({
@@ -22,15 +36,24 @@ export default function InpaintEditor({
   aesthetic,
   promptDirectives,
   variantSlot,
+  source,
+  sourceOptions,
+  onSourceChange,
   pendingRequestId,
+  pendingSource,
   onInpaintComplete,
 }: InpaintEditorProps) {
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
   const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
   const { toasts, showError, showSuccess, dismissToast } = useToast();
 
+  // The source in effect for the CURRENT run, captured at start time so the
+  // completion callback reports the right one even if the selector (or the
+  // pending-request props) change while a run is in flight.
+  const runSourceRef = useRef<InpaintSource>(pendingSource ?? source);
+
   const { isProcessing, statusText, start } = useInpaintStatus({
-    onCompleted: onInpaintComplete,
+    onCompleted: (resultImageUrl) => onInpaintComplete?.(resultImageUrl, runSourceRef.current),
     showSuccess,
     showError,
   });
@@ -54,11 +77,26 @@ export default function InpaintEditor({
   const aspectRatio = imageDims ? imageDims.width / imageDims.height : null;
 
   // Resume an in-flight job (e.g. after a refresh): skip the submit and go
-  // straight to polling the persisted requestId.
+  // straight to polling the persisted requestId. The run's source comes from
+  // the persisted row so completion persists with the original run's
+  // semantics (issue #170).
   useEffect(() => {
     if (!pendingRequestId) return;
+    runSourceRef.current = pendingSource ?? source;
     void start(async () => pendingRequestId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- resume once per requestId, matching the pre-#170 behavior
   }, [pendingRequestId, start]);
+
+  // Switching source swaps the image being edited — any existing mask was
+  // drawn for the previous image and must not leak into the next run.
+  const handleSourceChange = useCallback(
+    (next: InpaintSource) => {
+      if (inpaintSourcesEqual(next, source)) return;
+      setMaskDataUrl(null);
+      onSourceChange?.(next);
+    },
+    [source, onSourceChange]
+  );
 
   const handleInpaint = useCallback(async () => {
     if (!promptDirectives.trim()) {
@@ -76,6 +114,8 @@ export default function InpaintEditor({
       return;
     }
 
+    runSourceRef.current = source;
+
     await start(async (signal) => {
       const startResponse = await fetch("/api/inpaint", {
         method: "POST",
@@ -87,6 +127,7 @@ export default function InpaintEditor({
           aesthetic,
           roomId,
           variantSlot,
+          sourceSlot: source.kind === "variant" ? source.slot : null,
         }),
         signal,
       });
@@ -99,12 +140,39 @@ export default function InpaintEditor({
 
       return startData.requestId as string;
     });
-  }, [maskDataUrl, imageUrl, promptDirectives, aesthetic, roomId, variantSlot, start, showError]);
+  }, [maskDataUrl, imageUrl, promptDirectives, aesthetic, roomId, variantSlot, source, start, showError]);
 
   return (
     <div className="flex flex-col gap-6">
+      {sourceOptions.length > 1 && (
+        <fieldset className="rounded-md border border-stone-200 p-3">
+          <legend className="px-1 text-sm font-medium text-stone-700">
+            Edit from
+          </legend>
+          <div className="flex flex-wrap gap-x-4 gap-y-2">
+            {sourceOptions.map((option) => (
+              <label
+                key={inpaintSourceLabel(option)}
+                className="inline-flex cursor-pointer items-center gap-2 text-sm text-stone-700"
+              >
+                <input
+                  type="radio"
+                  name={`inpaint-source-${roomId}`}
+                  value={inpaintSourceLabel(option)}
+                  checked={inpaintSourcesEqual(option, source)}
+                  disabled={isProcessing}
+                  onChange={() => handleSourceChange(option)}
+                  className="h-4 w-4 accent-stone-800"
+                />
+                {inpaintSourceLabel(option)}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      )}
+
       <div>
-        <h4 className="text-sm font-medium text-stone-700 mb-2">Original Image</h4>
+        <h4 className="text-sm font-medium text-stone-700 mb-2">Source Image</h4>
         <InpaintMaskCanvas
           overlayImageSrc={imageUrl}
           aspectRatio={aspectRatio}

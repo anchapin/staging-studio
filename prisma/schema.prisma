@@ -77,6 +77,11 @@ model InpaintRequest {
   roomId      String
   room        Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
   variantSlot Int      // 0 or 1 — which "after" variant slot this run targets
+  sourceSlot  Int?     // issue #170: null = run edits the original before photo;
+                       // 0 or 1 = run edits that variant's staged result and
+                       // overwrites its "after" slot in place (selection untouched).
+                       // Persisted so a pendingRequestId resume can apply the same
+                       // result-persistence semantics as the original submit.
   status      String   // mirrors fal queue status: IN_QUEUE | IN_PROGRESS | COMPLETED | ERROR
   resultUrl   String?  // filled when status is COMPLETED
   createdAt   DateTime @default(now())

@@ -111,7 +111,9 @@ const projectDetailSelect = {
         where: { status: { in: ["IN_QUEUE", "IN_PROGRESS"] } },
         orderBy: { createdAt: "desc" as const },
         take: 1,
-        select: { id: true },
+        // sourceSlot (issue #170) lets a pendingRequestId resume persist the
+        // result with the same source semantics the run was started with.
+        select: { id: true, variantSlot: true, sourceSlot: true },
       },
     },
   },

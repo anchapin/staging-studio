@@ -104,10 +104,13 @@ export default function InpaintMaskCanvas({
   }, [dims.width, dims.height]);
 
   // Initialize once on mount, and re-initialize when the geometry changes
-  // (e.g. the photo's aspect ratio resolves after the image loads).
+  // (e.g. the photo's aspect ratio resolves after the image loads) or when
+  // the underlying photo itself changes (issue #170 source switching) — a
+  // mask drawn for one image must never survive onto the next. The ref sync
+  // effect above runs first, so initCanvas reads the latest initial mask.
   useEffect(() => {
     initCanvas();
-  }, [initCanvas]);
+  }, [initCanvas, overlayImageSrc]);
 
   const getCoordinates = (
     e: React.MouseEvent | React.TouchEvent
