@@ -116,7 +116,7 @@ export async function POST(req: NextRequest) {
     // 5. Signed, short-lived, projectId-scoped token lets the cookie-less
     //    headless browser through middleware auth for THIS project only.
     const token = await signPreviewToken(projectId);
-    const previewUrl = `${appUrl}/projects/${projectId}/preview?${PREVIEW_TOKEN_QUERY_PARAM}=${encodeURIComponent(token)}`;
+    const previewUrl = `${appUrl}/preview/${projectId}?${PREVIEW_TOKEN_QUERY_PARAM}=${encodeURIComponent(token)}`;
 
     // 6. Credential rides in a header (Basic auth, `apiKey:`), never the
     //    query string; bounded by an AbortController so a hung Browserless

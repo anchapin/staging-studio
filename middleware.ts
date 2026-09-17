@@ -12,10 +12,6 @@ import {
 const PREVIEW_PATH_PATTERN = /^\/projects\/([^/]+)\/preview$/;
 
 export async function middleware(request: NextRequest) {
-  // Defense-in-depth: never trust a client-supplied verification stamp.
-  // It is re-set below only after the preview token actually verifies.
-  request.headers.delete("x-preview-verified");
-
   let supabaseResponse = NextResponse.next({
     request,
   });
@@ -65,12 +61,6 @@ export async function middleware(request: NextRequest) {
       const verification = await verifyPreviewToken(token);
       if (verification.valid && verification.projectId === previewMatch[1]) {
         authenticated = true;
-        // Stamp the verified project for downstream server components —
-        // the (dashboard) layout reads this header to skip its session
-        // gate for the cookie-less PDF render (the preview page
-        // re-verifies the token itself before rendering).
-        request.headers.set("x-preview-verified", verification.projectId);
-        supabaseResponse = NextResponse.next({ request });
       }
     }
   }
