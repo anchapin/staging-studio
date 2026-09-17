@@ -2,6 +2,11 @@
 
 import { useRef, useState, useEffect, useCallback, useMemo, useId } from "react";
 import { clientPointToCanvas, computeMaskCanvasDimensions } from "@/lib/canvas-coords";
+import { estimateMaskCoverage, shouldWarnLowCoverage } from "@/lib/mask-coverage";
+import { floodFillMask, maskGridFromPixels } from "@/lib/mask-flood-fill";
+
+/** Tools for building the mask: freehand paint or flood-fill inside an outline. */
+type MaskTool = "brush" | "fill";
 
 interface InpaintMaskCanvasProps {
   width?: number;
@@ -36,6 +41,13 @@ export default function InpaintMaskCanvas({
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(initialMaskDataUrl ?? null);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
 
+  // Masking-guidance state: which tool is active, whether anything has been
+  // painted yet (drives the empty-state hint), and whether the exported mask
+  // is suspiciously tiny (drives the low-coverage warning).
+  const [activeTool, setActiveTool] = useState<MaskTool>("brush");
+  const [hasPainted, setHasPainted] = useState(false);
+  const [lowCoverage, setLowCoverage] = useState(false);
+
   // Keyboard painting: the virtual brush cursor lives in canvas pixel space
   // (the same space clientPointToCanvas produces) so arrow-key deltas scale
   // with the canvas resolution, not with client pixels.
@@ -45,6 +57,7 @@ export default function InpaintMaskCanvas({
   const cursorRef = useRef<{ x: number; y: number } | null>(null);
   const keyboardPaintingRef = useRef(false);
   const hintId = useId();
+  const maskingHintId = useId();
 
   // Canvas resolution follows the photo's aspect ratio (capped on the long
   // edge); without one, fall back to the plain width/height props.
@@ -84,6 +97,10 @@ export default function InpaintMaskCanvas({
       ctx.fillStyle = "black";
       ctx.fillRect(0, 0, dims.width, dims.height);
     }
+    // Re-initializing replaces the canvas content, so reset the guidance
+    // state to match what will actually be on screen.
+    setHasPainted(Boolean(initial));
+    setLowCoverage(false);
   }, [dims.width, dims.height]);
 
   // Initialize once on mount, and re-initialize when the geometry changes
@@ -143,12 +160,55 @@ export default function InpaintMaskCanvas({
     ctx.fill();
   };
 
+  // Fill Region tool: flood-fills the unpainted region connected to the
+  // click/cursor point with painted pixels. Designed for cover-the-object
+  // semantics — draw a continuous outline around the object, then fill its
+  // interior in one click instead of painting it by hand. Returns true when
+  // pixels changed.
+  const performFill = (point: { x: number; y: number }): boolean => {
+    const canvas = canvasRef.current;
+    if (!canvas) return false;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return false;
+
+    const seedX = Math.min(canvas.width - 1, Math.max(0, Math.floor(point.x)));
+    const seedY = Math.min(canvas.height - 1, Math.max(0, Math.floor(point.y)));
+
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const grid = maskGridFromPixels(imageData.data, canvas.width, canvas.height);
+    const result = floodFillMask(grid, canvas.width, canvas.height, seedX, seedY);
+    if (!result || result.filledCount === 0) return false;
+
+    // Snap filled (and already-painted) cells to pure white so the exported
+    // mask keeps clean region-replacement semantics.
+    const data = imageData.data;
+    for (let i = 0; i < result.mask.length; i++) {
+      if (result.mask[i] === 1) {
+        const o = i * 4;
+        data[o] = 255;
+        data[o + 1] = 255;
+        data[o + 2] = 255;
+        data[o + 3] = 255;
+      }
+    }
+    ctx.putImageData(imageData, 0, 0);
+    return true;
+  };
+
   const handleStart = (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
     const point = getCoordinates(e);
     if (!point) return;
+    if (activeTool === "fill") {
+      if (performFill(point)) {
+        setHasPainted(true);
+        exportMask();
+      }
+      return;
+    }
     setIsDrawing(true);
     lastPointRef.current = point;
+    setHasPainted(true);
     draw(point, point);
   };
 
@@ -172,6 +232,7 @@ export default function InpaintMaskCanvas({
   const exportMask = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const ctx = canvas.getContext("2d");
 
     // fal-ai/flux-fill expects the mask geometry to match the source image,
     // so rescale the painted mask to the photo's natural pixel dimensions.
@@ -195,6 +256,19 @@ export default function InpaintMaskCanvas({
 
     setMaskDataUrl(dataUrl);
     onMaskChange?.(dataUrl);
+
+    // Surface a low-coverage warning when the mask looks like a stray stroke
+    // or an outline-only mistake (cover-the-object semantics). Coverage is a
+    // ratio, so reading it from the paint canvas is equivalent to reading it
+    // from the scaled export.
+    if (ctx) {
+      const coverage = estimateMaskCoverage(
+        ctx.getImageData(0, 0, canvas.width, canvas.height).data,
+        canvas.width,
+        canvas.height
+      );
+      setLowCoverage(shouldWarnLowCoverage(coverage));
+    }
   }, [naturalWidth, naturalHeight, onMaskChange]);
 
   const clearMask = () => {
@@ -205,6 +279,8 @@ export default function InpaintMaskCanvas({
     ctx.fillStyle = "black";
     ctx.fillRect(0, 0, dims.width, dims.height);
     setMaskDataUrl(null);
+    setHasPainted(false);
+    setLowCoverage(false);
     onMaskChange?.(null);
   };
 
@@ -238,6 +314,16 @@ export default function InpaintMaskCanvas({
   const toggleKeyboardPaint = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    if (activeTool === "fill") {
+      const at = cursorRef.current ?? centerOf(canvas);
+      cursorRef.current = at;
+      setCursor(at);
+      if (performFill(at)) {
+        setHasPainted(true);
+        exportMask();
+      }
+      return;
+    }
     if (keyboardPaintingRef.current) {
       liftKeyboardPaint();
       return;
@@ -247,6 +333,7 @@ export default function InpaintMaskCanvas({
     setCursor(at);
     keyboardPaintingRef.current = true;
     setIsKeyboardPainting(true);
+    setHasPainted(true);
     drawDot(at);
   };
 
@@ -315,6 +402,13 @@ export default function InpaintMaskCanvas({
       />
     ) : null;
 
+  const cursorClass = activeTool === "fill" ? "cursor-cell" : "cursor-crosshair";
+
+  const canvasAriaLabel =
+    activeTool === "fill"
+      ? "Room mask canvas with the Fill Region tool active: draw a continuous outline around the object, arrow keys move the cursor, press P, Space, or Enter to fill the region under the cursor"
+      : "Room mask painting canvas: arrow keys move the brush (hold Shift for fine steps), press P, Space, or Enter to start and stop painting";
+
   const canvasElement = (
     <div
       role="application"
@@ -325,12 +419,12 @@ export default function InpaintMaskCanvas({
         width={dims.width}
         height={dims.height}
         tabIndex={0}
-        aria-label="Room mask painting canvas: arrow keys move the brush (hold Shift for fine steps), press P, Space, or Enter to start and stop painting"
-        aria-describedby={hintId}
+        aria-label={canvasAriaLabel}
+        aria-describedby={`${maskingHintId} ${hintId}`}
         className={
           hasOverlay
-            ? "absolute inset-0 h-full w-full rounded-lg cursor-crosshair touch-none opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-500 focus-visible:ring-offset-2"
-            : "border border-gray-300 rounded cursor-crosshair touch-none focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-500 focus-visible:ring-offset-2"
+            ? `absolute inset-0 h-full w-full rounded-lg ${cursorClass} touch-none opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-500 focus-visible:ring-offset-2`
+            : `border border-gray-300 rounded ${cursorClass} touch-none focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-500 focus-visible:ring-offset-2`
         }
         style={
           hasOverlay ? undefined : { width: Math.min(dims.width, 512), height: Math.min(dims.height, 512) }
@@ -347,6 +441,23 @@ export default function InpaintMaskCanvas({
         onBlur={handleCanvasBlur}
       />
       {cursorIndicator}
+
+      {/* Empty-state hint: the mask uses cover-the-object semantics, so make
+          the first paint action obvious. Hidden once anything is painted. */}
+      {!hasPainted && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"
+        >
+          <span
+            className={`rounded-md bg-black/60 px-3 py-1.5 text-center text-xs font-medium text-white ${
+              hasOverlay ? "" : "border border-white/30"
+            }`}
+          >
+            Drag to paint over the object you want changed
+          </span>
+        </div>
+      )}
     </div>
   );
 
@@ -374,6 +485,24 @@ export default function InpaintMaskCanvas({
         <div className="relative w-fit">{canvasElement}</div>
       )}
 
+      {/* Cover-vs-outline semantics: the mask is region replacement, not
+          selection — everything painted is regenerated. */}
+      <p id={maskingHintId} className="text-xs text-stone-700">
+        <span className="font-medium">How masking works:</span> Paint over the
+        entire object or area you want changed — everything painted is
+        regenerated, everything else is preserved. A thin outline won&apos;t
+        change the interior, so cover the whole object (or draw an outline and
+        use Fill Region on its inside).
+      </p>
+
+      {lowCoverage && (
+        <p role="status" className="text-xs font-medium text-amber-700">
+          The painted area is very small — this may be a stray stroke or just
+          an outline. Paint over the entire object you want changed, then apply
+          inpainting.
+        </p>
+      )}
+
       <p id={hintId} className="text-xs text-gray-500">
         Keyboard painting: Tab to the canvas, move the brush with the arrow keys
         (Shift + arrow for fine steps), and press P, Space, or Enter to start or
@@ -381,6 +510,33 @@ export default function InpaintMaskCanvas({
       </p>
 
       <div className="flex items-center gap-4">
+        <div role="group" aria-label="Mask tool" className="flex items-center gap-2">
+          <button
+            type="button"
+            aria-pressed={activeTool === "brush"}
+            onClick={() => setActiveTool("brush")}
+            className={
+              activeTool === "brush"
+                ? "px-3 py-1.5 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors"
+                : "px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors"
+            }
+          >
+            Brush
+          </button>
+          <button
+            type="button"
+            aria-pressed={activeTool === "fill"}
+            onClick={() => setActiveTool("fill")}
+            className={
+              activeTool === "fill"
+                ? "px-3 py-1.5 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors"
+                : "px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors"
+            }
+          >
+            Fill Region
+          </button>
+        </div>
+
         <label className="flex items-center gap-2 text-sm">
           Brush Size:
           <input
