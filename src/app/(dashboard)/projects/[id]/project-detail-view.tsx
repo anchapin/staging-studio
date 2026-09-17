@@ -6,8 +6,12 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, PencilRuler } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 import { resolveFocusedRoom, resolveRoomLayoutMode } from "@/lib/focus-mode";
-import { ComparisonSlider } from "@/components/canvas/comparison-slider";
+import {
+  isCompleteVariantPair,
+  resolveStagedResultDisplay,
+} from "@/lib/staged-result";
 import RoomCanvas from "@/components/canvas/room-canvas";
+import StagedResultImage from "@/components/canvas/staged-result-image";
 import InpaintEditor from "@/components/canvas/inpaint-editor";
 import { VariantPicker } from "@/components/canvas/variant-picker";
 import GenerateCopyForm, {
@@ -66,16 +70,13 @@ function variantPairsOf(room: Room): [VariantPair, VariantPair] {
   ];
 }
 
-function isComplete(pair: VariantPair): pair is { before: string; after: string } {
-  return Boolean(pair.before && pair.after);
-}
-
 /**
  * Derives the per-room editor inputs shared by the all-rooms grid cards and
  * the focused full-width view (issue #169) so both layouts agree on the
- * displayed variant, the inpaint source resolution (#170), and the
- * pending-run state. Directives typed in-session win; otherwise a room with
- * saved AI copy starts from its persisted `rawDirectives`.
+ * displayed variant, the inpaint source resolution (#170), the pending-run
+ * state, and the staged "after" image shown post-staging (#168).
+ * Directives typed in-session win; otherwise a room with saved AI copy
+ * starts from its persisted `rawDirectives`.
  */
 function roomEditorInputs(
   room: Room,
@@ -84,11 +85,13 @@ function roomEditorInputs(
 ) {
   const pairs = variantPairsOf(room);
   const selectedIndex = room.selectedVariantIndex ?? 0;
-  const displayIndex = isComplete(pairs[selectedIndex])
-    ? selectedIndex
-    : isComplete(pairs[0])
-      ? 0
-      : 1;
+  /**
+   * The staged result to show in place of the old before/after slider
+   * (issue #168): the selected variant's after image, falling back to A
+   * then B, or null while no variant is complete. Non-null exactly when a
+   * complete variant exists, so the VariantPicker and the image agree.
+   */
+  const staged = resolveStagedResultDisplay(room.name, pairs, selectedIndex);
   const roomDirectives = directives[room.id] ?? room.rawDirectives ?? "";
   const inpaintSource =
     inpaintSourceByRoom[room.id] ?? { kind: "original" as const };
@@ -96,9 +99,8 @@ function roomEditorInputs(
   return {
     pairs,
     selectedIndex,
-    displayIndex,
-    displayPair: pairs[displayIndex],
-    hasAnyCompleteVariant: pairs.some(isComplete),
+    staged,
+    hasAnyCompleteVariant: pairs.some(isCompleteVariantPair),
     roomDirectives,
     inpaintSource,
     inpaintImageUrl:
@@ -202,7 +204,7 @@ export default function ProjectDetailView({
   const handleVariantSelect = useCallback(
     async (room: Room, index: number) => {
       const pair = variantPairsOf(room)[index];
-      if (!isComplete(pair)) {
+      if (!isCompleteVariantPair(pair)) {
         showInfo(
           `Variant ${index === 0 ? "A" : "B"} hasn't been staged yet — open "Edit staging" and run inpainting to create it.`
         );
@@ -492,15 +494,16 @@ export default function ProjectDetailView({
                     />
                   </section>
 
-                  {isComplete(focusedInputs.displayPair) && (
+                  {focusedInputs.staged && (
                     <section aria-label="Staged result">
                       <h3 className="text-sm font-semibold text-stone-800 mb-3">
                         Staged result
                       </h3>
-                      <ComparisonSlider
-                        roomName={focusedRoom.name}
-                        originalImage={focusedInputs.displayPair.before}
-                        variantImage={focusedInputs.displayPair.after}
+                      <StagedResultImage
+                        afterImageUrl={focusedInputs.staged.afterImageUrl}
+                        alt={focusedInputs.staged.alt}
+                        label={focusedInputs.staged.label}
+                        largeImage
                       />
                       <VariantPicker
                         className="mt-3"
@@ -591,11 +594,11 @@ export default function ProjectDetailView({
                         }}
                       />
 
-                      {isComplete(inputs.displayPair) && (
-                        <ComparisonSlider
-                          roomName={room.name}
-                          originalImage={inputs.displayPair.before}
-                          variantImage={inputs.displayPair.after}
+                      {inputs.staged && (
+                        <StagedResultImage
+                          afterImageUrl={inputs.staged.afterImageUrl}
+                          alt={inputs.staged.alt}
+                          label={inputs.staged.label}
                         />
                       )}
 
