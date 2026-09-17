@@ -1,5 +1,5 @@
 import { createBrowserClient, createServerClient } from "@supabase/ssr";
-import { requireEnvVars } from "@/lib/env";
+import { MissingEnvVarsError, requireEnvVars } from "@/lib/env";
 
 const globalForSupabaseBrowser = globalThis as unknown as {
   supabaseBrowser: ReturnType<typeof createBrowserClient> | undefined;
@@ -13,15 +13,24 @@ const globalForSupabaseBrowser = globalThis as unknown as {
  * instance (GoTrueClient deduplication).
  *
  * Side effects: reads `NEXT_PUBLIC_SUPABASE_URL` and
- * `NEXT_PUBLIC_SUPABASE_ANON_KEY` at call time via `requireEnvVars` —
- * throws `MissingEnvVarsError` if either is missing. Reads/writes the
+ * `NEXT_PUBLIC_SUPABASE_ANON_KEY` via literal `process.env` member
+ * expressions so Next.js inlines them into the client bundle at build
+ * time — dynamic `process.env[name]` access (as in `requireEnvVars`) is
+ * NOT inlined and would be `undefined` in the browser. Throws
+ * `MissingEnvVarsError` if either is missing. Reads/writes the
  * session in localStorage via the default `@supabase/ssr` browser storage.
  */
 export function createClient() {
-  const env = requireEnvVars("NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const missing = [
+    ...(url === undefined || url.trim() === "" ? ["NEXT_PUBLIC_SUPABASE_URL"] : []),
+    ...(anonKey === undefined || anonKey.trim() === "" ? ["NEXT_PUBLIC_SUPABASE_ANON_KEY"] : []),
+  ];
+  if (missing.length > 0) throw new MissingEnvVarsError(missing);
   return (
     globalForSupabaseBrowser.supabaseBrowser ??
-    createBrowserClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
+    createBrowserClient(url as string, anonKey as string)
   );
 }
 
