@@ -52,3 +52,7 @@ coverage/
 # generated toolchain artifacts
 next-env.d.ts
 tsconfig.tsbuildinfo
+
+# editor artifacts / env copies
+*.rswp
+..env.local*
