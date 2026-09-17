@@ -6,6 +6,7 @@ StagingStudio — AI-assisted home staging lookbook generator for Circle G Desig
 
 ```bash
 cp .env.example .env.local   # required before dev; all keys listed under "Env vars"
+ln -s .env.local .env        # required before Prisma CLI commands (see env-file note below)
 npm install                  # package-lock.json is committed; postinstall runs `prisma generate`
 npx prisma db push           # run once before dev; schema-first workflow
 npm run dev
@@ -20,6 +21,7 @@ npm run build
 
 - No CI, no formatter config. Run lint, typecheck, and build (and `npm test` if you touched logic with tests) before finishing a change.
 - Prisma uses `db push`, not migrations — there is no `prisma/migrations/` dir and no migration history to maintain.
+- Prisma CLI (`db push`, `db studio`, `migrate`) loads env vars only from `.env` — it does NOT read Next.js's `.env.local`. Keep a `.env → .env.local` symlink (both names gitignored) so Prisma and Next.js share one source of truth; without it, `npx prisma db push` fails with `Environment variable not found: DATABASE_URL` even when `.env.local` is fully populated.
 
 ## Layout
 
@@ -47,7 +49,7 @@ npm run build
 
 ## Env vars
 
-All in `.env.example`, copied to `.env.local` — every key below is annotated there with reader, source, and required/optional status:
+All in `.env.example`, copied to `.env.local` (with `.env` symlinked to it — see the env-file note under Commands) — every key below is annotated there with reader, source, and required/optional status:
 
 - `DATABASE_URL` — required. Supabase Postgres connection string, used by Prisma (`prisma/schema.prisma` datasource).
 - `NEXT_PUBLIC_SUPABASE_URL` — required. Supabase project URL; read by `middleware.ts`, `lib/supabase.ts`, `api/setup*`, `auth/callback`. Source: Supabase dashboard → Project Settings → API.
