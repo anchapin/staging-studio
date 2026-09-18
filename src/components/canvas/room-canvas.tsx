@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import Image from "next/image";
 import imageCompression from "browser-image-compression";
 import { Upload, Loader2, X, ImageIcon } from "lucide-react";
@@ -22,9 +22,9 @@ interface RoomCanvasProps {
   variantSlot?: 0 | 1;
   onUploadComplete?: (slot: 0 | 1, publicUrl: string) => void;
   /**
-   * Focused-room layout (issue #169): render the photo at a taller frame
-   * sized for the full content width instead of the compact grid-card
-   * height.
+   * Focused-room layout (issue #169): span the full content width instead
+   * of one half of the grid. Since #188 the frame height follows the
+   * photo's aspect ratio (viewport-capped), so this only affects sizing.
    */
   largeImage?: boolean;
 }
@@ -52,6 +52,35 @@ export default function RoomCanvas({
   } | null>(null);
   const [liveMessage, setLiveMessage] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /**
+   * Natural pixel dimensions of the loaded photo (issue #188). The frame
+   * adopts the photo's own aspect ratio so the FULL image stays visible —
+   * a fixed-height frame with `object-cover` cropped the bottom (and top)
+   * off wide photos like the living-room hero shot. Null until the photo
+   * loads; the fixed `frameHeight` fallback covers that window and the
+   * empty/upload state.
+   */
+  const [imageAspect, setImageAspect] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
+
+  // Measure the source photo once it loads (same pattern as InpaintEditor)
+  // so the frame can mirror its aspect ratio. `window.Image` — not the
+  // imported next/image component — is the DOM constructor here.
+  useEffect(() => {
+    if (!imageUrl) return;
+    const img = new window.Image();
+    img.onload = () => {
+      if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+        setImageAspect({ width: img.naturalWidth, height: img.naturalHeight });
+      }
+    };
+    img.src = imageUrl;
+    return () => {
+      img.onload = null;
+    };
+  }, [imageUrl]);
 
   const frameHeight = largeImage ? "h-96" : "h-64";
   const imageSizes = largeImage ? FOCUSED_ROOM_IMAGE_SIZES : ROOM_CANVAS_IMAGE_SIZES;
@@ -198,13 +227,26 @@ export default function RoomCanvas({
   return (
     <div className="relative rounded-lg border border-stone-200 bg-stone-100 overflow-hidden">
       {imageUrl ? (
-        <div className={`relative group ${frameHeight}`}>
+        /* Issue #188: size the frame to the photo's own aspect ratio (with a
+           viewport-height cap so portrait photos just scroll instead of
+           towering) and letterbox with `object-contain` — never crop. The
+           photo is the product and must be fully visible. */
+        <div
+          className={`relative group w-full overflow-hidden ${
+            imageAspect ? "max-h-[70vh]" : frameHeight
+          }`}
+          style={
+            imageAspect
+              ? { aspectRatio: `${imageAspect.width} / ${imageAspect.height}` }
+              : undefined
+          }
+        >
           <Image
             src={imageUrl}
             alt="Room"
             fill
             sizes={imageSizes}
-            className="object-cover"
+            className="object-contain"
           />
           <button
             onClick={() => fileInputRef.current?.click()}
