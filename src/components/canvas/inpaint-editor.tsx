@@ -14,6 +14,7 @@ import {
   DEFAULT_MASK_EXPANSION_RADIUS,
   MAX_MASK_EXPANSION_RADIUS,
 } from "@/lib/mask-dilation";
+import HolisticSpikePanel from "./holistic-spike-panel";
 
 interface InpaintEditorProps {
   roomId: string;
@@ -164,6 +165,48 @@ export default function InpaintEditor({
     [isProcessing, isSegmenting, imageDims, roomId, imageUrl, showError]
   );
 
+  // Shared submit path for brush runs and holistic spike runs (issue
+  // #190): both post the same body to /api/inpaint; holistic runs add
+  // the negativePrompt override and swap mask/directives for the
+  // strategy-generated ones.
+  const beginInpaintRun = useCallback(
+    async (run: { maskUrl: string; promptDirectives: string; negativePrompt?: string }) => {
+      if (!imageUrl) {
+        showError("No image available to edit.");
+        return;
+      }
+
+      runSourceRef.current = source;
+
+      await start(async (signal) => {
+        const startResponse = await fetch("/api/inpaint", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            imageUrl,
+            maskUrl: run.maskUrl,
+            promptDirectives: run.promptDirectives,
+            negativePrompt: run.negativePrompt,
+            aesthetic,
+            roomId,
+            variantSlot,
+            sourceSlot: source.kind === "variant" ? source.slot : null,
+          }),
+          signal,
+        });
+
+        const startData = await startResponse.json();
+
+        if (!startResponse.ok) {
+          throw new Error(startData.message || startData.error || "Failed to start inpainting");
+        }
+
+        return startData.requestId as string;
+      });
+    },
+    [imageUrl, aesthetic, roomId, variantSlot, source, start, showError]
+  );
+
   const handleInpaint = useCallback(async () => {
     if (!promptDirectives.trim()) {
       showError("Please provide staging directives first.");
@@ -175,38 +218,22 @@ export default function InpaintEditor({
       return;
     }
 
-    if (!imageUrl) {
-      showError("No image available to edit.");
-      return;
-    }
+    await beginInpaintRun({ maskUrl: maskDataUrl, promptDirectives });
+  }, [maskDataUrl, promptDirectives, beginInpaintRun, showError]);
 
-    runSourceRef.current = source;
-
-    await start(async (signal) => {
-      const startResponse = await fetch("/api/inpaint", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          imageUrl,
-          maskUrl: maskDataUrl,
-          promptDirectives,
-          aesthetic,
-          roomId,
-          variantSlot,
-          sourceSlot: source.kind === "variant" ? source.slot : null,
-        }),
-        signal,
+  // Holistic spike entry (issue #190): the panel builds the full-room
+  // mask + aesthetic-derived directives; this just forwards them into
+  // the shared run launcher.
+  const handleHolisticRun = useCallback(
+    (run: { maskDataUrl: string; promptDirectives: string; negativePrompt: string }) => {
+      void beginInpaintRun({
+        maskUrl: run.maskDataUrl,
+        promptDirectives: run.promptDirectives,
+        negativePrompt: run.negativePrompt,
       });
-
-      const startData = await startResponse.json();
-
-      if (!startResponse.ok) {
-        throw new Error(startData.message || startData.error || "Failed to start inpainting");
-      }
-
-      return startData.requestId as string;
-    });
-  }, [maskDataUrl, imageUrl, promptDirectives, aesthetic, roomId, variantSlot, source, start, showError]);
+    },
+    [beginInpaintRun]
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -306,6 +333,24 @@ export default function InpaintEditor({
           </span>
         )}
       </div>
+
+      {/* Issue #190 spike entry — deliberately outside the main toolbar;
+          issue #191 replaces this with the polished one-click preset. */}
+      <details className="no-print rounded-md border border-dashed border-stone-300 p-3 text-sm">
+        <summary className="cursor-pointer select-none text-stone-500">
+          Holistic staging spike (#190) — internal testing only
+        </summary>
+        <div className="pt-3">
+          <HolisticSpikePanel
+            aesthetic={aesthetic}
+            imageWidth={imageDims?.width ?? null}
+            imageHeight={imageDims?.height ?? null}
+            disabled={isProcessing || isSegmenting}
+            onRun={handleHolisticRun}
+            onError={showError}
+          />
+        </div>
+      </details>
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>

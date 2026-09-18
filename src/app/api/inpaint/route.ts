@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { imageUrl, maskUrl, promptDirectives, aesthetic, variantSlot } =
+    const { imageUrl, maskUrl, promptDirectives, aesthetic, variantSlot, negativePrompt } =
       parsed.data;
     const sourceSlot = parsed.data.sourceSlot ?? null;
     roomId = parsed.data.roomId;
@@ -118,7 +118,7 @@ export async function POST(request: NextRequest) {
     // instead of holding the request open for the full generation.
     const falQueueSubmit = fal.queue.submit as FalQueueSubmitFunction;
     const submission = await falQueueSubmit(FAL_FLUX_FILL_MODEL, {
-      input: buildFalFillPayload({ imageUrl, maskUrl, prompt }),
+      input: buildFalFillPayload({ imageUrl, maskUrl, prompt, negativePrompt }),
     });
 
     // Persist the requestId → room mapping before responding so the status

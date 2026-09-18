@@ -56,7 +56,9 @@ export const aiMaskUrlSchema = z
  * Contract: `imageUrl` ({@link aiImageUrlSchema}) is the room photo to
  * edit; `maskUrl` ({@link aiMaskUrlSchema}) marks the region to fill;
  * `promptDirectives` (1–2000 chars) and `aesthetic` (1–200 chars) steer
- * the FLUX.1 Fill generation.
+ * the FLUX.1 Fill generation. `negativePrompt` is optional (issue #190):
+ * the holistic full-room path sends `HOLISTIC_NEGATIVE_PROMPT` there;
+ * omitted ⇒ the route keeps the single-object `NEGATIVE_PROMPT`.
  * Side effects: none (pure validation); the fal.ai call happens in the
  * route, gated by `assertFalConfigured()`/`FAL_KEY`.
  */
@@ -65,6 +67,7 @@ export const inpaintRequestSchema = z.object({
   maskUrl: aiMaskUrlSchema,
   promptDirectives: z.string().min(1).max(2000),
   aesthetic: z.string().min(1).max(200),
+  negativePrompt: z.string().min(1).max(2000).optional(),
 });
 
 /**
