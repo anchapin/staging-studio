@@ -80,6 +80,7 @@ All in `.env.example`, copied to `.env.local` (with `.env` symlinked to it — s
 - Tailwind v4 runs CSS-first (`@import "tailwindcss"` in `globals.css`) but still loads the legacy JS config via `@config "../../tailwind.config.ts"`; PostCSS uses `@tailwindcss/postcss`. Don't reintroduce v3 `@tailwind` directives.
 - `next.config.ts` allowlists remote images only for `*.supabase.co` and `*.fal.ai` — a new image host must be added to `images.remotePatterns` or `next/image` throws.
 - shadcn style is `base-nova`; add components via the CLI (`npx shadcn@latest add …`) so `components.json` aliases stay in sync.
+- **Next.js rewrites `tsconfig.json` on every build/dev** (root cause #193): Next 16.3.5's `getDesiredCompilerOptions()` requires `jsx: "react-jsx"`, so `next build`/`next dev` unconditionally flips the committed `"jsx": "preserve"` → `"react-jsx"` (and manages the `.next/dev/types` include) — no opt-out; the `extends` escape hatch disables Next's tsconfig setup entirely (rejected). The committed tsconfig is authoritative: expect this dirty state after every build/dev and NEVER commit the flip — `git checkout -- tsconfig.json` before committing. Optional guard: `git config core.hooksPath .githooks` installs a pre-commit hook (`scripts/check-tsconfig-flip.sh`) that fails when the only tsconfig diff is this flip (#219).
 
 ## Domain model
 
