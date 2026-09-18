@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import {
   E2E_EDITOR_PROJECT_ID,
   E2E_EDITOR_ROOM_ID,
+  SAM_TOOL_ENABLED_IN_E2E_BUILD,
 } from "../env";
 import {
   interceptFurnishingsDetection,
@@ -287,6 +288,17 @@ test.describe("mask painting on high-DPI displays", () => {
  * the canvas (and therefore the pending inpaint mask) untouched.
  */
 test.describe("select object segmentation", () => {
+  // Issue #228: the point-SAM flow these specs exercise (warm-ping ping,
+  // per-click /api/segment calls) was REPLACED by SAM 3.1 concept
+  // selection. Until the fal-ai/sam-3-1 interception and the replacement
+  // concept-tool specs land with #231, the e2e build compiles the tool
+  // OFF (SAM_TOOL_ENABLED_IN_E2E_BUILD) so the editor-open auto-fire can
+  // never reach the real route — these legacy specs skip meanwhile.
+  test.skip(
+    !SAM_TOOL_ENABLED_IN_E2E_BUILD,
+    "concept-tool e2e specs arrive with #231; the flag is compiled off in the e2e build"
+  );
+
   test("one click paints the segment mask and feeds the inpaint flow", async ({ page }) => {
     const inpaint = interceptInpaint(page);
     const segment = interceptSegment(page);

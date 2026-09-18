@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo, useId } from "react";
 import InpaintMaskCanvas from "./inpaint-mask-canvas";
 import { useToast, ToastContainer } from "@/components/ui/toast";
 import { Loader2 } from "lucide-react";
@@ -17,13 +17,20 @@ import {
 import HolisticSpikePanel from "./holistic-spike-panel";
 import StageEntireRoomPreset from "./stage-entire-room-preset";
 import BatchStagingPanel from "./batch-staging-panel";
-import { useSegmentPrewarm } from "./use-segment-prewarm";
-import { SegmentCache } from "@/lib/segment-cache";
-import {
-  buildSegmentTimingEvent,
-  emitSegmentTiming,
-} from "@/lib/segment-timing";
+import { useConceptSegments } from "./use-segment-prewarm";
+import { SegmentCache, type SegmentCacheEntry } from "@/lib/segment-cache";
 import { SAM_TOOL_ENABLED } from "@/lib/sam-tool";
+import {
+  buildConceptEmptyMessage,
+  buildSelectionLoggedEvent,
+  CONCEPT_CHIPS,
+  CONCEPT_EVENT_LOG_PREFIX,
+  DEFAULT_CONCEPT,
+  isValidConceptName,
+} from "@/lib/concept-chips";
+import { findInstanceAtPoint } from "@/lib/instance-hit-test";
+import { maskGridFromAlphaPixels } from "@/lib/mask-flood-fill";
+import { computeMaskCanvasDimensions } from "@/lib/canvas-coords";
 import {
   MAX_BATCH_OBJECTS,
   advanceBatchProgress,
@@ -69,31 +76,6 @@ function loadImage(src: string): Promise<HTMLImageElement> {
     img.onerror = () => reject(new Error("Image failed to load."));
     img.src = src;
   });
-}
-
-/**
- * Scales a selection's mask PNG to the photo's natural pixel dimensions
- * (issue #203): SAM returns masks at the provider's output size, but every
- * dispatched mask must share the source image's geometry (the same
- * invariant the brush flow's export step guarantees). Browser-only; the
- * luminance threshold downstream tolerates resampling blur.
- */
-async function normalizeMaskToNaturalDims(
-  maskDataUrl: string,
-  width: number,
-  height: number
-): Promise<string | null> {
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return null;
-  try {
-    ctx.drawImage(await loadImage(maskDataUrl), 0, 0, width, height);
-  } catch {
-    return null;
-  }
-  return canvas.toDataURL("image/png");
 }
 
 /**
@@ -146,6 +128,93 @@ async function composeUnionMaskDataUrl(
   return canvas.toDataURL("image/png");
 }
 
+// -------------------------------------------------------------------------
+// Issue #228: SAM 3.1 concept-instance decoding. The detection route
+// returns per-instance ALPHA cutouts (transparent background, photo-colored
+// object pixels), so grid extraction uses alpha (not luminance — dark
+// furniture would be dropped) and the toggle path converts each cutout to
+// the white-on-black mask the union/export pipeline already speaks (the
+// same source-in technique the one-click preset uses).
+// -------------------------------------------------------------------------
+
+/** One decoded detection instance, in response order (score-ranked). */
+interface DecodedInstance {
+  grid: Uint8Array;
+  width: number;
+  height: number;
+  /** Provider confidence, or null when the response omitted it. */
+  score: number | null;
+  /** White-on-black mask at the photo's natural dimensions (toggle path). */
+  whiteMaskDataUrl: string;
+}
+
+/**
+ * Decodes one alpha-cutout mask into a hit-test grid (at `gridDims`, the
+ * mask-canvas resolution — click points arrive in that space) plus a
+ * white-on-black data URL at the photo's natural dimensions. Returns
+ * null when the image fails to decode; the caller preserves the slot so
+ * response indices stay stable. Browser-only.
+ */
+async function decodeConceptInstance(
+  maskDataUrl: string,
+  score: number | null,
+  gridDims: { width: number; height: number },
+  naturalDims: { width: number; height: number }
+): Promise<DecodedInstance | null> {
+  try {
+    const img = await loadImage(maskDataUrl);
+
+    const gridCanvas = document.createElement("canvas");
+    gridCanvas.width = gridDims.width;
+    gridCanvas.height = gridDims.height;
+    const gridCtx = gridCanvas.getContext("2d");
+    if (!gridCtx) return null;
+    gridCtx.drawImage(img, 0, 0, gridDims.width, gridDims.height);
+    const gridPixels = gridCtx.getImageData(0, 0, gridDims.width, gridDims.height);
+
+    const whiteCanvas = document.createElement("canvas");
+    whiteCanvas.width = naturalDims.width;
+    whiteCanvas.height = naturalDims.height;
+    const whiteCtx = whiteCanvas.getContext("2d");
+    if (!whiteCtx) return null;
+    whiteCtx.drawImage(img, 0, 0, naturalDims.width, naturalDims.height);
+    whiteCtx.globalCompositeOperation = "source-in";
+    whiteCtx.fillStyle = "white";
+    whiteCtx.fillRect(0, 0, naturalDims.width, naturalDims.height);
+
+    return {
+      grid: maskGridFromAlphaPixels(
+        gridPixels.data,
+        gridDims.width,
+        gridDims.height
+      ),
+      width: gridDims.width,
+      height: gridDims.height,
+      score,
+      whiteMaskDataUrl: whiteCanvas.toDataURL("image/png"),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Decodes every instance of a concept result, preserving response order
+ * (and null slots for undecodable masks) so `selection_logged` indices
+ * keep matching the provider response. Browser-only.
+ */
+async function decodeConceptInstances(
+  result: { maskDataUrls: string[]; scores: number[] },
+  gridDims: { width: number; height: number },
+  naturalDims: { width: number; height: number }
+): Promise<Array<DecodedInstance | null>> {
+  return Promise.all(
+    result.maskDataUrls.map((maskDataUrl, index) =>
+      decodeConceptInstance(maskDataUrl, result.scores[index] ?? null, gridDims, naturalDims)
+    )
+  );
+}
+
 export default function InpaintEditor({
   roomId,
   imageUrl,
@@ -168,12 +237,19 @@ export default function InpaintEditor({
   const [maskExpansion, setMaskExpansion] = useState(DEFAULT_MASK_EXPANSION_RADIUS);
   const { toasts, showError, showSuccess, dismissToast } = useToast();
 
-  // Click-to-segment state (issue #183): one in-flight SAM request at a
-  // time. Issue #203: a successful response no longer merges straight onto
-  // the canvas — it is added to a pending selection set (the multi-select
-  // batch). The editor composes the union of the set and hands it to the
-  // canvas as a SelectionReset, so the grid always equals the union.
-  const [isSegmenting, setIsSegmenting] = useState(false);
+  // Concept-selection state (issue #228): the detection concept drives
+  // ONE billed call per (image, concept); clicks only toggle instances
+  // client-side. Issue #203's pending batch-selection machinery stays for
+  // the batch-panel integration (#229) — concept toggles do not touch it.
+  const [requestedConcept, setRequestedConcept] = useState<string>(DEFAULT_CONCEPT);
+  const [displayedResult, setDisplayedResult] = useState<SegmentCacheEntry | null>(null);
+  const [decodedInstances, setDecodedInstances] = useState<
+    Array<DecodedInstance | null> | null
+  >(null);
+  const [selectedInstanceIndices, setSelectedInstanceIndices] = useState<number[]>([]);
+  const [conceptInput, setConceptInput] = useState("");
+  const [conceptInputError, setConceptInputError] = useState<string | null>(null);
+  const conceptInputId = useId();
   const [batchSelections, setBatchSelections] = useState<BatchSelection[]>([]);
   const [unionMaskDataUrl, setUnionMaskDataUrl] = useState<string | null>(null);
   const [selectionReset, setSelectionReset] = useState<{
@@ -181,7 +257,6 @@ export default function InpaintEditor({
     maskDataUrl: string | null;
   } | null>(null);
   const selectionResetIdRef = useRef(0);
-  const selectionIdRef = useRef(0);
 
   // Issue #203: per-object batch execution state. `activeBatch` holds the
   // running (or failed, awaiting retry) plan + progress; the refs carry
@@ -195,28 +270,127 @@ export default function InpaintEditor({
   const batchOutcomeRef = useRef<{ kind: "completed"; url: string } | null>(null);
   const batchFailureRef = useRef<string | null>(null);
 
-  // Issue #202: in-session cache of provider-returned masks. Repeat
-  // selections of an already-segmented point (the canvas dedupe resets on
-  // paint/fill/clear, so re-selection is a normal flow) come back instantly
-  // with zero fal-ai/sam calls. One instance per mount, cleared on source
-  // switch — the lifecycle that makes same-URL keying safe is documented in
-  // segment-cache.ts.
+  // Issue #228 (rekeying the issue #202 point cache): in-session cache of
+  // concept detections. Repeat selections of an already-detected (image,
+  // concept) pair — chip re-clicks, toggles after a Clear Mask, returning
+  // from another concept — come back instantly with zero billed calls.
+  // One instance per mount, cleared on source switch — the lifecycle that
+  // makes same-URL keying safe is documented in segment-cache.ts.
   const segmentCacheRef = useRef<SegmentCache | null>(null);
   if (!segmentCacheRef.current) {
     segmentCacheRef.current = new SegmentCache();
   }
 
-  // Issue #202: pre-warm the /api/segment path (route cold start + auth +
-  // room ownership) while the editor is open, at zero provider cost. The
-  // status classifies click timings as cold ("warming"/"idle"/"failed") or
-  // warm ("warm") for the latency instrumentation below.
-  const prewarmStatus = useSegmentPrewarm({
+  // Issue #228: auto-fire the `furniture` catch-all detection the moment
+  // the editor's image has loaded — the real call IS the prewarm (the old
+  // `warm: true` ping is gone; one call per (image, concept) returns every
+  // instance, so there is nothing cheaper to warm with). Chip switches
+  // reuse this machinery; the SegmentCache serves repeats without a fetch.
+  const conceptSegments = useConceptSegments({
     enabled: SAM_TOOL_ENABLED,
     roomId,
     imageUrl: imageUrl || null,
     imageWidth: imageDims?.width ?? null,
     imageHeight: imageDims?.height ?? null,
+    concept: requestedConcept,
+    resolveCached: useCallback(
+      (concept: string) => segmentCacheRef.current?.peek(imageUrl, concept) ?? null,
+      [imageUrl]
+    ),
   });
+  const conceptLoading = conceptSegments.status === "warming";
+
+  // Install fetched results into the cache so re-selecting the concept
+  // later is free (the hook itself never writes the cache).
+  useEffect(() => {
+    if (conceptSegments.result) {
+      segmentCacheRef.current?.put(
+        imageUrl,
+        conceptSegments.result.concept,
+        conceptSegments.result
+      );
+    }
+  }, [conceptSegments.result, imageUrl]);
+
+  // Surface hook results for the active concept (cache-served or fetched).
+  useEffect(() => {
+    if (conceptSegments.result && conceptSegments.result.concept === requestedConcept) {
+      setDisplayedResult(conceptSegments.result);
+    }
+  }, [conceptSegments.result, requestedConcept]);
+
+  // Concept switching: serve the cache instantly (zero flicker, zero
+  // network) and reset the per-concept toggle state. Uncached concepts
+  // fall through to the hook's fetch above.
+  const handleConceptChange = useCallback(
+    (concept: string) => {
+      setRequestedConcept(concept);
+      setConceptInputError(null);
+      setDisplayedResult(segmentCacheRef.current?.get(imageUrl, concept) ?? null);
+      setSelectedInstanceIndices([]);
+    },
+    [imageUrl]
+  );
+
+  // Free-text concept: validated client-side (mirroring the server's
+  // segmentConceptSchema) BEFORE any billed call can be built.
+  const handleConceptSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const candidate = conceptInput.trim();
+    if (!isValidConceptName(candidate)) {
+      setConceptInputError(
+        'Use a single lowercase word or short phrase — 1–30 characters, lowercase letters, spaces, and hyphens only (no commas, numbers, or sentences). Try "sofa" or "wall art".'
+      );
+      return;
+    }
+    setConceptInput("");
+    handleConceptChange(candidate);
+  };
+
+  // Decode the displayed result's alpha cutouts into hit-test grids (at
+  // the mask-canvas resolution — click points arrive in that space) plus
+  // white-on-black masks for the toggle path. Undecodable masks keep
+  // their (null) slot so response indices stay stable.
+  useEffect(() => {
+    if (!displayedResult || displayedResult.maskDataUrls.length === 0 || !imageDims) {
+      setDecodedInstances(null);
+      return;
+    }
+    let cancelled = false;
+    const gridDims = computeMaskCanvasDimensions(imageDims.width / imageDims.height);
+    void decodeConceptInstances(displayedResult, gridDims, imageDims).then((instances) => {
+      if (!cancelled) setDecodedInstances(instances);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [displayedResult, imageDims]);
+
+  // Selected instances' white masks (natural dims), feeding the shared
+  // union-composition effect. Order follows the score rank.
+  const selectedInstanceMaskUrls = useMemo(() => {
+    if (!decodedInstances) return [];
+    return selectedInstanceIndices
+      .map((index) => decodedInstances[index]?.whiteMaskDataUrl)
+      .filter((url): url is string => Boolean(url));
+  }, [decodedInstances, selectedInstanceIndices]);
+
+  // Overlay descriptors for the canvas's tinted instance layer.
+  const instanceOverlays = useMemo(() => {
+    if (!displayedResult || !decodedInstances) return undefined;
+    const overlays: Array<{ id: string; maskDataUrl: string; rank: number; selected: boolean }> = [];
+    for (let index = 0; index < displayedResult.maskDataUrls.length; index++) {
+      const instance = decodedInstances[index];
+      if (!instance) continue;
+      overlays.push({
+        id: `${displayedResult.concept}:${index}`,
+        maskDataUrl: displayedResult.maskDataUrls[index],
+        rank: index,
+        selected: selectedInstanceIndices.includes(index),
+      });
+    }
+    return overlays;
+  }, [displayedResult, decodedInstances, selectedInstanceIndices]);
 
   // The source in effect for the CURRENT run, captured at start time so the
   // completion callback reports the right one even if the selector (or the
@@ -245,6 +419,33 @@ export default function InpaintEditor({
       showError(message, retryable, onRetry, retryLabel);
     },
   });
+
+  // Instance toggling (issue #228): pure client-side hit-test against the
+  // decoded grids — re-clicks and re-toggles never cost a network call.
+  // Every toggle emits the training-corpus `selection_logged` event (W3
+  // depends on this shape).
+  const handleInstanceToggle = useCallback(
+    (point: { x: number; y: number }) => {
+      if (isProcessing) return;
+      if (!displayedResult || !decodedInstances) return;
+      const hit = findInstanceAtPoint(decodedInstances, point);
+      if (hit === null) return;
+      setSelectedInstanceIndices((previous) =>
+        previous.includes(hit) ? previous.filter((index) => index !== hit) : [...previous, hit]
+      );
+      console.log(
+        `${CONCEPT_EVENT_LOG_PREFIX} ${JSON.stringify(
+          buildSelectionLoggedEvent({
+            roomId,
+            concept: displayedResult.concept,
+            instanceIndex: hit,
+            score: decodedInstances[hit]?.score ?? null,
+          })
+        )}`
+      );
+    },
+    [isProcessing, displayedResult, decodedInstances, roomId]
+  );
 
   // Measure the source photo so the mask canvas can mirror its aspect ratio
   // and export masks at the photo's exact pixel dimensions.
@@ -277,8 +478,8 @@ export default function InpaintEditor({
 
   // Switching source swaps the image being edited — any existing mask was
   // drawn for the previous image and must not leak into the next run. The
-  // segment cache is dropped with it (issue #202 lifecycle: one session
-  // per image).
+  // segment cache is dropped with it (issue #202/#228 lifecycle: one
+  // session per image), and the concept session resets to the default.
   const handleSourceChange = useCallback(
     (next: InpaintSource) => {
       if (inpaintSourcesEqual(next, source)) return;
@@ -288,136 +489,36 @@ export default function InpaintEditor({
       // union/reset state follows the selection set via effects.
       setBatchSelections([]);
       segmentCacheRef.current?.clear();
+      setRequestedConcept(DEFAULT_CONCEPT);
+      setDisplayedResult(null);
+      setDecodedInstances(null);
+      setSelectedInstanceIndices([]);
+      setConceptInputError(null);
       onSourceChange?.(next);
     },
     [source, onSourceChange]
   );
 
-  // Select Object (issue #183): sends the clicked point (already in the
-  // photo's natural pixel space) plus the room reference to /api/segment.
-  // On failure the error is surfaced and the canvas is left unchanged — a
-  // segment response only reaches the canvas via the selection set on
-  // success.
-  //
-  // Issue #202 additions kept: in-session cache for repeat points, and a
-  // `[segment-timing]` event (source: cache|network, prewarmed: cold/warm)
-  // per completed selection.
-  //
-  // Issue #203: consecutive clicks ACCUMULATE — each success adds an
-  // object (click point + its own mask, normalized to natural dimensions)
-  // to the pending batch selection set, capped at MAX_BATCH_OBJECTS. The
-  // union-composition effect below syncs the canvas.
-  const handleSegmentSelect = useCallback(
-    async (point: { x: number; y: number }) => {
-      if (isProcessing || isSegmenting) return;
-      if (!imageDims) {
-        showError("The image is still loading. Please try again.");
-        return;
-      }
-      if (batchSelections.length >= MAX_BATCH_OBJECTS) {
-        showError(
-          `Batches are capped at ${MAX_BATCH_OBJECTS} objects — each object is a separate billed generation. Run this batch first, then select more.`
-        );
-        return;
-      }
-
-      const addSelection = async (rawMaskDataUrl: string) => {
-        const maskDataUrl = await normalizeMaskToNaturalDims(
-          rawMaskDataUrl,
-          imageDims.width,
-          imageDims.height
-        );
-        if (!maskDataUrl) {
-          showError("Could not prepare the selected object's mask. Please try again.");
-          return;
-        }
-        const selection: BatchSelection = {
-          id: `sel-${(selectionIdRef.current += 1)}`,
-          point,
-          maskDataUrl,
-        };
-        const reduction = reduceSelectionSet(batchSelections, { type: "add", selection });
-        if (reduction.rejected === "cap") {
-          showError(
-            `Batches are capped at ${MAX_BATCH_OBJECTS} objects. Run this batch first, then select more.`
-          );
-          return;
-        }
-        if (reduction.rejected === "duplicate") {
-          showError("That object is already in the batch — click a different object.");
-          return;
-        }
-        setBatchSelections(reduction.selections);
-      };
-
-      const cache = segmentCacheRef.current;
-      const clickStartedAt = performance.now();
-      const cachedMask = cache?.get(imageUrl, point) ?? null;
-      if (cachedMask) {
-        emitSegmentTiming(
-          buildSegmentTimingEvent({
-            ms: performance.now() - clickStartedAt,
-            source: "cache",
-            prewarmed: true,
-            imageUrl,
-          })
-        );
-        await addSelection(cachedMask);
-        return;
-      }
-      setIsSegmenting(true);
-      try {
-        const response = await fetch("/api/segment", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            roomId,
-            imageUrl,
-            point,
-            imageWidth: imageDims.width,
-            imageHeight: imageDims.height,
-          }),
-        });
-        const data = await response.json();
-        if (!response.ok) {
-          throw new Error(data.message || data.error || "Failed to select the object.");
-        }
-        cache?.put(imageUrl, point, data.maskDataUrl);
-        emitSegmentTiming(
-          buildSegmentTimingEvent({
-            ms: performance.now() - clickStartedAt,
-            source: "network",
-            prewarmed: prewarmStatus === "warm",
-            imageUrl,
-          })
-        );
-        await addSelection(data.maskDataUrl);
-      } catch (error) {
-        showError(
-          error instanceof Error ? error.message : "Object selection failed. Please try again."
-        );
-      } finally {
-        setIsSegmenting(false);
-      }
-    },
-    [isProcessing, isSegmenting, imageDims, roomId, imageUrl, prewarmStatus, showError, batchSelections]
-  );
-
-  // Issue #203: keep the union mask (for thematic runs + the batch panel)
-  // and the canvas's selection reset in lockstep with the selection set.
+  // Issue #203 (extended by #228): keep the union mask (for thematic runs
+  // + the batch panel) and the canvas's selection reset in lockstep with
+  // BOTH selection sources — the pending batch set (point-based, #229
+  // integration pending) and the concept instances toggled in by hit-test.
   // The reset carries an incrementing id so every change applies exactly
-  // once; an empty set resets the grid to black (Clear Mask semantics).
+  // once; both sources empty resets the grid to black (Clear Mask
+  // semantics). Concept masks arrive as white-on-black data URLs at the
+  // photo's natural dimensions, the same geometry the batch set is
+  // normalized to, so `composeUnionMaskDataUrl` takes them unchanged.
   useEffect(() => {
     if (!imageDims) return;
     let cancelled = false;
     const compose = async () => {
+      const maskUrls = [
+        ...batchSelections.map((selection) => selection.maskDataUrl),
+        ...selectedInstanceMaskUrls,
+      ];
       const unionUrl =
-        batchSelections.length > 0
-          ? await composeUnionMaskDataUrl(
-              batchSelections.map((selection) => selection.maskDataUrl),
-              imageDims.width,
-              imageDims.height
-            )
+        maskUrls.length > 0
+          ? await composeUnionMaskDataUrl(maskUrls, imageDims.width, imageDims.height)
           : null;
       if (cancelled) return;
       setUnionMaskDataUrl(unionUrl);
@@ -428,7 +529,7 @@ export default function InpaintEditor({
     return () => {
       cancelled = true;
     };
-  }, [batchSelections, imageDims]);
+  }, [batchSelections, selectedInstanceMaskUrls, imageDims]);
 
   // Issue #203: a selection-set change invalidates a finished (e.g.
   // failed) batch's plan — drop it so the panel never offers a retry
@@ -647,10 +748,11 @@ export default function InpaintEditor({
     setBatchSelections([]);
   }, []);
 
-  // Clear Mask (canvas button) empties the grid — the selection set must
-  // follow so the panel can't describe objects the canvas no longer masks.
+  // Clear Mask (canvas button) empties the grid — the selection state must
+  // follow so nothing describes objects the canvas no longer masks.
   const handleMaskCleared = useCallback(() => {
     setBatchSelections([]);
+    setSelectedInstanceIndices([]);
   }, []);
 
   return (
@@ -683,6 +785,85 @@ export default function InpaintEditor({
       )}
 
       <div className="flex flex-col gap-3">
+        {/* Issue #228: concept chips + validated free text. Chips enforce
+            single-concept by construction; free text is validated with
+            isValidConceptName (the server schema's client mirror) BEFORE
+            any billed call is built. Flag-gated with the tool itself. */}
+        {SAM_TOOL_ENABLED && (
+          <div className="flex flex-col gap-2">
+            <div
+              role="group"
+              aria-label="Detection concept"
+              aria-busy={conceptLoading}
+              className="flex flex-wrap items-center gap-2"
+            >
+              <span className="text-sm font-medium text-stone-700">Concept:</span>
+              {CONCEPT_CHIPS.map((chip) => (
+                <button
+                  key={chip}
+                  type="button"
+                  aria-pressed={requestedConcept === chip}
+                  disabled={isProcessing}
+                  onClick={() => handleConceptChange(chip)}
+                  className={
+                    requestedConcept === chip
+                      ? "px-2.5 py-1 text-xs rounded-full border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors"
+                      : "px-2.5 py-1 text-xs rounded-full border border-gray-300 bg-white text-stone-700 hover:bg-gray-50 transition-colors"
+                  }
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
+            <form onSubmit={handleConceptSubmit} className="flex flex-wrap items-center gap-2">
+              <label htmlFor={conceptInputId} className="text-xs text-stone-600">
+                Custom concept:
+              </label>
+              <input
+                id={conceptInputId}
+                type="text"
+                value={conceptInput}
+                onChange={(event) => {
+                  setConceptInput(event.target.value);
+                  if (conceptInputError) setConceptInputError(null);
+                }}
+                placeholder="e.g. wall art"
+                className="w-44 rounded-md border border-gray-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-stone-500"
+              />
+              <button
+                type="submit"
+                disabled={isProcessing}
+                className="px-2.5 py-1 text-xs rounded-md border border-stone-800 bg-white text-stone-800 hover:bg-stone-100 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Detect
+              </button>
+            </form>
+            {conceptInputError && (
+              <p role="alert" className="text-xs font-medium text-red-700">
+                {conceptInputError}
+              </p>
+            )}
+            {conceptLoading && (
+              <p role="status" className="text-xs text-stone-600">
+                Looking for {requestedConcept}…
+              </p>
+            )}
+            {!conceptLoading && conceptSegments.status === "failed" && (
+              <p role="status" className="text-xs font-medium text-amber-700">
+                Couldn&apos;t detect &quot;{requestedConcept}&quot; — try again, another
+                concept, or the brush.
+              </p>
+            )}
+            {!conceptLoading &&
+              displayedResult &&
+              displayedResult.concept === requestedConcept &&
+              displayedResult.maskDataUrls.length === 0 && (
+                <p role="status" className="text-xs text-stone-600">
+                  {buildConceptEmptyMessage(requestedConcept)}
+                </p>
+              )}
+          </div>
+        )}
         <h4 className="text-sm font-medium text-stone-700 mb-2">Source Image</h4>
         <InpaintMaskCanvas
           overlayImageSrc={imageUrl}
@@ -691,17 +872,12 @@ export default function InpaintEditor({
           naturalHeight={imageDims?.height ?? null}
           initialMaskDataUrl={maskDataUrl}
           onMaskChange={setMaskDataUrl}
-          onSegmentSelect={handleSegmentSelect}
-          segmentDisabled={isProcessing || isSegmenting}
-          segmenting={isSegmenting}
+          onInstanceToggle={handleInstanceToggle}
+          segmentDisabled={isProcessing || conceptLoading}
+          segmenting={conceptLoading}
+          instanceOverlays={instanceOverlays}
           expansionRadius={maskExpansion}
           fullWidth={fullWidth}
-          selectionMarkers={batchSelections.map((selection, index) => ({
-            id: selection.id,
-            x: selection.point.x,
-            y: selection.point.y,
-            index: index + 1,
-          }))}
           selectionReset={selectionReset}
           onMaskCleared={handleMaskCleared}
         />
@@ -734,7 +910,7 @@ export default function InpaintEditor({
         <BatchStagingPanel
           selections={batchSelections}
           maxObjects={MAX_BATCH_OBJECTS}
-          disabled={isProcessing || isSegmenting}
+          disabled={isProcessing || conceptLoading}
           processing={isProcessing}
           activeBatch={activeBatch}
           onRun={handleBatchRun}
@@ -747,11 +923,11 @@ export default function InpaintEditor({
       <div className="flex items-center gap-4">
         <button
           onClick={handleInpaint}
-          disabled={isProcessing || isSegmenting || !maskDataUrl}
+          disabled={isProcessing || conceptLoading || !maskDataUrl}
           className={`
             flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium
             transition-colors
-            ${isProcessing || isSegmenting || !maskDataUrl
+            ${isProcessing || conceptLoading || !maskDataUrl
               ? "bg-stone-300 text-stone-500 cursor-not-allowed"
               : "bg-stone-800 text-white hover:bg-stone-700"
             }
@@ -770,12 +946,6 @@ export default function InpaintEditor({
         {isProcessing && statusText && (
           <span className="text-sm text-stone-600">{statusText}</span>
         )}
-
-        {isSegmenting && (
-          <span role="status" className="text-sm text-stone-600">
-            Identifying the object you clicked...
-          </span>
-        )}
       </div>
 
       {/* Issue #191/#223 one-click preset, demoted to an optional shortcut
@@ -789,7 +959,7 @@ export default function InpaintEditor({
         aesthetic={aesthetic}
         imageWidth={imageDims?.width ?? null}
         imageHeight={imageDims?.height ?? null}
-        disabled={isProcessing || isSegmenting}
+        disabled={isProcessing || conceptLoading}
         processing={isProcessing}
         statusText={statusText}
         onRun={handleHolisticRun}
@@ -807,7 +977,7 @@ export default function InpaintEditor({
             aesthetic={aesthetic}
             imageWidth={imageDims?.width ?? null}
             imageHeight={imageDims?.height ?? null}
-            disabled={isProcessing || isSegmenting}
+            disabled={isProcessing || conceptLoading}
             onRun={handleHolisticRun}
             onError={showError}
           />

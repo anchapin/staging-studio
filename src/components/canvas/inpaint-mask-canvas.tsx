@@ -3,7 +3,6 @@
 import { useRef, useState, useEffect, useCallback, useMemo, useId } from "react";
 import { Loader2 } from "lucide-react";
 import {
-  canvasPointToNatural,
   clientPointToCanvas,
   computeBackingStoreDimensions,
   computeMaskCanvasDimensions,
@@ -18,8 +17,21 @@ import {
 } from "@/lib/mask-dilation";
 import { SAM_TOOL_ENABLED } from "@/lib/sam-tool";
 
-/** Tools for building the mask: freehand paint, flood-fill, or click-to-segment. */
+/** Tools for building the mask: freehand paint, flood-fill, or concept select. */
 type MaskTool = "brush" | "fill" | "select";
+
+/**
+ * Rank→color palette for instance overlays (issue #228). Six hues,
+ * cycled by score rank, so adjacent instances stay distinguishable.
+ */
+const INSTANCE_OVERLAY_PALETTE = [
+  "#22c55e",
+  "#f97316",
+  "#3b82f6",
+  "#a855f7",
+  "#06b6d4",
+  "#eab308",
+];
 
 /**
  * Issue #203: editor-side sync of the batch selection set. Whenever `id`
@@ -43,6 +55,22 @@ export interface SelectionMarker {
   index: number;
 }
 
+/**
+ * Issue #228: one detected concept instance to tint on the overlay
+ * canvas. `rank` is the score rank (0 = highest score) and picks the
+ * palette color; `selected` dims the instance (its pixels are already in
+ * the white mask canvas above).
+ */
+export interface InstanceOverlay {
+  /** Stable React key (concept + response position). */
+  id: string;
+  /** The provider mask (alpha-cutout data URL) to tint. */
+  maskDataUrl: string;
+  /** Score rank, 0-based. */
+  rank: number;
+  selected: boolean;
+}
+
 interface InpaintMaskCanvasProps {
   width?: number;
   height?: number;
@@ -63,19 +91,26 @@ interface InpaintMaskCanvasProps {
    */
   fullWidth?: boolean;
   /**
-   * Select Object tool (issue #183): called on click with the point in the
-   * photo's natural pixel space. The parent issues the /api/segment call.
+   * Select Objects tool (issue #228): called on click with the point in
+   * LOGICAL canvas pixel space (dims — the same space the parent decodes
+   * instance grids at). The parent hit-tests client-side; no provider
+   * call happens on click. Repeated clicks are MEANINGFUL (toggle), so
+   * unlike the old point-SAM flow there is no same-point dedupe.
    */
-  onSegmentSelect?: (point: CanvasPoint) => void;
+  onInstanceToggle?: (point: CanvasPoint) => void;
   /** True while segmenting (or inpainting) runs; select clicks are ignored. */
   segmentDisabled?: boolean;
   /**
-   * True while a SAM segment request is in flight (issue #202): shows a
-   * spinner + "Selecting..." on the Select Object tool itself and a wait
-   * cursor on the canvas, so a click's processing is visible where the
-   * click happened — not only in the status line at the editor's bottom.
+   * True while a concept detection is in flight (issue #228, formerly the
+   * per-click SAM request): shows a spinner + "Selecting..." on the
+   * Select Objects tool itself and a wait cursor on the canvas.
    */
   segmenting?: boolean;
+  /**
+   * Issue #228: score-ranked detected instances to tint beneath the mask
+   * canvas. Pure DOM/canvas overlay — never touches the exported mask.
+   */
+  instanceOverlays?: InstanceOverlay[];
   /**
    * Outward mask growth in mask-canvas pixels applied at export time
    * (issue #180): makes FLUX.1 Fill regenerate bezels/frames at the painted
@@ -112,9 +147,10 @@ export default function InpaintMaskCanvas({
   naturalHeight,
   overlayImageSrc,
   fullWidth = false,
-  onSegmentSelect,
+  onInstanceToggle,
   segmentDisabled = false,
   segmenting = false,
+  instanceOverlays,
   expansionRadius = DEFAULT_MASK_EXPANSION_RADIUS,
   selectionMarkers,
   selectionReset = null,
@@ -125,13 +161,6 @@ export default function InpaintMaskCanvas({
   const [brushSize, setBrushSize] = useState(initialBrushSize);
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(initialMaskDataUrl ?? null);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
-
-  // Cost guardrail for the paid SAM call (issue #183): a repeat click on
-  // the exact same point is deduped (the endpoint is deterministic, so the
-  // identical point would return an identical mask). Any manual paint,
-  // clear, or geometry change resets the key so re-selection stays
-  // possible.
-  const lastSegmentPointRef = useRef<CanvasPoint | null>(null);
 
   // Masking-guidance state: which tool is active, whether anything has been
   // painted yet (drives the empty-state hint), and whether the exported mask
@@ -183,6 +212,70 @@ export default function InpaintMaskCanvas({
 
   const hasOverlay = Boolean(overlayImageSrc);
 
+  // ---------------------------------------------------------------------
+  // Issue #228: score-ranked instance overlays. A dedicated canvas layer
+  // (below the interactive mask canvas) tints each detected instance by
+  // rank; selected instances dim because their pixels already show as
+  // white in the mask canvas above. This layer is decorative only — it
+  // never touches the exported mask pixels.
+  // ---------------------------------------------------------------------
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
+  const instanceImageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
+  const [overlayTick, setOverlayTick] = useState(0);
+
+  // Preload instance cutout images once per response; the draw effect
+  // reads them from the cache. Failed decodes cache a zero-width image
+  // and are skipped at draw time.
+  useEffect(() => {
+    if (!instanceOverlays || instanceOverlays.length === 0) return;
+    let cancelled = false;
+    const cache = instanceImageCacheRef.current;
+    for (const overlay of instanceOverlays) {
+      if (cache.has(overlay.maskDataUrl)) continue;
+      const img = new Image();
+      img.onload = () => {
+        if (!cancelled) setOverlayTick((tick) => tick + 1);
+      };
+      img.onerror = () => {
+        if (!cancelled) setOverlayTick((tick) => tick + 1);
+      };
+      cache.set(overlay.maskDataUrl, img);
+      img.src = overlay.maskDataUrl;
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [instanceOverlays]);
+
+  useEffect(() => {
+    const overlayCanvas = overlayCanvasRef.current;
+    const ctx = overlayCanvas?.getContext("2d");
+    if (!overlayCanvas || !ctx) return;
+    ctx.clearRect(0, 0, dims.width, dims.height);
+    if (!instanceOverlays || instanceOverlays.length === 0) return;
+    const cache = instanceImageCacheRef.current;
+    for (const overlay of instanceOverlays) {
+      const img = cache.get(overlay.maskDataUrl);
+      if (!img || !img.complete || !img.naturalWidth) continue;
+      // Tint the alpha cutout with the rank color: draw the cutout, then
+      // keep only its alpha shape filled with the palette color.
+      const tinted = document.createElement("canvas");
+      tinted.width = dims.width;
+      tinted.height = dims.height;
+      const tintedCtx = tinted.getContext("2d");
+      if (!tintedCtx) continue;
+      tintedCtx.drawImage(img, 0, 0, dims.width, dims.height);
+      tintedCtx.globalCompositeOperation = "source-in";
+      tintedCtx.fillStyle =
+        INSTANCE_OVERLAY_PALETTE[overlay.rank % INSTANCE_OVERLAY_PALETTE.length];
+      tintedCtx.fillRect(0, 0, dims.width, dims.height);
+      ctx.globalAlpha = overlay.selected ? 0.12 : 0.4;
+      ctx.drawImage(tinted, 0, 0);
+    }
+    ctx.globalAlpha = 1;
+  }, [instanceOverlays, overlayTick, dims.width, dims.height]);
+
+
   // Latest initial mask without making initCanvas depend on it — re-running
   // init on every parent render would wipe in-progress strokes.
   const initialMaskRef = useRef(initialMaskDataUrl);
@@ -218,7 +311,6 @@ export default function InpaintMaskCanvas({
     // state to match what will actually be on screen.
     setHasPainted(Boolean(initial));
     setLowCoverage(false);
-    lastSegmentPointRef.current = null;
   }, [dims.width, dims.height, backing]);
 
   // Initialize once on mount, and re-initialize when the geometry changes
@@ -328,45 +420,29 @@ export default function InpaintMaskCanvas({
     const point = getCoordinates(e);
     if (!point) return;
     if (activeTool === "select") {
-      handleSegmentClick(point);
+      handleInstanceClick(point);
       return;
     }
     if (activeTool === "fill") {
-      lastSegmentPointRef.current = null;
       if (performFill(point)) {
         setHasPainted(true);
         exportMask();
       }
       return;
     }
-    lastSegmentPointRef.current = null;
     setIsDrawing(true);
     lastPointRef.current = point;
     setHasPainted(true);
     draw(point, point);
   };
 
-  // Select Object tool: converts the clicked canvas point into the photo's
-  // natural pixel space (what the SAM point prompt expects), dedupes repeat
-  // clicks on the same point, and hands off to the parent's /api/segment
-  // call. The canvas is only repainted when the parent comes back with a
-  // successful response (via segmentMaskRequest), so failures leave it
-  // untouched.
-  const handleSegmentClick = (canvasPoint: CanvasPoint) => {
-    if (!onSegmentSelect || segmentDisabled) return;
-    const naturalWidthValue = naturalWidth && naturalWidth > 0 ? naturalWidth : dims.width;
-    const naturalHeightValue = naturalHeight && naturalHeight > 0 ? naturalHeight : dims.height;
-    const point = canvasPointToNatural(
-      canvasPoint,
-      dims.width,
-      dims.height,
-      naturalWidthValue,
-      naturalHeightValue
-    );
-    const last = lastSegmentPointRef.current;
-    if (last && last.x === point.x && last.y === point.y) return;
-    lastSegmentPointRef.current = point;
-    onSegmentSelect(point);
+  // Select Objects tool (issue #228): hands the clicked LOGICAL canvas
+  // point to the parent, which hit-tests it against the decoded concept
+  // instances — zero provider calls per click. Repeated clicks on the
+  // same point are meaningful (toggle in/out), so there is no dedupe.
+  const handleInstanceClick = (canvasPoint: CanvasPoint) => {
+    if (!onInstanceToggle || segmentDisabled) return;
+    onInstanceToggle(canvasPoint);
   };
 
   const handleMove = (e: React.MouseEvent | React.TouchEvent) => {
@@ -491,7 +567,6 @@ export default function InpaintMaskCanvas({
     setMaskDataUrl(null);
     setHasPainted(false);
     setLowCoverage(false);
-    lastSegmentPointRef.current = null;
     onMaskChange?.(null);
     // Issue #203: the grid is now empty — the parent must drop the batch
     // selection set so the panel can't disagree with the canvas (the
@@ -521,7 +596,6 @@ export default function InpaintMaskCanvas({
       setMaskDataUrl(null);
       setHasPainted(false);
       setLowCoverage(false);
-      lastSegmentPointRef.current = null;
       onMaskChange?.(null);
       return;
     }
@@ -576,21 +650,19 @@ export default function InpaintMaskCanvas({
       const at = cursorRef.current ?? centerOf();
       cursorRef.current = at;
       setCursor(at);
-      handleSegmentClick(at);
+      handleInstanceClick(at);
       return;
     }
     if (activeTool === "fill") {
       const at = cursorRef.current ?? centerOf();
       cursorRef.current = at;
       setCursor(at);
-      lastSegmentPointRef.current = null;
       if (performFill(at)) {
         setHasPainted(true);
         exportMask();
       }
       return;
     }
-    lastSegmentPointRef.current = null;
     if (keyboardPaintingRef.current) {
       liftKeyboardPaint();
       return;
@@ -699,7 +771,7 @@ export default function InpaintMaskCanvas({
     activeTool === "fill"
       ? "Room mask canvas with the Fill Region tool active: draw a continuous outline around the object, arrow keys move the cursor, press P, Space, or Enter to fill the region under the cursor"
       : activeTool === "select"
-        ? "Room mask canvas with the Select Object tool active: click an object in the photo to add its detected shape to the batch selection (consecutive clicks accumulate, up to five objects), arrow keys move the cursor, press P, Space, or Enter to select the object under the cursor"
+        ? "Room mask canvas with the Select Objects tool active: detected instances are tinted by rank, click one to toggle its shape in or out of the mask (clicks are free — detection already ran per concept), arrow keys move the cursor, press P, Space, or Enter to toggle the instance under the cursor"
         : "Room mask painting canvas: arrow keys move the brush (hold Shift for fine steps), press P, Space, or Enter to start and stop painting";
 
   const canvasElement = (
@@ -707,6 +779,24 @@ export default function InpaintMaskCanvas({
       role="application"
       className={hasOverlay ? "absolute inset-0" : "relative w-fit"}
     >
+      {/* Issue #228: tinted per-instance overlays (score-ranked). Decorative
+          layer beneath the interactive mask canvas — never export pixels. */}
+      <canvas
+        ref={overlayCanvasRef}
+        width={dims.width}
+        height={dims.height}
+        aria-hidden="true"
+        className={
+          hasOverlay
+            ? "pointer-events-none absolute inset-0 h-full w-full"
+            : "pointer-events-none absolute left-0 top-0"
+        }
+        style={
+          hasOverlay
+            ? undefined
+            : { width: Math.min(dims.width, 512), height: Math.min(dims.height, 512) }
+        }
+      />
       <canvas
         ref={canvasRef}
         width={backing.width}
@@ -749,7 +839,7 @@ export default function InpaintMaskCanvas({
             }`}
           >
             {activeTool === "select"
-              ? "Click objects to add them to the batch selection"
+              ? "Click a tinted object to toggle it in the mask"
               : "Drag to paint over the object you want changed"}
           </span>
         </div>
@@ -805,10 +895,10 @@ export default function InpaintMaskCanvas({
         regenerated, everything else is preserved. A thin outline won&apos;t
         change the interior, so cover the whole object (or draw an outline and
         use Fill Region on its inside).
-        {/* Select Object is flag-gated (SAM_TOOL_ENABLED): the sentence
+        {/* Select Objects is flag-gated (SAM_TOOL_ENABLED): the sentence
             disappears with the tool if the kill switch is flipped off. */}
         {SAM_TOOL_ENABLED &&
-          " Select Object detects a clicked object's shape for you and paints it onto the mask. Consecutive clicks accumulate into a batch — compose one theme or per-object prompts in the batch panel, then run them in order."}
+          " Select Objects detects every instance of the chosen concept in one call — pick a concept chip above, then click tinted objects on the photo to toggle them in or out of the mask. Re-clicks and re-toggles are free."}
       </p>
 
       {lowCoverage && (
@@ -851,10 +941,10 @@ export default function InpaintMaskCanvas({
           >
             Fill Region
           </button>
-          {/* Issue #189 hid this tool for the demo; issue #202 revived it
-              with per-click feedback: the spinner below is THE processing
-              indicator — visible where the click happened, not just in the
-              editor's bottom status line. */}
+          {/* Issue #228: the old per-click Select Object tool became the
+              concept-driven Select Objects tool. The spinner below is THE
+              processing indicator — visible on the tool itself while a
+              concept detection runs, not just in the editor's status line. */}
           {SAM_TOOL_ENABLED && (
             <button
               type="button"
@@ -874,7 +964,7 @@ export default function InpaintMaskCanvas({
                   Selecting...
                 </>
               ) : (
-                "Select Object"
+                "Select Objects"
               )}
             </button>
           )}
