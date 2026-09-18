@@ -34,11 +34,20 @@ import { isMaskedPixel } from "./mask-coverage";
  */
 export const MAX_BATCH_OBJECTS = 5;
 
-/** One pending multi-select object: where it was clicked and its own mask. */
+/**
+ * One pending multi-select object: where it was selected and its own mask.
+ * Since issue #229 the only source is the concept tool's toggled instances;
+ * the set structure and reducer are unchanged from #203.
+ */
 export interface BatchSelection {
   /** Unique, stable id for the lifetime of the selection set. */
   id: string;
-  /** Click point in the photo's natural pixel space. */
+  /**
+   * Selection point, used as the duplicate key (same rounded point = same
+   * object). Concept-sourced entries carry the toggle point in mask-canvas
+   * pixel space; the exact space only needs to be homogeneous within one
+   * set, which holds now that every entry is concept-sourced.
+   */
   point: { x: number; y: number };
   /**
    * The object's white-on-black mask as a `data:image` PNG, already scaled
@@ -46,6 +55,12 @@ export interface BatchSelection {
    * selection, so every mask in the set shares one geometry).
    */
   maskDataUrl: string;
+  /**
+   * Detection concept the instance was toggled from (issue #229), shown in
+   * the batch panel; omitting it falls back to the positional `Object N`
+   * label.
+   */
+  conceptLabel?: string;
 }
 
 /** How prompts map onto the selected objects. */
@@ -105,6 +120,62 @@ export function reduceSelectionSet(
     case "clear":
       return { selections: [], rejected: null };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Concept-toggle integration (issue #229): toggled concept instances are
+// the only selection source feeding the batch panel.
+// ---------------------------------------------------------------------------
+
+/** Result of applying one instance toggle: both state pieces, in lockstep. */
+export interface ConceptToggleReduction {
+  selections: BatchSelection[];
+  /** The canvas's tinted-instance indices, updated with the set. */
+  selectedInstanceIndices: number[];
+  /** Why an add was refused, inherited from {@link reduceSelectionSet}. */
+  rejected: "cap" | "duplicate" | null;
+}
+
+/**
+ * Applies one concept-instance toggle to BOTH pieces of selection state —
+ * the batch selection set and the canvas's tinted-instance indices — in
+ * lockstep, so the batch panel can never disagree with what the canvas
+ * shows as selected (issue #229).
+ *
+ * Contract: toggling ON routes through {@link reduceSelectionSet}'s `add`,
+ * so the cap ({@link MAX_BATCH_OBJECTS}) and duplicate-point rules are the
+ * existing ones — no new limit logic. A refused add leaves BOTH pieces
+ * unchanged (the instance does not light up on the canvas either).
+ * Toggling OFF removes by id and rank; removing an absent id/index is a
+ * no-op. Callers pass `turningOn` consistent with `selectedInstanceIndices`
+ * (the toggle target's membership). Never mutates the inputs.
+ * Side effects: none (pure).
+ */
+export function applyConceptToggle(
+  selections: BatchSelection[],
+  selectedInstanceIndices: number[],
+  entry: BatchSelection,
+  instanceIndex: number,
+  turningOn: boolean
+): ConceptToggleReduction {
+  if (!turningOn) {
+    return {
+      selections: reduceSelectionSet(selections, { type: "remove", id: entry.id }).selections,
+      selectedInstanceIndices: selectedInstanceIndices.filter((index) => index !== instanceIndex),
+      rejected: null,
+    };
+  }
+  const reduction = reduceSelectionSet(selections, { type: "add", selection: entry });
+  if (reduction.rejected !== null) {
+    return { selections: reduction.selections, selectedInstanceIndices, rejected: reduction.rejected };
+  }
+  return {
+    selections: reduction.selections,
+    selectedInstanceIndices: selectedInstanceIndices.includes(instanceIndex)
+      ? selectedInstanceIndices
+      : [...selectedInstanceIndices, instanceIndex],
+    rejected: null,
+  };
 }
 
 // ---------------------------------------------------------------------------

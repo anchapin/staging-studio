@@ -23,7 +23,7 @@ export interface ActiveBatch {
 }
 
 interface BatchStagingPanelProps {
-  /** The pending selection set, in click order. */
+  /** The pending selection set, in toggle order. */
   selections: BatchSelection[];
   /** Selection cap (mirrors MAX_BATCH_OBJECTS; shown in the copy). */
   maxObjects: number;
@@ -47,8 +47,10 @@ interface BatchStagingPanelProps {
 
 /**
  * Multi-select batch panel (issue #203): prompt composition for the
- * accumulated Select Object selection set, mirroring the #191 preset's
- * panel style. UX + wiring only — plan building/validation lives in
+ * accumulated selection set, mirroring the #191 preset's panel style.
+ * Since issue #229 the entries come exclusively from toggled SAM 3.1
+ * concept instances — the old per-click SAM source is removed. UX +
+ * wiring only — plan building/validation lives in
  * `multi-select-batch.ts`, and the editor owns execution (thematic = one
  * run over the union mask; per-object = sequential runs, one per object,
  * stacking into the same variant slot).
@@ -81,6 +83,10 @@ export default function BatchStagingPanel({
   const setPrompt = (selectionId: string, value: string) => {
     setPromptsBySelection((previous) => ({ ...previous, [selectionId]: value }));
   };
+
+  /** Concept name for concept-sourced entries; positional `Object N` otherwise. */
+  const entryLabel = (selection: BatchSelection, index: number) =>
+    selection.conceptLabel ?? batchStepLabel(index);
 
   const handleRun = () => {
     if (!canRun) return;
@@ -122,10 +128,11 @@ export default function BatchStagingPanel({
       </div>
 
       <p className="text-xs text-stone-600">
-        Every selected object carries its own mask. Batches are capped at{" "}
-        {maxObjects} objects — each one is a separate billed generation, and
-        per-object results are applied one at a time so they stack into the
-        same variant. Changing the selection rebuilds the mask.
+        Selected objects come from toggling detected instances on the photo;
+        each carries its own mask. Batches are capped at {maxObjects}{" "}
+        objects — each one is a separate billed generation, and per-object
+        results are applied one at a time so they stack into the same
+        variant. Changing the selection rebuilds the mask.
       </p>
 
       <ol className="flex flex-wrap gap-1.5 text-xs text-stone-700">
@@ -134,7 +141,7 @@ export default function BatchStagingPanel({
             key={selection.id}
             className="rounded-full border border-stone-300 bg-white px-2 py-0.5"
           >
-            {batchStepLabel(index)}
+            {entryLabel(selection, index)}
           </li>
         ))}
       </ol>
@@ -196,14 +203,18 @@ export default function BatchStagingPanel({
                       htmlFor={`batch-prompt-${selection.id}`}
                       className="text-xs font-medium text-stone-600"
                     >
-                      {batchStepLabel(index)} prompt
+                      {entryLabel(selection, index)} prompt
                     </label>
                     <input
                       id={`batch-prompt-${selection.id}`}
                       type="text"
                       value={orderedPrompts[index]}
                       onChange={(event) => setPrompt(selection.id, event.target.value)}
-                      placeholder={`e.g. replace ${batchStepLabel(index).toLowerCase()} with ...`}
+                      placeholder={
+                        selection.conceptLabel
+                          ? `e.g. replace the ${selection.conceptLabel} with ...`
+                          : `e.g. replace ${batchStepLabel(index).toLowerCase()} with ...`
+                      }
                       className="mt-0.5 w-full rounded-md border border-stone-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-stone-500"
                     />
                   </li>
