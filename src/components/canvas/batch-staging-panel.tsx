@@ -109,14 +109,14 @@ export default function BatchStagingPanel({
 
   return (
     <section
-      aria-label="Batch object staging"
+      aria-label="Batch region staging"
       className="no-print flex flex-col gap-3 rounded-md border border-stone-300 bg-stone-50 p-4"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h4 className="text-sm font-semibold text-stone-800">
           Batch staging
           <span className="ml-2 rounded bg-stone-200 px-1.5 py-0.5 text-xs font-normal text-stone-600">
-            {selections.length} / {maxObjects} objects
+            {selections.length} / {maxObjects} regions
           </span>
         </h4>
         <div className="flex items-center gap-2">
@@ -135,9 +135,9 @@ export default function BatchStagingPanel({
       </div>
 
       <p className="text-xs text-stone-600">
-        Selected objects come from toggling detected instances on the photo;
-        each carries its own mask. Batches are capped at {maxObjects}{" "}
-        objects — each one is a separate billed generation, and per-object
+        Selected regions come from toggling detected instances on the photo;
+        nearby instances fuse into one region. Batches are capped at {maxObjects}{" "}
+        regions — each one is a separate billed generation, and per-region
         results are applied one at a time so they stack into the same
         variant. Changing the selection rebuilds the mask.
       </p>
@@ -165,7 +165,7 @@ export default function BatchStagingPanel({
               onChange={() => setMode("thematic")}
               className="h-4 w-4 accent-stone-800"
             />
-            One theme for all objects
+            One theme for all regions
           </label>
           <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-stone-700">
             <input

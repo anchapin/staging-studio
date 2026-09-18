@@ -184,8 +184,8 @@ describe("unionMaskBuffers", () => {
 
 describe("batchStepLabel", () => {
   it("produces 1-based labels", () => {
-    expect(batchStepLabel(0)).toBe("Object 1");
-    expect(batchStepLabel(4)).toBe("Object 5");
+    expect(batchStepLabel(0)).toBe("Region 1");
+    expect(batchStepLabel(4)).toBe("Region 5");
   });
 });
 
@@ -202,7 +202,7 @@ describe("buildBatchPlan", () => {
     });
     expect(result).toEqual({
       ok: false,
-      error: "Select at least one object before running a batch.",
+      error: "Select at least one region before running a batch.",
     });
   });
 
@@ -269,13 +269,13 @@ describe("buildBatchPlan", () => {
       expect(result.plan.steps).toEqual([
         {
           selectionId: "a",
-          label: "Object 1",
+          label: "Region 1",
           maskDataUrl: MASK_A,
           promptDirectives: "futon for the couch",
         },
         {
           selectionId: "b",
-          label: "Object 2",
+          label: "Region 2",
           maskDataUrl: MASK_B,
           promptDirectives: "rug to match",
         },
@@ -293,7 +293,7 @@ describe("buildBatchPlan", () => {
     });
     expect(result).toEqual({
       ok: false,
-      error: "Every selected object needs its own prompt.",
+      error: "Every selected region needs its own prompt.",
     });
   });
 
@@ -306,7 +306,7 @@ describe("buildBatchPlan", () => {
       unionMaskDataUrl: MASK_C,
     });
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain("Object 2");
+    if (!result.ok) expect(result.error).toContain("Region 2");
   });
 
   it("refuses an over-long per-object prompt", () => {
@@ -318,21 +318,21 @@ describe("buildBatchPlan", () => {
       unionMaskDataUrl: MASK_C,
     });
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain("Object 2");
+    if (!result.ok) expect(result.error).toContain("Region 2");
   });
 });
 
 describe("per-object progress state machine", () => {
   const steps = [
-    { selectionId: "a", label: "Object 1", maskDataUrl: MASK_A, promptDirectives: "p1" },
-    { selectionId: "b", label: "Object 2", maskDataUrl: MASK_B, promptDirectives: "p2" },
-    { selectionId: "c", label: "Object 3", maskDataUrl: MASK_C, promptDirectives: "p3" },
+    { selectionId: "a", label: "Region 1", maskDataUrl: MASK_A, promptDirectives: "p1" },
+    { selectionId: "b", label: "Region 2", maskDataUrl: MASK_B, promptDirectives: "p2" },
+    { selectionId: "c", label: "Region 3", maskDataUrl: MASK_C, promptDirectives: "p3" },
   ];
 
   it("starts with every step pending", () => {
     const progress = initialBatchProgress(steps);
     expect(progress.steps.map((step) => step.status)).toEqual(["pending", "pending", "pending"]);
-    expect(progress.steps.map((step) => step.label)).toEqual(["Object 1", "Object 2", "Object 3"]);
+    expect(progress.steps.map((step) => step.label)).toEqual(["Region 1", "Region 2", "Region 3"]);
   });
 
   it("moves a running step to completed and records its result URL", () => {
@@ -391,10 +391,10 @@ describe("per-object progress state machine", () => {
     expect(hasFailedStep(progress)).toBe(true);
   });
 
-  it("renders running-step progress as 'Object N of total'", () => {
+  it("renders running-step progress as 'Region N of total'", () => {
     let progress = initialBatchProgress(steps);
     expect(batchProgressText(progress)).toBeNull();
     progress = advanceBatchProgress(progress, { kind: "start", index: 1 });
-    expect(batchProgressText(progress)).toBe("Object 2 of 3");
+    expect(batchProgressText(progress)).toBe("Region 2 of 3");
   });
 });

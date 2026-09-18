@@ -102,14 +102,14 @@ test.describe("sam 3.1 concept find-and-replace flow", () => {
     expect(detection.requestCount()).toBe(3);
 
     // ---- 3. Toggle two detected instances (clicks are free) ------------
-    const selectButton = page.getByRole("button", { name: "Select Objects" });
+    const selectButton = page.getByRole("button", { name: "Select Regions" });
     await expect(selectButton).toBeEnabled();
     await selectButton.click();
 
     const canvas = page
       .getByRole("application")
       .locator(
-        'canvas[aria-label^="Room mask canvas with the Select Objects tool active"]'
+        'canvas[aria-label^="Room mask canvas with the Select Regions tool active"]'
       );
     await expect(canvas).toBeVisible();
     await canvas.scrollIntoViewIfNeeded();

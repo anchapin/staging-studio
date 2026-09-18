@@ -833,7 +833,7 @@ export default function InpaintMaskCanvas({
     activeTool === "fill"
       ? "Room mask canvas with the Fill Region tool active: draw a continuous outline around the object, arrow keys move the cursor, press P, Space, or Enter to fill the region under the cursor"
       : activeTool === "select"
-        ? "Room mask canvas with the Select Objects tool active: detected instances show as faint tinted shapes with colored outlines, selected instances as solid fills — click one to toggle its shape in or out of the mask (clicks are free — detection already ran per concept), arrow keys move the cursor, press P, Space, or Enter to toggle the instance under the cursor"
+        ? "Room mask canvas with the Select Regions tool active: detected instances show as faint tinted shapes with colored outlines, selected instances as solid fills — click one to toggle its shape in or out of the mask (clicks are free — detection already ran per concept), arrow keys move the cursor, press P, Space, or Enter to toggle the instance under the cursor"
         : "Room mask painting canvas: arrow keys move the brush (hold Shift for fine steps), press P, Space, or Enter to start and stop painting";
 
   const canvasElement = (
@@ -960,7 +960,7 @@ export default function InpaintMaskCanvas({
         {/* Select Objects is flag-gated (SAM_TOOL_ENABLED): the sentence
             disappears with the tool if the kill switch is flipped off. */}
         {SAM_TOOL_ENABLED &&
-          " Select Objects detects every instance of the chosen concept in one call — pick a concept chip above, then click outlined objects to add them to the mask (outlines turn solid fills when selected). Re-clicks and re-toggles are free."}
+          " Select Regions detects every instance of the chosen concept in one call — pick a concept chip above, then click outlined instances to add them to the mask (outlines turn solid fills when selected). Nearby instances fuse into one region. Re-clicks and re-toggles are free."}
       </p>
 
       {lowCoverage && (
@@ -1026,7 +1026,7 @@ export default function InpaintMaskCanvas({
                   Selecting...
                 </>
               ) : (
-                "Select Objects"
+                "Select Regions"
               )}
             </button>
           )}

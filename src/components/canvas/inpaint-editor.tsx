@@ -36,7 +36,7 @@ import {
 } from "@/lib/mask-format";
 import { maskGridFromPixels } from "@/lib/mask-flood-fill";
 import { computeMaskCanvasDimensions } from "@/lib/canvas-coords";
-import { fillHoles } from "@/lib/mask-postprocess";
+import { fillHoles, closeRegion, MERGE_PROXIMITY_PX } from "@/lib/mask-postprocess";
 import {
   MAX_BATCH_OBJECTS,
   advanceBatchProgress,
@@ -50,6 +50,7 @@ import {
   type BatchPromptMode,
   type BatchSelection,
   type ConceptSelectAllCandidate,
+  type InstanceMaskGrid,
   type PerObjectBatchPlan,
 } from "@/lib/multi-select-batch";
 
@@ -106,29 +107,8 @@ async function composeUnionMaskDataUrl(
   height: number
 ): Promise<string | null> {
   if (maskDataUrls.length === 0) return null;
-  const buffers: Array<{
-    width: number;
-    height: number;
-    data: Uint8ClampedArray;
-  }> = [];
-  for (const url of maskDataUrls) {
-    try {
-      const img = await loadImage(url);
-      const layer = document.createElement("canvas");
-      layer.width = width;
-      layer.height = height;
-      const layerCtx = layer.getContext("2d");
-      if (!layerCtx) return null;
-      layerCtx.drawImage(img, 0, 0, width, height);
-      buffers.push({
-        width,
-        height,
-        data: layerCtx.getImageData(0, 0, width, height).data,
-      });
-    } catch {
-      return null;
-    }
-  }
+  const buffers = await decodeMaskBuffers(maskDataUrls, width, height);
+  if (!buffers) return null;
   const union = unionMaskBuffers(buffers);
   if (!union) return null;
 
@@ -160,6 +140,77 @@ async function composeUnionMaskDataUrl(
     0,
     0
   );
+  return canvas.toDataURL("image/png");
+}
+
+/** Decodes mask data URLs into RGBA buffers at one shared geometry. Browser-only. */
+async function decodeMaskBuffers(
+  maskDataUrls: string[],
+  width: number,
+  height: number
+): Promise<Array<{ width: number; height: number; data: Uint8ClampedArray }> | null> {
+  const buffers: Array<{ width: number; height: number; data: Uint8ClampedArray }> = [];
+  for (const url of maskDataUrls) {
+    try {
+      const img = await loadImage(url);
+      const layer = document.createElement("canvas");
+      layer.width = width;
+      layer.height = height;
+      const layerCtx = layer.getContext("2d");
+      if (!layerCtx) return null;
+      layerCtx.drawImage(img, 0, 0, width, height);
+      buffers.push({
+        width,
+        height,
+        data: layerCtx.getImageData(0, 0, width, height).data,
+      });
+    } catch {
+      return null;
+    }
+  }
+  return buffers;
+}
+
+/**
+ * Composes one merged region's mask (issue #252 D2/D3): union the member
+ * masks, morphologically close with the proximity radius scaled to natural
+ * dimensions (bridges the seam between fused objects), then fill holes
+ * (closing can seal new pockets; filling runs last). Browser-only.
+ */
+async function composeRegionMaskDataUrl(
+  maskDataUrls: string[],
+  width: number,
+  height: number,
+  closeRadius: number
+): Promise<string | null> {
+  if (maskDataUrls.length === 0) return null;
+  const buffers = await decodeMaskBuffers(maskDataUrls, width, height);
+  if (!buffers) return null;
+  const union = unionMaskBuffers(buffers);
+  if (!union) return null;
+
+  const unionGrid = maskGridFromPixels(union.data, union.width, union.height);
+  const closed = closeRegion(unionGrid, width, height, closeRadius);
+  const closedGrid = closed ? closed.mask : unionGrid;
+  const filled = fillHoles(closedGrid, width, height);
+  const finalGrid = filled ? filled.mask : closedGrid;
+
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let i = 0; i < finalGrid.length; i++) {
+    const o = i * 4;
+    if (finalGrid[i] === 1) {
+      data[o] = 255;
+      data[o + 1] = 255;
+      data[o + 2] = 255;
+    }
+    data[o + 3] = 255;
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.putImageData(new ImageData(data, width, height), 0, 0);
   return canvas.toDataURL("image/png");
 }
 
@@ -532,6 +583,20 @@ export default function InpaintEditor({
       if (hit === null) return;
       const instance = decodedInstances[hit];
       if (!instance) return;
+      // Issue #252 D2: proximity merging engages when instance grids are
+      // available — toggling a mask within MERGE_PROXIMITY_PX of an
+      // existing region's members fuses into that region (one row, one
+      // prompt, one billed run; the region mask is recomposed below).
+      const instanceGrids = new Map<number, InstanceMaskGrid>();
+      decodedInstances.forEach((decoded, index) => {
+        if (decoded) {
+          instanceGrids.set(index, {
+            grid: decoded.grid,
+            width: decoded.width,
+            height: decoded.height,
+          });
+        }
+      });
       const toggled = applyConceptToggle(
         batchSelections,
         selectedInstanceIndices,
@@ -542,11 +607,12 @@ export default function InpaintEditor({
           conceptLabel: displayedResult.concept,
         },
         hit,
-        !selectedInstanceIndices.includes(hit)
+        !selectedInstanceIndices.includes(hit),
+        { instanceGrids }
       );
       if (toggled.rejected === "cap") {
         showError(
-          `Batch staging is limited to ${MAX_BATCH_OBJECTS} objects — undo or clear one to add more.`
+          `Batch staging is limited to ${MAX_BATCH_OBJECTS} regions — undo or clear one to add more.`
         );
         return;
       }
@@ -605,6 +671,8 @@ export default function InpaintEditor({
           maskDataUrl: instance.whiteMaskDataUrl,
           conceptLabel: displayedResult.concept,
         },
+        score: instance.score,
+        grid: { grid: instance.grid, width: instance.width, height: instance.height },
       });
     }
     const result = applyConceptSelectAll(batchSelections, selectedInstanceIndices, candidates);
@@ -625,7 +693,7 @@ export default function InpaintEditor({
     }
     setSelectAllNotice(
       result.truncated
-        ? `Selected ${result.selections.length} of ${candidates.length} detected — batch staging is limited to ${MAX_BATCH_OBJECTS} objects.`
+        ? `Selected ${result.selections.length} of ${candidates.length} detected — batch staging is limited to ${MAX_BATCH_OBJECTS} regions.`
         : null
     );
   }, [
@@ -676,6 +744,7 @@ export default function InpaintEditor({
       // segmented against the previous image — they must not leak. The
       // union/reset state follows the selection set via effects.
       setBatchSelections([]);
+      regionMaskCacheRef.current.clear();
       segmentCacheRef.current?.clear();
       setRequestedConcept(DEFAULT_CONCEPT);
       setDisplayedResult(null);
@@ -719,6 +788,64 @@ export default function InpaintEditor({
       cancelled = true;
     };
   }, [batchSelections, imageDims]);
+
+  // Issue #252 D2: keep merged regions' masks composed from their members —
+  // union → closing → hole fill at the photo's natural dimensions (WYSIWYG:
+  // the canvas tint, the dispatched per-region mask, and the thematic union
+  // all agree). Single-instance regions keep their decoded white mask, so
+  // only multi-member regions are recomposed here. The cache is keyed by
+  // id + membership, so a merge that later gains another member recomposes
+  // exactly once.
+  const regionMaskCacheRef = useRef(new Map<string, string>());
+  useEffect(() => {
+    if (!imageDims) return;
+    const pending = batchSelections.filter((selection) => {
+      const members = selection.memberInstanceIndices;
+      if (!members || members.length <= 1) return false;
+      const key = `${selection.id}:${members.join(",")}`;
+      return regionMaskCacheRef.current.get(key) !== selection.maskDataUrl;
+    });
+    if (pending.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      const gridEntry = decodedInstances?.find((instance) => instance) ?? null;
+      const naturalLong = Math.max(imageDims.width, imageDims.height);
+      const gridLong = gridEntry
+        ? Math.max(gridEntry.width, gridEntry.height)
+        : naturalLong;
+      // MERGE_PROXIMITY_PX is defined in mask-canvas grid pixels; scale it
+      // to the natural-dimension space the region masks live in.
+      const closeRadius = Math.max(1, Math.round(MERGE_PROXIMITY_PX * (naturalLong / gridLong)));
+      for (const selection of pending) {
+        const members = selection.memberInstanceIndices ?? [];
+        const memberUrls = members
+          .map((index) => decodedInstances?.[index]?.whiteMaskDataUrl)
+          .filter((url): url is string => Boolean(url));
+        if (memberUrls.length !== members.length) continue;
+        const url = await composeRegionMaskDataUrl(
+          memberUrls,
+          imageDims.width,
+          imageDims.height,
+          closeRadius
+        );
+        if (cancelled) return;
+        if (!url) continue;
+        const key = `${selection.id}:${members.join(",")}`;
+        regionMaskCacheRef.current.set(key, url);
+        setBatchSelections((previous) =>
+          previous.map((candidate) =>
+            candidate.id === selection.id &&
+            (candidate.memberInstanceIndices ?? []).join(",") === members.join(",")
+              ? { ...candidate, maskDataUrl: url }
+              : candidate
+          )
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [batchSelections, imageDims, decodedInstances]);
 
   // Issue #203: a selection-set change invalidates a finished (e.g.
   // failed) batch's plan — drop it so the panel never offers a retry
