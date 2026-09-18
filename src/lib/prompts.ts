@@ -10,8 +10,10 @@ export const NEGATIVE_PROMPT =
 
 // Framing/physicality language appended to every inpaint prompt: without
 // it, FLUX renders replacements (e.g. "a painting") as raw canvas texture
-// pasted onto the wall — no frame, no depth, no wall blending.
-const FRAMING_CONTEXT =
+// pasted onto the wall — no frame, no depth, no wall blending. The
+// holistic full-room prompt (issue #190, `holistic-prompt.ts`) reuses the
+// same sentence so both paths share the framing work from #182.
+export const FRAMING_CONTEXT =
   "Presented as a finished object with its own frame and mounting, " +
   "integrated natural shadows and depth, clean surrounding wall.";
 
@@ -26,6 +28,12 @@ export interface FalFillPayloadInput {
   imageUrl: string;
   maskUrl: string;
   prompt: string;
+  /**
+   * Overrides the negative prompt (issue #190: the holistic full-room
+   * path sends `HOLISTIC_NEGATIVE_PROMPT`, whose architecture terms are
+   * re-scoped). Omitted ⇒ the single-object default {@link NEGATIVE_PROMPT}.
+   */
+  negativePrompt?: string;
 }
 
 // Type alias (not interface) so the payload stays assignable to the
@@ -96,7 +104,8 @@ export function buildInpaintPrompt(
  * (`fal.queue.submit("fal-ai/flux-fill", { input })`) in `api/inpaint`.
  *
  * Contract: `guidance` is pinned to 7.5 and `num_inference_steps` to 28;
- * `negative_prompt` is always {@link NEGATIVE_PROMPT}; image/mask/prompt
+ * `negative_prompt` is {@link NEGATIVE_PROMPT} unless the caller passes
+ * `negativePrompt` (the holistic full-room path does); image/mask/prompt
  * fields pass through unchanged. The exact shape is pinned by
  * `tests/prompts.test.ts` — changing it alters paid generation output.
  * Side effects: none (pure).
@@ -108,7 +117,7 @@ export function buildFalFillPayload(
     image_url: input.imageUrl,
     mask_url: input.maskUrl,
     prompt: input.prompt,
-    negative_prompt: NEGATIVE_PROMPT,
+    negative_prompt: input.negativePrompt ?? NEGATIVE_PROMPT,
     guidance: 7.5,
     num_inference_steps: 28,
   };
