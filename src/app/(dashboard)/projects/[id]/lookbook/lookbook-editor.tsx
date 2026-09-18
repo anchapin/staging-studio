@@ -170,11 +170,21 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
         }
 
         setGeneratedRoomIds((prev) => new Set(prev).add(roomId));
-        setOverrides((prev) => {
-          const next = { ...prev };
-          delete next[roomId];
-          return next;
-        });
+        // Populate the editors from the generated copy immediately: in
+        // production the route already persisted it server-side, and in
+        // tests the route is intercepted, so neither reloads the rows.
+        if (data?.data) {
+          const copy = data.data;
+          setOverrides((prev) => ({
+            ...prev,
+            [roomId]: {
+              observedChallenge: copy.observedChallenge ?? "",
+              recommendation: copy.recommendation ?? "",
+              buyerPsychology: copy.buyerPsychology ?? "",
+              checklistItems: copy.checklist ?? [],
+            },
+          }));
+        }
         draftsRef.current.delete(roomId);
         router.refresh();
       } catch (error) {

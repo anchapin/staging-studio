@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { E2E_REHEARSAL_PROJECT_ID } from "../env";
-import { interceptExportPdf, login } from "../helpers";
+import { interceptExportPdf, interceptGenerateCopy, login } from "../helpers";
 
 // Seeded in tests/e2e/global-setup.ts: the rehearsal project is the only
 // one the preview spec also exercises; its cover renders the address and
@@ -119,5 +119,76 @@ test.describe("lookbook export (issue #250)", () => {
     await page.reload();
     await page.getByRole("button", { name: "Edit" }).click();
     await expect(recommendationBox).toHaveValue(revised);
+  });
+});
+
+test.describe("lookbook checklist editing and generate-once (issue #250)", () => {
+  const URL = `/projects/${E2E_REHEARSAL_PROJECT_ID}/lookbook`;
+  const COPY_ROOM = "Lookbook Suite";
+  const EMPTY_ROOM = "Rehearsal Room";
+
+  test("checklist text edits, priority changes, and deletes persist", async ({
+    page,
+  }) => {
+    await login(page);
+    await page.goto(URL);
+    await page.getByRole("button", { name: "Edit" }).click();
+
+    const item1 = page.getByLabel(`Checklist item 1 · ${COPY_ROOM}`, { exact: true });
+    await expect(item1).toHaveValue("Replace burnt-out bulbs with warm white");
+
+    await item1.fill("Swap all bulbs for 2700K warm white");
+    await page
+      .getByLabel(`Priority for checklist item 1 · ${COPY_ROOM}`)
+      .selectOption("Standard");
+    await item1.blur();
+    await expect(page.getByText("Saved")).toBeVisible();
+
+    await page
+      .getByRole("button", { name: `Delete checklist item 2 · ${COPY_ROOM}` })
+      .click();
+    await expect(
+      page.getByLabel(`Checklist item 2 · ${COPY_ROOM}`, { exact: true })
+    ).toHaveCount(0);
+    await item1.blur();
+    await expect(page.getByText("Saved")).toBeVisible();
+
+    await page.reload();
+    await page.getByRole("button", { name: "Edit" }).click();
+    await expect(
+      page.getByLabel(`Checklist item 1 · ${COPY_ROOM}`, { exact: true })
+    ).toHaveValue("Swap all bulbs for 2700K warm white");
+    await expect(
+      page.getByLabel(`Priority for checklist item 1 · ${COPY_ROOM}`)
+    ).toHaveValue("Standard");
+    await expect(
+      page.getByLabel(`Checklist item 2 · ${COPY_ROOM}`, { exact: true })
+    ).toHaveCount(0);
+  });
+
+  test("a copy-less room offers generate-once with no regenerate control", async ({
+    page,
+  }) => {
+    interceptGenerateCopy(page);
+    await login(page);
+    await page.goto(URL);
+    await page.getByRole("button", { name: "Edit" }).click();
+
+    const generate = page.getByRole("button", { name: "Generate copy" });
+    await expect(generate).toHaveCount(1);
+
+    await generate.click();
+    await expect(
+      page.getByLabel(new RegExp(`Observed challenge.*${EMPTY_ROOM}`, "i"))
+    ).toHaveValue(/E2E: the room reads as sparse/);
+    await expect(
+      page.getByLabel(new RegExp(`Recommendation.*${EMPTY_ROOM}`, "i"))
+    ).toHaveValue(/E2E: anchor the seating area/);
+
+    // Generate-once: the button (and any regenerate control) is gone.
+    await expect(page.getByRole("button", { name: "Generate copy" })).toHaveCount(
+      0
+    );
+    await expect(page.getByText(/regenerate/i)).toHaveCount(0);
   });
 });
