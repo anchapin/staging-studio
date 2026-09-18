@@ -1,6 +1,10 @@
 import Image from "next/image";
 import { parseChecklistItems } from "@/lib/checklist-schema";
 import { extractPillars } from "@/lib/lookbook-pillars";
+import {
+  resolveStagedResultDisplay,
+  type StagedVariantPair,
+} from "@/lib/staged-result";
 import { LookbookRoomData, ChecklistItem } from "./types";
 
 const PRIORITY_STYLES: Record<ChecklistItem["priority"], string> = {
@@ -23,6 +27,25 @@ export function RoomSpread({ room, project }: RoomSpreadProps) {
   const pillars = extractPillars(room);
   const checklist = parseChecklistItems(room.checklistItems, { roomId: room.id });
 
+  // Issue #253: render the SELECTED variant's image pair, not variant A's
+  // slot. Same policy as the dashboard (pinned by tests/staged-result.test.ts):
+  // follow `selectedVariantIndex`, fall back A → B when the selection is
+  // unset or points at an incomplete slot. When no variant is complete at
+  // all, keep the legacy single-slot rendering (placeholder box).
+  const variantPairs: [StagedVariantPair, StagedVariantPair] = [
+    { before: room.beforeImageUrl, after: room.afterImageUrl },
+    { before: room.beforeImageUrl2, after: room.afterImageUrl2 },
+  ];
+  const display = resolveStagedResultDisplay(
+    room.name,
+    variantPairs,
+    room.selectedVariantIndex ?? 0
+  );
+  const beforeImageUrl = display
+    ? variantPairs[display.variantIndex].before
+    : room.beforeImageUrl;
+  const afterImageUrl = display?.afterImageUrl ?? room.afterImageUrl;
+
   return (
     <div className="lookbook-page min-h-screen flex flex-col bg-stone-50">
       <div className="p-8 border-b border-border">
@@ -38,9 +61,9 @@ export function RoomSpread({ room, project }: RoomSpreadProps) {
 
       <div className="avoid-break flex-1 grid grid-cols-2 gap-0">
         <div className="relative aspect-[4/3] bg-muted">
-          {room.beforeImageUrl ? (
+          {beforeImageUrl ? (
             <Image
-              src={room.beforeImageUrl}
+              src={beforeImageUrl}
               alt={`${room.name} - Before staging`}
               fill
               sizes={SPREAD_IMAGE_SIZES}
@@ -60,9 +83,9 @@ export function RoomSpread({ room, project }: RoomSpreadProps) {
         </div>
 
         <div className="relative aspect-[4/3] bg-muted">
-          {room.afterImageUrl ? (
+          {afterImageUrl ? (
             <Image
-              src={room.afterImageUrl}
+              src={afterImageUrl}
               alt={`${room.name} - After staging`}
               fill
               sizes={SPREAD_IMAGE_SIZES}

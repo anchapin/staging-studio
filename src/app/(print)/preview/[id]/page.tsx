@@ -158,6 +158,8 @@ export default async function LookbookPreviewPage({
       name: room.name,
       beforeImageUrl: room.beforeImageUrl,
       afterImageUrl: room.afterImageUrl,
+      beforeImageUrl2: room.beforeImageUrl2,
+      afterImageUrl2: room.afterImageUrl2,
       selectedVariantIndex: room.selectedVariantIndex,
       observedChallenge: room.observedChallenge,
       recommendation: room.recommendation,

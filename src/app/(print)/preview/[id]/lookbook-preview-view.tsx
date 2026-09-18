@@ -7,6 +7,8 @@ export interface PreviewRoom {
   name: string;
   beforeImageUrl: string | null;
   afterImageUrl: string | null;
+  beforeImageUrl2: string | null;
+  afterImageUrl2: string | null;
   selectedVariantIndex: number | null;
   observedChallenge: string | null;
   recommendation: string | null;
@@ -58,6 +60,9 @@ export function LookbookPreviewView({ project }: { project: PreviewProject }) {
             name: room.name,
             beforeImageUrl: room.beforeImageUrl,
             afterImageUrl: room.afterImageUrl,
+            beforeImageUrl2: room.beforeImageUrl2,
+            afterImageUrl2: room.afterImageUrl2,
+            selectedVariantIndex: room.selectedVariantIndex,
             observedChallenge: room.observedChallenge,
             recommendation: room.recommendation,
             buyerPsychology: room.buyerPsychology,
@@ -80,6 +85,8 @@ export function LookbookPreviewView({ project }: { project: PreviewProject }) {
           name: room.name,
           beforeImageUrl: room.beforeImageUrl,
           afterImageUrl: room.afterImageUrl,
+          beforeImageUrl2: room.beforeImageUrl2,
+          afterImageUrl2: room.afterImageUrl2,
           project: projectData,
           user: project.user,
         }))}
