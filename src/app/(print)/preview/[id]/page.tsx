@@ -3,10 +3,11 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 
 import { prisma } from "@/lib/prisma";
+import { PREVIEW_TOKEN_QUERY_PARAM } from "@/lib/preview-token";
 import {
-  PREVIEW_TOKEN_QUERY_PARAM,
-  verifyPreviewToken,
-} from "@/lib/preview-token";
+  extractPreviewToken,
+  getPreviewAccess as resolvePreviewAccessRequest,
+} from "@/lib/preview-access";
 
 import {
   LookbookPreviewView,
@@ -17,6 +18,12 @@ interface LookbookPreviewPageProps {
   params: Promise<{ id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
+
+/**
+ * React `cache()` dedupes ONE access resolution per request, shared by
+ * generateMetadata and the page (same trick as getPreviewProject below).
+ */
+const getPreviewAccess = cache(resolvePreviewAccessRequest);
 
 /**
  * Single Prisma fetch shared by generateMetadata and the page via React
@@ -42,9 +49,9 @@ const getPreviewProject = cache(async (id: string) =>
 );
 
 /**
- * Token is verified before the address is read: an invalid, expired, or
- * mismatched token never leaks a propertyAddress into the title (the page
- * itself 404s in that case).
+ * Access is resolved (token OR owning session, see src/lib/preview-access.ts)
+ * before the address is read: a denied request never leaks a
+ * propertyAddress into the title (the page itself 404s in that case).
  */
 export async function generateMetadata({
   params,
@@ -55,11 +62,11 @@ export async function generateMetadata({
     searchParams,
   ]);
 
-  const rawToken = resolvedSearchParams[PREVIEW_TOKEN_QUERY_PARAM];
-  const token = Array.isArray(rawToken) ? rawToken[0] : rawToken;
-
-  const verification = await verifyPreviewToken(token);
-  if (!verification.valid || verification.projectId !== id) {
+  const allowed = await getPreviewAccess(
+    id,
+    extractPreviewToken(resolvedSearchParams)
+  );
+  if (!allowed) {
     return { title: "Lookbook Preview" };
   }
 
@@ -87,6 +94,18 @@ export async function generateMetadata({
  * here with Prisma so the lookbook markup reaches Browserless in the HTML
  * response without a client-side auth + fetch chain.
  */
+/**
+ * Lookbook preview, server-rendered. Access is authorized by EITHER the
+ * signed preview token (see src/lib/preview-token.ts) — the cookie-less
+ * Browserless PDF-export flow — OR an authenticated session whose user
+ * owns the project (see src/lib/preview-access.ts): the human
+ * "Preview Lookbook" button links here without a token. Everything else —
+ * anonymous without a token, invalid/expired/mismatched tokens,
+ * non-owner sessions — 404s instead of rendering or leaking existence.
+ * Data is fetched here with Prisma so the lookbook markup reaches
+ * Browserless in the HTML response without a client-side auth + fetch
+ * chain.
+ */
 export default async function LookbookPreviewPage({
   params,
   searchParams,
@@ -96,11 +115,10 @@ export default async function LookbookPreviewPage({
     searchParams,
   ]);
 
-  const rawToken = resolvedSearchParams[PREVIEW_TOKEN_QUERY_PARAM];
-  const token = Array.isArray(rawToken) ? rawToken[0] : rawToken;
+  const token = extractPreviewToken(resolvedSearchParams);
 
-  const verification = await verifyPreviewToken(token);
-  if (!verification.valid || verification.projectId !== id) {
+  const allowed = await getPreviewAccess(id, token);
+  if (!allowed) {
     notFound();
   }
 
@@ -112,12 +130,14 @@ export default async function LookbookPreviewPage({
     project = await getPreviewProject(id);
   } catch (error) {
     console.error("Error loading preview project:", error);
-    // The token is verified at this point, so re-requesting the same URL
-    // (token intact) is a plain-server-render "Retry".
-    const retryHref =
-      typeof token === "string"
-        ? `/projects/${id}/preview?${PREVIEW_TOKEN_QUERY_PARAM}=${encodeURIComponent(token)}`
-        : `/projects/${id}/preview`;
+    // Access was already granted (token or owning session), so
+    // re-requesting the same URL replays it as a plain-server-render
+    // "Retry". The token, when present, is preserved on the real
+    // /preview/:id route (issue #254: this link previously pointed at the
+    // removed /projects/:id/preview route and 404ed itself).
+    const retryHref = `/preview/${id}${
+      token ? `?${PREVIEW_TOKEN_QUERY_PARAM}=${encodeURIComponent(token)}` : ""
+    }`;
     return (
       <div className="p-8">
         <div
