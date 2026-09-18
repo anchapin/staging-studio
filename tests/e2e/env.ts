@@ -26,6 +26,15 @@ export const E2E_UPLOAD_ROOM_ID = "e2euploadroom0000000000000room";
 export const E2E_EDITOR_PROJECT_ID = "e2eeditorproject000000000proj";
 export const E2E_EDITOR_ROOM_ID = "e2eeditorroom00000000000000room";
 
+/**
+ * Dedicated room for the concept-flow spec (issue #231). The spec stages
+ * real variants into its room, so it must NOT share the editor room the
+ * brush/preset specs assert against — specs run alphabetically and share
+ * one seeded database per suite run.
+ */
+export const E2E_CONCEPT_PROJECT_ID = "e2econceptproject00000000proj";
+export const E2E_CONCEPT_ROOM_ID = "e2econceptroom000000000000room";
+
 export const E2E_REHEARSAL_PROJECT_ID = "e2erehearsalproject0000000proj";
 export const E2E_REHEARSAL_ROOM_ID = "e2erehearsalroom0000000000room";
 
@@ -69,23 +78,22 @@ export function roomPhotoPublicUrl(storagePath: string): string {
 }
 
 /**
- * Issue #228: SAM 3.1 concept-tool kill switch FOR THE E2E BUILD ONLY.
+ * SAM 3.1 concept-tool switch FOR THE E2E BUILD ONLY (issue #231).
  *
- * The editor now auto-fires a REAL `furniture` detection against
- * `/api/segment/furnishings` when it opens. Only two specs in this suite
- * intercept that route (the preset flow's), so with the tool enabled the
- * auto-fire would reach the real route handler — and through it fal.ai —
- * in every other editor-opening spec, breaking hermeticity. Compiling the
- * tool OFF for the app under test (via `nextEnv()` inlining
- * NEXT_PUBLIC_SAM_TOOL_ENABLED=false) keeps the whole suite hermetic; the
- * two point-SAM specs in `mask-paint.spec.ts` skip on this constant (they
- * assert the removed `warm: true` ping anyway).
+ * The editor auto-fires a `furniture` detection against
+ * `/api/segment/furnishings` the moment it opens, so with the tool
+ * enabled EVERY editor-opening spec must register
+ * `interceptFurnishingsDetection(page)` — the harness mocks the
+ * `fal-ai/sam-3-1/image`-backed route at the browser network layer, which
+ * is what lets the REAL UI path (auto-fire → concept chips → instance
+ * toggles → batch dispatch) run hermetically with the flag ON.
  *
- * Issue #231 lands the `fal-ai/sam-3-1/image` interception and the
- * replacement concept-tool specs: flip this to `true` and remove the
- * skip guards in the same change.
+ * Kill-switch semantics are preserved: flipping this constant to `false`
+ * compiles the tool out of the app under test exactly as before, and the
+ * concept-flow spec in `concept-flow.spec.ts` then skips itself — flag-off
+ * runs never exercise concept specs.
  */
-export const SAM_TOOL_ENABLED_IN_E2E_BUILD = false;
+export const SAM_TOOL_ENABLED_IN_E2E_BUILD = true;
 
 /**
  * Environment for the Next.js build + server started by Playwright's
@@ -102,7 +110,7 @@ export function nextEnv(): Record<string, string> {
     BROWSERLESS_API_KEY: "e2e-dummy-browserless-key",
     NEXT_PUBLIC_APP_URL: APP_URL,
     PREVIEW_TOKEN_SECRET: "e2e-preview-token-secret",
-    // Kill switch for the concept tool in the app under test — see
+    // Concept-tool switch for the app under test — see
     // SAM_TOOL_ENABLED_IN_E2E_BUILD above.
     NEXT_PUBLIC_SAM_TOOL_ENABLED: SAM_TOOL_ENABLED_IN_E2E_BUILD ? "true" : "false",
   };

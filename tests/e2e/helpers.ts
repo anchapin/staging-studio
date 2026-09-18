@@ -90,14 +90,19 @@ function maskCanvas(page: Page): ReturnType<Page["locator"]> {
 }
 
 interface InpaintCaptureState {
-  submitPayload: Record<string, unknown> | null;
+  /** Every POST /api/inpaint body, in submission order (issue #231). */
+  submitPayloads: Array<Record<string, unknown>>;
   maskDataUrl: string;
   mode: "completed" | "terminal";
 }
 
 export interface InpaintInterception {
-  /** Captured JSON body of the browser's POST /api/inpaint. */
+  /** Captured JSON body of the browser's most recent POST /api/inpaint. */
   submitBody(): Record<string, unknown>;
+  /** Every captured POST /api/inpaint body, in submission order. */
+  submitBodies(): Array<Record<string, unknown>>;
+  /** How many POST /api/inpaint requests the browser has issued so far. */
+  requestCount(): number;
   /** Captured mask data URL, exactly as the browser put it on the wire. */
   maskDataUrl(): string;
   /** Switch status polling to return a completed staged image. */
@@ -114,7 +119,7 @@ export interface InpaintInterception {
  *                                  a terminal failure for the drill.
  */
 export function interceptInpaint(page: Page): InpaintInterception {
-  const state: InpaintCaptureState = { submitPayload: null, maskDataUrl: "", mode: "completed" };
+  const state: InpaintCaptureState = { submitPayloads: [], maskDataUrl: "", mode: "completed" };
 
   const fulfillStatus = (route: Route): void => {
     if (state.mode === "terminal") {
@@ -144,13 +149,12 @@ export function interceptInpaint(page: Page): InpaintInterception {
       void route.fallback();
       return;
     }
-    state.submitPayload = JSON.parse(route.request().postData() ?? "{}") as Record<
+    const submitPayload = JSON.parse(route.request().postData() ?? "{}") as Record<
       string,
       unknown
     >;
-    state.maskDataUrl = typeof state.submitPayload.maskUrl === "string"
-      ? state.submitPayload.maskUrl
-      : "";
+    state.submitPayloads.push(submitPayload);
+    state.maskDataUrl = typeof submitPayload.maskUrl === "string" ? submitPayload.maskUrl : "";
     void route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -179,8 +183,15 @@ export function interceptInpaint(page: Page): InpaintInterception {
 
   return {
     submitBody() {
-      if (!state.submitPayload) throw new Error("POST /api/inpaint was never captured");
-      return state.submitPayload;
+      const last = state.submitPayloads[state.submitPayloads.length - 1];
+      if (!last) throw new Error("POST /api/inpaint was never captured");
+      return last;
+    },
+    submitBodies() {
+      return [...state.submitPayloads];
+    },
+    requestCount() {
+      return state.submitPayloads.length;
     },
     maskDataUrl() {
       if (!state.maskDataUrl) throw new Error("no mask data URL captured from POST /api/inpaint");
@@ -195,116 +206,16 @@ export function interceptInpaint(page: Page): InpaintInterception {
   };
 }
 
-interface SegmentCaptureState {
-  submitPayload: Record<string, unknown> | null;
-  segmentCount: number;
-  warmCount: number;
-  mode: "success" | "failure";
-  maskDataUrl: string;
-}
-
-export interface SegmentInterception {
-  /** Captured JSON body of the browser's most recent REAL POST /api/segment click (pre-warm pings excluded). */
-  submitBody(): Record<string, unknown>;
-  /** How many REAL segmentation requests (pre-warm pings excluded) the browser has issued so far. */
-  segmentRequestCount(): number;
-  /** How many issue-#202 pre-warm pings (`warm: true`) the browser has issued so far. */
-  warmRequestCount(): number;
-  /** Switches responses back to the success fixture (default). */
-  respondWithSuccess(): void;
-  /** Switches responses to a simulated SAM failure. */
-  respondWithFailure(): void;
-  /** Replaces the mask data URL returned on success (default: a 2x2 PNG with one white quadrant). */
-  setMaskFixture(dataUrl: string): void;
-}
-
-// 2x2 RGB PNG with its top-left pixel white and the rest black — after
-// scaling onto the mask canvas this yields ~25% white coverage.
-const SEGMENT_MASK_FIXTURE_DATA_URL =
-  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAADklEQVR4nGP4DwYMEAAAPs8F+9t6hu0AAAAASUVORK5CYII=";
-
-/**
- * Intercepts the SAM-backed segment route (issue #183) at the browser
- * network layer so fal.ai and the real route handler are never contacted.
- * Success mode fulfills with a mask fixture data URL (white quadrant on
- * black, ~25% coverage after scaling) so the canvas merge is observable
- * through the exported inpaint mask.
- *
- * Since issue #202 the editor also fires a pre-warm ping (`warm: true` in
- * the body) when it opens; the interception classifies those separately
- * (warmRequestCount) so click-dedup assertions stay exact, and fulfills
- * them with the same 200 shape the real route's `{ warmed: true }` would
- * be treated as by the client (any ok response completes the warm).
- */
-export function interceptSegment(page: Page): SegmentInterception {
-  const state: SegmentCaptureState = {
-    submitPayload: null,
-    segmentCount: 0,
-    warmCount: 0,
-    mode: "success",
-    maskDataUrl: SEGMENT_MASK_FIXTURE_DATA_URL,
-  };
-
-  page.route("**/api/segment", (route) => {
-    if (route.request().method() !== "POST") {
-      void route.fallback();
-      return;
-    }
-    const payload = JSON.parse(route.request().postData() ?? "{}") as Record<
-      string,
-      unknown
-    >;
-    if (payload.warm === true) {
-      state.warmCount += 1;
-    } else {
-      state.segmentCount += 1;
-      state.submitPayload = payload;
-    }
-    if (state.mode === "failure") {
-      void route.fulfill({
-        status: 500,
-        contentType: "application/json",
-        body: JSON.stringify({
-          error: "Segmentation failed",
-          message: "Simulated SAM failure (e2e).",
-        }),
-      });
-      return;
-    }
-    void route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ maskDataUrl: state.maskDataUrl }),
-    });
-  });
-
-  return {
-    submitBody() {
-      if (!state.submitPayload) throw new Error("POST /api/segment was never captured");
-      return state.submitPayload;
-    },
-    segmentRequestCount() {
-      return state.segmentCount;
-    },
-    warmRequestCount() {
-      return state.warmCount;
-    },
-    respondWithSuccess() {
-      state.mode = "success";
-    },
-    respondWithFailure() {
-      state.mode = "failure";
-    },
-    setMaskFixture(dataUrl: string) {
-      state.maskDataUrl = dataUrl;
-    },
-  };
-}
-
 interface FurnishingsDetectionCaptureState {
   submitPayload: Record<string, unknown> | null;
   requestCount: number;
   mode: "success" | "empty" | "failure";
+  /**
+   * Success-mode alpha cutouts (the multi-instance mock backing the
+   * concept-flow spec, issue #231). null → the default single-band
+   * fixture the preset specs assert geometry against.
+   */
+  successMasks: string[] | null;
 }
 
 export interface FurnishingsDetectionInterception {
@@ -316,6 +227,12 @@ export interface FurnishingsDetectionInterception {
   respondWithEmpty(): void;
   /** Switches responses back to the success fixture (default). */
   respondWithSuccess(): void;
+  /**
+   * Switches success responses to the given per-instance alpha cutouts
+   * (issue #231) — the multi-instance mock the concept-flow spec toggles
+   * against. Pass the same URLs repeatedly to vary instance count.
+   */
+  respondWithMaskDataUrls(maskDataUrls: string[]): void;
   /** Switches responses to a simulated detection failure. */
   respondWithFailure(): void;
 }
@@ -332,9 +249,13 @@ const FURNISHINGS_CUTOUT_FIXTURE_DATA_URL = `data:image/png;base64,iVBORw0KGgoAA
 /**
  * Intercepts the SAM 3.1 furnishings-detection route (issue #223) at the
  * browser network layer so fal.ai and the real route handler are never
- * contacted. Success mode returns one alpha-cutout mask fixture (the
- * format the live endpoint serves — see furnishing-detection.ts); the
- * spec observes the run through the /api/inpaint interception.
+ * contacted. Success mode returns per-instance alpha-cutout mask fixtures
+ * (the format the live endpoint serves — see furnishing-detection.ts) and
+ * echoes the requested concept, like the real route. Since issue #231 the
+ * concept tool is compiled ON in the e2e build, so EVERY editor-opening
+ * spec must register this interception (the editor auto-fires the
+ * catch-all detection on open); the spec observes the run through the
+ * /api/inpaint interception.
  */
 export function interceptFurnishingsDetection(
   page: Page
@@ -343,6 +264,7 @@ export function interceptFurnishingsDetection(
     submitPayload: null,
     requestCount: 0,
     mode: "success",
+    successMasks: null,
   };
 
   page.route("**/api/segment/furnishings", (route) => {
@@ -378,7 +300,11 @@ export function interceptFurnishingsDetection(
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        maskDataUrls: [FURNISHINGS_CUTOUT_FIXTURE_DATA_URL],
+        concept:
+          typeof state.submitPayload?.concept === "string"
+            ? state.submitPayload.concept
+            : "furniture",
+        maskDataUrls: state.successMasks ?? [FURNISHINGS_CUTOUT_FIXTURE_DATA_URL],
       }),
     });
   });
@@ -398,6 +324,11 @@ export function interceptFurnishingsDetection(
     },
     respondWithSuccess() {
       state.mode = "success";
+      state.successMasks = null;
+    },
+    respondWithMaskDataUrls(maskDataUrls: string[]) {
+      state.mode = "success";
+      state.successMasks = [...maskDataUrls];
     },
     respondWithFailure() {
       state.mode = "failure";

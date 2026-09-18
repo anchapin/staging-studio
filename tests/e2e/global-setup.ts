@@ -4,6 +4,8 @@ import { PrismaClient } from "@prisma/client";
 import {
   APP_URL,
   DATABASE_URL,
+  E2E_CONCEPT_PROJECT_ID,
+  E2E_CONCEPT_ROOM_ID,
   E2E_EDITOR_PROJECT_ID,
   E2E_EDITOR_ROOM_ID,
   E2E_EMAIL,
@@ -142,6 +144,9 @@ async function seed(): Promise<void> {
   const prisma = new PrismaClient({ datasources: { db: { url: DATABASE_URL } } });
   try {
     const beforePhotoUrl = roomPhotoPublicUrl(`rooms/${E2E_EDITOR_ROOM_ID}/before-image.png`);
+    const conceptBeforePhotoUrl = roomPhotoPublicUrl(
+      `rooms/${E2E_CONCEPT_ROOM_ID}/before-image.png`
+    );
 
     await prisma.user.create({
       data: {
@@ -183,6 +188,22 @@ async function seed(): Promise<void> {
               },
             },
             {
+              id: E2E_CONCEPT_PROJECT_ID,
+              propertyAddress: "404 Concept Crescent",
+              clientName: "Concept Client",
+              targetBuyer: "first-time buyers",
+              stagingAesthetic: "Vintage Modern",
+              rooms: {
+                create: [
+                  {
+                    id: E2E_CONCEPT_ROOM_ID,
+                    name: "Concept Room",
+                    beforeImageUrl: conceptBeforePhotoUrl,
+                  },
+                ],
+              },
+            },
+            {
               id: E2E_REHEARSAL_PROJECT_ID,
               propertyAddress: "303 Rehearsal Road",
               clientName: "Rehearsal Client",
@@ -215,11 +236,17 @@ async function main(): Promise<void> {
   await seed();
 
   const mock = new MockSupabase();
-  // Back the seeded editor room's before-photo URL with real bytes so the
-  // app (and next/image's server-side optimizer) can actually fetch it.
+  // Back the seeded rooms' before-photo URLs with real bytes so the app
+  // (and next/image's server-side optimizer) can actually fetch them.
   mock.putObject(
     "room-photos",
     `rooms/${E2E_EDITOR_ROOM_ID}/before-image.png`,
+    roomPhotoFixture(),
+    "image/png"
+  );
+  mock.putObject(
+    "room-photos",
+    `rooms/${E2E_CONCEPT_ROOM_ID}/before-image.png`,
     roomPhotoFixture(),
     "image/png"
   );
