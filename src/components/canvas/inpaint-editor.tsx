@@ -34,7 +34,9 @@ import {
   maskGridFromProviderPixels,
   paintMaskPixels,
 } from "@/lib/mask-format";
+import { maskGridFromPixels } from "@/lib/mask-flood-fill";
 import { computeMaskCanvasDimensions } from "@/lib/canvas-coords";
+import { fillHoles } from "@/lib/mask-postprocess";
 import {
   MAX_BATCH_OBJECTS,
   advanceBatchProgress,
@@ -129,6 +131,25 @@ async function composeUnionMaskDataUrl(
   }
   const union = unionMaskBuffers(buffers);
   if (!union) return null;
+
+  // Issue #252 D3: hole-fill the union at composition (filling runs last —
+  // unioning region masks can seal new enclosed pockets), so the thematic
+  // run never receives a donut.
+  const unionGrid = maskGridFromPixels(union.data, union.width, union.height);
+  const filledUnion = fillHoles(unionGrid, union.width, union.height);
+  if (filledUnion) {
+    const unionData = union.data;
+    for (let i = 0; i < filledUnion.mask.length; i++) {
+      const o = i * 4;
+      if (filledUnion.mask[i] === 1) {
+        unionData[o] = 255;
+        unionData[o + 1] = 255;
+        unionData[o + 2] = 255;
+      }
+      unionData[o + 3] = 255;
+    }
+  }
+
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
@@ -200,18 +221,51 @@ async function decodeConceptInstance(
       naturalDims.height,
       { maskedColor: [255, 255, 255] }
     );
+
+    // Issue #252 D3: hole-fill the region mask at composition time so the
+    // canvas tint and the dispatched mask are identical and donut-free
+    // (WYSIWYG). The natural-resolution mask is re-classified from the
+    // painted buffer (white-on-black is stable through the classifier),
+    // hole-filled, and written back as pure white/black pixels.
+    const naturalGrid = maskGridFromProviderPixels(
+      painted,
+      naturalDims.width,
+      naturalDims.height
+    );
+    const filledNatural = fillHoles(naturalGrid, naturalDims.width, naturalDims.height);
+    if (filledNatural && filledNatural.filledCount > 0) {
+      for (let i = 0; i < filledNatural.mask.length; i++) {
+        const o = i * 4;
+        if (filledNatural.mask[i] === 1) {
+          painted[o] = 255;
+          painted[o + 1] = 255;
+          painted[o + 2] = 255;
+          painted[o + 3] = 255;
+        } else {
+          painted[o] = 0;
+          painted[o + 1] = 0;
+          painted[o + 2] = 0;
+          painted[o + 3] = 255;
+        }
+      }
+    }
     whiteCtx.putImageData(
       new ImageData(new Uint8ClampedArray(painted), naturalDims.width, naturalDims.height),
       0,
       0
     );
 
+    // Same invariant for the hit-test grid the toggle path reasons about.
+    let grid = maskGridFromProviderPixels(
+      gridPixels.data,
+      gridDims.width,
+      gridDims.height
+    );
+    const filledGrid = fillHoles(grid, gridDims.width, gridDims.height);
+    if (filledGrid) grid = filledGrid.mask;
+
     return {
-      grid: maskGridFromProviderPixels(
-        gridPixels.data,
-        gridDims.width,
-        gridDims.height
-      ),
+      grid,
       width: gridDims.width,
       height: gridDims.height,
       score,

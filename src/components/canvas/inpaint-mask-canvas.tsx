@@ -16,6 +16,7 @@ import {
   DEFAULT_MASK_EXPANSION_RADIUS,
   dilateMaskGrid,
 } from "@/lib/mask-dilation";
+import { fillHoles } from "@/lib/mask-postprocess";
 import { SAM_TOOL_ENABLED } from "@/lib/sam-tool";
 
 /** Tools for building the mask: freehand paint, flood-fill, or concept select. */
@@ -530,9 +531,14 @@ export default function InpaintMaskCanvas({
     // instead of preserved. Dilation runs in logical mask-canvas pixel space
     // (dims) BEFORE the scale-to-natural-dimensions step and only rewrites
     // mask pixels — the source photo is never touched. A radius of 0 keeps
-    // the live canvas as the export source (today's exact output).
+    // the un-dilated mask.
+    //
+    // Issue #252 D3: filling runs LAST in the composition pipeline —
+    // dilation can seal unpainted pockets — so every manual mask reaching
+    // /api/inpaint is hole-free ("no donut reaches FLUX"). Strokes stay raw
+    // while drawing; this is the run-composition point.
     let maskSource: HTMLCanvasElement = canvas;
-    if (expansionRadius > 0) {
+    {
       const paint = document.createElement("canvas");
       paint.width = dims.width;
       paint.height = dims.height;
@@ -541,14 +547,20 @@ export default function InpaintMaskCanvas({
       paintCtx.drawImage(canvas, 0, 0, dims.width, dims.height);
       const paintData = paintCtx.getImageData(0, 0, dims.width, dims.height);
       const grid = maskGridFromPixels(paintData.data, dims.width, dims.height);
-      const dilated = dilateMaskGrid(grid, dims.width, dims.height, expansionRadius);
-      if (!dilated) return;
+      const dilated =
+        expansionRadius > 0
+          ? dilateMaskGrid(grid, dims.width, dims.height, expansionRadius)
+          : null;
+      if (expansionRadius > 0 && !dilated) return;
+      const baseMask = dilated ? dilated.mask : grid;
+      const filled = fillHoles(baseMask, dims.width, dims.height);
+      const finalMask = filled ? filled.mask : baseMask;
 
       const grown = paintCtx.createImageData(dims.width, dims.height);
       const grownData = grown.data;
-      for (let i = 0; i < dilated.mask.length; i++) {
+      for (let i = 0; i < finalMask.length; i++) {
         const o = i * 4;
-        if (dilated.mask[i] === 1) {
+        if (finalMask[i] === 1) {
           grownData[o] = 255;
           grownData[o + 1] = 255;
           grownData[o + 2] = 255;
