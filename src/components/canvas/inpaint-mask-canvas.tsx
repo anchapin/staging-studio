@@ -10,6 +10,7 @@ import {
   type CanvasPoint,
 } from "@/lib/canvas-coords";
 import { estimateMaskCoverage, shouldWarnLowCoverage } from "@/lib/mask-coverage";
+import { paintMaskPixels } from "@/lib/mask-format";
 import { floodFillMask, maskGridFromPixels } from "@/lib/mask-flood-fill";
 import {
   DEFAULT_MASK_EXPANSION_RADIUS,
@@ -22,15 +23,16 @@ type MaskTool = "brush" | "fill" | "select";
 
 /**
  * Rank→color palette for instance overlays (issue #228). Six hues,
- * cycled by score rank, so adjacent instances stay distinguishable.
+ * cycled by score rank, so adjacent instances stay distinguishable. RGB
+ * tuples feed `paintMaskPixels` directly (issue #248).
  */
-const INSTANCE_OVERLAY_PALETTE = [
-  "#22c55e",
-  "#f97316",
-  "#3b82f6",
-  "#a855f7",
-  "#06b6d4",
-  "#eab308",
+const INSTANCE_OVERLAY_PALETTE: Array<readonly [number, number, number]> = [
+  [0x22, 0xc5, 0x5f],
+  [0xf9, 0x73, 0x16],
+  [0x3b, 0x82, 0xf6],
+  [0xa8, 0x55, 0xf7],
+  [0x06, 0xb6, 0xd4],
+  [0xea, 0xb3, 0x08],
 ];
 
 /**
@@ -64,7 +66,7 @@ export interface SelectionMarker {
 export interface InstanceOverlay {
   /** Stable React key (concept + response position). */
   id: string;
-  /** The provider mask (alpha-cutout data URL) to tint. */
+  /** The provider mask (data URL; grayscale or alpha cutout) to tint. */
   maskDataUrl: string;
   /** Score rank, 0-based. */
   rank: number;
@@ -257,18 +259,31 @@ export default function InpaintMaskCanvas({
     for (const overlay of instanceOverlays) {
       const img = cache.get(overlay.maskDataUrl);
       if (!img || !img.complete || !img.naturalWidth) continue;
-      // Tint the alpha cutout with the rank color: draw the cutout, then
-      // keep only its alpha shape filled with the palette color.
+      // Tint the mask with the rank color: alpha is DERIVED from the
+      // format-agnostic classification (issue #248) — a grayscale provider
+      // mask decodes fully opaque, which the replaced `source-in` fill
+      // trusted and painted frame-wide.
       const tinted = document.createElement("canvas");
       tinted.width = dims.width;
       tinted.height = dims.height;
       const tintedCtx = tinted.getContext("2d");
       if (!tintedCtx) continue;
       tintedCtx.drawImage(img, 0, 0, dims.width, dims.height);
-      tintedCtx.globalCompositeOperation = "source-in";
-      tintedCtx.fillStyle =
-        INSTANCE_OVERLAY_PALETTE[overlay.rank % INSTANCE_OVERLAY_PALETTE.length];
-      tintedCtx.fillRect(0, 0, dims.width, dims.height);
+      const tintedData = paintMaskPixels(
+        tintedCtx.getImageData(0, 0, dims.width, dims.height).data,
+        dims.width,
+        dims.height,
+        {
+          maskedColor:
+            INSTANCE_OVERLAY_PALETTE[overlay.rank % INSTANCE_OVERLAY_PALETTE.length],
+          transparentBackground: true,
+        }
+      );
+      tintedCtx.putImageData(
+        new ImageData(new Uint8ClampedArray(tintedData), dims.width, dims.height),
+        0,
+        0
+      );
       ctx.globalAlpha = overlay.selected ? 0.12 : 0.4;
       ctx.drawImage(tinted, 0, 0);
     }

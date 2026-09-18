@@ -29,7 +29,10 @@ import {
   isValidConceptName,
 } from "@/lib/concept-chips";
 import { findInstanceAtPoint } from "@/lib/instance-hit-test";
-import { maskGridFromAlphaPixels } from "@/lib/mask-flood-fill";
+import {
+  maskGridFromProviderPixels,
+  paintMaskPixels,
+} from "@/lib/mask-format";
 import { computeMaskCanvasDimensions } from "@/lib/canvas-coords";
 import {
   MAX_BATCH_OBJECTS,
@@ -138,11 +141,12 @@ async function composeUnionMaskDataUrl(
 
 // -------------------------------------------------------------------------
 // Issue #228: SAM 3.1 concept-instance decoding. The detection route
-// returns per-instance ALPHA cutouts (transparent background, photo-colored
-// object pixels), so grid extraction uses alpha (not luminance — dark
-// furniture would be dropped) and the toggle path converts each cutout to
-// the white-on-black mask the union/export pipeline already speaks (the
-// same source-in technique the one-click preset uses).
+// returns per-instance masks whose provider format varies — live captures
+// (issue #248) show grayscale white-on-black PNGs with NO alpha channel,
+// while #228 assumed alpha cutouts — so grid extraction goes through the
+// format-agnostic classifier and the toggle path rebuilds each mask as
+// white-on-black from that classification (the same derived-alpha
+// technique every SAM-mask consumer now shares).
 // -------------------------------------------------------------------------
 
 /** One decoded detection instance, in response order (score-ranked). */
@@ -157,7 +161,8 @@ interface DecodedInstance {
 }
 
 /**
- * Decodes one alpha-cutout mask into a hit-test grid (at `gridDims`, the
+ * Decodes one provider mask (grayscale or alpha-cutout — the classifier
+ * detects the format) into a hit-test grid (at `gridDims`, the
  * mask-canvas resolution — click points arrive in that space) plus a
  * white-on-black data URL at the photo's natural dimensions. Returns
  * null when the image fails to decode; the caller preserves the slot so
@@ -186,12 +191,20 @@ async function decodeConceptInstance(
     const whiteCtx = whiteCanvas.getContext("2d");
     if (!whiteCtx) return null;
     whiteCtx.drawImage(img, 0, 0, naturalDims.width, naturalDims.height);
-    whiteCtx.globalCompositeOperation = "source-in";
-    whiteCtx.fillStyle = "white";
-    whiteCtx.fillRect(0, 0, naturalDims.width, naturalDims.height);
+    const painted = paintMaskPixels(
+      whiteCtx.getImageData(0, 0, naturalDims.width, naturalDims.height).data,
+      naturalDims.width,
+      naturalDims.height,
+      { maskedColor: [255, 255, 255] }
+    );
+    whiteCtx.putImageData(
+      new ImageData(new Uint8ClampedArray(painted), naturalDims.width, naturalDims.height),
+      0,
+      0
+    );
 
     return {
-      grid: maskGridFromAlphaPixels(
+      grid: maskGridFromProviderPixels(
         gridPixels.data,
         gridDims.width,
         gridDims.height
