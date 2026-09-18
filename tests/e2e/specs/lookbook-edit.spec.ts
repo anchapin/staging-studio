@@ -85,6 +85,14 @@ test.describe("lookbook export (issue #250)", () => {
 
   test("Export PDF is offered in Preview mode only", async ({ page }) => {
     await login(page);
+
+    // Export is NOT on the project page (issue #250 feedback): users
+    // must pass through the lookbook preview before paying for a PDF.
+    await page.goto(`/projects/${E2E_REHEARSAL_PROJECT_ID}`);
+    await expect(page.getByRole("button", { name: "Export PDF" })).toHaveCount(
+      0
+    );
+
     await page.goto(EXPORT_URL);
 
     const exportButton = page.getByRole("button", { name: "Export PDF" });

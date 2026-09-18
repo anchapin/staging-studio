@@ -120,6 +120,12 @@ test.describe("rehearsal drill", () => {
     await expect(page.getByText("Pack away personal photos")).toBeVisible();
 
     // ---- Export (Browserless simulated, success) ------------------------
+    // Export lives on the lookbook page (issue #250 feedback): the book
+    // is previewed before the PDF API is paid for.
+    await page.goto(`${REHEARSAL_PROJECT}/lookbook`);
+    await expect(
+      page.getByRole("button", { name: "Export PDF" })
+    ).toBeVisible();
     // Register the download listener BEFORE the click: the intercepted
     // fetch resolves in milliseconds, and a late listener misses the
     // event entirely.
@@ -179,7 +185,8 @@ test.describe("rehearsal drill", () => {
     interceptExportPdf(page, "outage");
 
     await login(page);
-    await page.goto(REHEARSAL_PROJECT);
+    // Export lives on the lookbook page (issue #250 feedback).
+    await page.goto(`${REHEARSAL_PROJECT}/lookbook`);
 
     await page.getByRole("button", { name: "Export PDF" }).click();
 

@@ -24,7 +24,6 @@ import VariantThumbnailStrip from "@/components/canvas/variant-thumbnail-strip";
 import GenerateCopyForm, {
   type GeneratedCopy,
 } from "@/components/canvas/generate-copy-form";
-import ExportPdfButton from "@/components/canvas/export-pdf-button";
 import { useToast, ToastContainer } from "@/components/ui/toast";
 import {
   deleteVariantAfterImage,
@@ -563,10 +562,6 @@ export default function ProjectDetailView({
             >
               Preview Lookbook
             </Link>
-            <ExportPdfButton
-              projectId={project.id}
-              projectName={project.propertyAddress}
-            />
           </div>
         </div>
       </header>
