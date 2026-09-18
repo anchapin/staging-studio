@@ -12,6 +12,7 @@ import {
   type BatchSelection,
   type PerObjectBatchPlan,
 } from "@/lib/multi-select-batch";
+import { buildPrefill } from "@/lib/prompt-prefill";
 
 /**
  * The per-object batch in flight or kept alive after a failure (for the
@@ -70,7 +71,20 @@ export default function BatchStagingPanel({
   const [thematicPrompt, setThematicPrompt] = useState("");
   const [promptsBySelection, setPromptsBySelection] = useState<Record<string, string>>({});
 
-  const orderedPrompts = selections.map((selection) => promptsBySelection[selection.id] ?? "");
+  // Issue #230: per-object rows pre-fill with the selection's concept
+  // label ("Replace the chair with ") — editable text, so a wrong
+  // CLIP/human label is fixable in one keystroke. An explicitly stored
+  // value always wins (`??` only fills untouched rows), so clearing the
+  // seed and typing raw directives degrades to today's behavior with no
+  // mode flag. Unlabeled entries ("Object N") get no seed. The thematic
+  // (union) field stays empty on purpose — "Replace the furniture, rug
+  // with…" is nonsense across a union mask; that path owns the holistic
+  // vocabulary (its textarea keeps the plain "" initial state above).
+  const orderedPrompts = selections.map((selection) =>
+    promptsBySelection[selection.id] !== undefined
+      ? promptsBySelection[selection.id]
+      : buildPrefill(selection.conceptLabel)
+  );
   const batchRunning = processing && activeBatch !== null;
   const thematicReady = thematicPrompt.trim().length > 0;
   const perObjectReady = orderedPrompts.every((prompt) => prompt.trim().length > 0);
