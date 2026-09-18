@@ -1,7 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-import { E2E_REHEARSAL_PROJECT_ID } from "../env";
+import { E2E_REHEARSAL_PROJECT_ID, nextEnv } from "../env";
 import { interceptExportPdf, interceptGenerateCopy, login } from "../helpers";
+import { signPreviewToken } from "../../../src/lib/preview-token";
 
 // Seeded in tests/e2e/global-setup.ts: the rehearsal project is the only
 // one the preview spec also exercises; its cover renders the address and
@@ -190,5 +191,36 @@ test.describe("lookbook checklist editing and generate-once (issue #250)", () =>
       0
     );
     await expect(page.getByText(/regenerate/i)).toHaveCount(0);
+  });
+});
+
+test.describe("preview page Edit Lookbook link (issue #250)", () => {
+  const PREVIEW_URL = `/preview/${E2E_REHEARSAL_PROJECT_ID}`;
+
+  test("owning session sees the Edit Lookbook link and it navigates to the edit page", async ({
+    page,
+  }) => {
+    await login(page);
+    await page.goto(PREVIEW_URL);
+
+    const editLink = page.getByRole("link", { name: "Edit Lookbook" });
+    await expect(editLink).toBeVisible();
+    await editLink.click();
+    await expect(page).toHaveURL(
+      new RegExp(`/projects/${E2E_REHEARSAL_PROJECT_ID}/lookbook$`)
+    );
+  });
+
+  test("the token path (Browserless capture) never sees the link", async ({
+    page,
+  }) => {
+    process.env.PREVIEW_TOKEN_SECRET = nextEnv().PREVIEW_TOKEN_SECRET;
+    const token = await signPreviewToken(E2E_REHEARSAL_PROJECT_ID);
+
+    await page.goto(`${PREVIEW_URL}?token=${encodeURIComponent(token)}`);
+    await expect(page.getByText("303 Rehearsal Road").first()).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "Edit Lookbook" })
+    ).toHaveCount(0);
   });
 });
