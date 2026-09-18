@@ -45,12 +45,22 @@ test.describe("rehearsal drill", () => {
     // ---- Upload -------------------------------------------------------
     await page.goto(REHEARSAL_PROJECT);
     await expect(page.getByRole("heading", { name: "Rehearsal Room" })).toBeVisible();
-    const { putSha256 } = await uploadRoomPhotoViaUi(page, {
-      name: "rehearsal-photo.png",
-      mimeType: "image/png",
-      buffer: file,
-    });
-    await expect(page.locator('img[alt="Room"]')).toBeVisible({ timeout: 15_000 });
+    const { putSha256 } = await uploadRoomPhotoViaUi(
+      page,
+      {
+        name: "rehearsal-photo.png",
+        mimeType: "image/png",
+        buffer: file,
+      },
+      "Rehearsal Room"
+    );
+    // Scoped to the Rehearsal Room card — the project seeds a second
+    // room (issue #250) whose photos also render with alt="Room".
+    await expect(
+      page
+        .locator(".space-y-3", { hasText: "Rehearsal Room" })
+        .locator('img[alt="Room"]')
+    ).toBeVisible({ timeout: 15_000 });
 
     // ---- Focused editor (grid → focused, issue #169 flow) --------------
     await page
@@ -110,6 +120,12 @@ test.describe("rehearsal drill", () => {
     await expect(page.getByText("Pack away personal photos")).toBeVisible();
 
     // ---- Export (Browserless simulated, success) ------------------------
+    // Export lives on the lookbook page (issue #250 feedback): the book
+    // is previewed before the PDF API is paid for.
+    await page.goto(`${REHEARSAL_PROJECT}/lookbook`);
+    await expect(
+      page.getByRole("button", { name: "Export PDF" })
+    ).toBeVisible();
     // Register the download listener BEFORE the click: the intercepted
     // fetch resolves in milliseconds, and a late listener misses the
     // event entirely.
@@ -169,7 +185,8 @@ test.describe("rehearsal drill", () => {
     interceptExportPdf(page, "outage");
 
     await login(page);
-    await page.goto(REHEARSAL_PROJECT);
+    // Export lives on the lookbook page (issue #250 feedback).
+    await page.goto(`${REHEARSAL_PROJECT}/lookbook`);
 
     await page.getByRole("button", { name: "Export PDF" }).click();
 

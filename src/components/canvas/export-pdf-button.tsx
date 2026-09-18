@@ -9,6 +9,12 @@ interface ExportPdfButtonProps {
   projectName?: string;
   onExportStart?: () => void;
   onExportComplete?: () => void;
+  /**
+   * Optional gate awaited before the export request (issue #250): the
+   * lookbook page flushes pending autosaves first. Resolve `false` to
+   * abort the export without contacting Browserless.
+   */
+  onBeforeExport?: () => Promise<boolean>;
 }
 
 export default function ExportPdfButton({
@@ -16,6 +22,7 @@ export default function ExportPdfButton({
   projectName,
   onExportStart,
   onExportComplete,
+  onBeforeExport,
 }: ExportPdfButtonProps) {
   const [isExporting, setIsExporting] = useState(false);
   const { toasts, showError, showSuccess, dismissToast } = useToast();
@@ -25,6 +32,11 @@ export default function ExportPdfButton({
     onExportStart?.();
 
     try {
+      if (onBeforeExport && !(await onBeforeExport())) {
+        showError("Save pending edits before exporting.", true);
+        return;
+      }
+
       const response = await fetch("/api/export-pdf", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -61,7 +73,7 @@ export default function ExportPdfButton({
     } finally {
       setIsExporting(false);
     }
-  }, [projectId, projectName, onExportStart, onExportComplete, showError, showSuccess]);
+  }, [projectId, projectName, onExportStart, onExportComplete, onBeforeExport, showError, showSuccess]);
 
   return (
     <div>

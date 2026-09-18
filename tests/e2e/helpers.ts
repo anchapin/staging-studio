@@ -527,10 +527,15 @@ export async function mockStorageEntries(): Promise<MockStorageEntry[]> {
  * Uploads a room photo through the real UI (`setInputFiles` → real
  * bytes) and resolves with the sha256 of the browser's PUT body. The PUT
  * listener is registered before the click so nothing can race it.
+ *
+ * `roomName` scopes the upload button to one room card — required when
+ * the project seeds more than one room (issue #250 added a second
+ * rehearsal room); single-room projects may omit it.
  */
 export async function uploadRoomPhotoViaUi(
   page: Page,
-  file: { name: string; mimeType: string; buffer: Buffer }
+  file: { name: string; mimeType: string; buffer: Buffer },
+  roomName?: string
 ): Promise<{ putSha256: string; putSize: number }> {
   const capture: { body: Buffer | null } = { body: null };
   const onPut = (request: Request): void => {
@@ -544,12 +549,15 @@ export async function uploadRoomPhotoViaUi(
   };
   page.on("request", onPut);
 
+  const scope = roomName
+    ? page.locator(".space-y-3", { hasText: roomName })
+    : page;
   try {
-    await page
+    await scope
       .getByRole("button", { name: "Upload room photo" })
-      .or(page.getByRole("button", { name: "Replace room photo" }))
+      .or(scope.getByRole("button", { name: "Replace room photo" }))
       .click();
-    await page.locator('input[type="file"]').setInputFiles({
+    await scope.locator('input[type="file"]').setInputFiles({
       name: file.name,
       mimeType: file.mimeType,
       buffer: file.buffer,

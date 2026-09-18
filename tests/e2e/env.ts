@@ -38,6 +38,14 @@ export const E2E_CONCEPT_ROOM_ID = "e2econceptroom000000000000room";
 export const E2E_REHEARSAL_PROJECT_ID = "e2erehearsalproject0000000proj";
 export const E2E_REHEARSAL_ROOM_ID = "e2erehearsalroom0000000000room";
 
+/**
+ * Second rehearsal room WITH seeded AI copy (issue #250): the lookbook
+ * edit spec edits/persists prose and checklist rows against it, while
+ * the original rehearsal room stays copy-less for the generate-once
+ * flow.
+ */
+export const E2E_LOOKBOOK_ROOM_ID = "e2elookbookroom00000000000room";
+
 /** Port/host for the mock Supabase (GoTrue auth + Storage). */
 export const MOCK_SUPABASE_PORT = 39911;
 export const MOCK_SUPABASE_HOST = "127.0.0.1";

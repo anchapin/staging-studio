@@ -1,5 +1,6 @@
 import { cache } from "react";
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import type { Metadata } from "next";
 
 import { prisma } from "@/lib/prisma";
@@ -189,5 +190,23 @@ export default async function LookbookPreviewPage({
     })),
   };
 
-  return <LookbookPreviewView project={previewProject} />;
+  // Session-origin access (no token) is the owning firm browsing their
+  // book — offer the lookbook edit page (issue #250). The Browserless
+  // token path never sees the link, so the captured PDF is untouched;
+  // .no-print additionally keeps it out of any manual browser printing.
+  return (
+    <div>
+      {!token && (
+        <div className="no-print flex justify-end p-4">
+          <Link
+            href={`/projects/${id}/lookbook`}
+            className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-100"
+          >
+            Edit Lookbook
+          </Link>
+        </div>
+      )}
+      <LookbookPreviewView project={previewProject} />
+    </div>
+  );
 }

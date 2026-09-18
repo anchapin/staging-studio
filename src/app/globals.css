@@ -130,3 +130,26 @@
     page-break-after: auto;
   }
 }
+
+/* On-screen paper preview for /projects/[id]/lookbook (issue #250).
+   Scoped to .paper-preview so the print route and Browserless capture
+   are untouched: pages keep their internal flex/grid layouts but lose
+   min-h-screen in favor of fixed letter proportions (8.5in x 11in at
+   96dpi = 816px x 1056px). */
+.paper-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  align-items: center;
+}
+
+.paper-preview .lookbook-page {
+  width: 100%;
+  max-width: 816px;
+  min-height: 0;
+  aspect-ratio: 8.5 / 11;
+  overflow: hidden;
+  border: 1px solid var(--border, #e7e5e4);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
+  background: white;
+}
