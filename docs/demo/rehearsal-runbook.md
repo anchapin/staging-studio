@@ -28,7 +28,7 @@ Helper assertions: `bash scripts/rehearsal-drill.sh` (see §6).
 ### Production app state
 - [ ] Logged-in state fresh: open the bookmarked URL → land on `/projects` without re-auth gymnastics (type-the-password beat still rehearsed in §2 step 1)
 - [ ] Demo project "1506 Porters Mill Ter, Midlothian" opens: Living Room has a hero before-photo; second room present with images
-- [ ] Saved staging directives + mask present for the Living Room (Beat 3–4 pre-load)
+- [ ] Saved staging directives present for the Living Room (Beat 3–4 pre-load)
 
 ### Printer
 - [ ] Printer ON and online (`lpstat -p -d` on Linux/macOS, or print a test page from the OS)
@@ -48,8 +48,8 @@ The pass condition: all 10 beats complete without intervention. Check off as you
 
 - [ ] **Beat 1 — Login.** Typed the password live (no saved form fill), landed on `/projects`
 - [ ] **Beat 2 — Open project.** "1506 Porters Mill Ter" open; narrated client profile + **Vintage Modern** aesthetic
-- [ ] **Beat 3 — Living Room directives.** Opened **Edit staging**; typed staging directives (as Lauren will dictate)
-- [ ] **Beat 4 — Mask + Apply Inpainting.** Painted/reused mask, clicked **Apply Inpainting**, narrated during the queue wait; **result appeared (live or pre-generated variant)**
+- [ ] **Beat 3 — 5A hero beat.** Opened **Edit staging**; typed staging directives (as Lauren will dictate); clicked **Stage entire room**, narrated during the queue wait; **result appeared (live or pre-generated variant)**
+- [ ] **Beat 4 — Brush touch-ups + variant strip.** Painted a touch-up zone with the brush; flipped **Original / Variant A / Variant B**; selected state landed on the chosen take
 - [ ] **Beat 5 — Generate Copy.** Read **Challenge → Recommendation → Psychology** aloud
 - [ ] **Beat 6 — Second room reveal.** Bedroom/second room shown; "document, not a one-off" line delivered
 - [ ] **Beat 7 — Preview Lookbook.** Cover → philosophy → room spread → sign-off scrolled
@@ -60,8 +60,8 @@ The pass condition: all 10 beats complete without intervention. Check off as you
 Notes from run 1 (timing per beat, anything rough):
 
 ```
-beat 1: ___s   beat 2: ___s   beat 3: ___s
-beat 4: ___s (queue: ___s — live / fallback)
+beat 1: ___s   beat 2: ___s   beat 3: ___s (queue: ___s — live / fallback)
+beat 4: ___s
 beat 5: ___s   beat 6: ___s   beat 7: ___s
 beat 8: ___s   beat 9: ___s   beat 10: ___s
 rough spots:
@@ -93,7 +93,7 @@ run 2 verdict: clean / needed rescue because: ___________
 narration, whether or not the live queue is actually slow.
 
 1. [ ] Rehearse the **reveal action itself** (deterministic, no API needed): open the Living Room, click through to the **variant** holding the pre-generated after-image (same directive as the live one), and say the line — "let me show you the finished version" / "same pipeline, pre-warmed for today." You should be able to do this in < 5 s of dead air.
-2. [ ] **Live-fire attempt:** click **Apply Inpainting** and let the queue run. If it returns ≤ 90 s, note the timing and treat step 1 as the drill (the production queue is warm; a real stall may not reproduce on demand). If it stalls > 90 s: **do not cancel** — execute the fallback reveal exactly as in step 1, leave the live result to land in the background.
+2. [ ] **Live-fire attempt:** click **Stage entire room** and let the queue run. If it returns ≤ 90 s, note the timing and treat step 1 as the drill (the production queue is warm; a real stall may not reproduce on demand). If it stalls > 90 s: **do not cancel** — execute the fallback reveal exactly as in step 1, leave the live result to land in the background.
 3. [ ] Confirm: after the fallback reveal, the demo continues (Beat 5) without waiting on the spinner; if the live result lands later, the selected after-image is still correct.
 4. [ ] Rule check: at no point did you wait on a spinner in silence.
 
