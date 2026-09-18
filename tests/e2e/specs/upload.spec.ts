@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { roomPhotoFixture } from "../fixtures";
-import { E2E_UPLOAD_PROJECT_ID, E2E_UPLOAD_ROOM_ID } from "../env";
+import { E2E_UPLOAD_ROOM_ID } from "../env";
 import {
   login,
   mockStorageEntries,

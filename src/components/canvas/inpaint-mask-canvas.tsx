@@ -778,6 +778,12 @@ export default function InpaintMaskCanvas({
               : undefined
           }
         >
+          {/* The mask paints over the exact intrinsic image, so the editor
+              needs a plain <img> (sometimes with no src); next/image's
+              optimizer and wrapper would change the request path and DOM
+              in this pixel-stacked surface. The LCP heuristic behind
+              no-img-element does not apply here. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={overlayImageSrc || undefined}
             alt="Original"

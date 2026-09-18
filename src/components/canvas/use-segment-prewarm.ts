@@ -78,7 +78,7 @@ export function useSegmentPrewarm({
 
     const controller = new AbortController();
     const startedAt = performance.now();
-    const prewarm = fetch("/api/segment", {
+    fetch("/api/segment", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       signal: controller.signal,

@@ -64,7 +64,6 @@ export default function GenerateCopyForm({
     },
     // Self-reference resolves at call time, so the retry closure above
     // always reaches the latest `persistCopy` binding.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [roomId, onCopyGenerated, showSuccess, showError]
   );
 
