@@ -113,6 +113,12 @@ export const segmentPointSchema = z.object({
  * natural dimensions the client measured for the same image, and the
  * point must fall within them. `.strict()` rejects unknown keys so
  * stale clients fail loudly.
+ *
+ * `warm` (issue #202) marks an editor-open pre-warm ping: the route runs
+ * only the auth + room-ownership path and returns `{ warmed: true }`
+ * WITHOUT calling fal (zero provider cost). The body still validates as
+ * a full click — the probe point exercises the identical schema path a
+ * real click takes — but the point is never executed.
  * Side effects: none (pure validation); the fal.ai SAM call happens in
  * the route, gated by `assertFalConfigured()`/`FAL_KEY`.
  */
@@ -123,6 +129,7 @@ export const segmentRequestSchema = z
     point: segmentPointSchema,
     imageWidth: z.number().int().positive().max(20_000),
     imageHeight: z.number().int().positive().max(20_000),
+    warm: z.boolean().optional(),
   })
   .strict()
   .refine(

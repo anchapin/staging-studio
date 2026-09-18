@@ -27,6 +27,28 @@ describe("segmentRequestSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("accepts an issue-#202 pre-warm ping (warm: true) with the full click shape", () => {
+    const result = segmentRequestSchema.safeParse({ ...validBody, warm: true });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.warm).toBe(true);
+    }
+  });
+
+  it("treats warm as an optional flag (absent means a real click)", () => {
+    const result = segmentRequestSchema.safeParse(validBody);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.warm).toBeUndefined();
+    }
+  });
+
+  it("rejects a non-boolean warm flag", () => {
+    expect(
+      segmentRequestSchema.safeParse({ ...validBody, warm: "yes" }).success
+    ).toBe(false);
+  });
+
   it("rejects a body missing roomId", () => {
     expect(
       segmentRequestSchema.safeParse({ ...validBody, roomId: undefined }).success

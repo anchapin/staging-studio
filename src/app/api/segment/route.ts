@@ -9,6 +9,10 @@ import {
   buildFalSegmentPayload,
   parseFalSegmentResponse,
 } from "@/lib/segment-mask";
+import {
+  buildSegmentServerTimingEvent,
+  emitSegmentTiming,
+} from "@/lib/segment-timing";
 
 const SEGMENT_ERROR_COPY = {
   auth: {
@@ -67,6 +71,8 @@ async function fetchMaskAsDataUrl(url: string): Promise<string> {
 }
 
 export async function POST(request: NextRequest) {
+  // Timing anchor for the segment_server_timing events (issue #202).
+  const startedAt = Date.now();
   // Hoisted so the catch block can correlate failures with the room even
   // when the error fires before/after the request body is parsed.
   let roomId: string | undefined;
@@ -95,7 +101,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { imageUrl, point } = parsed.data;
+    const { imageUrl, point, warm } = parsed.data;
     roomId = parsed.data.roomId;
 
     const room = await prisma.room.findFirst({
@@ -114,14 +120,36 @@ export async function POST(request: NextRequest) {
 
     assertFalConfigured();
 
+    // Pre-warm ping (issue #202): the editor fires this on open so the
+    // first real click doesn't pay the route's cold path. It runs the
+    // identical auth + room-ownership chain a click runs, then returns
+    // WITHOUT the fal call — a pre-warm costs zero fal-ai/sam requests,
+    // vs the 1 billed call every real click spends. The provider-side
+    // image encode cannot be pre-warmed at all: `fal-ai/sam` exposes no
+    // embedding input/output (see segment-mask.ts), so the encoder runs
+    // inside each billed call on fal's servers.
+    if (warm) {
+      emitSegmentTiming(
+        buildSegmentServerTimingEvent({
+          totalMs: Date.now() - startedAt,
+          falMs: null,
+          warm: true,
+          roomId: roomId ?? null,
+        })
+      );
+      return NextResponse.json({ warmed: true });
+    }
+
     // Synchronous SAM call: segmentation completes in seconds, so a direct
     // queue-aware subscribe keeps the flow single-round-trip instead of the
     // submit/poll pair the long-running inpaint run needs.
+    const falStartedAt = Date.now();
     const falSubscribe = fal.subscribe as FalSubscribeFunction;
     const result = await falSubscribe(FAL_SAM_MODEL, {
       input: buildFalSegmentPayload({ imageUrl, point }),
       abortSignal: AbortSignal.timeout(SEGMENT_TIMEOUT_MS),
     });
+    const falMs = Date.now() - falStartedAt;
 
     const mask = parseFalSegmentResponse(result);
     if (!mask) {
@@ -129,6 +157,18 @@ export async function POST(request: NextRequest) {
     }
 
     const maskDataUrl = await fetchMaskAsDataUrl(mask.maskUrl);
+
+    // Issue #202 instrumentation: total vs fal split, so operators can see
+    // how much of a click's latency is provider work (falMs — irreducible
+    // without an embedding-split provider) vs our route overhead.
+    emitSegmentTiming(
+      buildSegmentServerTimingEvent({
+        totalMs: Date.now() - startedAt,
+        falMs,
+        warm: false,
+        roomId: roomId ?? null,
+      })
+    );
 
     return NextResponse.json({ maskDataUrl });
   } catch (error) {
