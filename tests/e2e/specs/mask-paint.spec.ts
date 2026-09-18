@@ -13,6 +13,7 @@ import {
   whitePixelGeometry,
   whitePixelShare,
 } from "../helpers";
+import { SAM_TOOL_ENABLED } from "../../../src/lib/sam-tool";
 
 const MIN_WHITE_SHARE = 0.01; // 1% of canvas pixels
 
@@ -285,6 +286,10 @@ test.describe("mask painting on high-DPI displays", () => {
  * (and therefore the pending inpaint mask) untouched.
  */
 test.describe("select object segmentation", () => {
+  // Issue #189: the Select Object tool is hidden from the editor UI for the
+  // demo (brush-only). The specs stay pinned here for the post-demo revival
+  // (issue #202); they run again once SAM_TOOL_ENABLED flips back to true.
+  test.skip(!SAM_TOOL_ENABLED, "SAM Select Object tool is hidden for the demo (issue #189)");
   test("one click paints the segment mask and feeds the inpaint flow", async ({ page }) => {
     const inpaint = interceptInpaint(page);
     const segment = interceptSegment(page);
