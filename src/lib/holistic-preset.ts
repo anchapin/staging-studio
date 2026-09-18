@@ -32,8 +32,12 @@ import {
   type HolisticPromptVariantId,
 } from "./holistic-prompt";
 
-/** Button label for the one-click preset. */
-export const HOLISTIC_PRESET_LABEL = "Stage entire room";
+/**
+ * Button label for the one-click preset. Issue #223 renamed the preset
+ * from "Stage entire room": the flow restages furnishings and decor, so
+ * the label must not promise whole-photo restaging.
+ */
+export const HOLISTIC_PRESET_LABEL = "Restage furnishings";
 
 /**
  * Prompt wording the preset ships with: the architecture-first (a2)

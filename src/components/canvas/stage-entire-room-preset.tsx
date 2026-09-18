@@ -100,28 +100,29 @@ export default function StageEntireRoomPreset({
 
   return (
     <section
-      aria-label="Stage entire room preset"
-      className="no-print flex flex-col gap-3 rounded-md border border-stone-300 bg-stone-50 p-4 sm:flex-row sm:items-center sm:justify-between"
+      aria-label="Restage furnishings preset"
+      className="no-print flex flex-col gap-3 rounded-md border border-stone-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between"
     >
       <div className="min-w-0">
         <h4 className="text-sm font-semibold text-stone-800">
           {HOLISTIC_PRESET_LABEL}
           {plan && (
-            <span className="ml-2 rounded bg-stone-200 px-1.5 py-0.5 text-xs font-normal text-stone-600">
-              {plan.strategy.label}
+            <span className="ml-2 rounded bg-stone-100 px-1.5 py-0.5 text-xs font-normal text-stone-600">
+              optional shortcut
             </span>
           )}
         </h4>
         <p className="mt-1 text-xs text-stone-600">
           {plan ? (
             <>
-              Restages the whole photo with the &ldquo;{plan.aesthetic}
-              &rdquo; brief
+              Optional: restages the room&rsquo;s look with the &ldquo;
+              {plan.aesthetic}&rdquo; brief
               {plan.usingFallbackAesthetic
                 ? " (no aesthetic set — using a neutral brief)"
                 : ""}
-              ; the ceiling line and floor plane stay anchored. Touch up the
-              result afterwards with the brush.
+              ; the ceiling line and floor plane stay anchored. You can also
+              paint a mask on the photo below and apply inpainting directly —
+              no shortcut needed.
             </>
           ) : (
             "Preset unavailable — please use the brush flow."
@@ -143,8 +144,8 @@ export default function StageEntireRoomPreset({
             flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium
             transition-colors
             ${buttonDisabled
-              ? "bg-stone-300 text-stone-500 cursor-not-allowed"
-              : "bg-stone-800 text-white hover:bg-stone-700"
+              ? "bg-stone-100 text-stone-400 cursor-not-allowed border border-stone-200"
+              : "border border-stone-300 bg-white text-stone-700 hover:bg-stone-50"
             }
           `}
         >
