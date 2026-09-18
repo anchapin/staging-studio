@@ -224,3 +224,71 @@ test.describe("preview page Edit Lookbook link (issue #250)", () => {
     ).toHaveCount(0);
   });
 });
+
+test.describe("lookbook page UX feedback (issue #250 follow-ups)", () => {
+  const LOOKBOOK_URL = `/projects/${E2E_REHEARSAL_PROJECT_ID}/lookbook`;
+
+  test("Preview Lookbook on the project page opens the lookbook page in preview mode", async ({
+    page,
+  }) => {
+    await login(page);
+    await page.goto(`/projects/${E2E_REHEARSAL_PROJECT_ID}`);
+
+    await page.getByRole("link", { name: "Preview Lookbook" }).click();
+    await expect(page).toHaveURL(
+      new RegExp(`/projects/${E2E_REHEARSAL_PROJECT_ID}/lookbook$`)
+    );
+    await expect(page.getByText("303 Rehearsal Road").first()).toBeVisible();
+
+    // Default mode is Preview: paper rendering, not editors.
+    await expect(page.getByRole("button", { name: "Edit" })).toBeVisible();
+    await expect(
+      page.getByLabel(/Recommendation · Lookbook Suite/)
+    ).toHaveCount(0);
+  });
+
+  test("mode toggle and Export stay reachable at the bottom of the page", async ({
+    page,
+  }) => {
+    await login(page);
+    await page.goto(LOOKBOOK_URL);
+
+    const editToggle = page.getByRole("button", { name: "Edit" });
+    await expect(editToggle).toBeVisible();
+
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+
+    const toggleY = (await editToggle.boundingBox())?.y ?? 9999;
+    expect(toggleY).toBeLessThan(120);
+
+    const exportY =
+      (
+        await page
+          .getByRole("button", { name: "Export PDF" })
+          .boundingBox()
+      )?.y ?? 9999;
+    expect(exportY).toBeLessThan(120);
+  });
+
+  test("edit mode shows room imagery and lookbook context alongside editors", async ({
+    page,
+  }) => {
+    await login(page);
+    await page.goto(LOOKBOOK_URL);
+    await page.getByRole("button", { name: "Edit" }).click();
+
+    const section = page.locator("section", { hasText: "Lookbook Suite" });
+    await expect(
+      section.getByAltText("Lookbook Suite - Before staging")
+    ).toBeVisible();
+    await expect(
+      section.getByAltText("Lookbook Suite - After staging")
+    ).toBeVisible();
+    await expect(
+      section.getByLabel(/Recommendation · Lookbook Suite/)
+    ).toBeVisible();
+
+    // Un-editable lookbook content stays visible for context while editing.
+    await expect(page.getByText("Prepared for Rehearsal Client")).toBeVisible();
+  });
+});

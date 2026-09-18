@@ -54,7 +54,13 @@ test.describe("rehearsal drill", () => {
       },
       "Rehearsal Room"
     );
-    await expect(page.locator('img[alt="Room"]')).toBeVisible({ timeout: 15_000 });
+    // Scoped to the Rehearsal Room card — the project seeds a second
+    // room (issue #250) whose photos also render with alt="Room".
+    await expect(
+      page
+        .locator(".space-y-3", { hasText: "Rehearsal Room" })
+        .locator('img[alt="Room"]')
+    ).toBeVisible({ timeout: 15_000 });
 
     // ---- Focused editor (grid → focused, issue #169 flow) --------------
     await page

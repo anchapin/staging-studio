@@ -3,12 +3,20 @@
 import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import Image from "next/image";
+
 import {
   LookbookPreviewView,
   type PreviewProject,
   type PreviewRoom,
 } from "@/app/(print)/preview/[id]/lookbook-preview-view";
 import ExportPdfButton from "@/components/canvas/export-pdf-button";
+import {
+  CoverPage,
+  PhilosophyPage,
+  SignoffPage,
+  type ProjectData,
+} from "@/components/lookbook";
 import { saveRoomCopyEdits } from "@/app/actions/room";
 import {
   AutosaveController,
@@ -16,6 +24,10 @@ import {
 } from "@/lib/autosave-controller";
 import type { RoomCopyEditInput } from "@/lib/room-copy-edit-schema";
 import { CHECKLIST_PRIORITIES } from "@/lib/checklist-schema";
+import {
+  resolveStagedResultDisplay,
+  type StagedVariantPair,
+} from "@/lib/staged-result";
 
 import { AutoTextarea } from "./auto-textarea";
 
@@ -209,9 +221,31 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
         ? "saved"
         : "idle";
 
+  // Lookbook context for the edit mode (issue #250 feedback): the
+  // un-editable pages stay visible around the editors.
+  const projectData: ProjectData = {
+    propertyAddress: project.propertyAddress,
+    clientName: project.clientName,
+    targetBuyer: project.targetBuyer,
+    stagingAesthetic: project.stagingAesthetic,
+  };
+  const signoffRooms = project.rooms.map((room) => ({
+    id: room.id,
+    name: room.name,
+    beforeImageUrl: room.beforeImageUrl,
+    afterImageUrl: room.afterImageUrl,
+    beforeImageUrl2: room.beforeImageUrl2,
+    afterImageUrl2: room.afterImageUrl2,
+    project: projectData,
+    user: project.user,
+  }));
+
   return (
     <div>
-      <div className="no-print mb-6 flex flex-wrap items-center justify-between gap-3">
+      {/* Floating chrome (issue #250 feedback): sticks to the top of the
+          viewport so Edit/Preview, the save state, and Export stay
+          reachable without scrolling back up. */}
+      <div className="no-print sticky top-0 z-20 -mx-4 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 bg-stone-50/95 px-4 py-3 backdrop-blur">
         <div
           role="group"
           aria-label="Lookbook mode"
@@ -244,26 +278,38 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
           </button>
         </div>
 
-        {mode === "edit" && (
-          <div aria-live="polite" className="text-sm">
-            {indicator === "error" ? (
-              <span className="flex items-center gap-2 text-red-700">
-                Save failed
-                <button
-                  type="button"
-                  onClick={retryFailedSaves}
-                  className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
-                >
-                  Retry
-                </button>
-              </span>
-            ) : indicator === "saving" ? (
-              <span className="text-stone-500">Saving…</span>
-            ) : indicator === "saved" ? (
-              <span className="text-green-700">Saved</span>
-            ) : null}
-          </div>
-        )}
+        <div className="flex items-center gap-4">
+          {mode === "edit" && (
+            <div aria-live="polite" className="text-sm">
+              {indicator === "error" ? (
+                <span className="flex items-center gap-2 text-red-700">
+                  Save failed
+                  <button
+                    type="button"
+                    onClick={retryFailedSaves}
+                    className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+                  >
+                    Retry
+                  </button>
+                </span>
+              ) : indicator === "saving" ? (
+                <span className="text-stone-500">Saving…</span>
+              ) : indicator === "saved" ? (
+                <span className="text-green-700">Saved</span>
+              ) : null}
+            </div>
+          )}
+
+          {/* Export in Preview mode only (issue #250): the browserless
+              capture must never run over unsaved edits. */}
+          {mode === "preview" && (
+            <ExportPdfButton
+              projectId={project.id}
+              projectName={project.propertyAddress}
+              onBeforeExport={flushBeforeExport}
+            />
+          )}
+        </div>
       </div>
 
       {saveBlocked && (
@@ -282,6 +328,13 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
         </div>
       ) : (
         <div className="space-y-6">
+          {/* Cover + philosophy as read-only letter-proportioned cards —
+              context for the copy being edited below. */}
+          <div className="paper-preview">
+            <CoverPage project={projectData} user={project.user} />
+            <PhilosophyPage project={projectData} user={project.user} />
+          </div>
+
           {project.rooms.map((room) => (
             <RoomCopyEditor
               key={room.id}
@@ -303,18 +356,14 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
               onBlur={() => blurRoom(room.id)}
             />
           ))}
-        </div>
-      )}
 
-      {/* Export in Preview mode only (issue #250): the browserless
-          capture must never run over unsaved edits. */}
-      {mode === "preview" && (
-        <div className="no-print mt-8 flex justify-end">
-          <ExportPdfButton
-            projectId={project.id}
-            projectName={project.propertyAddress}
-            onBeforeExport={flushBeforeExport}
-          />
+          <div className="paper-preview">
+            <SignoffPage
+              user={project.user}
+              project={projectData}
+              rooms={signoffRooms}
+            />
+          </div>
         </div>
       )}
     </div>
@@ -352,6 +401,24 @@ function RoomCopyEditor({
   const buyerPsychology = override?.buyerPsychology ?? room.buyerPsychology ?? "";
   const checklistItems: ChecklistRow[] =
     override?.checklistItems ?? room.checklistItems ?? [];
+
+  // Issue #253 selection policy, same as RoomSpread: follow
+  // selectedVariantIndex, fall back A → B, legacy single-slot when
+  // nothing is complete — so the imagery shown while editing matches
+  // what the printed spread will show.
+  const variantPairs: [StagedVariantPair, StagedVariantPair] = [
+    { before: room.beforeImageUrl, after: room.afterImageUrl },
+    { before: room.beforeImageUrl2, after: room.afterImageUrl2 },
+  ];
+  const display = resolveStagedResultDisplay(
+    room.name,
+    variantPairs,
+    room.selectedVariantIndex ?? 0
+  );
+  const beforeImageUrl = display
+    ? variantPairs[display.variantIndex].before
+    : room.beforeImageUrl;
+  const afterImageUrl = display?.afterImageUrl ?? room.afterImageUrl;
 
   // UI rows carry wide string types (input/select values); the server
   // action re-validates through roomCopyEditSchema before Prisma, so a
@@ -394,6 +461,51 @@ function RoomCopyEditor({
             )}
           </div>
         )}
+      </div>
+
+      {/* The room's printed imagery stays visible while editing so copy
+          can be written against the actual before/after photos. */}
+      <div className="mb-5 grid grid-cols-2 gap-4">
+        <div className="relative aspect-[4/3] overflow-hidden rounded-md bg-stone-100">
+          {beforeImageUrl ? (
+            <Image
+              src={beforeImageUrl}
+              alt={`${room.name} - Before staging`}
+              fill
+              sizes="(max-width: 896px) 100vw, 430px"
+              className="object-cover"
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center">
+              <p className="font-jakarta text-sm text-stone-400">Before</p>
+            </div>
+          )}
+          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-3">
+            <p className="font-cinzel text-xs tracking-wider text-white uppercase">
+              Before
+            </p>
+          </div>
+        </div>
+        <div className="relative aspect-[4/3] overflow-hidden rounded-md bg-stone-100">
+          {afterImageUrl ? (
+            <Image
+              src={afterImageUrl}
+              alt={`${room.name} - After staging`}
+              fill
+              sizes="(max-width: 896px) 100vw, 430px"
+              className="object-cover"
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center">
+              <p className="font-jakarta text-sm text-stone-400">After</p>
+            </div>
+          )}
+          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-3">
+            <p className="font-cinzel text-xs tracking-wider text-white uppercase">
+              After
+            </p>
+          </div>
+        </div>
       </div>
 
       <div className="space-y-4">

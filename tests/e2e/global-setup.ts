@@ -219,6 +219,12 @@ async function seed(): Promise<void> {
                   {
                     id: E2E_LOOKBOOK_ROOM_ID,
                     name: "Lookbook Suite",
+                    beforeImageUrl: roomPhotoPublicUrl(
+                      `rooms/${E2E_LOOKBOOK_ROOM_ID}/before-image.png`
+                    ),
+                    afterImageUrl: roomPhotoPublicUrl(
+                      `rooms/${E2E_LOOKBOOK_ROOM_ID}/after-image.png`
+                    ),
                     observedChallenge:
                       "North-facing living room reads dim in listing photos.",
                     recommendation:
@@ -270,6 +276,20 @@ async function main(): Promise<void> {
   mock.putObject(
     "room-photos",
     `rooms/${E2E_CONCEPT_ROOM_ID}/before-image.png`,
+    roomPhotoFixture(),
+    "image/png"
+  );
+  // Issue #250: the lookbook edit spec asserts real <img> elements for
+  // the seeded copy room, so back both of its photo slots.
+  mock.putObject(
+    "room-photos",
+    `rooms/${E2E_LOOKBOOK_ROOM_ID}/before-image.png`,
+    roomPhotoFixture(),
+    "image/png"
+  );
+  mock.putObject(
+    "room-photos",
+    `rooms/${E2E_LOOKBOOK_ROOM_ID}/after-image.png`,
     roomPhotoFixture(),
     "image/png"
   );
