@@ -1,21 +1,24 @@
 /**
- * Feature flag: SAM click-to-select ("Select Object") mask tool.
+ * Feature flag: SAM 3.1 concept-selection mask tool ("Select Objects").
  *
- * Issue #202 (post-demo revival): the tool is re-enabled with the real
- * design pass the demo skipped — immediate per-click feedback (spinner +
- * busy state on the tool button itself, wait cursor on the canvas), an
- * editor-open pre-warm ping that warms the route/auth/DB path at zero
- * provider cost, a bounded in-session mask cache (repeat selections of an
- * already-segmented point are free), and cold/warm latency events
- * (`segment-timing.ts`) for operator measurement.
+ * Issue #228: the old per-click `fal-ai/sam` Select Object tool is
+ * replaced by concept selection — ONE call per (image, concept) to
+ * `POST /api/segment/furnishings` (issue #227) returns every instance;
+ * clicks hit-test client-side for free. The editor-open pre-warm ping
+ * (`warm: true`, issue #202) is gone: the REAL `furniture` detection IS
+ * the prewarm, and its instances feed the chip UI the moment the editor
+ * opens.
  *
- * `fal-ai/sam` has no embedding input/output (see `segment-mask.ts`), so
- * the SAM image encoder still runs inside each billed call on fal's
- * servers; the pre-warm removes OUR side's cold-path costs only. Multi-
- * select is the next wave (issue #203).
+ * The flag remains the kill switch: flipping it to `false` hides the
+ * tool button and its hint copy, gates the editor-open auto-fire, and
+ * skips the concept-tool e2e specs — the brush and flood-fill tools are
+ * untouched.
  *
- * The flag remains the kill switch: flipping it to `false` hides the tool
- * and its hint copy, gates the pre-warm, and skips the select-object e2e
- * specs — nothing else changes.
+ * Environment override: `NEXT_PUBLIC_SAM_TOOL_ENABLED=false` (inlined at
+ * build time) disables the tool — the e2e harness builds with it off
+ * until the `fal-ai/sam-3-1/image` interception lands (issue #231), so
+ * the editor-open auto-fire can never reach the real route mid-suite.
+ * Unset (production/dev) defaults to ENABLED.
  */
-export const SAM_TOOL_ENABLED = true;
+export const SAM_TOOL_ENABLED =
+  process.env.NEXT_PUBLIC_SAM_TOOL_ENABLED !== "false";

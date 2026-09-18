@@ -1,23 +1,23 @@
 /**
- * Client-side cache for SAM click-to-segment responses (issue #202).
+ * Client-side cache for SAM 3.1 concept-selection responses (issue #228,
+ * rekeying the issue #202 point cache).
  *
- * Every "Select Object" click on a NEW point costs one `fal-ai/sam` call
- * (the endpoint has no embedding input/output — see `segment-mask.ts` —
- * so the image is re-encoded inside each billed call). This cache removes
- * the cost of RE-selecting a point that was already segmented during the
- * same editing session: the exact mask returned by the provider is served
- * from memory instantly, with zero provider calls.
+ * Every concept detection on a NEW (image, concept) pair costs one
+ * `fal-ai/sam-3-1/image` call (see `furnishing-detection.ts`). One call
+ * returns ALL instances of that concept, so the cache unit is the whole
+ * result: keying by `(imageUrl, concept)` makes re-selecting an
+ * already-detected concept (chip re-clicks, toggling instances after a
+ * Clear Mask, returning from another concept) instant and free — zero
+ * provider calls.
  *
  * Keying
  * ------
- * `buildSegmentCacheKey(imageUrl, point)` = `<imageUrl>#<roundedX>,<roundedY>`.
+ * `buildSegmentCacheKey(imageUrl, concept)` = `<imageUrl>#<concept>`.
  *
  * - Image is part of the key, so before/after variant switches can never
  *   cross-contaminate: a different source image simply misses.
- * - Points round to integer natural pixels. Sub-pixel deltas (<1px) are
- *   far below SAM's effective input resolution (the model downsizes to
- *   ~1024 on the long edge), so returning the mask for a point 0.x px
- *   away is materially identical — while keeping keys finite and stable.
+ * - The concept is matched verbatim (pre-validated by
+ *   `isValidConceptName`, so it is already trimmed).
  *
  * Invalidation / lifecycle
  * ------------------------
@@ -35,45 +35,56 @@
  * Memory bounds
  * -------------
  * Two caps, both enforced on `put()` with LRU (insertion-order) eviction:
- * `maxEntries` (default 16) and `maxBytes` (default 4 MiB), where bytes
- * are approximated by the data-URL string length (ASCII base64, so code
- * units ≈ bytes). The server caps a mask response at 10 MiB
- * (`MAX_MASK_RESPONSE_BYTES` in `api/segment/route.ts`); entries × that
- * worst case would be ~160 MiB, which is exactly why the byte budget
- * exists. Real white-on-black masks are tens of KB, so the typical
+ * `maxEntries` (default 8) and `maxBytes` (default 8 MiB), where bytes
+ * are approximated by the summed data-URL string lengths of an entry's
+ * masks (ASCII base64, so code units ≈ bytes). One entry holds up to 30
+ * instance masks (`FURNISHING_DETECTION_MAX_MASKS`), so entries run
+ * larger than the old per-point masks; the byte budget covers a full
+ * entry set. Real per-instance masks are tens of KB, so the typical
  * footprint is well under 1 MiB.
  *
  * Side effects: none (pure in-memory data structure).
  */
 
-/** A click point in the source image's natural pixel space. */
-export interface SegmentCachePoint {
-  x: number;
-  y: number;
+/** One concept detection result, exactly as the route returns it. */
+export interface SegmentCacheEntry {
+  /** The validated concept this result was detected with. */
+  concept: string;
+  /** Per-instance masks (data URLs), score-ranked. */
+  maskDataUrls: string[];
+  /** Provider confidence per instance, parallel to `maskDataUrls`. */
+  scores: number[];
 }
 
 export interface SegmentCacheOptions {
-  /** Maximum stored masks (LRU-evicted). Default 16. */
+  /** Maximum stored concept results (LRU-evicted). Default 8. */
   maxEntries?: number;
-  /** Maximum approximate memory for stored data URLs, in bytes. Default 4 MiB. */
+  /** Maximum approximate memory for stored mask data URLs, in bytes. Default 8 MiB. */
   maxBytes?: number;
 }
 
-export const DEFAULT_SEGMENT_CACHE_ENTRIES = 16;
-export const DEFAULT_SEGMENT_CACHE_BYTES = 4 * 1024 * 1024;
+export const DEFAULT_SEGMENT_CACHE_ENTRIES = 8;
+export const DEFAULT_SEGMENT_CACHE_BYTES = 8 * 1024 * 1024;
 
 /**
- * Builds the cache key for a segmentation result. Points round to integer
- * natural pixels (see module doc for why that is safe); `imageUrl` is used
- * verbatim so different images can never share entries.
+ * Builds the cache key for a concept detection result. `imageUrl` is
+ * used verbatim so different images can never share entries; the concept
+ * is appended as-is (it is pre-validated — trimmed, normalized charset —
+ * so no further key munging is needed).
  * Side effects: none (pure).
  */
-export function buildSegmentCacheKey(imageUrl: string, point: SegmentCachePoint): string {
-  return `${imageUrl}#${Math.round(point.x)},${Math.round(point.y)}`;
+export function buildSegmentCacheKey(imageUrl: string, concept: string): string {
+  return `${imageUrl}#${concept}`;
+}
+
+function approxEntryBytes(entry: SegmentCacheEntry): number {
+  let total = 0;
+  for (const url of entry.maskDataUrls) total += url.length;
+  return total;
 }
 
 export class SegmentCache {
-  private readonly entries = new Map<string, string>();
+  private readonly entries = new Map<string, SegmentCacheEntry>();
   private readonly maxEntries: number;
   private readonly maxBytes: number;
   private approxBytes = 0;
@@ -83,23 +94,24 @@ export class SegmentCache {
     this.maxBytes = options.maxBytes ?? DEFAULT_SEGMENT_CACHE_BYTES;
   }
 
-  /** Number of cached masks. */
+  /** Number of cached concept results. */
   get size(): number {
     return this.entries.size;
   }
 
-  /** Approximate memory used by cached data URLs, in bytes. */
+  /** Approximate memory used by cached mask data URLs, in bytes. */
   get bytes(): number {
     return this.approxBytes;
   }
 
   /**
-   * Returns the cached mask for an already-segmented point, refreshing its
-   * LRU recency. Returns null on a miss (new point or new image).
+   * Returns the cached result for an already-detected (image, concept)
+   * pair, refreshing its LRU recency. Returns null on a miss. Call from
+   * event handlers; use `peek` for render-time reads.
    * Side effects: none (recency refresh is internal to the cache).
    */
-  get(imageUrl: string, point: SegmentCachePoint): string | null {
-    const key = buildSegmentCacheKey(imageUrl, point);
+  get(imageUrl: string, concept: string): SegmentCacheEntry | null {
+    const key = buildSegmentCacheKey(imageUrl, concept);
     const hit = this.entries.get(key);
     if (hit === undefined) return null;
     // Map iteration order is insertion order: delete + re-insert moves the
@@ -110,24 +122,43 @@ export class SegmentCache {
   }
 
   /**
-   * Stores a provider-returned mask, evicting least-recently-used entries
-   * until both caps hold. Re-putting an existing key updates it in place
-   * (at its byte size delta) and marks it most recently used.
+   * Read-only cache lookup that does NOT refresh LRU recency — safe to
+   * call during render (the auto-fire hook's cache resolution reads this
+   * way). Returns null on a miss.
+   * Side effects: none.
+   */
+  peek(imageUrl: string, concept: string): SegmentCacheEntry | null {
+    return this.entries.get(buildSegmentCacheKey(imageUrl, concept)) ?? null;
+  }
+
+  /**
+   * Stores a provider-returned concept result, evicting least-recently-
+   * used entries until both caps hold. Re-putting an existing key updates
+   * it in place (at its byte size delta) and marks it most recently used.
    * Side effects: none beyond the cache's own state.
    */
-  put(imageUrl: string, point: SegmentCachePoint, maskDataUrl: string): void {
-    const key = buildSegmentCacheKey(imageUrl, point);
+  put(
+    imageUrl: string,
+    concept: string,
+    result: { maskDataUrls: string[]; scores: number[] }
+  ): void {
+    const key = buildSegmentCacheKey(imageUrl, concept);
+    const entry: SegmentCacheEntry = {
+      concept,
+      maskDataUrls: result.maskDataUrls,
+      scores: result.scores,
+    };
     const previous = this.entries.get(key);
     if (previous !== undefined) {
-      this.approxBytes -= previous.length;
+      this.approxBytes -= approxEntryBytes(previous);
       this.entries.delete(key);
     }
-    this.entries.set(key, maskDataUrl);
-    this.approxBytes += maskDataUrl.length;
+    this.entries.set(key, entry);
+    this.approxBytes += approxEntryBytes(entry);
     this.evict();
   }
 
-  /** Drops every cached mask (called on inpaint source switches). */
+  /** Drops every cached result (called on inpaint source switches). */
   clear(): void {
     this.entries.clear();
     this.approxBytes = 0;
@@ -146,7 +177,7 @@ export class SegmentCache {
     const oldest = this.entries.keys().next();
     if (oldest.done) return;
     const value = this.entries.get(oldest.value);
-    this.approxBytes -= value?.length ?? 0;
+    this.approxBytes -= value ? approxEntryBytes(value) : 0;
     this.entries.delete(oldest.value);
   }
 }

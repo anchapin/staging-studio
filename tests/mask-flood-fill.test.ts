@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { maskGridFromPixels, floodFillMask, mergeMaskGrids } from "@/lib/mask-flood-fill";
+import {
+  CUTOUT_ALPHA_THRESHOLD,
+  maskGridFromAlphaPixels,
+  maskGridFromPixels,
+  floodFillMask,
+  mergeMaskGrids,
+} from "@/lib/mask-flood-fill";
 
 const makeRgba = (pixels: Array<[number, number, number, number]>) =>
   new Uint8ClampedArray(pixels.flat());
@@ -172,5 +178,50 @@ describe("mergeMaskGrids", () => {
       mask: new Uint8Array(0),
       addedCount: 0,
     });
+  });
+});
+
+describe("maskGridFromAlphaPixels", () => {
+  // Issue #228: SAM 3.1 detection masks are ALPHA cutouts (transparent
+  // background, photo-colored object pixels). Luminance would drop every
+  // dark-colored object, so classification keys on alpha alone.
+  it("classifies on alpha alone, ignoring dark object colors", () => {
+    const data = makeRgba([
+      [30, 20, 10, 255], // dark sofa pixel — alpha-only says MASKED
+      [0, 0, 0, 0], // transparent background
+      [255, 255, 255, 255], // bright object pixel
+      [10, 10, 10, 200], // near-threshold alpha, dark — MASKED
+    ]);
+    expect(Array.from(maskGridFromAlphaPixels(data, 2, 2))).toEqual([1, 0, 1, 1]);
+  });
+
+  it("drops pixels below the alpha threshold and pins the threshold", () => {
+    expect(CUTOUT_ALPHA_THRESHOLD).toBe(128);
+    const data = makeRgba([
+      [255, 255, 255, 128], // exactly at threshold → masked
+      [255, 255, 255, 127], // one below → background
+      [0, 0, 0, 255],
+      [0, 0, 0, 0],
+    ]);
+    expect(Array.from(maskGridFromAlphaPixels(data, 2, 2))).toEqual([1, 0, 1, 0]);
+  });
+
+  it("leaves cells beyond the available data unpainted", () => {
+    const data = makeRgba([
+      [0, 0, 0, 255],
+      [0, 0, 0, 255],
+    ]);
+    // 2 pixels of data for a 2×2 grid: the trailing 2 cells stay 0.
+    expect(Array.from(maskGridFromAlphaPixels(data, 2, 2))).toEqual([1, 1, 0, 0]);
+  });
+
+  it("is pure: the input buffer is not mutated", () => {
+    const data = makeRgba([
+      [10, 20, 30, 255],
+      [0, 0, 0, 0],
+    ]);
+    const snapshot = data.slice();
+    maskGridFromAlphaPixels(data, 2, 1);
+    expect(Array.from(data)).toEqual(Array.from(snapshot));
   });
 });

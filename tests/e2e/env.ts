@@ -69,6 +69,25 @@ export function roomPhotoPublicUrl(storagePath: string): string {
 }
 
 /**
+ * Issue #228: SAM 3.1 concept-tool kill switch FOR THE E2E BUILD ONLY.
+ *
+ * The editor now auto-fires a REAL `furniture` detection against
+ * `/api/segment/furnishings` when it opens. Only two specs in this suite
+ * intercept that route (the preset flow's), so with the tool enabled the
+ * auto-fire would reach the real route handler — and through it fal.ai —
+ * in every other editor-opening spec, breaking hermeticity. Compiling the
+ * tool OFF for the app under test (via `nextEnv()` inlining
+ * NEXT_PUBLIC_SAM_TOOL_ENABLED=false) keeps the whole suite hermetic; the
+ * two point-SAM specs in `mask-paint.spec.ts` skip on this constant (they
+ * assert the removed `warm: true` ping anyway).
+ *
+ * Issue #231 lands the `fal-ai/sam-3-1/image` interception and the
+ * replacement concept-tool specs: flip this to `true` and remove the
+ * skip guards in the same change.
+ */
+export const SAM_TOOL_ENABLED_IN_E2E_BUILD = false;
+
+/**
  * Environment for the Next.js build + server started by Playwright's
  * `webServer`. NEXT_PUBLIC_* values are inlined at build time, so the
  * mock Supabase URL must be set here, not in a shell.
@@ -83,5 +102,8 @@ export function nextEnv(): Record<string, string> {
     BROWSERLESS_API_KEY: "e2e-dummy-browserless-key",
     NEXT_PUBLIC_APP_URL: APP_URL,
     PREVIEW_TOKEN_SECRET: "e2e-preview-token-secret",
+    // Kill switch for the concept tool in the app under test — see
+    // SAM_TOOL_ENABLED_IN_E2E_BUILD above.
+    NEXT_PUBLIC_SAM_TOOL_ENABLED: SAM_TOOL_ENABLED_IN_E2E_BUILD ? "true" : "false",
   };
 }

@@ -39,6 +39,34 @@ export function maskGridFromPixels(
   return grid;
 }
 
+/** Alpha threshold above which a cutout pixel counts as object pixels. */
+export const CUTOUT_ALPHA_THRESHOLD = 128;
+
+/**
+ * Converts RGBA pixel data into a binary mask grid using ALPHA only
+ * (issue #228): 1 where the pixel's alpha is at/above
+ * {@link CUTOUT_ALPHA_THRESHOLD}, 0 elsewhere. This is the right
+ * classifier for SAM 3.1 detection masks — they arrive as alpha cutouts
+ * (transparent background, photo-colored object pixels), so LUMINANCE
+ * (what {@link maskGridFromPixels} checks via `isMaskedPixel`) would drop
+ * every dark-colored object. Cells beyond the available data are left
+ * unpainted.
+ */
+export function maskGridFromAlphaPixels(
+  data: Uint8ClampedArray | Uint8Array,
+  width: number,
+  height: number
+): Uint8Array {
+  const total = width * height;
+  const grid = new Uint8Array(total);
+  for (let i = 0; i < total; i++) {
+    const o = i * 4;
+    if (o + 3 >= data.length) break;
+    grid[i] = data[o + 3] >= CUTOUT_ALPHA_THRESHOLD ? 1 : 0;
+  }
+  return grid;
+}
+
 /**
  * Merges two binary mask grids with OR semantics: a cell is painted in the
  * result when it is painted in either input.
