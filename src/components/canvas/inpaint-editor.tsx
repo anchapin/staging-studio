@@ -34,6 +34,7 @@ import { computeMaskCanvasDimensions } from "@/lib/canvas-coords";
 import {
   MAX_BATCH_OBJECTS,
   advanceBatchProgress,
+  applyConceptToggle,
   buildBatchPlan,
   initialBatchProgress,
   reduceSelectionSet,
@@ -239,8 +240,10 @@ export default function InpaintEditor({
 
   // Concept-selection state (issue #228): the detection concept drives
   // ONE billed call per (image, concept); clicks only toggle instances
-  // client-side. Issue #203's pending batch-selection machinery stays for
-  // the batch-panel integration (#229) — concept toggles do not touch it.
+  // client-side. Issue #229: those toggles ARE the batch selection set —
+  // they flow into `batchSelections` through the #203 reducer, so the
+  // batch panel's structure, cap, and dispatch are unchanged. There is no
+  // other selection source (the old per-click SAM path is gone).
   const [requestedConcept, setRequestedConcept] = useState<string>(DEFAULT_CONCEPT);
   const [displayedResult, setDisplayedResult] = useState<SegmentCacheEntry | null>(null);
   const [decodedInstances, setDecodedInstances] = useState<
@@ -327,7 +330,10 @@ export default function InpaintEditor({
       setRequestedConcept(concept);
       setConceptInputError(null);
       setDisplayedResult(segmentCacheRef.current?.get(imageUrl, concept) ?? null);
+      // Toggle state is per-concept (issue #228); the batch set mirrors
+      // the toggles (issue #229), so it resets with them.
       setSelectedInstanceIndices([]);
+      setBatchSelections([]);
     },
     [imageUrl]
   );
@@ -365,15 +371,6 @@ export default function InpaintEditor({
       cancelled = true;
     };
   }, [displayedResult, imageDims]);
-
-  // Selected instances' white masks (natural dims), feeding the shared
-  // union-composition effect. Order follows the score rank.
-  const selectedInstanceMaskUrls = useMemo(() => {
-    if (!decodedInstances) return [];
-    return selectedInstanceIndices
-      .map((index) => decodedInstances[index]?.whiteMaskDataUrl)
-      .filter((url): url is string => Boolean(url));
-  }, [decodedInstances, selectedInstanceIndices]);
 
   // Overlay descriptors for the canvas's tinted instance layer.
   const instanceOverlays = useMemo(() => {
@@ -423,28 +420,64 @@ export default function InpaintEditor({
   // Instance toggling (issue #228): pure client-side hit-test against the
   // decoded grids — re-clicks and re-toggles never cost a network call.
   // Every toggle emits the training-corpus `selection_logged` event (W3
-  // depends on this shape).
+  // depends on this shape). Issue #229: the toggle also drives the batch
+  // selection set — ON routes through the #203 reducer (cap + duplicate
+  // rules inherited, no new limit logic) and a refused add leaves the
+  // instance untinted, so the panel and the canvas always agree.
   const handleInstanceToggle = useCallback(
     (point: { x: number; y: number }) => {
       if (isProcessing) return;
       if (!displayedResult || !decodedInstances) return;
       const hit = findInstanceAtPoint(decodedInstances, point);
       if (hit === null) return;
-      setSelectedInstanceIndices((previous) =>
-        previous.includes(hit) ? previous.filter((index) => index !== hit) : [...previous, hit]
+      const instance = decodedInstances[hit];
+      if (!instance) return;
+      const toggled = applyConceptToggle(
+        batchSelections,
+        selectedInstanceIndices,
+        {
+          id: `${displayedResult.concept}:${hit}`,
+          point,
+          maskDataUrl: instance.whiteMaskDataUrl,
+          conceptLabel: displayedResult.concept,
+        },
+        hit,
+        !selectedInstanceIndices.includes(hit)
       );
+      if (toggled.rejected === "cap") {
+        showError(
+          `Batch staging is limited to ${MAX_BATCH_OBJECTS} objects — undo or clear one to add more.`
+        );
+        return;
+      }
+      if (toggled.rejected === "duplicate") {
+        showError(
+          "That spot rounds to an already-selected object's click point — toggle that one off first."
+        );
+        return;
+      }
+      setSelectedInstanceIndices(toggled.selectedInstanceIndices);
+      setBatchSelections(toggled.selections);
       console.log(
         `${CONCEPT_EVENT_LOG_PREFIX} ${JSON.stringify(
           buildSelectionLoggedEvent({
             roomId,
             concept: displayedResult.concept,
             instanceIndex: hit,
-            score: decodedInstances[hit]?.score ?? null,
+            score: instance.score,
           })
         )}`
       );
     },
-    [isProcessing, displayedResult, decodedInstances, roomId]
+    [
+      isProcessing,
+      displayedResult,
+      decodedInstances,
+      roomId,
+      batchSelections,
+      selectedInstanceIndices,
+      showError,
+    ]
   );
 
   // Measure the source photo so the mask canvas can mirror its aspect ratio
@@ -499,26 +532,26 @@ export default function InpaintEditor({
     [source, onSourceChange]
   );
 
-  // Issue #203 (extended by #228): keep the union mask (for thematic runs
-  // + the batch panel) and the canvas's selection reset in lockstep with
-  // BOTH selection sources — the pending batch set (point-based, #229
-  // integration pending) and the concept instances toggled in by hit-test.
-  // The reset carries an incrementing id so every change applies exactly
-  // once; both sources empty resets the grid to black (Clear Mask
-  // semantics). Concept masks arrive as white-on-black data URLs at the
-  // photo's natural dimensions, the same geometry the batch set is
-  // normalized to, so `composeUnionMaskDataUrl` takes them unchanged.
+  // Issue #203 (simplified by #229): keep the union mask (for thematic
+  // runs + the batch panel) and the canvas's selection reset in lockstep
+  // with the batch selection set — since #229 the toggled concept
+  // instances ARE that set, so one source drives everything. The reset
+  // carries an incrementing id so every change applies exactly once; an
+  // empty set resets the grid to black (Clear Mask semantics). Concept
+  // masks arrive as white-on-black data URLs at the photo's natural
+  // dimensions, the same geometry the batch set is normalized to, so
+  // `composeUnionMaskDataUrl` takes them unchanged.
   useEffect(() => {
     if (!imageDims) return;
     let cancelled = false;
     const compose = async () => {
-      const maskUrls = [
-        ...batchSelections.map((selection) => selection.maskDataUrl),
-        ...selectedInstanceMaskUrls,
-      ];
       const unionUrl =
-        maskUrls.length > 0
-          ? await composeUnionMaskDataUrl(maskUrls, imageDims.width, imageDims.height)
+        batchSelections.length > 0
+          ? await composeUnionMaskDataUrl(
+              batchSelections.map((selection) => selection.maskDataUrl),
+              imageDims.width,
+              imageDims.height
+            )
           : null;
       if (cancelled) return;
       setUnionMaskDataUrl(unionUrl);
@@ -529,7 +562,7 @@ export default function InpaintEditor({
     return () => {
       cancelled = true;
     };
-  }, [batchSelections, selectedInstanceMaskUrls, imageDims]);
+  }, [batchSelections, imageDims]);
 
   // Issue #203: a selection-set change invalidates a finished (e.g.
   // failed) batch's plan — drop it so the panel never offers a retry
@@ -684,6 +717,7 @@ export default function InpaintEditor({
         batchActiveRef.current = false;
         setActiveBatch(null);
         setBatchSelections([]);
+        setSelectedInstanceIndices([]);
         showSuccess(
           `Batch complete — ${plan.steps.length} ${
             plan.steps.length === 1 ? "object" : "objects"
@@ -721,9 +755,11 @@ export default function InpaintEditor({
         }).then(() => {
           // A thematic batch is one ordinary run — consume the selection
           // set only when it actually completed (outcome ref is set by
-          // onCompleted; beginInpaintRun resets it per run).
+          // onCompleted; beginInpaintRun resets it per run). The tinted
+          // instance indices follow the set (issue #229 lockstep).
           if (batchOutcomeRef.current?.kind === "completed") {
             setBatchSelections([]);
+            setSelectedInstanceIndices([]);
           }
         });
         return;
@@ -902,10 +938,11 @@ export default function InpaintEditor({
         </p>
       </div>
 
-      {/* Issue #203: multi-select batch panel — appears once at least one
-          Select Object click has accumulated. Thematic runs go through the
-          shared single-run launcher; per-object plans execute sequentially
-          with per-step progress and a retry affordance. */}
+      {/* Issue #203 panel, fed since #229 by the concept toggles: appears
+          once at least one detected instance has been toggled in. Thematic
+          runs go through the shared single-run launcher; per-object plans
+          execute sequentially with per-step progress and a retry
+          affordance. */}
       {batchSelections.length > 0 && (
         <BatchStagingPanel
           selections={batchSelections}
