@@ -1,6 +1,6 @@
-# PoC Demo Script — Lauren Chapin (Sep 19–20)
+# PoC Demo Script — Lauren Chapin (Sep 26–27)
 
-Total planned content: **~12 minutes** (under the 15-minute cap). Driver: Alex. Lauren art-directs.
+Total planned content: **~11 minutes** (under the 15-minute cap). Driver: Alex. Lauren art-directs.
 URL: `https://staging-studio-kappa.vercel.app` (bookmarked; exact URL, no trailing slash).
 
 ## Pre-flight (before she arrives — see T10)
@@ -17,12 +17,12 @@ URL: `https://staging-studio-kappa.vercel.app` (bookmarked; exact URL, no traili
 **2. Open the project (30s).** "1506 Porters Mill Ter, Midlothian — the Hartwell house."
 Narrate: client profile (empty-nesters downsizing) and aesthetic (**Vintage Modern**) — this drives every AI choice that follows.
 
-**3. Living Room — Lauren dictates (2 min).** Open **Edit staging**. She says what she'd do with the room. Type her words into *Staging directives* verbatim — this is the "AI follows HER" moment. If her direction matches the saved one, even better: it's pre-loaded.
-
-**4. Mask + inpaint live (90s hard timeout).** Paint the furniture zone with the brush (or reuse the saved mask). Click **Apply Inpainting**.
-Narrate during the queue wait (~35s measured): "it's reading her intent, re-staging around the actual architecture — this used to be a half-day of Photoshop."
+**3. THE HERO BEAT — the 5A holistic staging flow (2.5 min).** Open **Edit staging** on the Living Room. She dictates the look, top to bottom — the mood, the pieces, what stays and what goes. Type her words into *Staging directives* verbatim — this is the "AI follows HER" moment. Then one click: **Stage entire room**. The AI re-stages the whole room at once — walls, floors, lighting, layout — composed around the actual architecture, from her direction.
+Narrate during the queue wait (~35s measured): "it's reading her intent and staging the entire room around how the house actually is — this used to be a half-day of Photoshop."
 - **≤90s:** live result appears as the after-image.
 - **>90s:** click the variant — reveal the **pre-generated** after-image (identical directive). Line: "same pipeline, pre-warmed for today."
+
+**4. Brush touch-ups + variant strip (2 min).** Precision pass on top of the holistic result: paint one small zone with the **brush** for a targeted touch-up — "the room came back whole; now we fine-tune, like a highlighter." Then the **variant strip — Original / Variant A / Variant B**: flip between takes; the selected state follows the toggle. Ask HER to call the winner. "Three takes of her room, one click apart."
 
 **5. Copy generation live (20s).** Click **Generate Copy**. Read the *Challenge → Recommendation → Psychology* trio aloud — "this is the client-ready language, in our voice, in seconds."
 
@@ -39,7 +39,7 @@ Narrate during the queue wait (~35s measured): "it's reading her intent, re-stag
 
 ## Failure drills (T10 — rehearse both)
 
-- **Inpaint stall:** if the spinner passes ~90s, say "let me show you the finished version," open the variant/pre-generated image, continue. Never wait on a spinner in silence.
+- **Stage-the-room stall:** if the spinner passes ~90s, say "let me show you the finished version," open the pre-generated variant, continue. Never wait on a spinner in silence.
 - **Export error:** on-disk fallback PDF. The printed artifact is the demo; the live export is the proof. If live fails → fallback + honest one-liner: "rendering hiccup on the demo account — here's the document it produces."
 - **Any 500:** screenshot, note the timestamp, fallback, keep moving. Log sweep afterward.
 
