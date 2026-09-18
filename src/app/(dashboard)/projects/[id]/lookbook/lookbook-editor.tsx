@@ -8,6 +8,7 @@ import {
   type PreviewProject,
   type PreviewRoom,
 } from "@/app/(print)/preview/[id]/lookbook-preview-view";
+import ExportPdfButton from "@/components/canvas/export-pdf-button";
 import { saveRoomCopyEdits } from "@/app/actions/room";
 import {
   AutosaveController,
@@ -122,6 +123,18 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
     for (const controller of controllersRef.current.values()) {
       if (controller.status === "error") controller.retry();
     }
+  }, []);
+
+  /**
+   * Export gate: flush every room's pending autosave; abort the export
+   * (false) when any edit failed to persist — Browserless must never
+   * capture a stale book.
+   */
+  const flushBeforeExport = useCallback(async () => {
+    const results = await Promise.all(
+      [...controllersRef.current.values()].map((c) => c.flush())
+    );
+    return results.every((ok) => ok);
   }, []);
 
   const handleGenerate = useCallback(
@@ -280,6 +293,18 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
               onBlur={() => blurRoom(room.id)}
             />
           ))}
+        </div>
+      )}
+
+      {/* Export in Preview mode only (issue #250): the browserless
+          capture must never run over unsaved edits. */}
+      {mode === "preview" && (
+        <div className="no-print mt-8 flex justify-end">
+          <ExportPdfButton
+            projectId={project.id}
+            projectName={project.propertyAddress}
+            onBeforeExport={flushBeforeExport}
+          />
         </div>
       )}
     </div>

@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { E2E_REHEARSAL_PROJECT_ID } from "../env";
-import { login } from "../helpers";
+import { interceptExportPdf, login } from "../helpers";
 
 // Seeded in tests/e2e/global-setup.ts: the rehearsal project is the only
 // one the preview spec also exercises; its cover renders the address and
@@ -37,5 +37,87 @@ test.describe("lookbook page access (issue #250)", () => {
     await expect(page.getByText(SEEDED_ADDRESS).first()).toBeVisible();
     // …and the room spread heading, proving room data reached the view.
     await expect(page.getByRole("heading", { name: SEEDED_ROOM })).toBeVisible();
+  });
+});
+
+test.describe("lookbook editing (issue #250)", () => {
+  const EDIT_URL = `/projects/${E2E_REHEARSAL_PROJECT_ID}/lookbook`;
+  const COPY_ROOM = "Lookbook Suite";
+  const SEEDED_RECOMMENDATION =
+    "Layer warm lamps and lighten textiles to lift the space.";
+
+  async function enterEditMode(page: import("@playwright/test").Page) {
+    await page.getByRole("button", { name: "Edit" }).click();
+    await expect(page.getByRole("button", { name: "Preview" })).toBeVisible();
+  }
+
+  test("editing a prose field autosaves and survives a full reload", async ({
+    page,
+  }) => {
+    await login(page);
+    await page.goto(EDIT_URL);
+    await enterEditMode(page);
+
+    const recommendationBox = page.getByLabel(
+      new RegExp(`Recommendation.*${COPY_ROOM}`, "i")
+    );
+    await expect(recommendationBox).toHaveValue(SEEDED_RECOMMENDATION);
+
+    await recommendationBox.fill(
+      "Swap the heavy drapes for sheer linen to brighten the room."
+    );
+    await recommendationBox.blur();
+
+    await expect(page.getByText("Saved")).toBeVisible();
+
+    await page.reload();
+    await enterEditMode(page);
+    await expect(recommendationBox).toHaveValue(
+      "Swap the heavy drapes for sheer linen to brighten the room."
+    );
+  });
+});
+
+test.describe("lookbook export (issue #250)", () => {
+  const EXPORT_URL = `/projects/${E2E_REHEARSAL_PROJECT_ID}/lookbook`;
+  const COPY_ROOM = "Lookbook Suite";
+
+  test("Export PDF is offered in Preview mode only", async ({ page }) => {
+    await login(page);
+    await page.goto(EXPORT_URL);
+
+    const exportButton = page.getByRole("button", { name: "Export PDF" });
+    await expect(exportButton).toBeVisible();
+
+    await page.getByRole("button", { name: "Edit" }).click();
+    await expect(exportButton).toBeHidden();
+  });
+
+  test("exporting from the lookbook page persists pending edits first", async ({
+    page,
+  }) => {
+    interceptExportPdf(page, "success");
+    await login(page);
+    await page.goto(EXPORT_URL);
+    await page.getByRole("button", { name: "Edit" }).click();
+
+    const recommendationBox = page.getByLabel(
+      new RegExp(`Recommendation.*${COPY_ROOM}`, "i")
+    );
+    const revised =
+      "Flush-check: brighten with sheer curtains and a wool area rug.";
+    await recommendationBox.fill(revised);
+
+    // Preview mode click flushes pending autosaves; Export then runs
+    // over a clean slate (the button does not even exist in Edit mode).
+    await page.getByRole("button", { name: "Preview" }).click();
+    await page.getByRole("button", { name: "Export PDF" }).click();
+    await expect(page.getByText("PDF exported successfully!")).toBeVisible();
+
+    // The flushed edit survives a full reload — proof the flush landed
+    // before the export round-trip completed.
+    await page.reload();
+    await page.getByRole("button", { name: "Edit" }).click();
+    await expect(recommendationBox).toHaveValue(revised);
   });
 });
