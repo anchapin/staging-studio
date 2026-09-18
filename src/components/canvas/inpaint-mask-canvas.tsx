@@ -15,6 +15,7 @@ import {
   DEFAULT_MASK_EXPANSION_RADIUS,
   dilateMaskGrid,
 } from "@/lib/mask-dilation";
+import { SAM_TOOL_ENABLED } from "@/lib/sam-tool";
 
 /** Tools for building the mask: freehand paint, flood-fill, or click-to-segment. */
 type MaskTool = "brush" | "fill" | "select";
@@ -737,8 +738,11 @@ export default function InpaintMaskCanvas({
         entire object or area you want changed — everything painted is
         regenerated, everything else is preserved. A thin outline won&apos;t
         change the interior, so cover the whole object (or draw an outline and
-        use Fill Region on its inside). Select Object detects a clicked
-        object&apos;s shape for you and paints it onto the mask.
+        use Fill Region on its inside).
+        {/* Issue #189: only advertise Select Object while the SAM tool is
+            surfaced; the sentence disappears with the tool for the demo. */}
+        {SAM_TOOL_ENABLED &&
+          " Select Object detects a clicked object's shape for you and paints it onto the mask."}
       </p>
 
       {lowCoverage && (
@@ -781,19 +785,24 @@ export default function InpaintMaskCanvas({
           >
             Fill Region
           </button>
-          <button
-            type="button"
-            aria-pressed={activeTool === "select"}
-            disabled={segmentDisabled}
-            onClick={() => setActiveTool("select")}
-            className={
-              activeTool === "select"
-                ? "px-3 py-1.5 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
-                : "px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
-            }
-          >
-            Select Object
-          </button>
+          {/* Issue #189: the SAM Select Object tool is hidden for the demo
+              (opaque UX, no processing feedback). Implementation is retained
+              behind SAM_TOOL_ENABLED for the post-demo revival (#202). */}
+          {SAM_TOOL_ENABLED && (
+            <button
+              type="button"
+              aria-pressed={activeTool === "select"}
+              disabled={segmentDisabled}
+              onClick={() => setActiveTool("select")}
+              className={
+                activeTool === "select"
+                  ? "px-3 py-1.5 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                  : "px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+              }
+            >
+              Select Object
+            </button>
+          )}
         </div>
 
         <label className="flex items-center gap-2 text-sm">
