@@ -256,7 +256,12 @@ test.describe("lookbook page UX feedback (issue #250 follow-ups)", () => {
     const editToggle = page.getByRole("button", { name: "Edit" });
     await expect(editToggle).toBeVisible();
 
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    // The dashboard layout scrolls inside #main-content (fixed-height
+    // shell, issue #250 feedback) — scroll the real scroll container.
+    await page.evaluate(() => {
+      const main = document.getElementById("main-content");
+      if (main) main.scrollTo(0, main.scrollHeight);
+    });
 
     const toggleY = (await editToggle.boundingBox())?.y ?? 9999;
     expect(toggleY).toBeLessThan(120);

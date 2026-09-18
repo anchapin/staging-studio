@@ -27,8 +27,11 @@ export default async function DashboardLayout({
     redirect("/setup");
   }
 
+  // Fixed-height shell: #main-content below is the scroll container, so
+  // `sticky` chrome inside pages (lookbook toolbar, issue #250 feedback)
+  // activates and the sidebar stays put while content scrolls.
   return (
-    <div className="flex min-h-screen bg-stone-50">
+    <div className="flex h-screen bg-stone-50">
       {/* Skip link: first focusable element, jumps past the sidebar nav */}
       <a
         href="#main-content"
@@ -38,7 +41,7 @@ export default async function DashboardLayout({
       </a>
 
       {/* Sidebar */}
-      <aside className="no-print w-64 flex-shrink-0 bg-stone-900 text-white">
+      <aside className="no-print w-64 flex-shrink-0 overflow-y-auto bg-stone-900 text-white">
         <div className="flex h-16 items-center border-b border-stone-800 px-6">
           <p className="font-cinzel text-lg font-bold tracking-wide">
             Circle G Designs
