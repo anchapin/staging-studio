@@ -80,6 +80,8 @@ scripts/dev-tunnel.sh
 scripts/dev-tunnel.sh reset
 ```
 
+The script verifies the target port is actually a Next.js app before tunneling. Port 3000 is a trap: Grafana (and other dashboards) default to it, and `next dev` silently falls back to 3001 when it is taken — tunneling 3000 in that state exports Grafana's login page as your "lookbook". If that happens, the script fails with a pointer to the right port: `scripts/dev-tunnel.sh --port 3001`.
+
 Prerequisites: install [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) (no account needed) or [ngrok](https://ngrok.com/download) (free account + `ngrok config add-authtoken <token>`).
 
 The manual equivalent, if you prefer to drive the tunnel yourself:

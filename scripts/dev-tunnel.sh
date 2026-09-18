@@ -8,7 +8,9 @@
 # Usage:
 #   scripts/dev-tunnel.sh                  # auto-detect: cloudflared, else ngrok
 #   scripts/dev-tunnel.sh --tool ngrok     # force a specific tool
-#   scripts/dev-tunnel.sh --port 3000      # local port (default 3000)
+#   scripts/dev-tunnel.sh --port 3000      # local port (default 3000; auto-verified
+#                                           # to be a Next.js app — e.g. pass --port 3001
+#                                           # when Grafana or similar holds 3000)
 #   scripts/dev-tunnel.sh reset            # restore NEXT_PUBLIC_APP_URL=http://localhost:3000
 #
 # Prerequisites: cloudflared (https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
@@ -73,9 +75,31 @@ else
   command -v "$TOOL" > /dev/null 2>&1 || fail "--tool $TOOL requested but not installed."
 fi
 
-code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "http://localhost:$PORT" 2>/dev/null || true)"
-if [ -z "$code" ] || [ "$code" = "000" ]; then
-  printf '  [WARN] nothing is listening on http://localhost:%s yet — start "npm run dev" (the tunnel will 502 until then).\n' "$PORT"
+# --- the tunnel must point at THIS app, not whatever grabbed port 3000 -----
+# Grafana (and other dashboards) default to port 3000, and `next dev` silently
+# falls back to 3001 when 3000 is taken — a tunnel into the wrong service
+# exports that service's login page as the "lookbook" PDF.
+port_owner() {
+  curl -sI --max-time 3 "http://localhost:$1/" 2>/dev/null | tr -d '\r' | grep -i '^x-powered-by:' || true
+}
+is_next() {
+  case "$(port_owner "$1")" in *[Nn]ext*) return 0 ;; *) return 1 ;; esac
+}
+
+if ! is_next "$PORT"; then
+  owner="$(port_owner "$PORT")"
+  alt=""
+  for p in 3000 3001 3002 3003 3004 3005; do
+    [ "$p" = "$PORT" ] && continue
+    if is_next "$p"; then alt="$p"; break; fi
+  done
+  if [ -n "$alt" ]; then
+    fail "localhost:$PORT is not your Next.js dev server (answered: ${owner:-not Next.js}). The dev server appears to be on port $alt instead — re-run: scripts/dev-tunnel.sh --port $alt"
+  elif [ -n "$owner" ]; then
+    fail "localhost:$PORT answered (${owner}) but is not a Next.js app — refusing to tunnel the wrong service. Find your dev server's port and pass --port N."
+  else
+    printf '  [WARN] nothing Next-like is listening on http://localhost:%s yet — start "npm run dev" (the tunnel will 502 until then).\n' "$PORT"
+  fi
 fi
 
 # --- start the tunnel and discover its public URL ---------------------------
