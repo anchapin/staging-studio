@@ -5,6 +5,15 @@ import { prisma } from "@/lib/prisma";
 import { PREVIEW_TOKEN_QUERY_PARAM, signPreviewToken } from "@/lib/preview-token";
 import { classifyIntegrationError } from "@/lib/error-classify";
 import {
+  DEFAULT_DAILY_EXPORT_LIMIT,
+  DAILY_LIMIT_ENV_VAR,
+  dailyQuotaExceededPayload,
+  evaluateDailyQuota,
+  getDailyUsage,
+  recordDailyUsage,
+  resolveDailyLimit,
+} from "@/lib/api-quota";
+import {
   BROWSERLESS_TIMEOUT_MS,
   buildBrowserlessPdfBody,
   buildBrowserlessPdfUrl,
@@ -48,6 +57,33 @@ export async function POST(req: NextRequest) {
           message: "You must be signed in to export a PDF",
         },
         { status: 401 }
+      );
+    }
+
+    // Issue #201: daily per-user Browserless cost guardrail, checked before
+    // any validation work. Usage lives in the in-process daily counter
+    // (lib/api-quota.ts), which resets on cold start; that under-count
+    // limitation is documented there.
+    const exportLimit = resolveDailyLimit(
+      process.env[DAILY_LIMIT_ENV_VAR.export],
+      DEFAULT_DAILY_EXPORT_LIMIT
+    );
+    const exportQuota = evaluateDailyQuota(
+      getDailyUsage("export", user.id),
+      exportLimit
+    );
+    if (!exportQuota.allowed) {
+      console.warn(
+        JSON.stringify({
+          event: "export_pdf_daily_quota_exceeded",
+          userId: user.id,
+          used: exportQuota.used,
+          limit: exportQuota.limit,
+        })
+      );
+      return NextResponse.json(
+        dailyQuotaExceededPayload(exportQuota, "Please try again tomorrow."),
+        { status: 429 }
       );
     }
 
@@ -215,6 +251,11 @@ export async function POST(req: NextRequest) {
         { status: 502 }
       );
     }
+
+    // Count the billable export only once a verified PDF is about to be
+    // delivered: Browserless errors and non-PDF payloads do not count
+    // against the user's daily cap.
+    recordDailyUsage("export", user.id);
 
     return new NextResponse(pdfBuffer, {
       status: 200,

@@ -6,6 +6,14 @@ import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { inpaintRequestSchema } from "@/lib/ai-route-schemas";
 import { classifyIntegrationError } from "@/lib/error-classify";
 import {
+  DEFAULT_DAILY_INPAINT_LIMIT,
+  DAILY_LIMIT_ENV_VAR,
+  dailyQuotaExceededPayload,
+  evaluateDailyQuota,
+  inpaintDailyUsageWhere,
+  resolveDailyLimit,
+} from "@/lib/api-quota";
+import {
   FAL_FLUX_FILL_MODEL,
   buildFalFillPayload,
   buildInpaintPrompt,
@@ -61,6 +69,33 @@ export async function POST(request: NextRequest) {
           message: "You must be signed in to start inpainting.",
         },
         { status: 401 }
+      );
+    }
+
+    // Issue #201: daily per-user fal.ai cost guardrail. Today's usage is
+    // counted from the persisted InpaintRequest rows (see lib/api-quota.ts
+    // for the mechanism and its in-flight race) BEFORE the body is even
+    // parsed — a user at their cap never reaches the paid provider.
+    const inpaintLimit = resolveDailyLimit(
+      process.env[DAILY_LIMIT_ENV_VAR.inpaint],
+      DEFAULT_DAILY_INPAINT_LIMIT
+    );
+    const inpaintUsed = await prisma.inpaintRequest.count({
+      where: inpaintDailyUsageWhere(user.id),
+    });
+    const inpaintQuota = evaluateDailyQuota(inpaintUsed, inpaintLimit);
+    if (!inpaintQuota.allowed) {
+      console.warn(
+        JSON.stringify({
+          event: "inpaint_daily_quota_exceeded",
+          userId: user.id,
+          used: inpaintQuota.used,
+          limit: inpaintQuota.limit,
+        })
+      );
+      return NextResponse.json(
+        dailyQuotaExceededPayload(inpaintQuota, "Please try again tomorrow."),
+        { status: 429 }
       );
     }
 
