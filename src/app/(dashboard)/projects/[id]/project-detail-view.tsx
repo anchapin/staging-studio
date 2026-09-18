@@ -10,16 +10,27 @@ import {
   isCompleteVariantPair,
   resolveStagedResultDisplay,
 } from "@/lib/staged-result";
+import {
+  resolveActiveEditingSlot,
+  resolveSelectionAfterDelete,
+  resolveStripSelection,
+  variantTouchUpLabel,
+  type VariantStripSelection,
+} from "@/lib/variant-legibility";
 import RoomCanvas from "@/components/canvas/room-canvas";
 import StagedResultImage from "@/components/canvas/staged-result-image";
 import InpaintEditor from "@/components/canvas/inpaint-editor";
-import { VariantPicker } from "@/components/canvas/variant-picker";
+import VariantThumbnailStrip from "@/components/canvas/variant-thumbnail-strip";
 import GenerateCopyForm, {
   type GeneratedCopy,
 } from "@/components/canvas/generate-copy-form";
 import ExportPdfButton from "@/components/canvas/export-pdf-button";
 import { useToast, ToastContainer } from "@/components/ui/toast";
-import { saveVariantSelection } from "@/app/actions/room";
+import {
+  deleteVariantAfterImage,
+  getVariantTouchUpCounts,
+  saveVariantSelection,
+} from "@/app/actions/room";
 import { projectFetchStateFromStatus } from "@/lib/project-fetch-state";
 import {
   buildInpaintResultPatch,
@@ -28,6 +39,7 @@ import {
   resolveInpaintSourceUrl,
   resolveInpaintTargetSlot,
   type InpaintSource,
+  type VariantSlot,
 } from "@/lib/inpaint-source";
 
 const MAX_DIRECTIVE_LENGTH = 2000;
@@ -89,7 +101,7 @@ function roomEditorInputs(
    * The staged result to show in place of the old before/after slider
    * (issue #168): the selected variant's after image, falling back to A
    * then B, or null while no variant is complete. Non-null exactly when a
-   * complete variant exists, so the VariantPicker and the image agree.
+   * complete variant exists, so the variant strip and the image agree.
    */
   const staged = resolveStagedResultDisplay(room.name, pairs, selectedIndex);
   const roomDirectives = directives[room.id] ?? room.rawDirectives ?? "";
@@ -147,6 +159,19 @@ export default function ProjectDetailView({
   const [inpaintSourceByRoom, setInpaintSourceByRoom] = useState<
     Record<string, InpaintSource>
   >({});
+  /**
+   * Issue #192: per-room variant touch-up counts, derived from the room's
+   * `InpaintRequest` rows (fetched when the editor opens via
+   * `getVariantTouchUpCounts`) and incremented in-session as variant-source
+   * runs land.
+   */
+  const [touchUpCountsByRoom, setTouchUpCountsByRoom] = useState<
+    Record<string, { 0: number; 1: number }>
+  >({});
+  /** Slot with a delete in flight (spinner on the strip's trash button). */
+  const [deletingSlotByRoom, setDeletingSlotByRoom] = useState<
+    Record<string, VariantSlot | null>
+  >({});
   const { toasts, showError, showSuccess, showInfo, dismissToast } = useToast();
 
   /**
@@ -201,6 +226,29 @@ export default function ProjectDetailView({
     );
   }, []);
 
+  /**
+   * Issue #192: refreshes a room's per-slot touch-up counts from its
+   * `InpaintRequest` rows. Called when the focused editor opens; failures
+   * leave the previous counts in place (the indicator just omits the
+   * count until a fetch succeeds).
+   */
+  const fetchTouchUpCounts = useCallback(async (roomId: string) => {
+    const result = await getVariantTouchUpCounts(roomId);
+    if (result.success && result.counts) {
+      const counts = result.counts;
+      setTouchUpCountsByRoom((prev) => ({ ...prev, [roomId]: counts }));
+    }
+  }, []);
+
+  /** Opens the focused editor and refreshes its touch-up counts. */
+  const openEditor = useCallback(
+    (roomId: string) => {
+      setEditorRoomId(roomId);
+      void fetchTouchUpCounts(roomId);
+    },
+    [fetchTouchUpCounts]
+  );
+
   const handleVariantSelect = useCallback(
     async (room: Room, index: number) => {
       const pair = variantPairsOf(room)[index];
@@ -211,12 +259,14 @@ export default function ProjectDetailView({
         return;
       }
 
-      const previousIndex = room.selectedVariantIndex ?? 0;
+      // Selection may now be null (Original selected via the strip);
+      // revert to the exact prior value on failure instead of 0.
+      const previousRaw = room.selectedVariantIndex;
       applyRoomUpdate(room.id, { selectedVariantIndex: index });
 
       const result = await saveVariantSelection(room.id, index);
       if (!result.success) {
-        applyRoomUpdate(room.id, { selectedVariantIndex: previousIndex });
+        applyRoomUpdate(room.id, { selectedVariantIndex: previousRaw });
         showError(
           result.error || "Failed to save variant selection",
           true,
@@ -230,6 +280,106 @@ export default function ProjectDetailView({
       router.refresh();
     },
     [applyRoomUpdate, showError, showInfo, router]
+  );
+
+  /**
+   * Issue #192: single entry point for the thumbnail strip's select
+   * clicks. "Original" clears the lookbook selection
+   * (`selectedVariantIndex: null`); re-clicking the already-highlighted
+   * item is a no-op. Variant clicks delegate to {@link handleVariantSelect}
+   * (which toasts for unstaged slots).
+   */
+  const handleStripSelect = useCallback(
+    async (room: Room, selection: VariantStripSelection) => {
+      const current = resolveStripSelection(
+        room.selectedVariantIndex,
+        variantPairsOf(room)
+      );
+      if (selection === current) return;
+
+      if (selection === "original") {
+        const previousRaw = room.selectedVariantIndex;
+        applyRoomUpdate(room.id, { selectedVariantIndex: null });
+
+        const result = await saveVariantSelection(room.id, null);
+        if (!result.success) {
+          applyRoomUpdate(room.id, { selectedVariantIndex: previousRaw });
+          showError(
+            result.error || "Failed to save variant selection",
+            true,
+            () => {
+              void handleStripSelect(room, selection);
+            },
+            "Retry saving variant selection"
+          );
+          return;
+        }
+        router.refresh();
+        return;
+      }
+
+      await handleVariantSelect(room, selection);
+    },
+    [applyRoomUpdate, handleVariantSelect, showError, router]
+  );
+
+  /**
+   * Issue #192: deletes one variant's staged after-image. Optimistically
+   * clears the slot and lands the selection on a valid item via the same
+   * pure resolver the server action uses; reverts and offers a retry on
+   * failure.
+   */
+  const handleDeleteVariant = useCallback(
+    async (room: Room, slot: VariantSlot) => {
+      const letter = slot === 0 ? "A" : "B";
+      if (
+        !window.confirm(
+          `Delete Variant ${letter}'s staged image? You can stage this slot again later.`
+        )
+      ) {
+        return;
+      }
+
+      setDeletingSlotByRoom((prev) => ({ ...prev, [room.id]: slot }));
+      const previous = {
+        afterImageUrl: room.afterImageUrl,
+        afterImageUrl2: room.afterImageUrl2,
+        selectedVariantIndex: room.selectedVariantIndex,
+      };
+      const nextSelection = resolveSelectionAfterDelete(
+        variantPairsOf(room),
+        room.selectedVariantIndex,
+        slot
+      );
+
+      try {
+        applyRoomUpdate(
+          room.id,
+          slot === 0
+            ? { afterImageUrl: null, selectedVariantIndex: nextSelection }
+            : { afterImageUrl2: null, selectedVariantIndex: nextSelection }
+        );
+
+        const result = await deleteVariantAfterImage(room.id, slot);
+        if (!result.success) {
+          applyRoomUpdate(room.id, previous);
+          showError(
+            result.error || `Failed to delete Variant ${letter}`,
+            true,
+            () => {
+              void handleDeleteVariant(room, slot);
+            },
+            `Retry deleting Variant ${letter}`
+          );
+          return;
+        }
+        showSuccess(`Variant ${letter} deleted.`);
+        router.refresh();
+      } finally {
+        setDeletingSlotByRoom((prev) => ({ ...prev, [room.id]: null }));
+      }
+    },
+    [applyRoomUpdate, showError, showSuccess, router]
   );
 
   const persistInpaintResult = useCallback(
@@ -260,6 +410,17 @@ export default function ProjectDetailView({
           afterImageUrl2: data.afterImageUrl2,
           selectedVariantIndex: data.selectedVariantIndex,
         });
+        if (source.kind === "variant") {
+          // Issue #192: count this landed touch-up in-session so the
+          // editing indicator advances without waiting for a refetch.
+          setTouchUpCountsByRoom((prev) => {
+            const counts = prev[room.id] ?? { 0: 0, 1: 0 };
+            return {
+              ...prev,
+              [room.id]: { ...counts, [source.slot]: counts[source.slot] + 1 },
+            };
+          });
+        }
         showSuccess(`Staged image saved as Variant ${slot === 0 ? "A" : "B"}.`);
         router.refresh();
       } catch (error) {
@@ -352,6 +513,19 @@ export default function ProjectDetailView({
   const focusedInputs = focusedRoom
     ? roomEditorInputs(focusedRoom, directives, inpaintSourceByRoom)
     : null;
+  /**
+   * Issue #192: the variant slot currently being edited — the editor's
+   * chosen source when it is a staged variant, or a resuming pending run
+   * that edits one. Drives the "editing Variant X · n touch-ups"
+   * indicator in the focused view.
+   */
+  const focusedEditingSlot =
+    focusedRoom && focusedInputs
+      ? resolveActiveEditingSlot(
+          focusedInputs.inpaintSource,
+          focusedInputs.pendingSource
+        )
+      : null;
 
   return (
     <div className="min-h-screen bg-stone-50">
@@ -432,6 +606,26 @@ export default function ProjectDetailView({
                 }}
               />
 
+              {focusedRoom.beforeImageUrl && (
+                <VariantThumbnailStrip
+                  roomName={focusedRoom.name}
+                  originalUrl={focusedRoom.beforeImageUrl}
+                  pairs={focusedInputs.pairs}
+                  selection={resolveStripSelection(
+                    focusedRoom.selectedVariantIndex,
+                    focusedInputs.pairs
+                  )}
+                  onSelect={(selection) =>
+                    void handleStripSelect(focusedRoom, selection)
+                  }
+                  onDeleteVariant={(slot) =>
+                    void handleDeleteVariant(focusedRoom, slot)
+                  }
+                  deletingSlot={deletingSlotByRoom[focusedRoom.id] ?? null}
+                  touchUpCounts={touchUpCountsByRoom[focusedRoom.id] ?? null}
+                />
+              )}
+
               {focusedRoom.beforeImageUrl ? (
                 <>
                   <section aria-label="Staging directives">
@@ -464,6 +658,19 @@ export default function ProjectDetailView({
                     <h3 className="text-sm font-semibold text-stone-800 mb-3">
                       AI Staging
                     </h3>
+                    {focusedEditingSlot !== null && (
+                      <p
+                        role="status"
+                        className="mb-3 inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800 ring-1 ring-amber-200"
+                      >
+                        {variantTouchUpLabel(
+                          focusedEditingSlot,
+                          touchUpCountsByRoom[focusedRoom.id]?.[
+                            focusedEditingSlot
+                          ] ?? 0
+                        )}
+                      </p>
+                    )}
                     <InpaintEditor
                       roomId={focusedRoom.id}
                       imageUrl={focusedInputs.inpaintImageUrl ?? ""}
@@ -504,15 +711,6 @@ export default function ProjectDetailView({
                         alt={focusedInputs.staged.alt}
                         label={focusedInputs.staged.label}
                         largeImage
-                      />
-                      <VariantPicker
-                        className="mt-3"
-                        selectedIndex={focusedInputs.selectedIndex}
-                        onSelect={(index) =>
-                          void handleVariantSelect(focusedRoom, index)
-                        }
-                        variant1Label="Variant A"
-                        variant2Label="Variant B"
                       />
                     </section>
                   )}
@@ -571,7 +769,7 @@ export default function ProjectDetailView({
                         <h3 className="font-medium text-stone-800">{room.name}</h3>
                         <button
                           type="button"
-                          onClick={() => setEditorRoomId(room.id)}
+                          onClick={() => openEditor(room.id)}
                           className="inline-flex items-center gap-1.5 rounded-md border border-stone-300 px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-100"
                         >
                           <PencilRuler className="w-4 h-4" aria-hidden="true" />
@@ -602,12 +800,23 @@ export default function ProjectDetailView({
                         />
                       )}
 
-                      {inputs.hasAnyCompleteVariant && (
-                        <VariantPicker
-                          selectedIndex={inputs.selectedIndex}
-                          onSelect={(index) => void handleVariantSelect(room, index)}
-                          variant1Label="Variant A"
-                          variant2Label="Variant B"
+                      {room.beforeImageUrl && (
+                        <VariantThumbnailStrip
+                          roomName={room.name}
+                          originalUrl={room.beforeImageUrl}
+                          pairs={inputs.pairs}
+                          selection={resolveStripSelection(
+                            room.selectedVariantIndex,
+                            inputs.pairs
+                          )}
+                          onSelect={(selection) =>
+                            void handleStripSelect(room, selection)
+                          }
+                          onDeleteVariant={(slot) =>
+                            void handleDeleteVariant(room, slot)
+                          }
+                          deletingSlot={deletingSlotByRoom[room.id] ?? null}
+                          touchUpCounts={touchUpCountsByRoom[room.id] ?? null}
                         />
                       )}
                     </div>
