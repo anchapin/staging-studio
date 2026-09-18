@@ -89,7 +89,7 @@ Deploying to production? See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — every 
 ## Development
 
 ```bash
-npm run lint        # next lint
+npm run lint        # eslint .
 npm run typecheck   # tsc --noEmit
 npm test            # vitest run (tests live in tests/)
 npm run e2e         # Playwright browser suite (tests/e2e) — see below

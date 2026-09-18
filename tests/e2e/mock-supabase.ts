@@ -216,6 +216,10 @@ export class MockSupabase {
       // ---- Test inspection ----------------------------------------------
       if (parts[0] === "__e2e") {
         if (parts[1] === "storage" && req.method === "GET") {
+          // Rest-destructure omit is the mechanism for stripping `bytes`
+          // from the inspection payload; `_bytes` exists only to discard
+          // that field, so "unused" is a false positive here.
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           json(res, 200, this.listObjects().map(({ bytes: _bytes, ...rest }) => rest));
           return;
         }

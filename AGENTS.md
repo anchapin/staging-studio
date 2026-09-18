@@ -12,7 +12,7 @@ npm run db:push              # run once before dev; schema-first workflow
 npm run dev
 npm run db:generate          # after editing prisma/schema.prisma (regenerates client)
 npm run db:studio
-npm run lint                 # next lint (eslint 9 flat config)
+npm run lint                 # eslint . (eslint 9 flat config; `next lint` was removed in Next 16.3.5)
 npm run typecheck            # tsc --noEmit
 npm test                     # vitest run (tests live in tests/)
 npx vitest run tests/auth-redirect.test.ts   # single test file
