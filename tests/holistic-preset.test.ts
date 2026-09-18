@@ -12,8 +12,8 @@ import {
 } from "@/lib/holistic-preset";
 
 describe("HOLISTIC_PRESET_LABEL", () => {
-  it("is the issue's preset name", () => {
-    expect(HOLISTIC_PRESET_LABEL).toBe("Stage entire room");
+  it("is the issue #223 furnishings-scoped preset name", () => {
+    expect(HOLISTIC_PRESET_LABEL).toBe("Restage furnishings");
   });
 });
 

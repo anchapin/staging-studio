@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildInpaintResultPatch,
+  healInpaintSource,
   inpaintSourceFromRequestRow,
   inpaintSourceLabel,
   inpaintSourcesEqual,
@@ -182,6 +183,44 @@ describe("buildInpaintResultPatch", () => {
     const patch = buildInpaintResultPatch(selectedIsB, RESULT, VARIANT_1);
     expect(patch.selectedVariantIndex).toBeUndefined();
     expect(patch.afterImageUrl2).toBe(RESULT);
+  });
+});
+
+describe("healInpaintSource", () => {
+  it("heals a stale variant source to the original photo when the variant's result is missing", () => {
+    expect(healInpaintSource(room(), VARIANT_0)).toEqual(ORIGINAL);
+  });
+
+  it("heals a stale slot-1 variant source the same way", () => {
+    expect(healInpaintSource(room({ afterImageUrl: AFTER_0 }), VARIANT_1)).toEqual(ORIGINAL);
+  });
+
+  it("passes a variant source with a live staged result through unchanged", () => {
+    const full = room({ afterImageUrl: AFTER_0, afterImageUrl2: AFTER_1 });
+    expect(healInpaintSource(full, VARIANT_0)).toEqual(VARIANT_0);
+    expect(healInpaintSource(full, VARIANT_1)).toEqual(VARIANT_1);
+  });
+
+  it("passes the original photo source through unchanged", () => {
+    expect(healInpaintSource(room(), ORIGINAL)).toEqual(ORIGINAL);
+  });
+
+  it("always heals to a source listInpaintSources offers for the same room", () => {
+    const rooms: InpaintSourceRoom[] = [
+      room(),
+      room({ afterImageUrl: AFTER_0 }),
+      room({ afterImageUrl2: AFTER_1 }),
+      room({ afterImageUrl: AFTER_0, afterImageUrl2: AFTER_1 }),
+    ];
+    for (const current of rooms) {
+      for (const source of [ORIGINAL, VARIANT_0, VARIANT_1]) {
+        expect(
+          listInpaintSources(current).some((option) =>
+            inpaintSourcesEqual(option, healInpaintSource(current, source))
+          )
+        ).toBe(true);
+      }
+    }
   });
 });
 

@@ -682,20 +682,6 @@ export default function InpaintEditor({
         </fieldset>
       )}
 
-      {/* Issue #191 one-click preset: primary full-room staging affordance.
-          It targets the currently selected variant slot via the shared run
-          launcher, so brush touch-ups stack on its result afterwards. */}
-      <StageEntireRoomPreset
-        aesthetic={aesthetic}
-        imageWidth={imageDims?.width ?? null}
-        imageHeight={imageDims?.height ?? null}
-        disabled={isProcessing || isSegmenting}
-        processing={isProcessing}
-        statusText={statusText}
-        onRun={handleHolisticRun}
-        onError={showError}
-      />
-
       <div className="flex flex-col gap-3">
         <h4 className="text-sm font-medium text-stone-700 mb-2">Source Image</h4>
         <InpaintMaskCanvas
@@ -791,6 +777,20 @@ export default function InpaintEditor({
           </span>
         )}
       </div>
+
+      {/* Issue #191 one-click preset, demoted to an optional shortcut by
+          issue #223: the brush → Apply Inpainting flow above is the primary
+          path and works on any source without running the preset first. */}
+      <StageEntireRoomPreset
+        aesthetic={aesthetic}
+        imageWidth={imageDims?.width ?? null}
+        imageHeight={imageDims?.height ?? null}
+        disabled={isProcessing || isSegmenting}
+        processing={isProcessing}
+        statusText={statusText}
+        onRun={handleHolisticRun}
+        onError={showError}
+      />
 
       {/* Issue #190 spike entry — kept as protocol documentation; the
           polished one-click preset above (issue #191) does not depend on it. */}

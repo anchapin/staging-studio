@@ -34,6 +34,7 @@ import {
 import { projectFetchStateFromStatus } from "@/lib/project-fetch-state";
 import {
   buildInpaintResultPatch,
+  healInpaintSource,
   inpaintSourceFromRequestRow,
   listInpaintSources,
   resolveInpaintSourceUrl,
@@ -105,8 +106,13 @@ function roomEditorInputs(
    */
   const staged = resolveStagedResultDisplay(room.name, pairs, selectedIndex);
   const roomDirectives = directives[room.id] ?? room.rawDirectives ?? "";
-  const inpaintSource =
-    inpaintSourceByRoom[room.id] ?? { kind: "original" as const };
+  // Issue #223: the session's stored source can go stale when room data
+  // changes underneath it (variant cleared, persistence failure, refresh)
+  // — heal it against the room so a dead sourceSlot is never submitted.
+  const inpaintSource = healInpaintSource(
+    room,
+    inpaintSourceByRoom[room.id] ?? { kind: "original" as const }
+  );
   const pendingRequest = room.inpaintRequests?.[0] ?? null;
   return {
     pairs,

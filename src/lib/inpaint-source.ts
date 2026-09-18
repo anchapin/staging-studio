@@ -143,6 +143,27 @@ export function buildInpaintResultPatch(
 }
 
 /**
+ * Self-heals a stored source selection against current room data (issue
+ * #223): a variant source whose staged result no longer exists (session
+ * state out of sync with the room — persistence failure, variant
+ * cleared, data refreshed underneath the session) falls back to the
+ * original photo instead of submitting a dead `sourceSlot` that the
+ * inpaint route rejects with a 400. Sources whose image still exists
+ * pass through unchanged.
+ *
+ * Side effects: none — pure function.
+ */
+export function healInpaintSource(
+  room: InpaintSourceRoom,
+  source: InpaintSource
+): InpaintSource {
+  if (source.kind === "variant" && !resolveInpaintSourceUrl(room, source)) {
+    return { kind: "original" };
+  }
+  return source;
+}
+
+/**
  * Reconstructs the source of a persisted run from its stored `sourceSlot`
  * (`null` or any unexpected value ⇒ original-photo run — the pre-#170
  * semantics every legacy row carries).
