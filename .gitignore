@@ -62,3 +62,6 @@ tsconfig.tsbuildinfo
 # editor artifacts / env copies
 *.rswp
 .env.local*
+
+# vitest JSON reporter output (rtk/vitest artifact)
+.vitest/

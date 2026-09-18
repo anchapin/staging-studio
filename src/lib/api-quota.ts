@@ -1,7 +1,7 @@
 /**
- * Daily per-user cost/quota guardrails for the three paid-API surfaces
- * (issue #201): fal.ai inpainting, OpenAI copy generation, and Browserless
- * PDF export.
+ * Daily per-user cost/quota guardrails for the paid-API surfaces
+ * (issue #201): fal.ai inpainting, OpenAI copy generation, Browserless
+ * PDF export, and fal.ai SAM 3.1 segmentation (issue #226).
  *
  * Mechanism per surface:
  * - `inpaint` (fal.ai): every successful queue submit already persists an
@@ -16,6 +16,9 @@
  *   the production DB must not be touched (no Prisma schema change), so
  *   usage is tracked with a dependency-free IN-PROCESS daily counter
  *   (module-level Map) via `recordDailyUsage`/`getDailyUsage`.
+ * - `segment` (fal.ai SAM 3.1 concept calls, issue #226): same rationale
+ *   as `copy`/`export` — no log table and no schema change — so it also
+ *   rides the in-process daily counter.
  *
  * KNOWN LIMITATION (in-process counter): on serverless platforms each
  * Lambda/instance keeps its own counter, so a cold start (or traffic
@@ -43,17 +46,25 @@
  * day) — compare against the providers' dashboard spend alerts.
  */
 
-export type QuotaSurface = "copy" | "export";
+export type QuotaSurface = "copy" | "export" | "segment";
 
 export const DEFAULT_DAILY_INPAINT_LIMIT = 20;
 export const DEFAULT_DAILY_COPY_LIMIT = 50;
 export const DEFAULT_DAILY_EXPORT_LIMIT = 20;
+export const DEFAULT_DAILY_SEGMENT_LIMIT = 100;
+/**
+ * Alias for `DEFAULT_DAILY_SEGMENT_LIMIT` under the name used in issue
+ * #226's scope line ("cap SEGMENT_DAILY_LIMIT = 100"). Prefer the
+ * `DEFAULT_DAILY_*_LIMIT` naming in new code.
+ */
+export const SEGMENT_DAILY_LIMIT = DEFAULT_DAILY_SEGMENT_LIMIT;
 
 /** Env var that configures each surface's daily limit (optional; falls back to the defaults above). */
 export const DAILY_LIMIT_ENV_VAR = {
   inpaint: "DAILY_INPAINT_LIMIT",
   copy: "DAILY_COPY_LIMIT",
   export: "DAILY_EXPORT_LIMIT",
+  segment: "DAILY_SEGMENT_LIMIT",
 } as const;
 
 export interface DailyWindow {
