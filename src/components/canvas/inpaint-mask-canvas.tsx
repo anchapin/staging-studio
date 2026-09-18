@@ -11,7 +11,7 @@ import {
   type CanvasPoint,
 } from "@/lib/canvas-coords";
 import { estimateMaskCoverage, shouldWarnLowCoverage } from "@/lib/mask-coverage";
-import { floodFillMask, maskGridFromPixels, mergeMaskGrids } from "@/lib/mask-flood-fill";
+import { floodFillMask, maskGridFromPixels } from "@/lib/mask-flood-fill";
 import {
   DEFAULT_MASK_EXPANSION_RADIUS,
   dilateMaskGrid,
@@ -22,13 +22,25 @@ import { SAM_TOOL_ENABLED } from "@/lib/sam-tool";
 type MaskTool = "brush" | "fill" | "select";
 
 /**
- * A completed click-to-segment response to paint onto the mask (issue
- * #183). `id` must change per request so each successful response applies
- * exactly once; `maskDataUrl` is a white-on-black PNG data URL.
+ * Issue #203: editor-side sync of the batch selection set. Whenever `id`
+ * changes, the mask grid is re-initialized from `maskDataUrl` — the union
+ * of every pending selection (or cleared when null). The grid is REPLACED
+ * rather than merged because removals cannot be un-painted. A single
+ * Select Object click (issue #183 flow) is the one-element case.
  */
-export interface SegmentMaskRequest {
+export interface SelectionReset {
   id: number;
-  maskDataUrl: string;
+  maskDataUrl: string | null;
+}
+
+/** Issue #203: one numbered badge marking a pending batch selection. */
+export interface SelectionMarker {
+  id: string;
+  /** Click point in the photo's natural pixel space. */
+  x: number;
+  y: number;
+  /** 1-based position in the selection set. */
+  index: number;
 }
 
 interface InpaintMaskCanvasProps {
@@ -64,14 +76,29 @@ interface InpaintMaskCanvasProps {
    * click happened — not only in the status line at the editor's bottom.
    */
   segmenting?: boolean;
-  /** A successful segment response to merge onto the active mask grid. */
-  segmentMaskRequest?: SegmentMaskRequest | null;
   /**
    * Outward mask growth in mask-canvas pixels applied at export time
    * (issue #180): makes FLUX.1 Fill regenerate bezels/frames at the painted
    * boundary instead of preserving them. 0 restores the un-dilated mask.
    */
   expansionRadius?: number;
+  /**
+   * Issue #203: numbered badges (1-based) for each pending batch selection,
+   * positioned by natural-pixel click point. Pure DOM overlay — like the
+   * brush cursor, they never touch canvas pixels, so the exported mask
+   * stays clean.
+   */
+  selectionMarkers?: SelectionMarker[];
+  /**
+   * Issue #203: replace the mask grid with this union mask whenever `id`
+   * changes (a selection was added, removed, or cleared). `maskDataUrl`
+   * null clears the grid. Single-select (issue #183) flows through the
+   * same path: one selection's union is its own mask.
+   */
+  selectionReset?: SelectionReset | null;
+  /** Issue #203: the user pressed Clear Mask; lets the parent drop the
+   * batch selection set so it cannot disagree with the now-empty grid. */
+  onMaskCleared?: () => void;
 }
 
 export default function InpaintMaskCanvas({
@@ -88,8 +115,10 @@ export default function InpaintMaskCanvas({
   onSegmentSelect,
   segmentDisabled = false,
   segmenting = false,
-  segmentMaskRequest = null,
   expansionRadius = DEFAULT_MASK_EXPANSION_RADIUS,
+  selectionMarkers,
+  selectionReset = null,
+  onMaskCleared,
 }: InpaintMaskCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -464,60 +493,54 @@ export default function InpaintMaskCanvas({
     setLowCoverage(false);
     lastSegmentPointRef.current = null;
     onMaskChange?.(null);
+    // Issue #203: the grid is now empty — the parent must drop the batch
+    // selection set so the panel can't disagree with the canvas (the
+    // resulting empty-set reset below re-initializes to black, idempotent).
+    onMaskCleared?.();
   };
 
-  // Applies a successful segment response: draws the returned white-on-black
-  // mask at canvas resolution, OR-merges it onto the existing painted grid
-  // (manual strokes survive), and re-exports. Failure paths (parent never
-  // sends a request, image load error) leave the canvas pixels untouched.
+  // Issue #203: batch selection sync — replaces the #183 incremental
+  // segment merge. The grid must always equal the union of the current
+  // selection set, so ANY set change (add, undo-last, remove, clear)
+  // re-initializes the grid from the editor-composed union mask instead of
+  // merging (removals cannot be un-painted, and re-composing keeps the
+  // grid provably consistent with the panel's list). Manual strokes made
+  // on top of a selection are rebuilt away by design: while the selection
+  // set exists it is the source of truth (the batch panel says so).
+  const lastAppliedResetRef = useRef<number>(-1);
   useEffect(() => {
-    if (!segmentMaskRequest) return;
+    if (!selectionReset || selectionReset.id === lastAppliedResetRef.current) return;
+    lastAppliedResetRef.current = selectionReset.id;
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+
+    if (!selectionReset.maskDataUrl) {
+      ctx.fillStyle = "black";
+      ctx.fillRect(0, 0, dims.width, dims.height);
+      setMaskDataUrl(null);
+      setHasPainted(false);
+      setLowCoverage(false);
+      lastSegmentPointRef.current = null;
+      onMaskChange?.(null);
+      return;
+    }
+
     let cancelled = false;
-    const applySegmentMask = (img: HTMLImageElement) => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-
-      const base = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const segment = document.createElement("canvas");
-      segment.width = canvas.width;
-      segment.height = canvas.height;
-      const segmentCtx = segment.getContext("2d");
-      if (!segmentCtx) return;
-      segmentCtx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      const segmentData = segmentCtx.getImageData(0, 0, canvas.width, canvas.height);
-
-      const merged = mergeMaskGrids(
-        maskGridFromPixels(base.data, canvas.width, canvas.height),
-        maskGridFromPixels(segmentData.data, canvas.width, canvas.height)
-      );
-      if (!merged) return;
-
-      const data = base.data;
-      for (let i = 0; i < merged.mask.length; i++) {
-        if (merged.mask[i] === 1) {
-          const o = i * 4;
-          data[o] = 255;
-          data[o + 1] = 255;
-          data[o + 2] = 255;
-          data[o + 3] = 255;
-        }
-      }
-      ctx.putImageData(base, 0, 0);
+    const img = new Image();
+    img.onload = () => {
+      if (cancelled) return;
+      ctx.fillStyle = "black";
+      ctx.fillRect(0, 0, dims.width, dims.height);
+      ctx.drawImage(img, 0, 0, dims.width, dims.height);
       setHasPainted(true);
       exportMask();
     };
-
-    const img = new Image();
-    img.onload = () => {
-      if (!cancelled) applySegmentMask(img);
-    };
-    img.src = segmentMaskRequest.maskDataUrl;
+    img.src = selectionReset.maskDataUrl;
     return () => {
       cancelled = true;
     };
-  }, [segmentMaskRequest, exportMask]);
+  }, [selectionReset, dims.width, dims.height, exportMask, onMaskChange]);
 
   // The virtual brush cursor lives in LOGICAL canvas space — the same
   // space clientPointToCanvas produces and the DOM cursor indicator
@@ -622,6 +645,27 @@ export default function InpaintMaskCanvas({
     liftKeyboardPaint();
   };
 
+  // Issue #203: while a batch selection set exists, numbered badges mark
+  // each pending object at its click point. Like the brush cursor this is
+  // a DOM overlay — never canvas pixels — so the exported mask stays clean.
+  const markerSpace = {
+    width: naturalWidth && naturalWidth > 0 ? naturalWidth : dims.width,
+    height: naturalHeight && naturalHeight > 0 ? naturalHeight : dims.height,
+  };
+  const selectionBadges = (selectionMarkers ?? []).map((marker) => (
+    <div
+      key={marker.id}
+      aria-hidden="true"
+      className="pointer-events-none absolute z-20 flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white bg-stone-900/85 text-[10px] font-semibold leading-none text-white shadow"
+      style={{
+        left: `${(marker.x / markerSpace.width) * 100}%`,
+        top: `${(marker.y / markerSpace.height) * 100}%`,
+      }}
+    >
+      {marker.index}
+    </div>
+  ));
+
   // Brush cursor indicator is a DOM overlay, never canvas pixels, so the
   // exported mask stays clean. Positioned/sized as percentages of the canvas
   // box so it matches the display size in both overlay and standalone modes.
@@ -655,7 +699,7 @@ export default function InpaintMaskCanvas({
     activeTool === "fill"
       ? "Room mask canvas with the Fill Region tool active: draw a continuous outline around the object, arrow keys move the cursor, press P, Space, or Enter to fill the region under the cursor"
       : activeTool === "select"
-        ? "Room mask canvas with the Select Object tool active: click an object in the photo to paint its detected shape onto the mask, arrow keys move the cursor, press P, Space, or Enter to select the object under the cursor"
+        ? "Room mask canvas with the Select Object tool active: click an object in the photo to add its detected shape to the batch selection (consecutive clicks accumulate, up to five objects), arrow keys move the cursor, press P, Space, or Enter to select the object under the cursor"
         : "Room mask painting canvas: arrow keys move the brush (hold Shift for fine steps), press P, Space, or Enter to start and stop painting";
 
   const canvasElement = (
@@ -690,6 +734,7 @@ export default function InpaintMaskCanvas({
         onBlur={handleCanvasBlur}
       />
       {cursorIndicator}
+      {selectionBadges}
 
       {/* Empty-state hint: the mask uses cover-the-object semantics, so make
           the first paint action obvious. Hidden once anything is painted. */}
@@ -704,7 +749,7 @@ export default function InpaintMaskCanvas({
             }`}
           >
             {activeTool === "select"
-              ? "Click an object to select it for masking"
+              ? "Click objects to add them to the batch selection"
               : "Drag to paint over the object you want changed"}
           </span>
         </div>
@@ -757,7 +802,7 @@ export default function InpaintMaskCanvas({
         {/* Select Object is flag-gated (SAM_TOOL_ENABLED): the sentence
             disappears with the tool if the kill switch is flipped off. */}
         {SAM_TOOL_ENABLED &&
-          " Select Object detects a clicked object's shape for you and paints it onto the mask."}
+          " Select Object detects a clicked object's shape for you and paints it onto the mask. Consecutive clicks accumulate into a batch — compose one theme or per-object prompts in the batch panel, then run them in order."}
       </p>
 
       {lowCoverage && (
