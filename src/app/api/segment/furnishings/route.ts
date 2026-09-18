@@ -5,6 +5,15 @@ import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { furnishingsSegmentRequestSchema } from "@/lib/ai-route-schemas";
 import { classifyIntegrationError } from "@/lib/error-classify";
 import {
+  DEFAULT_DAILY_SEGMENT_LIMIT,
+  DAILY_LIMIT_ENV_VAR,
+  dailyQuotaExceededPayload,
+  evaluateDailyQuota,
+  getDailyUsage,
+  recordDailyUsage,
+  resolveDailyLimit,
+} from "@/lib/api-quota";
+import {
   FAL_FURNISHING_DETECTION_MODEL,
   buildFurnishingDetectionPayload,
   parseFurnishingDetectionResponse,
@@ -32,9 +41,18 @@ const FURNISHINGS_ERROR_COPY = {
 // trips on provider misbehavior, never on real masks.
 const MAX_MASK_RESPONSE_BYTES = 10 * 1024 * 1024;
 
+// Issue #227: a concept that fails validation is the caller's mistake,
+// never a transient provider state — the client should let the user fix
+// the input, not auto-retry the same body.
+const INVALID_CONCEPT_COPY = {
+  error: "Invalid concept",
+  message:
+    'Use a single lowercase word or short phrase — 1–30 characters, lowercase letters, spaces, and hyphens only (no commas or sentences). Try "sofa", "wall art", or leave the concept off for the default "furniture".',
+};
+
 // SAM 3.1 detection completes in seconds; bound the wait so a hung
-// provider degrades to the retryable timeout copy instead of hanging the
-// preset run.
+// provider degrades to the retryable timeout copy instead of hanging
+// the detection request.
 const DETECTION_TIMEOUT_MS = 90_000;
 
 type FalSubscribeFunction = (
@@ -82,19 +100,54 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Issue #226: daily per-user segment guardrail (in-process counter —
+    // see lib/api-quota.ts for the mechanism and its multi-instance
+    // limitation). Checked BEFORE the body is parsed so a user at their
+    // cap never reaches the paid provider.
+    const segmentLimit = resolveDailyLimit(
+      process.env[DAILY_LIMIT_ENV_VAR.segment],
+      DEFAULT_DAILY_SEGMENT_LIMIT
+    );
+    const segmentQuota = evaluateDailyQuota(
+      getDailyUsage("segment", user.id),
+      segmentLimit
+    );
+    if (!segmentQuota.allowed) {
+      console.warn(
+        JSON.stringify({
+          event: "segment_daily_quota_exceeded",
+          userId: user.id,
+          used: segmentQuota.used,
+          limit: segmentQuota.limit,
+        })
+      );
+      return NextResponse.json(
+        dailyQuotaExceededPayload(segmentQuota, "Please try again tomorrow."),
+        { status: 429 }
+      );
+    }
+
     const parsed = furnishingsSegmentRequestSchema.safeParse(await request.json());
     if (!parsed.success) {
+      // Issue #227: concept-shaped failures get actionable, non-retryable
+      // copy — the fix is editing the input, not resending it.
+      const conceptInvalid = parsed.error.issues.some((issue) =>
+        issue.path.includes("concept")
+      );
       return NextResponse.json(
         {
-          error: "Invalid request",
-          message: "Please provide a valid roomId and imageUrl.",
+          error: conceptInvalid ? INVALID_CONCEPT_COPY.error : "Invalid request",
+          message: conceptInvalid
+            ? INVALID_CONCEPT_COPY.message
+            : "Please provide a valid roomId and imageUrl.",
+          retryable: false,
           issues: parsed.error.issues,
         },
         { status: 400 }
       );
     }
 
-    const { imageUrl } = parsed.data;
+    const { imageUrl, concept } = parsed.data;
     roomId = parsed.data.roomId;
 
     const room = await prisma.room.findFirst({
@@ -115,10 +168,14 @@ export async function POST(request: NextRequest) {
 
     // Synchronous detection call: SAM 3.1 completes in seconds, so a
     // direct queue-aware subscribe keeps the preset flow single-round-trip
-    // (the same pattern as /api/segment).
+    // (the same pattern as /api/segment). Omitted concept ⇒ the payload
+    // builder applies the verified "furniture" default, so the preset
+    // path stays byte-equivalent.
+    const startedAtMs = Date.now();
     const falSubscribe = fal.subscribe as FalSubscribeFunction;
+    const payload = buildFurnishingDetectionPayload({ imageUrl, concept });
     const result = await falSubscribe(FAL_FURNISHING_DETECTION_MODEL, {
-      input: buildFurnishingDetectionPayload({ imageUrl }),
+      input: payload,
       abortSignal: AbortSignal.timeout(DETECTION_TIMEOUT_MS),
     });
 
@@ -132,7 +189,25 @@ export async function POST(request: NextRequest) {
       maskDataUrls.push(await fetchMaskAsDataUrl(maskUrl));
     }
 
-    return NextResponse.json({ maskDataUrls });
+    // An empty maskDataUrls list is a VALID result ("no {concept} found"
+    // is presentable, not an error) — the response succeeds either way.
+    // Billing and timing are logged only for completed detections.
+    recordDailyUsage("segment", user.id);
+    console.log(
+      JSON.stringify({
+        event: "segment_concept_timing",
+        source: "network",
+        concept: payload.prompt,
+        instanceCount: maskDataUrls.length,
+        ms: Date.now() - startedAtMs,
+      })
+    );
+
+    return NextResponse.json({
+      concept: payload.prompt,
+      maskDataUrls,
+      scores: detection.scores,
+    });
   } catch (error) {
     console.error(
       JSON.stringify({ event: "furnishings_detection_failed", roomId: roomId ?? null }),
