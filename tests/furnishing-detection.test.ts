@@ -23,7 +23,9 @@ describe("buildFurnishingDetectionPayload", () => {
     expect(FURNISHING_DETECTION_PROMPT).toBe("furniture");
   });
 
-  it("passes the image through unchanged and pins the mask-returning flags", () => {
+  it("passes the image through unchanged and pins the mask-returning flags (default concept)", () => {
+    // Omitted concept ⇒ the verified "furniture" default — the one-click
+    // preset path (issue #223) stays byte-equivalent after #227.
     expect(buildFurnishingDetectionPayload({ imageUrl: IMAGE })).toEqual({
       image_url: IMAGE,
       prompt: "furniture",
@@ -33,13 +35,29 @@ describe("buildFurnishingDetectionPayload", () => {
       include_scores: true,
     });
   });
+
+  it("forwards a caller-supplied concept as the detection prompt (issue #227)", () => {
+    expect(buildFurnishingDetectionPayload({ imageUrl: IMAGE, concept: "wall art" })).toEqual({
+      image_url: IMAGE,
+      prompt: "wall art",
+      apply_mask: false,
+      return_multiple_masks: true,
+      max_masks: 30,
+      include_scores: true,
+    });
+  });
+
+  it("still sends include_scores: true so per-mask scores stay parseable", () => {
+    const payload = buildFurnishingDetectionPayload({ imageUrl: IMAGE, concept: "sofa" });
+    expect(payload.include_scores).toBe(true);
+  });
 });
 
 describe("parseFurnishingDetectionResponse", () => {
   const MASK_A = "https://v3b.fal.media/files/b/0aaaea4f/fMvmjI8dt1UM2WGt5_BYn.png";
   const MASK_B = "https://v3b.fal.media/files/b/0aaaea4f/lL7PVN_YOtLEXLxzJgZi3.png";
 
-  it("extracts every mask URL from the verified SAM 3.1 response shape", () => {
+  it("extracts every mask URL and index-aligned score from the verified SAM 3.1 response shape", () => {
     const response = {
       image: { url: MASK_A, width: 1280, height: 696, content_type: "image/png" },
       masks: [
@@ -52,20 +70,57 @@ describe("parseFurnishingDetectionResponse", () => {
     };
     expect(parseFurnishingDetectionResponse(response)).toEqual({
       maskUrls: [MASK_A, MASK_B],
+      scores: [0.94140625, 0.93359375],
     });
+  });
+
+  it("prefers an entry-level score over the top-level array", () => {
+    expect(
+      parseFurnishingDetectionResponse({
+        masks: [{ url: MASK_A, score: 0.5 }],
+        scores: [0.99],
+      })
+    ).toEqual({ maskUrls: [MASK_A], scores: [0.5] });
+  });
+
+  it("reports 0 (confidence floor) instead of dropping a kept mask with no resolvable score", () => {
+    // No scores array, no entry-level score — the mask still ships so
+    // scores.length === maskUrls.length always holds.
+    expect(parseFurnishingDetectionResponse({ masks: [{ url: MASK_A }] })).toEqual({
+      maskUrls: [MASK_A],
+      scores: [0],
+    });
+    expect(parseFurnishingDetectionResponse({ masks: [{ url: MASK_A }], scores: "junk" })).toEqual(
+      {
+        maskUrls: [MASK_A],
+        scores: [0],
+      }
+    );
+  });
+
+  it("keeps scores index-aligned when mask entries without a URL are skipped", () => {
+    // scores[i] is keyed to the mask's ORIGINAL index: skipping the
+    // second mask must not shift the third mask onto the second score.
+    expect(
+      parseFurnishingDetectionResponse({
+        masks: [{ url: MASK_A }, { url: "  " }, { url: MASK_B }],
+        scores: [0.9, 0.5, 0.7],
+      })
+    ).toEqual({ maskUrls: [MASK_A, MASK_B], scores: [0.9, 0.7] });
   });
 
   it("treats an empty masks array as a valid nothing-detected result", () => {
     // The probe returned exactly this shape when the prompt matched nothing.
     expect(parseFurnishingDetectionResponse({ masks: [], scores: [] })).toEqual({
       maskUrls: [],
+      scores: [],
     });
   });
 
   it("skips mask entries without a usable URL", () => {
     expect(
       parseFurnishingDetectionResponse({ masks: [{ url: MASK_A }, { url: "  " }, {}, null] })
-    ).toEqual({ maskUrls: [MASK_A] });
+    ).toEqual({ maskUrls: [MASK_A], scores: [0] });
   });
 
   it("returns null for malformed responses", () => {

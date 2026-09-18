@@ -138,13 +138,37 @@ export const segmentRequestSchema = z
   );
 
 /**
+ * Zod schema for a SAM 3.1 detection concept (issue #227).
+ *
+ * Contract: a single lowercase word or short phrase — lowercase letters,
+ * spaces, and hyphens only, 1–30 characters after trimming. Commas and
+ * sentence punctuation are rejected BY VALIDATION (not just discouraged):
+ * the issue-#223 spike probe showed SAM 3.1 returns ZERO masks for
+ * multi-term comma lists and one weak mask for full sentences, so a
+ * malformed concept can only waste a quota-billed call. The client-side
+ * chip taxonomy mirrors these rules; members pass by construction.
+ * Side effects: none (pure validation).
+ */
+export const segmentConceptSchema = z
+  .string()
+  .trim()
+  .min(1, { message: "Concept must be 1–30 characters." })
+  .max(30, { message: "Concept must be 1–30 characters." })
+  .regex(/^[a-z -]+$/, {
+    message:
+      "Concept must be a single lowercase word or short phrase (letters, spaces, and hyphens only — no commas, numbers, or sentences).",
+  });
+
+/**
  * Zod schema for the `POST /api/segment/furnishings` request body
- * (issue #223): the one-click preset's text-prompted furnishings
+ * (issue #223, generalized in issue #227): text-prompted furnishings
  * detection. `roomId` scopes the detection to a room the caller owns
  * (the route re-checks ownership server-side); `imageUrl`
- * ({@link aiImageUrlSchema}) is the room photo fal will segment. There
- * is no point, image-size pair, or warm flag — detection is prompted by
- * the concept constant in `furnishing-detection.ts`, not by a click.
+ * ({@link aiImageUrlSchema}) is the room photo fal will segment;
+ * `concept` ({@link segmentConceptSchema}) is the optional detection
+ * concept — omitted ⇒ the route's "furniture" default, keeping the
+ * one-click preset path byte-equivalent. There is no point, image-size
+ * pair, or warm flag — detection is prompted by a concept, not a click.
  * `.strict()` rejects unknown keys so stale clients fail loudly.
  * Side effects: none (pure validation).
  */
@@ -152,5 +176,6 @@ export const furnishingsSegmentRequestSchema = z
   .object({
     roomId: z.string().min(1),
     imageUrl: aiImageUrlSchema,
+    concept: segmentConceptSchema.optional(),
   })
   .strict();
