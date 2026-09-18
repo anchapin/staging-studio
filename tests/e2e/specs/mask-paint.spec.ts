@@ -5,6 +5,7 @@ import {
   E2E_EDITOR_ROOM_ID,
 } from "../env";
 import {
+  interceptFurnishingsDetection,
   interceptInpaint,
   interceptSegment,
   login,
@@ -374,5 +375,75 @@ test.describe("select object segmentation", () => {
       timeout: 15_000,
     });
     await expect(applyButton).toBeEnabled();
+  });
+});
+
+/**
+ * "Restage furnishings" preset (issue #223).
+ *
+ * The preset's regeneration mask is the union of detected per-object
+ * furnishings masks, so architecture (ceiling strip, floor strip, walls)
+ * is OUTSIDE the regen target by construction — the structural fix for
+ * the wall-band strategy's architecture drift. These specs prove it
+ * through the actual POST /api/inpaint body the browser puts on the wire.
+ */
+test.describe("restage furnishings preset", () => {
+  test("regenerates only detected furnishings — ceiling and floor strips stay black", async ({
+    page,
+  }) => {
+    const inpaint = interceptInpaint(page);
+    const detection = interceptFurnishingsDetection(page);
+
+    await login(page);
+    await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
+
+    await page.getByRole("button", { name: "Restage furnishings" }).click();
+
+    await expect(page.getByText("Inpainting completed successfully!")).toBeVisible({
+      timeout: 20_000,
+    });
+
+    // The detection call was room-scoped and targeted the source photo.
+    const detectionBody = detection.submitBody();
+    expect(detectionBody.roomId).toBe(E2E_EDITOR_ROOM_ID);
+    expect(String(detectionBody.imageUrl)).toContain("before-image.png");
+
+    // The run carries the furnishings-scoped directives and the hardened
+    // negative prompt (architecture terms reintroduced — issue #223).
+    const body = inpaint.submitBody();
+    expect(String(body.promptDirectives)).toContain("Replace all furniture and decor");
+    expect(String(body.negativePrompt)).toContain("walls");
+
+    // Architecture preservation is structural: the white regen region is
+    // the detected band (fixture rows 30–34) grown by the 15px dilation
+    // to rows 15–49 of 64 — the ceiling strip (rows 0–14) and floor strip
+    // (rows 50–63) the old wall-band strategy regenerated are never
+    // inside the mask.
+    const geometry = await whitePixelGeometry(page, inpaint.maskDataUrl());
+    expect(geometry.share).toBeGreaterThan(0.45);
+    expect(geometry.share).toBeLessThan(0.65);
+    expect(geometry.bbox.minY).toBeGreaterThan(0.2);
+    expect(geometry.bbox.maxY).toBeLessThan(0.8);
+  });
+
+  test("fails visibly when nothing is detected — no silent geometric fallback", async ({
+    page,
+  }) => {
+    const inpaint = interceptInpaint(page);
+    const detection = interceptFurnishingsDetection(page);
+    detection.respondWithEmpty();
+
+    await login(page);
+    await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
+
+    await page.getByRole("button", { name: "Restage furnishings" }).click();
+
+    await expect(
+      page.getByText("No furnishings were detected in this photo.")
+    ).toBeVisible({ timeout: 15_000 });
+    expect(detection.requestCount()).toBe(1);
+    // The failure must not fall back to a geometric full-room mask (the
+    // regression being fixed) — no inpaint run is ever submitted.
+    expect(() => inpaint.submitBody()).toThrow();
   });
 });

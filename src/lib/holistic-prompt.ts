@@ -34,14 +34,20 @@ import { FRAMING_CONTEXT, buildInpaintPrompt } from "./prompts";
 export type HolisticPromptVariantId = "thematic" | "architecture-first";
 
 /**
- * Negative prompt for holistic full-room runs: the artifact-suppression
- * subset of the single-object {@link NEGATIVE_PROMPT} (its architecture
- * terms are dropped — under a full-room mask they would suppress the
- * room itself), plus geometry-drift terms protecting window frames and
- * the ceiling/floor lines the decision rule cares about.
+ * Negative prompt for holistic preset runs (issue #223 furnishings
+ * scope): the single-object {@link NEGATIVE_PROMPT}'s architecture
+ * terms are REINTRODUCED — under a furnishings-union mask the
+ * walls/windows/flooring are preserved context outside the mask, so
+ * suppressing them keeps the fill from hallucinating new architectural
+ * elements inside masked regions instead of fighting the generation —
+ * plus the artifact terms and geometry-drift terms protecting window
+ * frames and the ceiling/floor lines.
  */
 export const HOLISTIC_NEGATIVE_PROMPT =
-  "bezel, monitor frame, TV border, screen casing, electronics, wires, cables, black plastic trim, raw canvas texture, warped architecture, crooked window frames, crooked ceiling line, crooked floor line";
+  "walls, windows, trim, doors, molding, structural columns, flooring, " +
+  "bezel, monitor frame, TV border, screen casing, electronics, wires, " +
+  "cables, black plastic trim, raw canvas texture, warped architecture, " +
+  "crooked window frames, crooked ceiling line, crooked floor line";
 
 /**
  * Builds the holistic staging directives for a project aesthetic.
@@ -70,10 +76,15 @@ export function buildHolisticDirectives(input: {
   }
 
   return (
-    `${thematic} The walls, windows, trim, doors, ceiling line, and flooring ` +
-    "must remain faithful to the original photo — the result must read as the " +
-    "same room, only restaged. Remove any television completely, including " +
-    "its bezel, stand, wall mount, and cords, and leave the wall behind it clean."
+    `Replace all furniture and decor with ${aesthetic} alternatives: sofa, ` +
+    "seating, tables, rugs, lighting, artwork, plants, and accessories fully " +
+    "restaged to suit the space, and clear away clutter from surfaces. Keep " +
+    "the layout believable and the furniture scaled to the room's " +
+    "architecture. The walls, wall color, flooring, windows, trim, doors, " +
+    "and ceiling must remain exactly as photographed — do not repaint, " +
+    "refinish, or alter any architecture; the result must read as the same " +
+    "room, only restaged. Remove any television completely, including its " +
+    "bezel, stand, wall mount, and cords, and leave the wall behind it clean."
   );
 }
 

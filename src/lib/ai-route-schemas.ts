@@ -136,3 +136,21 @@ export const segmentRequestSchema = z
     (data) => data.point.x <= data.imageWidth && data.point.y <= data.imageHeight,
     { message: "Point must fall within the image bounds" }
   );
+
+/**
+ * Zod schema for the `POST /api/segment/furnishings` request body
+ * (issue #223): the one-click preset's text-prompted furnishings
+ * detection. `roomId` scopes the detection to a room the caller owns
+ * (the route re-checks ownership server-side); `imageUrl`
+ * ({@link aiImageUrlSchema}) is the room photo fal will segment. There
+ * is no point, image-size pair, or warm flag — detection is prompted by
+ * the concept constant in `furnishing-detection.ts`, not by a click.
+ * `.strict()` rejects unknown keys so stale clients fail loudly.
+ * Side effects: none (pure validation).
+ */
+export const furnishingsSegmentRequestSchema = z
+  .object({
+    roomId: z.string().min(1),
+    imageUrl: aiImageUrlSchema,
+  })
+  .strict();
