@@ -15,6 +15,7 @@ import {
   MAX_MASK_EXPANSION_RADIUS,
 } from "@/lib/mask-dilation";
 import HolisticSpikePanel from "./holistic-spike-panel";
+import StageEntireRoomPreset from "./stage-entire-room-preset";
 
 interface InpaintEditorProps {
   roomId: string;
@@ -223,7 +224,8 @@ export default function InpaintEditor({
 
   // Holistic spike entry (issue #190): the panel builds the full-room
   // mask + aesthetic-derived directives; this just forwards them into
-  // the shared run launcher.
+  // the shared run launcher. The one-click preset (issue #191) reuses
+  // the same shape and launcher.
   const handleHolisticRun = useCallback(
     (run: { maskDataUrl: string; promptDirectives: string; negativePrompt: string }) => {
       void beginInpaintRun({
@@ -263,6 +265,20 @@ export default function InpaintEditor({
           </div>
         </fieldset>
       )}
+
+      {/* Issue #191 one-click preset: primary full-room staging affordance.
+          It targets the currently selected variant slot via the shared run
+          launcher, so brush touch-ups stack on its result afterwards. */}
+      <StageEntireRoomPreset
+        aesthetic={aesthetic}
+        imageWidth={imageDims?.width ?? null}
+        imageHeight={imageDims?.height ?? null}
+        disabled={isProcessing || isSegmenting}
+        processing={isProcessing}
+        statusText={statusText}
+        onRun={handleHolisticRun}
+        onError={showError}
+      />
 
       <div className="flex flex-col gap-3">
         <h4 className="text-sm font-medium text-stone-700 mb-2">Source Image</h4>
@@ -334,8 +350,8 @@ export default function InpaintEditor({
         )}
       </div>
 
-      {/* Issue #190 spike entry — deliberately outside the main toolbar;
-          issue #191 replaces this with the polished one-click preset. */}
+      {/* Issue #190 spike entry — kept as protocol documentation; the
+          polished one-click preset above (issue #191) does not depend on it. */}
       <details className="no-print rounded-md border border-dashed border-stone-300 p-3 text-sm">
         <summary className="cursor-pointer select-none text-stone-500">
           Holistic staging spike (#190) — internal testing only
