@@ -29,15 +29,26 @@ describe("buildHolisticDirectives", () => {
     expect(directives).toBe(
       "Replace all furniture and decor with Modern Farmhouse alternatives: sofa, " +
         "seating, tables, rugs, lighting, artwork, plants, and accessories fully " +
-        "restaged to suit the space. Keep the layout believable and the furniture " +
-        "scaled to the room's architecture. The walls, windows, trim, doors, " +
-        "ceiling line, and flooring must remain faithful to the original photo — " +
-        "the result must read as the same room, only restaged. Remove any " +
-        "television completely, including its bezel, stand, wall mount, and " +
-        "cords, and leave the wall behind it clean."
+        "restaged to suit the space, and clear away clutter from surfaces. Keep " +
+        "the layout believable and the furniture scaled to the room's " +
+        "architecture. The walls, wall color, flooring, windows, trim, doors, " +
+        "and ceiling must remain exactly as photographed — do not repaint, " +
+        "refinish, or alter any architecture; the result must read as the same " +
+        "room, only restaged. Remove any television completely, including its " +
+        "bezel, stand, wall mount, and cords, and leave the wall behind it clean."
     );
     expect(directives).toContain("same room, only restaged");
     expect(directives).toContain("including its bezel, stand, wall mount, and cords");
+  });
+
+  it("scopes the architecture-first variant to furnishings (issue #223)", () => {
+    const directives = buildHolisticDirectives({
+      aesthetic: "Japandi",
+      variant: "architecture-first",
+    });
+    expect(directives).toContain("clear away clutter from surfaces");
+    expect(directives).toContain("exactly as photographed");
+    expect(directives).toContain("do not repaint, refinish, or alter any architecture");
   });
 
   it("keeps the thematic variant free of architecture-preservation and TV wording", () => {
@@ -46,7 +57,7 @@ describe("buildHolisticDirectives", () => {
       variant: "thematic",
     });
     expect(directives).not.toContain("television");
-    expect(directives).not.toContain("must remain faithful");
+    expect(directives).not.toContain("exactly as photographed");
   });
 
   it("stays within the promptDirectives schema bound for a max-length aesthetic", () => {
@@ -77,25 +88,30 @@ describe("buildHolisticPrompt", () => {
 });
 
 describe("HOLISTIC_NEGATIVE_PROMPT", () => {
-  it("pins the exact holistic negative prompt", () => {
+  it("pins the exact furnishings-scoped holistic negative prompt", () => {
     expect(HOLISTIC_NEGATIVE_PROMPT).toBe(
-      "bezel, monitor frame, TV border, screen casing, electronics, wires, " +
+      "walls, windows, trim, doors, molding, structural columns, flooring, " +
+        "bezel, monitor frame, TV border, screen casing, electronics, wires, " +
         "cables, black plastic trim, raw canvas texture, warped architecture, " +
         "crooked window frames, crooked ceiling line, crooked floor line"
     );
   });
 
-  it("drops the single-object architecture-suppression terms that fight a full-room regen", () => {
-    expect(HOLISTIC_NEGATIVE_PROMPT).not.toMatch(/\bwalls\b/);
-    expect(HOLISTIC_NEGATIVE_PROMPT).not.toMatch(/\bwindows\b/);
-    expect(HOLISTIC_NEGATIVE_PROMPT).not.toMatch(/\bflooring\b/);
-    expect(HOLISTIC_NEGATIVE_PROMPT).not.toMatch(/\bdoors\b/);
+  it("reintroduces the single-object architecture terms now that architecture sits outside the mask (issue #223)", () => {
+    // Under a furnishings-union mask, walls/windows/flooring are preserved
+    // context, not regen targets — suppressing them keeps the fill from
+    // hallucinating new architectural elements inside masked regions.
+    expect(HOLISTIC_NEGATIVE_PROMPT).toMatch(/\bwalls\b/);
+    expect(HOLISTIC_NEGATIVE_PROMPT).toMatch(/\bwindows\b/);
+    expect(HOLISTIC_NEGATIVE_PROMPT).toMatch(/\bflooring\b/);
+    expect(HOLISTIC_NEGATIVE_PROMPT).toMatch(/\bdoors\b/);
   });
 
-  it("keeps the bezel/TV-frame artifact terms and differs from the single-object default", () => {
+  it("keeps the bezel/TV-frame artifact and geometry-drift terms", () => {
     expect(HOLISTIC_NEGATIVE_PROMPT).toContain("bezel");
     expect(HOLISTIC_NEGATIVE_PROMPT).toContain("TV border");
     expect(HOLISTIC_NEGATIVE_PROMPT).toContain("raw canvas texture");
+    expect(HOLISTIC_NEGATIVE_PROMPT).toContain("warped architecture");
     expect(HOLISTIC_NEGATIVE_PROMPT).not.toBe(NEGATIVE_PROMPT);
   });
 });

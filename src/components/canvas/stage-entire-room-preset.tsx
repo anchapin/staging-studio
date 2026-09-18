@@ -1,43 +1,107 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Loader2, Sparkles } from "lucide-react";
-import type { HolisticMaskImage } from "@/lib/holistic-mask";
+import {
+  isFurnishingCoverageAdequate,
+} from "@/lib/furnishing-detection";
 import {
   HOLISTIC_PRESET_LABEL,
   resolveHolisticPreset,
 } from "@/lib/holistic-preset";
+import { estimateMaskCoverage } from "@/lib/mask-coverage";
+import { maskGridFromPixels } from "@/lib/mask-flood-fill";
+import {
+  DEFAULT_MASK_EXPANSION_RADIUS,
+  dilateMaskGrid,
+} from "@/lib/mask-dilation";
+import { unionMaskBuffers } from "@/lib/multi-select-batch";
 
 /**
- * The polished one-click "Stage entire room" preset (issue #191): the
- * spike-confirmed full-room mask strategy plus the aesthetic-derived
- * prompt in a single primary editor control, targeting the currently
- * selected variant slot so brush touch-ups stack on the result via the
- * existing progressive inpainting flow.
+ * The one-click "Restage furnishings" preset (issues #191 and #223): the
+ * regeneration mask is the DILATED UNION of per-object masks detected
+ * over the room's furnishings (fal-ai/sam-3-1 via
+ * `POST /api/segment/furnishings`), so walls, flooring, windows, trim,
+ * doors, and ceiling sit outside the regen target and are preserved by
+ * construction — the fix for the wall-band preset's architecture drift.
  *
- * Per the #190 contract, strategy + prompt composition stay in the
- * src/lib modules (`holistic-mask.ts`, `holistic-prompt.ts`,
- * `holistic-preset.ts`) — this component is UX + wiring only: it builds
- * the strategy mask at the photo's natural pixel dimensions, serializes
- * it to the data:image PNG the route expects, and hands everything to
- * the parent's shared run launcher. It does NOT depend on the #190
- * spike panel (which stays as protocol documentation).
+ * Per the #190/#223 contract, endpoint choice, payload, and response
+ * parsing stay in `src/lib/furnishing-detection.ts`; prompt wording and
+ * plan resolution stay in `holistic-prompt.ts` / `holistic-preset.ts`.
+ * This component is UX + browser-only wiring: it converts each detected
+ * alpha-cutout mask into the white-on-black buffer the mask pipeline
+ * classifies (cutouts are transparent-background, photo-colored), unions
+ * them, dilates by the brush flow's default expansion radius so contact
+ * shadows and rims regenerate too, guards the union's coverage, and
+ * hands the serialized mask to the parent's shared run launcher.
  */
 
+/** Resolves when the image is loaded; rejects on a load error. */
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Image failed to load."));
+    img.src = src;
+  });
+}
+
 /** Serializes a generated mask buffer to the data:image PNG the route expects. */
-function maskImageToDataUrl(mask: HolisticMaskImage): string | null {
+function maskImageToDataUrl(mask: {
+  width: number;
+  height: number;
+  data: Uint8ClampedArray;
+}): string | null {
   const canvas = document.createElement("canvas");
   canvas.width = mask.width;
   canvas.height = mask.height;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
-  // 4-byte copy so the buffer is a plain ArrayBuffer-backed view (ImageData
-  // typing) — same pattern as the #190 spike panel.
-  ctx.putImageData(new ImageData(new Uint8ClampedArray(mask.data), mask.width, mask.height), 0, 0);
+  ctx.putImageData(
+    new ImageData(new Uint8ClampedArray(mask.data), mask.width, mask.height),
+    0,
+    0
+  );
   return canvas.toDataURL("image/png");
 }
 
+/**
+ * Converts one detected alpha-cutout mask into a white-on-black RGBA
+ * buffer at the photo's natural pixel dimensions. SAM 3.1 masks are
+ * transparent-background with photo-colored object pixels, which the
+ * mask pipeline's `isMaskedPixel` classification cannot read directly —
+ * `source-in` a white fill keeps the object's alpha shape, and
+ * `destination-over` black backs it opaque.
+ */
+async function cutoutToWhiteMaskBuffer(
+  maskDataUrl: string,
+  width: number,
+  height: number
+): Promise<Uint8ClampedArray | null> {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  try {
+    ctx.drawImage(await loadImage(maskDataUrl), 0, 0, width, height);
+  } catch {
+    return null;
+  }
+  ctx.globalCompositeOperation = "source-in";
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+  ctx.globalCompositeOperation = "destination-over";
+  ctx.fillStyle = "#000000";
+  ctx.fillRect(0, 0, width, height);
+  return ctx.getImageData(0, 0, width, height).data;
+}
+
 interface StageEntireRoomPresetProps {
+  /** The room being edited (scopes the detection call server-side). */
+  roomId: string;
+  /** The resolved source image the detection call segments. */
+  imageUrl: string;
   /** The room's project `stagingAesthetic` (may be empty). */
   aesthetic: string;
   /** Natural pixel width of the current source photo (mask builds at this size). */
@@ -59,6 +123,8 @@ interface StageEntireRoomPresetProps {
 }
 
 export default function StageEntireRoomPreset({
+  roomId,
+  imageUrl,
   aesthetic,
   imageWidth,
   imageHeight,
@@ -69,34 +135,110 @@ export default function StageEntireRoomPreset({
   onError,
 }: StageEntireRoomPresetProps) {
   const plan = useMemo(() => resolveHolisticPreset({ aesthetic }), [aesthetic]);
+  const [detecting, setDetecting] = useState(false);
 
-  const handleRun = useCallback(() => {
-    if (!plan) {
-      onError("The full-room preset is unavailable. Please use the brush flow.");
-      return;
-    }
+  const handleRun = useCallback(async () => {
     if (!imageWidth || !imageHeight) {
       onError("The image is still loading. Please try again.");
       return;
     }
-    const mask = plan.strategy.build(imageWidth, imageHeight);
-    if (!mask) {
-      onError("Could not build the full-room mask. Please try again.");
-      return;
-    }
-    const maskDataUrl = maskImageToDataUrl(mask);
-    if (!maskDataUrl) {
-      onError("Could not serialize the full-room mask. Please try again.");
-      return;
-    }
-    onRun({
-      maskDataUrl,
-      promptDirectives: plan.directives,
-      negativePrompt: plan.negativePrompt,
-    });
-  }, [plan, imageWidth, imageHeight, onRun, onError]);
+    if (detecting) return;
+    setDetecting(true);
+    try {
+      // 1. Detect furnishings (per-object alpha-cutout masks, server
+      //    re-encoded as data URLs).
+      const response = await fetch("/api/segment/furnishings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomId, imageUrl }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(
+          data?.message || data?.error || "Furnishings detection failed."
+        );
+      }
+      const maskDataUrls: string[] = Array.isArray(data?.maskDataUrls)
+        ? data.maskDataUrls
+        : [];
+      if (maskDataUrls.length === 0) {
+        throw new Error(
+          "No furnishings were detected in this photo. Use the brush tools to mask the room manually."
+        );
+      }
 
-  const buttonDisabled = disabled || !plan;
+      // 2. Convert cutouts to white-on-black buffers at natural dims.
+      const buffers: Array<{ width: number; height: number; data: Uint8ClampedArray }> = [];
+      for (const url of maskDataUrls) {
+        const data_ = await cutoutToWhiteMaskBuffer(url, imageWidth, imageHeight);
+        if (data_) buffers.push({ width: imageWidth, height: imageHeight, data: data_ });
+      }
+
+      // 3. Union the objects, then dilate so contact shadows, bezels, and
+      //    rims at each object's boundary regenerate too (same knob and
+      //    rationale as the brush flow's Mask Expansion default).
+      const union = unionMaskBuffers(buffers);
+      if (!union) {
+        throw new Error("Could not build the furnishings mask. Please try again.");
+      }
+      const grid = maskGridFromPixels(union.data, imageWidth, imageHeight);
+      const dilated = dilateMaskGrid(
+        grid,
+        imageWidth,
+        imageHeight,
+        DEFAULT_MASK_EXPANSION_RADIUS
+      );
+      if (!dilated) {
+        throw new Error("Could not build the furnishings mask. Please try again.");
+      }
+      const maskData = new Uint8ClampedArray(imageWidth * imageHeight * 4);
+      for (let i = 0; i < dilated.mask.length; i++) {
+        const o = i * 4;
+        if (dilated.mask[i] === 1) {
+          maskData[o] = 255;
+          maskData[o + 1] = 255;
+          maskData[o + 2] = 255;
+        }
+        maskData[o + 3] = 255;
+      }
+
+      // 4. Coverage guard: a near-empty union means a degenerate
+      //    detection — fail visibly instead of submitting a meaningless
+      //    mask. Architecture preservation itself is structural: those
+      //    pixels never entered the union.
+      const coverage = estimateMaskCoverage(maskData, imageWidth, imageHeight);
+      if (!isFurnishingCoverageAdequate(coverage)) {
+        throw new Error(
+          "Too little of the photo was detected as furnishings. Use the brush tools to mask the room manually."
+        );
+      }
+
+      // 5. Serialize and dispatch through the shared run launcher.
+      const maskDataUrl = maskImageToDataUrl({
+        width: imageWidth,
+        height: imageHeight,
+        data: maskData,
+      });
+      if (!maskDataUrl) {
+        throw new Error("Could not serialize the furnishings mask. Please try again.");
+      }
+      onRun({
+        maskDataUrl,
+        promptDirectives: plan.directives,
+        negativePrompt: plan.negativePrompt,
+      });
+    } catch (error) {
+      onError(
+        error instanceof Error
+          ? error.message
+          : "The furnishings preset failed. Please use the brush flow."
+      );
+    } finally {
+      setDetecting(false);
+    }
+  }, [roomId, imageUrl, imageWidth, imageHeight, detecting, plan, onRun, onError]);
+
+  const buttonDisabled = disabled || detecting;
 
   return (
     <section
@@ -106,31 +248,23 @@ export default function StageEntireRoomPreset({
       <div className="min-w-0">
         <h4 className="text-sm font-semibold text-stone-800">
           {HOLISTIC_PRESET_LABEL}
-          {plan && (
-            <span className="ml-2 rounded bg-stone-100 px-1.5 py-0.5 text-xs font-normal text-stone-600">
-              optional shortcut
-            </span>
-          )}
+          <span className="ml-2 rounded bg-stone-100 px-1.5 py-0.5 text-xs font-normal text-stone-600">
+            optional shortcut
+          </span>
         </h4>
         <p className="mt-1 text-xs text-stone-600">
-          {plan ? (
-            <>
-              Optional: restages the room&rsquo;s look with the &ldquo;
-              {plan.aesthetic}&rdquo; brief
-              {plan.usingFallbackAesthetic
-                ? " (no aesthetic set — using a neutral brief)"
-                : ""}
-              ; the ceiling line and floor plane stay anchored. You can also
-              paint a mask on the photo below and apply inpainting directly —
-              no shortcut needed.
-            </>
-          ) : (
-            "Preset unavailable — please use the brush flow."
-          )}
+          Optional: detects furniture and decor and restages them with the
+          &ldquo;{plan.aesthetic}&rdquo; brief
+          {plan.usingFallbackAesthetic
+            ? " (no aesthetic set — using a neutral brief)"
+            : ""}
+          ; walls, flooring, and windows stay as photographed. You can also
+          paint a mask on the photo below and apply inpainting directly —
+          no shortcut needed.
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-3">
-        {processing && statusText && (
+        {(processing || detecting) && statusText && (
           <span role="status" className="text-xs text-stone-600">
             {statusText}
           </span>
@@ -139,7 +273,7 @@ export default function StageEntireRoomPreset({
           type="button"
           onClick={handleRun}
           disabled={buttonDisabled}
-          aria-busy={processing}
+          aria-busy={processing || detecting}
           className={`
             flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium
             transition-colors
@@ -149,10 +283,10 @@ export default function StageEntireRoomPreset({
             }
           `}
         >
-          {processing ? (
+          {processing || detecting ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-              Staging...
+              {detecting ? "Detecting furnishings..." : "Staging..."}
             </>
           ) : (
             <>

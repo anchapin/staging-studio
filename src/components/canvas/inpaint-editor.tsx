@@ -778,10 +778,14 @@ export default function InpaintEditor({
         )}
       </div>
 
-      {/* Issue #191 one-click preset, demoted to an optional shortcut by
-          issue #223: the brush → Apply Inpainting flow above is the primary
-          path and works on any source without running the preset first. */}
+      {/* Issue #191/#223 one-click preset, demoted to an optional shortcut
+          by issue #223: the brush → Apply Inpainting flow above is the
+          primary path and works on any source without running the preset
+          first. The preset detects furnishings and restages only those
+          regions (see stage-entire-room-preset.tsx). */}
       <StageEntireRoomPreset
+        roomId={roomId}
+        imageUrl={imageUrl}
         aesthetic={aesthetic}
         imageWidth={imageDims?.width ?? null}
         imageHeight={imageDims?.height ?? null}

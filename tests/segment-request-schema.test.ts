@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { segmentRequestSchema } from "@/lib/ai-route-schemas";
+import {
+  furnishingsSegmentRequestSchema,
+  segmentRequestSchema,
+} from "@/lib/ai-route-schemas";
 
 const validBody = {
   roomId: "room_123",
@@ -111,6 +114,50 @@ describe("segmentRequestSchema", () => {
     expect(
       segmentRequestSchema.safeParse({ ...validBody, maskUrl: "data:image/png;base64,AAAA" })
         .success
+    ).toBe(false);
+  });
+});
+
+describe("furnishingsSegmentRequestSchema", () => {
+  const validFurnishingsBody = {
+    roomId: "room_123",
+    imageUrl: "https://example.supabase.co/storage/v1/object/public/rooms/before-image.png",
+  };
+
+  it("accepts a room-scoped detection request", () => {
+    const result = furnishingsSegmentRequestSchema.safeParse(validFurnishingsBody);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual(validFurnishingsBody);
+    }
+  });
+
+  it("rejects a body missing roomId or imageUrl", () => {
+    expect(furnishingsSegmentRequestSchema.safeParse({ imageUrl: validFurnishingsBody.imageUrl }).success).toBe(false);
+    expect(furnishingsSegmentRequestSchema.safeParse({ roomId: "room_123" }).success).toBe(false);
+  });
+
+  it("rejects an empty roomId", () => {
+    expect(
+      furnishingsSegmentRequestSchema.safeParse({ ...validFurnishingsBody, roomId: "" }).success
+    ).toBe(false);
+  });
+
+  it("rejects image URLs on non-allowlisted hosts", () => {
+    expect(
+      furnishingsSegmentRequestSchema.safeParse({
+        ...validFurnishingsBody,
+        imageUrl: "https://evil.example.com/rooms/before-image.png",
+      }).success
+    ).toBe(false);
+  });
+
+  it("rejects unknown keys (strict object)", () => {
+    expect(
+      furnishingsSegmentRequestSchema.safeParse({
+        ...validFurnishingsBody,
+        point: { x: 1, y: 1 },
+      }).success
     ).toBe(false);
   });
 });

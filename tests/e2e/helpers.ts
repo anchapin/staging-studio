@@ -301,12 +301,115 @@ export function interceptSegment(page: Page): SegmentInterception {
   };
 }
 
+interface FurnishingsDetectionCaptureState {
+  submitPayload: Record<string, unknown> | null;
+  requestCount: number;
+  mode: "success" | "empty" | "failure";
+}
+
+export interface FurnishingsDetectionInterception {
+  /** Captured JSON body of the browser's POST /api/segment/furnishings. */
+  submitBody(): Record<string, unknown>;
+  /** How many detection requests the browser has issued so far. */
+  requestCount(): number;
+  /** Switches responses to an empty detection (no objects found). */
+  respondWithEmpty(): void;
+  /** Switches responses back to the success fixture (default). */
+  respondWithSuccess(): void;
+  /** Switches responses to a simulated detection failure. */
+  respondWithFailure(): void;
+}
+
+// 96x64 RGBA PNG matching the verified fal-ai/sam-3-1 mask format
+// (issue #223): transparent background with an opaque photo-colored band
+// across rows 30–34 — at the e2e before photo's exact natural dimensions
+// (no resampling) so the preset's cutout→white conversion, union, and
+// 15px dilation are deterministic: the band dilates to rows 15–49,
+// leaving the ceiling strip (rows 0–14) and floor strip (rows 50–63)
+// outside the regeneration mask.
+const FURNISHINGS_CUTOUT_FIXTURE_DATA_URL = `data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABACAYAAADlNHIOAAAARUlEQVR42u3RAQkAMAhEUfunWAhD2MqVEITtPbgC9yMAAAAAAAAAAAAAAJ5Qedr2JoAAAjhCgI8DAAAAAAAAAAAAAAAzLnWJ0uyi1qBkAAAAAElFTkSuQmCC`;
+
+/**
+ * Intercepts the SAM 3.1 furnishings-detection route (issue #223) at the
+ * browser network layer so fal.ai and the real route handler are never
+ * contacted. Success mode returns one alpha-cutout mask fixture (the
+ * format the live endpoint serves — see furnishing-detection.ts); the
+ * spec observes the run through the /api/inpaint interception.
+ */
+export function interceptFurnishingsDetection(
+  page: Page
+): FurnishingsDetectionInterception {
+  const state: FurnishingsDetectionCaptureState = {
+    submitPayload: null,
+    requestCount: 0,
+    mode: "success",
+  };
+
+  page.route("**/api/segment/furnishings", (route) => {
+    if (route.request().method() !== "POST") {
+      void route.fallback();
+      return;
+    }
+    state.requestCount += 1;
+    state.submitPayload = JSON.parse(route.request().postData() ?? "{}") as Record<
+      string,
+      unknown
+    >;
+    if (state.mode === "failure") {
+      void route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: "Furnishings detection failed",
+          message: "Simulated SAM 3.1 failure (e2e).",
+        }),
+      });
+      return;
+    }
+    if (state.mode === "empty") {
+      void route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ maskDataUrls: [] }),
+      });
+      return;
+    }
+    void route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        maskDataUrls: [FURNISHINGS_CUTOUT_FIXTURE_DATA_URL],
+      }),
+    });
+  });
+
+  return {
+    submitBody() {
+      if (!state.submitPayload) {
+        throw new Error("POST /api/segment/furnishings was never captured");
+      }
+      return state.submitPayload;
+    },
+    requestCount() {
+      return state.requestCount;
+    },
+    respondWithEmpty() {
+      state.mode = "empty";
+    },
+    respondWithSuccess() {
+      state.mode = "success";
+    },
+    respondWithFailure() {
+      state.mode = "failure";
+    },
+  };
+}
+
 /**
  * Intercepts the OpenAI-backed copy route; the browser call never reaches
  * the real route handler, so no OPENAI_API_KEY is exercised.
  */
-export function interceptGenerateCopy(page: Page): void {
-  page.route("**/api/generate-copy", (route) => {
+export function interceptGenerateCopy(page: Page): void {  page.route("**/api/generate-copy", (route) => {
     if (route.request().method() !== "POST") {
       void route.fallback();
       return;
