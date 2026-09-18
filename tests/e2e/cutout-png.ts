@@ -1,15 +1,22 @@
 /**
- * Deterministic alpha-cutout PNG fixtures for the SAM 3.1 concept flow
- * (issue #231).
+ * Deterministic PNG fixtures for the SAM 3.1 concept flow (issues #231
+ * and #248).
  *
  * The concept-flow spec mocks `/api/segment/furnishings` with MULTIPLE
  * detected instances so real canvas clicks can toggle two distinct
- * objects. Each instance is an alpha cutout — the format the live
- * `fal-ai/sam-3-1/image` endpoint serves (see furnishing-detection.ts):
- * transparent everywhere except its opaque region.
+ * objects. TWO provider encodings are generated:
  *
- * Zero dependencies: raw RGBA scanlines + zlib deflate + hand-rolled
- * CRC32, mirroring the `solidPng` approach in fixtures.ts. Pure Node —
+ * - `grayscaleMaskPng` — the LIVE `fal-ai/sam-3-1/image` format captured
+ *   2026-09-18 (issue #248): color type 0, white object on black, NO
+ *   alpha channel. `CONCEPT_INSTANCE_GRAYSCALE_MASKS` is the spec's
+ *   PRIMARY fixture, so the full auto-fire → toggle → union → batch path
+ *   runs against what the provider really serves.
+ * - `alphaCutoutPng` — the #228-era assumed format (transparent
+ *   background, photo-colored object pixels), kept for the unit-level
+ *   format-parity pins in tests/mask-format.test.ts.
+ *
+ * Zero dependencies: raw scanlines + zlib deflate + hand-rolled CRC32,
+ * mirroring the `solidPng` approach in fixtures.ts. Pure Node —
  * importable from vitest (`tests/cutout-png.test.ts` pins the byte
  * layout) without dragging `@playwright/test` into the unit run.
  *
@@ -114,6 +121,45 @@ export function alphaCutoutDataUrl(spec: CutoutSpec): string {
   return `data:image/png;base64,${alphaCutoutPng(spec).toString("base64")}`;
 }
 
+/**
+ * Encodes a width×height GRAYSCALE PNG (color type 0, 8-bit): black
+ * background, the given regions white — the live SAM 3.1 mask format
+ * (issue #248). Ignores `spec.rgb` (a grayscale mask has no color).
+ * Deterministic for identical inputs.
+ */
+export function grayscaleMaskPng(spec: CutoutSpec): Buffer {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(spec.width, 0);
+  ihdr.writeUInt32BE(spec.height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 0; // color type: grayscale (no alpha channel — the live format)
+  ihdr[10] = 0; // compression
+  ihdr[11] = 0; // filter
+  ihdr[12] = 0; // interlace
+
+  const stride = spec.width;
+  const raw = Buffer.alloc((stride + 1) * spec.height);
+  for (const region of spec.regions) {
+    for (let y = region.y; y < region.y + region.h; y++) {
+      for (let x = region.x; x < region.x + region.w; x++) {
+        raw[y * (stride + 1) + 1 + x] = 255; // white: the pixel IS the object
+      }
+    }
+  }
+
+  return Buffer.concat([
+    PNG_SIGNATURE,
+    chunk("IHDR", ihdr),
+    chunk("IDAT", deflateSync(raw, { level: 6 })),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+/** Same pixels as {@link grayscaleMaskPng}, as a decodable data URL. */
+export function grayscaleMaskDataUrl(spec: CutoutSpec): string {
+  return `data:image/png;base64,${grayscaleMaskPng(spec).toString("base64")}`;
+}
+
 /** Geometry of every e2e fixture image (matches `roomPhotoFixture`). */
 export const FIXTURE_IMAGE_WIDTH = 96;
 export const FIXTURE_IMAGE_HEIGHT = 64;
@@ -130,6 +176,8 @@ export const FIXTURE_IMAGE_HEIGHT = 64;
  *    containing the point.
  *
  * The disjointness is what makes two-instance toggling deterministic.
+ * Both encodings share the geometry: GRAYSCALE is the spec's primary
+ * fixture (issue #248); the alpha cutouts stay for unit-level parity.
  */
 export const CONCEPT_INSTANCE_CUTOUTS: string[] = [
   alphaCutoutDataUrl({
@@ -138,6 +186,20 @@ export const CONCEPT_INSTANCE_CUTOUTS: string[] = [
     regions: [{ x: 0, y: 30, w: FIXTURE_IMAGE_WIDTH, h: 5 }],
   }),
   alphaCutoutDataUrl({
+    width: FIXTURE_IMAGE_WIDTH,
+    height: FIXTURE_IMAGE_HEIGHT,
+    regions: [{ x: 4, y: 44, w: 37, h: 17 }],
+  }),
+];
+
+/** {@link CONCEPT_INSTANCE_CUTOUTS} in the live grayscale format (#248). */
+export const CONCEPT_INSTANCE_GRAYSCALE_MASKS: string[] = [
+  grayscaleMaskDataUrl({
+    width: FIXTURE_IMAGE_WIDTH,
+    height: FIXTURE_IMAGE_HEIGHT,
+    regions: [{ x: 0, y: 30, w: FIXTURE_IMAGE_WIDTH, h: 5 }],
+  }),
+  grayscaleMaskDataUrl({
     width: FIXTURE_IMAGE_WIDTH,
     height: FIXTURE_IMAGE_HEIGHT,
     regions: [{ x: 4, y: 44, w: 37, h: 17 }],

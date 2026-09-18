@@ -10,6 +10,7 @@ import {
   resolveHolisticPreset,
 } from "@/lib/holistic-preset";
 import { estimateMaskCoverage } from "@/lib/mask-coverage";
+import { paintMaskPixels } from "@/lib/mask-format";
 import { maskGridFromPixels } from "@/lib/mask-flood-fill";
 import {
   DEFAULT_MASK_EXPANSION_RADIUS,
@@ -29,8 +30,9 @@ import { unionMaskBuffers } from "@/lib/multi-select-batch";
  * parsing stay in `src/lib/furnishing-detection.ts`; prompt wording and
  * plan resolution stay in `holistic-prompt.ts` / `holistic-preset.ts`.
  * This component is UX + browser-only wiring: it converts each detected
- * alpha-cutout mask into the white-on-black buffer the mask pipeline
- * classifies (cutouts are transparent-background, photo-colored), unions
+ * mask into the white-on-black buffer the mask pipeline classifies —
+ * detecting the provider format (grayscale vs alpha cutout, issue #248)
+ * via the shared classifier — unions
  * them, dilates by the brush flow's default expansion radius so contact
  * shadows and rims regenerate too, guards the union's coverage, and
  * hands the serialized mask to the parent's shared run launcher.
@@ -66,12 +68,10 @@ function maskImageToDataUrl(mask: {
 }
 
 /**
- * Converts one detected alpha-cutout mask into a white-on-black RGBA
- * buffer at the photo's natural pixel dimensions. SAM 3.1 masks are
- * transparent-background with photo-colored object pixels, which the
- * mask pipeline's `isMaskedPixel` classification cannot read directly —
- * `source-in` a white fill keeps the object's alpha shape, and
- * `destination-over` black backs it opaque.
+ * Converts one detected provider mask (grayscale or alpha-cutout — the
+ * shared classifier detects the format, issue #248) into a white-on-black
+ * RGBA buffer at the photo's natural pixel dimensions, rebuilding alpha
+ * from the classification instead of trusting the decode's alpha channel.
  */
 async function cutoutToWhiteMaskBuffer(
   maskDataUrl: string,
@@ -88,13 +88,10 @@ async function cutoutToWhiteMaskBuffer(
   } catch {
     return null;
   }
-  ctx.globalCompositeOperation = "source-in";
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, width, height);
-  ctx.globalCompositeOperation = "destination-over";
-  ctx.fillStyle = "#000000";
-  ctx.fillRect(0, 0, width, height);
-  return ctx.getImageData(0, 0, width, height).data;
+  const painted = paintMaskPixels(ctx.getImageData(0, 0, width, height).data, width, height, {
+    maskedColor: [255, 255, 255],
+  });
+  return new Uint8ClampedArray(painted);
 }
 
 interface StageEntireRoomPresetProps {
@@ -145,7 +142,7 @@ export default function StageEntireRoomPreset({
     if (detecting) return;
     setDetecting(true);
     try {
-      // 1. Detect furnishings (per-object alpha-cutout masks, server
+      // 1. Detect furnishings (per-object provider masks, server
       //    re-encoded as data URLs).
       const response = await fetch("/api/segment/furnishings", {
         method: "POST",
@@ -167,7 +164,7 @@ export default function StageEntireRoomPreset({
         );
       }
 
-      // 2. Convert cutouts to white-on-black buffers at natural dims.
+      // 2. Convert provider masks to white-on-black buffers at natural dims.
       const buffers: Array<{ width: number; height: number; data: Uint8ClampedArray }> = [];
       for (const url of maskDataUrls) {
         const data_ = await cutoutToWhiteMaskBuffer(url, imageWidth, imageHeight);

@@ -4,10 +4,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   CONCEPT_INSTANCE_CUTOUTS,
+  CONCEPT_INSTANCE_GRAYSCALE_MASKS,
   FIXTURE_IMAGE_HEIGHT,
   FIXTURE_IMAGE_WIDTH,
   alphaCutoutPng,
   crc32,
+  grayscaleMaskPng,
 } from "./e2e/cutout-png";
 
 /**
@@ -108,6 +110,79 @@ describe("alphaCutoutPng", () => {
       // Every fixture must decode as structurally valid PNG.
       const png = Buffer.from(dataUrl.replace(/^data:image\/png;base64,/, ""), "base64");
       expect(parseChunks(png).map((chunk) => chunk.type)).toEqual(["IHDR", "IDAT", "IEND"]);
+    }
+  });
+});
+
+describe("grayscaleMaskPng", () => {
+  // Issue #248: the LIVE sam-3-1 format is grayscale (color type 0) —
+  // white object on black, no alpha channel. The concept spec mocks the
+  // detection route with THIS format so the full auto-fire → toggle →
+  // union → batch path runs against what the provider really serves.
+  it("encodes a spec-compliant grayscale PNG (color type 0) whose chunk CRCs verify", () => {
+    const png = grayscaleMaskPng({
+      width: FIXTURE_IMAGE_WIDTH,
+      height: FIXTURE_IMAGE_HEIGHT,
+      regions: [{ x: 0, y: 30, w: FIXTURE_IMAGE_WIDTH, h: 5 }],
+    });
+    const chunks = parseChunks(png);
+
+    expect(chunks.map((chunk) => chunk.type)).toEqual(["IHDR", "IDAT", "IEND"]);
+    const ihdr = chunks[0].data;
+    expect(ihdr.length).toBe(13);
+    expect(ihdr.readUInt32BE(0)).toBe(FIXTURE_IMAGE_WIDTH);
+    expect(ihdr.readUInt32BE(4)).toBe(FIXTURE_IMAGE_HEIGHT);
+    expect(ihdr[8]).toBe(8); // bit depth
+    expect(ihdr[9]).toBe(0); // color type: GRAYSCALE (no alpha channel)
+    expect(chunks[2].data.length).toBe(0); // IEND
+  });
+
+  it("carries white pixels exactly inside the regions and black outside", () => {
+    const png = grayscaleMaskPng({
+      width: FIXTURE_IMAGE_WIDTH,
+      height: FIXTURE_IMAGE_HEIGHT,
+      regions: [
+        { x: 0, y: 30, w: FIXTURE_IMAGE_WIDTH, h: 5 },
+        { x: 4, y: 44, w: 37, h: 17 },
+      ],
+    });
+    const idat = parseChunks(png)[1].data;
+    const raw = inflateSync(idat);
+    // One byte per pixel (grayscale) plus the per-scanline filter byte.
+    expect(raw.length).toBe(FIXTURE_IMAGE_HEIGHT * (FIXTURE_IMAGE_WIDTH + 1));
+
+    const grayAt = (x: number, y: number): number =>
+      raw[y * (FIXTURE_IMAGE_WIDTH + 1) + 1 + x];
+
+    // Band instance: rows 30–34 white across the full width.
+    expect(grayAt(0, 30)).toBe(255);
+    expect(grayAt(95, 32)).toBe(255);
+    // Block instance: rows 44–60 × cols 4–40.
+    expect(grayAt(4, 44)).toBe(255);
+    expect(grayAt(40, 60)).toBe(255);
+    // Outside both regions: black.
+    expect(grayAt(48, 29)).toBe(0);
+    expect(grayAt(41, 50)).toBe(0);
+    expect(grayAt(48, 63)).toBe(0);
+  });
+
+  it("is deterministic for identical inputs", () => {
+    const spec = {
+      width: FIXTURE_IMAGE_WIDTH,
+      height: FIXTURE_IMAGE_HEIGHT,
+      regions: [{ x: 4, y: 44, w: 37, h: 17 }],
+    } as const;
+    expect(grayscaleMaskPng(spec).equals(grayscaleMaskPng(spec))).toBe(true);
+  });
+
+  it("ships the two-instance grayscale fixture with the SAME disjoint geometry as the cutout fixture", () => {
+    expect(CONCEPT_INSTANCE_GRAYSCALE_MASKS).toHaveLength(2);
+    for (const dataUrl of CONCEPT_INSTANCE_GRAYSCALE_MASKS) {
+      expect(dataUrl).toMatch(/^data:image\/png;base64,/);
+      const png = Buffer.from(dataUrl.replace(/^data:image\/png;base64,/, ""), "base64");
+      const chunks = parseChunks(png);
+      expect(chunks.map((chunk) => chunk.type)).toEqual(["IHDR", "IDAT", "IEND"]);
+      expect(chunks[0].data[9]).toBe(0); // grayscale color type
     }
   });
 });

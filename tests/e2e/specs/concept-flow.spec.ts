@@ -5,7 +5,7 @@ import {
   E2E_CONCEPT_ROOM_ID,
   SAM_TOOL_ENABLED_IN_E2E_BUILD,
 } from "../env";
-import { CONCEPT_INSTANCE_CUTOUTS } from "../cutout-png";
+import { CONCEPT_INSTANCE_GRAYSCALE_MASKS } from "../cutout-png";
 import {
   interceptFurnishingsDetection,
   interceptInpaint,
@@ -23,7 +23,11 @@ const CONSOLE_EVENT_PREFIX = "[concept-tool] ";
  * concept chips, the per-instance toggles, the #230 pre-filled prompts,
  * and the #229 batch dispatch — only the `fal-ai/sam-3-1/image`-backed
  * route is mocked, at the browser network layer, with two disjoint
- * instance cutouts so canvas clicks hit known instances deterministically.
+ * instance masks in the LIVE grayscale format (white object on black, no
+ * alpha channel — issue #248) so canvas clicks hit known instances
+ * deterministically and the mask pipeline runs against what the provider
+ * really serves. The alpha-cutout encoding stays pinned at unit level
+ * (tests/mask-format.test.ts).
  *
  * Kill-switch semantics: when the flag is compiled OFF
  * (SAM_TOOL_ENABLED_IN_E2E_BUILD=false) the whole concept surface
@@ -41,7 +45,7 @@ test.describe("sam 3.1 concept find-and-replace flow", () => {
   }) => {
     const inpaint = interceptInpaint(page);
     const detection = interceptFurnishingsDetection(page);
-    detection.respondWithMaskDataUrls(CONCEPT_INSTANCE_CUTOUTS);
+    detection.respondWithMaskDataUrls(CONCEPT_INSTANCE_GRAYSCALE_MASKS);
 
     // The toggles emit the training-corpus event (W3 depends on the
     // shape); collect them for the shape assertion at the end.
