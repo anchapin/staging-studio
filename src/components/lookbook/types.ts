@@ -7,7 +7,11 @@ export interface RoomData {
   name: string;
   beforeImageUrl: string | null;
   afterImageUrl: string | null;
-  selectedVariantIndex?: number;
+  /** Variant B slot (issue #253): the spread renders the selected variant's pair. */
+  beforeImageUrl2: string | null;
+  afterImageUrl2: string | null;
+  /** Prisma `Int?` — null means no explicit selection. */
+  selectedVariantIndex?: number | null;
   rawDirectives?: string | null;
   observedChallenge?: string | null;
   recommendation?: string | null;
