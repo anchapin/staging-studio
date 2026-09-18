@@ -3,6 +3,7 @@
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import type { ChecklistItem } from "@/lib/checklist-schema";
+import type { RoomCopyEditInput } from "@/lib/room-copy-edit-schema";
 import {
   resolveSelectionAfterDelete,
   touchUpCountsBySlot,
@@ -90,6 +91,75 @@ export async function saveRoomCopy(
   } catch (error) {
     console.error(
       JSON.stringify({ event: "save_room_copy_failed", roomId }),
+      error
+    );
+    return failure(error instanceof Error ? error.message : "Unknown error");
+  }
+}
+
+/**
+ * Server action: persists manual lookbook-copy edits onto a room
+ * (issue #250).
+ *
+ * Purpose: writes only the fields the lookbook edit page sends — a
+ * partial {@link RoomCopyEditInput} (subset of `observedChallenge`,
+ * `recommendation`, `buyerPsychology`, `checklistItems`) produced by the
+ * debounced autosave. Unlike {@link saveRoomCopy} (full verbatim write of
+ * AI output), absent fields are left untouched so an autosave of one
+ * field can never clobber the others.
+ *
+ * Contract: `edits` must already be validated by
+ * `roomCopyEditSchema` at the caller (the action is a thin trusted
+ * writer, matching the other actions in this file). Requires an
+ * authenticated session whose Prisma user owns the room's project — the
+ * update runs with an ownership `where` filter, so a foreign roomId
+ * silently matches nothing and returns "Not authenticated" rather than
+ * throwing or leaking existence. Failures are caught and reported,
+ * never thrown.
+ *
+ * Side effects: needs `DATABASE_URL` and a valid Supabase session
+ * cookie; performs a Prisma `room.update`; logs failures to
+ * `console.error`. No path revalidation (callers refresh locally).
+ *
+ * @param roomId ID of the room to update.
+ * @param edits Validated partial copy edits; only present fields are written.
+ * @returns `{ success: true }` on write, or
+ *   `{ success: false, error }` when unauthenticated or the update fails.
+ */
+export async function saveRoomCopyEdits(
+  roomId: string,
+  edits: RoomCopyEditInput
+): Promise<{ success: boolean; error?: string }> {
+  const ownershipWhere = await getOwnedRoomWhere(roomId);
+  if (!ownershipWhere) {
+    return failure("Not authenticated");
+  }
+
+  const data: Partial<{
+    observedChallenge: string;
+    recommendation: string;
+    buyerPsychology: string;
+    checklistItems: ChecklistItem[];
+  }> = {};
+  if (edits.observedChallenge !== undefined) {
+    data.observedChallenge = edits.observedChallenge;
+  }
+  if (edits.recommendation !== undefined) {
+    data.recommendation = edits.recommendation;
+  }
+  if (edits.buyerPsychology !== undefined) {
+    data.buyerPsychology = edits.buyerPsychology;
+  }
+  if (edits.checklistItems !== undefined) {
+    data.checklistItems = edits.checklistItems;
+  }
+
+  try {
+    await prisma.room.update({ where: ownershipWhere, data });
+    return { success: true };
+  } catch (error) {
+    console.error(
+      JSON.stringify({ event: "save_room_copy_edits_failed", roomId }),
       error
     );
     return failure(error instanceof Error ? error.message : "Unknown error");
