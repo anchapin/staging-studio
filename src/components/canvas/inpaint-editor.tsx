@@ -16,6 +16,13 @@ import {
 } from "@/lib/mask-dilation";
 import HolisticSpikePanel from "./holistic-spike-panel";
 import StageEntireRoomPreset from "./stage-entire-room-preset";
+import { useSegmentPrewarm } from "./use-segment-prewarm";
+import { SegmentCache } from "@/lib/segment-cache";
+import {
+  buildSegmentTimingEvent,
+  emitSegmentTiming,
+} from "@/lib/segment-timing";
+import { SAM_TOOL_ENABLED } from "@/lib/sam-tool";
 
 interface InpaintEditorProps {
   roomId: string;
@@ -70,6 +77,29 @@ export default function InpaintEditor({
   const [segmentRequest, setSegmentRequest] = useState<SegmentMaskRequest | null>(null);
   const segmentRequestIdRef = useRef(0);
 
+  // Issue #202: in-session cache of provider-returned masks. Repeat
+  // selections of an already-segmented point (the canvas dedupe resets on
+  // paint/fill/clear, so re-selection is a normal flow) come back instantly
+  // with zero fal-ai/sam calls. One instance per mount, cleared on source
+  // switch — the lifecycle that makes same-URL keying safe is documented in
+  // segment-cache.ts.
+  const segmentCacheRef = useRef<SegmentCache | null>(null);
+  if (!segmentCacheRef.current) {
+    segmentCacheRef.current = new SegmentCache();
+  }
+
+  // Issue #202: pre-warm the /api/segment path (route cold start + auth +
+  // room ownership) while the editor is open, at zero provider cost. The
+  // status classifies click timings as cold ("warming"/"idle"/"failed") or
+  // warm ("warm") for the latency instrumentation below.
+  const prewarmStatus = useSegmentPrewarm({
+    enabled: SAM_TOOL_ENABLED,
+    roomId,
+    imageUrl: imageUrl || null,
+    imageWidth: imageDims?.width ?? null,
+    imageHeight: imageDims?.height ?? null,
+  });
+
   // The source in effect for the CURRENT run, captured at start time so the
   // completion callback reports the right one even if the selector (or the
   // pending-request props) change while a run is in flight.
@@ -111,12 +141,15 @@ export default function InpaintEditor({
   }, [pendingRequestId, start]);
 
   // Switching source swaps the image being edited — any existing mask was
-  // drawn for the previous image and must not leak into the next run.
+  // drawn for the previous image and must not leak into the next run. The
+  // segment cache is dropped with it (issue #202 lifecycle: one session
+  // per image).
   const handleSourceChange = useCallback(
     (next: InpaintSource) => {
       if (inpaintSourcesEqual(next, source)) return;
       setMaskDataUrl(null);
       setSegmentRequest(null);
+      segmentCacheRef.current?.clear();
       onSourceChange?.(next);
     },
     [source, onSourceChange]
@@ -126,11 +159,36 @@ export default function InpaintEditor({
   // photo's natural pixel space) plus the room reference to /api/segment.
   // On failure the error is surfaced and the canvas is left unchanged — a
   // segment response is only forwarded to the canvas on success.
+  //
+  // Issue #202 additions: (1) a point segmented earlier in this session is
+  // served from the in-memory cache — same mask, instant, zero provider
+  // calls; (2) every completed selection emits a `[segment-timing]` event
+  // (source: cache|network, prewarmed: cold/warm) so first-click vs
+  // warm-click latency is one DevTools-filter away.
   const handleSegmentSelect = useCallback(
     async (point: { x: number; y: number }) => {
       if (isProcessing || isSegmenting) return;
       if (!imageDims) {
         showError("The image is still loading. Please try again.");
+        return;
+      }
+      const cache = segmentCacheRef.current;
+      const clickStartedAt = performance.now();
+      const cachedMask = cache?.get(imageUrl, point) ?? null;
+      if (cachedMask) {
+        segmentRequestIdRef.current += 1;
+        setSegmentRequest({
+          id: segmentRequestIdRef.current,
+          maskDataUrl: cachedMask,
+        });
+        emitSegmentTiming(
+          buildSegmentTimingEvent({
+            ms: performance.now() - clickStartedAt,
+            source: "cache",
+            prewarmed: true,
+            imageUrl,
+          })
+        );
         return;
       }
       setIsSegmenting(true);
@@ -150,11 +208,20 @@ export default function InpaintEditor({
         if (!response.ok) {
           throw new Error(data.message || data.error || "Failed to select the object.");
         }
+        cache?.put(imageUrl, point, data.maskDataUrl);
         segmentRequestIdRef.current += 1;
         setSegmentRequest({
           id: segmentRequestIdRef.current,
           maskDataUrl: data.maskDataUrl,
         });
+        emitSegmentTiming(
+          buildSegmentTimingEvent({
+            ms: performance.now() - clickStartedAt,
+            source: "network",
+            prewarmed: prewarmStatus === "warm",
+            imageUrl,
+          })
+        );
       } catch (error) {
         showError(
           error instanceof Error ? error.message : "Object selection failed. Please try again."
@@ -163,7 +230,7 @@ export default function InpaintEditor({
         setIsSegmenting(false);
       }
     },
-    [isProcessing, isSegmenting, imageDims, roomId, imageUrl, showError]
+    [isProcessing, isSegmenting, imageDims, roomId, imageUrl, prewarmStatus, showError]
   );
 
   // Shared submit path for brush runs and holistic spike runs (issue
@@ -291,6 +358,7 @@ export default function InpaintEditor({
           onMaskChange={setMaskDataUrl}
           onSegmentSelect={handleSegmentSelect}
           segmentDisabled={isProcessing || isSegmenting}
+          segmenting={isSegmenting}
           segmentMaskRequest={segmentRequest}
           expansionRadius={maskExpansion}
           fullWidth={fullWidth}

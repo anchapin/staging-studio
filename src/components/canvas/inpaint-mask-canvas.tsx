@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useEffect, useCallback, useMemo, useId } from "react";
+import { Loader2 } from "lucide-react";
 import {
   canvasPointToNatural,
   clientPointToCanvas,
@@ -56,6 +57,13 @@ interface InpaintMaskCanvasProps {
   onSegmentSelect?: (point: CanvasPoint) => void;
   /** True while segmenting (or inpainting) runs; select clicks are ignored. */
   segmentDisabled?: boolean;
+  /**
+   * True while a SAM segment request is in flight (issue #202): shows a
+   * spinner + "Selecting..." on the Select Object tool itself and a wait
+   * cursor on the canvas, so a click's processing is visible where the
+   * click happened — not only in the status line at the editor's bottom.
+   */
+  segmenting?: boolean;
   /** A successful segment response to merge onto the active mask grid. */
   segmentMaskRequest?: SegmentMaskRequest | null;
   /**
@@ -79,6 +87,7 @@ export default function InpaintMaskCanvas({
   fullWidth = false,
   onSegmentSelect,
   segmentDisabled = false,
+  segmenting = false,
   segmentMaskRequest = null,
   expansionRadius = DEFAULT_MASK_EXPANSION_RADIUS,
 }: InpaintMaskCanvasProps) {
@@ -634,7 +643,13 @@ export default function InpaintMaskCanvas({
       />
     ) : null;
 
-  const cursorClass = activeTool === "fill" ? "cursor-cell" : "cursor-crosshair";
+  // Issue #202: while a segment request is in flight the canvas cursor
+  // switches to wait — the click registered and processing is happening.
+  const cursorClass = segmenting
+    ? "cursor-wait"
+    : activeTool === "fill"
+      ? "cursor-cell"
+      : "cursor-crosshair";
 
   const canvasAriaLabel =
     activeTool === "fill"
@@ -739,8 +754,8 @@ export default function InpaintMaskCanvas({
         regenerated, everything else is preserved. A thin outline won&apos;t
         change the interior, so cover the whole object (or draw an outline and
         use Fill Region on its inside).
-        {/* Issue #189: only advertise Select Object while the SAM tool is
-            surfaced; the sentence disappears with the tool for the demo. */}
+        {/* Select Object is flag-gated (SAM_TOOL_ENABLED): the sentence
+            disappears with the tool if the kill switch is flipped off. */}
         {SAM_TOOL_ENABLED &&
           " Select Object detects a clicked object's shape for you and paints it onto the mask."}
       </p>
@@ -785,22 +800,31 @@ export default function InpaintMaskCanvas({
           >
             Fill Region
           </button>
-          {/* Issue #189: the SAM Select Object tool is hidden for the demo
-              (opaque UX, no processing feedback). Implementation is retained
-              behind SAM_TOOL_ENABLED for the post-demo revival (#202). */}
+          {/* Issue #189 hid this tool for the demo; issue #202 revived it
+              with per-click feedback: the spinner below is THE processing
+              indicator — visible where the click happened, not just in the
+              editor's bottom status line. */}
           {SAM_TOOL_ENABLED && (
             <button
               type="button"
               aria-pressed={activeTool === "select"}
+              aria-busy={segmenting}
               disabled={segmentDisabled}
               onClick={() => setActiveTool("select")}
               className={
                 activeTool === "select"
-                  ? "px-3 py-1.5 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
-                  : "px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                  ? "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                  : "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
               }
             >
-              Select Object
+              {segmenting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                  Selecting...
+                </>
+              ) : (
+                "Select Object"
+              )}
             </button>
           )}
         </div>

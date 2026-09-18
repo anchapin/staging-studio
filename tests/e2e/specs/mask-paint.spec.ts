@@ -13,7 +13,6 @@ import {
   whitePixelGeometry,
   whitePixelShare,
 } from "../helpers";
-import { SAM_TOOL_ENABLED } from "../../../src/lib/sam-tool";
 
 const MIN_WHITE_SHARE = 0.01; // 1% of canvas pixels
 
@@ -276,26 +275,29 @@ test.describe("mask painting on high-DPI displays", () => {
 });
 
 /**
- * Click-to-segment (issue #183).
+ * Click-to-segment (issue #183, revived by issue #202).
  *
  * The Select Object tool sends one clicked point to /api/segment; the
  * SAM-backed route is intercepted (no paid call) and fulfills with a mask
  * fixture whose white quadrant is observable in the exported /api/inpaint
- * mask. Covers the issue's guardrails: repeat clicks on the same point are
- * deduped, and a failing SAM call shows an error while leaving the canvas
- * (and therefore the pending inpaint mask) untouched.
+ * mask. Covers the issue's guardrails: the editor-open pre-warm ping is
+ * classified separately and costs zero "clicks", repeat clicks on the same
+ * point are deduped, and a failing SAM call shows an error while leaving
+ * the canvas (and therefore the pending inpaint mask) untouched.
  */
 test.describe("select object segmentation", () => {
-  // Issue #189: the Select Object tool is hidden from the editor UI for the
-  // demo (brush-only). The specs stay pinned here for the post-demo revival
-  // (issue #202); they run again once SAM_TOOL_ENABLED flips back to true.
-  test.skip(!SAM_TOOL_ENABLED, "SAM Select Object tool is hidden for the demo (issue #189)");
   test("one click paints the segment mask and feeds the inpaint flow", async ({ page }) => {
     const inpaint = interceptInpaint(page);
     const segment = interceptSegment(page);
 
     await login(page);
     await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
+
+    // Issue #202: opening the editor pre-warms the segment path with
+    // exactly one warm ping — never counted as a click.
+    await expect
+      .poll(() => segment.warmRequestCount(), { timeout: 15_000 })
+      .toBe(1);
 
     // Apply Inpainting requires staging directives before it will run.
     const directives = page.getByLabel("Staging directives (required)");
@@ -320,6 +322,7 @@ test.describe("select object segmentation", () => {
 
     // The click reached /api/segment as a bounded point in natural pixels.
     const body = segment.submitBody();
+    expect(body.warm).toBeUndefined();
     const point = body.point as { x: number; y: number };
     expect(point.x).toBeGreaterThan(0);
     expect(point.y).toBeGreaterThan(0);
@@ -327,10 +330,10 @@ test.describe("select object segmentation", () => {
     expect(point.y).toBeLessThanOrEqual(body.imageHeight as number);
 
     // A repeat click on the same point is deduped — still exactly one
-    // request, so the paid SAM endpoint is not re-invoked.
+    // real request, so the paid SAM endpoint is not re-invoked.
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     await expect
-      .poll(() => segment.requestCount(), { timeout: 5_000 })
+      .poll(() => segment.segmentRequestCount(), { timeout: 5_000 })
       .toBe(1);
 
     // The segment mask merged onto the canvas feeds the real inpaint flow.

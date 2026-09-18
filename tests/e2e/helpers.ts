@@ -197,16 +197,19 @@ export function interceptInpaint(page: Page): InpaintInterception {
 
 interface SegmentCaptureState {
   submitPayload: Record<string, unknown> | null;
-  requestCount: number;
+  segmentCount: number;
+  warmCount: number;
   mode: "success" | "failure";
   maskDataUrl: string;
 }
 
 export interface SegmentInterception {
-  /** Captured JSON body of the browser's POST /api/segment. */
+  /** Captured JSON body of the browser's most recent REAL POST /api/segment click (pre-warm pings excluded). */
   submitBody(): Record<string, unknown>;
-  /** How many /api/segment requests the browser has issued so far. */
-  requestCount(): number;
+  /** How many REAL segmentation requests (pre-warm pings excluded) the browser has issued so far. */
+  segmentRequestCount(): number;
+  /** How many issue-#202 pre-warm pings (`warm: true`) the browser has issued so far. */
+  warmRequestCount(): number;
   /** Switches responses back to the success fixture (default). */
   respondWithSuccess(): void;
   /** Switches responses to a simulated SAM failure. */
@@ -226,11 +229,18 @@ const SEGMENT_MASK_FIXTURE_DATA_URL =
  * Success mode fulfills with a mask fixture data URL (white quadrant on
  * black, ~25% coverage after scaling) so the canvas merge is observable
  * through the exported inpaint mask.
+ *
+ * Since issue #202 the editor also fires a pre-warm ping (`warm: true` in
+ * the body) when it opens; the interception classifies those separately
+ * (warmRequestCount) so click-dedup assertions stay exact, and fulfills
+ * them with the same 200 shape the real route's `{ warmed: true }` would
+ * be treated as by the client (any ok response completes the warm).
  */
 export function interceptSegment(page: Page): SegmentInterception {
   const state: SegmentCaptureState = {
     submitPayload: null,
-    requestCount: 0,
+    segmentCount: 0,
+    warmCount: 0,
     mode: "success",
     maskDataUrl: SEGMENT_MASK_FIXTURE_DATA_URL,
   };
@@ -240,11 +250,16 @@ export function interceptSegment(page: Page): SegmentInterception {
       void route.fallback();
       return;
     }
-    state.requestCount += 1;
-    state.submitPayload = JSON.parse(route.request().postData() ?? "{}") as Record<
+    const payload = JSON.parse(route.request().postData() ?? "{}") as Record<
       string,
       unknown
     >;
+    if (payload.warm === true) {
+      state.warmCount += 1;
+    } else {
+      state.segmentCount += 1;
+      state.submitPayload = payload;
+    }
     if (state.mode === "failure") {
       void route.fulfill({
         status: 500,
@@ -268,8 +283,11 @@ export function interceptSegment(page: Page): SegmentInterception {
       if (!state.submitPayload) throw new Error("POST /api/segment was never captured");
       return state.submitPayload;
     },
-    requestCount() {
-      return state.requestCount;
+    segmentRequestCount() {
+      return state.segmentCount;
+    },
+    warmRequestCount() {
+      return state.warmCount;
     },
     respondWithSuccess() {
       state.mode = "success";
