@@ -84,6 +84,14 @@ npm run dev
 
 `.env.example` annotates every key with its reader and source. After editing `prisma/schema.prisma`, regenerate the client with `npm run db:generate` (the project uses `db push`, not migrations).
 
+> **Heads-up: PDF export is the one feature that does not work on plain `localhost`.** Browserless.io's cloud Chrome has to fetch the lookbook preview page over the public internet, and it rejects local URLs outright — export fails with a 403 `Navigation … is not allowed`. The fix is a public tunnel:
+>
+> 1. Install a prerequisite (one-time): [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) (no account) or [ngrok](https://ngrok.com/download) (free account + authtoken).
+> 2. Run `scripts/dev-tunnel.sh` — it starts the tunnel and points `NEXT_PUBLIC_APP_URL` in `.env.local` at the public URL. (It refuses to tunnel a non-Next.js port — if Grafana or another service holds 3000, it tells you to re-run with `--port 3001`, where `next dev` lands when 3000 is busy.)
+> 3. Restart `npm run dev` (the variable is read at server boot), then export normally. `scripts/dev-tunnel.sh reset` restores the localhost default when you're done.
+>
+> Login, projects, upload, inpainting, and AI copy all work locally without a tunnel. Details in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
 Deploying to production? See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — every env var to configure, plus why `NEXT_PUBLIC_APP_URL` must be publicly reachable for PDF export.
 
 ## Development

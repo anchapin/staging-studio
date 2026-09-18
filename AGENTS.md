@@ -18,6 +18,7 @@ npm test                     # vitest run (tests live in tests/)
 npx vitest run tests/auth-redirect.test.ts   # single test file
 npm run e2e                  # hermetic Playwright browser suite; needs Docker (see Testing)
 npm run build
+scripts/dev-tunnel.sh        # local PDF export only: public tunnel (cloudflared/ngrok) + rewrites NEXT_PUBLIC_APP_URL in .env.local; `reset` restores localhost. Restart `npm run dev` after either.
 ```
 
 - No CI, no formatter config. Run lint, typecheck, and build (and `npm test` if you touched logic with tests) before finishing a change.

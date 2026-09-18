@@ -68,7 +68,23 @@ Re-run this after any change to `prisma/schema.prisma` (regenerate the client lo
 
 ## Local development and PDF export
 
-The dev fallback for `NEXT_PUBLIC_APP_URL` is `http://localhost:3000`, which Browserless's cloud Chrome cannot reach — so PDF export is the one feature that does not work out of the box locally. The workaround is to expose your dev server through a public tunnel and point `NEXT_PUBLIC_APP_URL` at it:
+The dev fallback for `NEXT_PUBLIC_APP_URL` is `http://localhost:3000`, which Browserless's cloud Chrome cannot reach — so PDF export is the one feature that does not work out of the box locally. The tell-tale symptom is a Browserless 403 with `"Navigation to \"http://localhost:3000/...\" is not allowed"` (their private-URL blocklist), which the API route surfaces as a generic export error.
+
+The workaround is to expose your dev server through a public tunnel and point `NEXT_PUBLIC_APP_URL` at it. The automated path:
+
+```bash
+# Auto-detects cloudflared (else ngrok), starts the tunnel, and rewrites the
+# NEXT_PUBLIC_APP_URL line in .env.local for you. Then restart `npm run dev`.
+scripts/dev-tunnel.sh
+# ...and when you're done exporting, restore the plain localhost default:
+scripts/dev-tunnel.sh reset
+```
+
+The script verifies the target port is actually a Next.js app before tunneling. Port 3000 is a trap: Grafana (and other dashboards) default to it, and `next dev` silently falls back to 3001 when it is taken — tunneling 3000 in that state exports Grafana's login page as your "lookbook". If that happens, the script fails with a pointer to the right port: `scripts/dev-tunnel.sh --port 3001`.
+
+Prerequisites: install [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) (no account needed) or [ngrok](https://ngrok.com/download) (free account + `ngrok config add-authtoken <token>`).
+
+The manual equivalent, if you prefer to drive the tunnel yourself:
 
 ```bash
 # Option A: ngrok
@@ -77,7 +93,7 @@ ngrok http 3000
 cloudflared tunnel --url http://localhost:3000
 ```
 
-Then in `.env.local` set `NEXT_PUBLIC_APP_URL` to the tunnel URL (e.g. `https://<random>.ngrok-free.app`) — no trailing slash — and restart `npm run dev`. Note that because it is a `NEXT_PUBLIC_*` variable, a change requires a dev-server restart. Remember the tunnel URL changes between runs (on free tiers), so update the variable accordingly.
+Then in `.env.local` set `NEXT_PUBLIC_APP_URL` to the tunnel URL (e.g. `https://<random>.ngrok-free.app` or `https://<random>.trycloudflare.com`) — no trailing slash — and restart `npm run dev`. Note that because it is a `NEXT_PUBLIC_*` variable, a change requires a dev-server restart. Remember the tunnel URL changes between runs (on free tiers), so update the variable accordingly — or just re-run `scripts/dev-tunnel.sh`.
 
 Everything else (login, projects, upload, inpainting, AI copy) works locally without a tunnel.
 
