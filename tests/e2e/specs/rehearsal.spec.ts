@@ -45,11 +45,15 @@ test.describe("rehearsal drill", () => {
     // ---- Upload -------------------------------------------------------
     await page.goto(REHEARSAL_PROJECT);
     await expect(page.getByRole("heading", { name: "Rehearsal Room" })).toBeVisible();
-    const { putSha256 } = await uploadRoomPhotoViaUi(page, {
-      name: "rehearsal-photo.png",
-      mimeType: "image/png",
-      buffer: file,
-    });
+    const { putSha256 } = await uploadRoomPhotoViaUi(
+      page,
+      {
+        name: "rehearsal-photo.png",
+        mimeType: "image/png",
+        buffer: file,
+      },
+      "Rehearsal Room"
+    );
     await expect(page.locator('img[alt="Room"]')).toBeVisible({ timeout: 15_000 });
 
     // ---- Focused editor (grid → focused, issue #169 flow) --------------
