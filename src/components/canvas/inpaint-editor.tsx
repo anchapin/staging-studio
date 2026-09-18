@@ -63,6 +63,13 @@ interface InpaintEditorProps {
   pendingSource?: InpaintSource | null;
   onInpaintComplete?: (resultImageUrl: string, source: InpaintSource) => void;
   /**
+   * Issue #230: reports the active labeled concept selection — the label
+   * when exactly one labeled selection is active, null otherwise. The
+   * parent uses it to pre-fill the single-object staging directives
+   * ("Replace the {concept} with ") without ever clobbering typed text.
+   */
+  onActiveConceptLabelChange?: (label: string | null) => void;
+  /**
    * Full-width focused layout (issue #169): the mask canvas spans the
    * available content width instead of the compact card cap.
    */
@@ -228,6 +235,7 @@ export default function InpaintEditor({
   pendingRequestId,
   pendingSource,
   onInpaintComplete,
+  onActiveConceptLabelChange,
   fullWidth = false,
 }: InpaintEditorProps) {
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
@@ -272,6 +280,23 @@ export default function InpaintEditor({
   const batchActiveRef = useRef(false);
   const batchOutcomeRef = useRef<{ kind: "completed"; url: string } | null>(null);
   const batchFailureRef = useRef<string | null>(null);
+
+  // Issue #230: the single-object editor path (brush → staging
+  // directives → Apply Inpainting) pre-fills the parent's directives
+  // when a labeled selection is active. Exactly one labeled selection
+  // names the mask unambiguously; with zero or several selections the
+  // single-object prompt stays untouched (the batch panel owns those
+  // flows). Fired through a ref so the effect keys on the label alone —
+  // the parent's inline handler identity may churn every render.
+  const activeConceptLabel =
+    batchSelections.length === 1 ? batchSelections[0].conceptLabel ?? null : null;
+  const activeConceptLabelCallbackRef = useRef(onActiveConceptLabelChange);
+  useEffect(() => {
+    activeConceptLabelCallbackRef.current = onActiveConceptLabelChange;
+  });
+  useEffect(() => {
+    activeConceptLabelCallbackRef.current?.(activeConceptLabel);
+  }, [activeConceptLabel]);
 
   // Issue #228 (rekeying the issue #202 point cache): in-session cache of
   // concept detections. Repeat selections of an already-detected (image,

@@ -42,6 +42,7 @@ import {
   type InpaintSource,
   type VariantSlot,
 } from "@/lib/inpaint-source";
+import { buildPrefill } from "@/lib/prompt-prefill";
 
 const MAX_DIRECTIVE_LENGTH = 2000;
 
@@ -697,6 +698,20 @@ export default function ProjectDetailView({
                       }
                       pendingRequestId={focusedInputs.pendingRequest?.id ?? null}
                       pendingSource={focusedInputs.pendingSource}
+                      onActiveConceptLabelChange={(label) => {
+                        // Issue #230: seed the single-object staging
+                        // directives with the concept pre-fill, only when
+                        // the effective field is still empty — typed
+                        // directives are never clobbered, and clearing the
+                        // seed degrades to raw directives (no mode flag).
+                        if (!label) return;
+                        setDirectives((prev) => {
+                          const current =
+                            prev[focusedRoom.id] ?? focusedRoom.rawDirectives ?? "";
+                          if (current.trim().length > 0) return prev;
+                          return { ...prev, [focusedRoom.id]: buildPrefill(label) };
+                        });
+                      }}
                       onInpaintComplete={(resultImageUrl, runSource) =>
                         void persistInpaintResult(
                           focusedRoom,
