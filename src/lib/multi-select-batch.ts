@@ -178,6 +178,70 @@ export function applyConceptToggle(
   };
 }
 
+/** One candidate for {@link applyConceptSelectAll}: a detected instance plus the entry it would add. */
+export interface ConceptSelectAllCandidate {
+  /** Position in the score-ranked detection response. */
+  instanceIndex: number;
+  /** The batch entry built from that instance's seed point. */
+  entry: BatchSelection;
+}
+
+/** Result of a bulk select-all: both state pieces plus what this call added. */
+export interface ConceptSelectAllReduction {
+  selections: BatchSelection[];
+  /** The canvas's tinted-instance indices, updated with the set. */
+  selectedInstanceIndices: number[];
+  /** Indices of instances THIS call selected — the caller emits one `selection_logged` per entry. */
+  addedInstanceIndices: number[];
+  /** True when detection found more selectable instances than the cap allowed. */
+  truncated: boolean;
+}
+
+/**
+ * Bulk toggle-on for the editor's "Select all detected" control
+ * (issue #249). Candidates arrive in score-ranked order; each one routes
+ * through {@link reduceSelectionSet}'s `add`, so the cap
+ * ({@link MAX_BATCH_OBJECTS}) and duplicate-point rules stay the ONLY
+ * limit logic — a cap refusal stops the walk and reports `truncated`,
+ * a duplicate refusal just skips that candidate. Already-selected
+ * instances add nothing (the control is idempotent). Both state pieces
+ * move in lockstep with {@link applyConceptToggle}'s guarantee: the batch
+ * panel and the canvas can never disagree. Never mutates the inputs.
+ * Side effects: none (pure).
+ */
+export function applyConceptSelectAll(
+  selections: BatchSelection[],
+  selectedInstanceIndices: number[],
+  candidates: readonly ConceptSelectAllCandidate[]
+): ConceptSelectAllReduction {
+  let nextSelections = selections;
+  let nextIndices = selectedInstanceIndices;
+  const addedInstanceIndices: number[] = [];
+  let truncated = false;
+
+  for (const candidate of candidates) {
+    if (nextIndices.includes(candidate.instanceIndex)) continue;
+    if (nextSelections.length >= MAX_BATCH_OBJECTS) {
+      truncated = true;
+      break;
+    }
+    const reduction = reduceSelectionSet(nextSelections, {
+      type: "add",
+      selection: candidate.entry,
+    });
+    if (reduction.rejected === "duplicate") continue;
+    if (reduction.rejected === "cap") {
+      truncated = true;
+      break;
+    }
+    nextSelections = reduction.selections;
+    nextIndices = [...nextIndices, candidate.instanceIndex];
+    addedInstanceIndices.push(candidate.instanceIndex);
+  }
+
+  return { selections: nextSelections, selectedInstanceIndices: nextIndices, addedInstanceIndices, truncated };
+}
+
 // ---------------------------------------------------------------------------
 // Union mask composition (pure pixel math)
 // ---------------------------------------------------------------------------

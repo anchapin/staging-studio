@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_BATCH_OBJECTS,
+  applyConceptSelectAll,
   applyConceptToggle,
   type BatchSelection,
 } from "@/lib/multi-select-batch";
@@ -104,6 +105,92 @@ describe("applyConceptToggle", () => {
     const selections = [entry("sofa:0", 10, 20)];
     const indices = [0];
     applyConceptToggle(selections, indices, entry("sofa:1", 200, 20), 1, true);
+    expect(selections).toHaveLength(1);
+    expect(indices).toEqual([0]);
+  });
+});
+
+describe("applyConceptSelectAll", () => {
+  // Issue #249: "Select all detected" is bulk-toggle-on — same cap, same
+  // duplicate-point rule, same lockstep between the batch set and the
+  // canvas indices, plus a report of what THIS call added (for per-instance
+  // selection_logged events) and whether the cap left instances out.
+  const detected = (count: number) =>
+    Array.from({ length: count }, (_, index) => ({
+      instanceIndex: index,
+      entry: entry(`sofa:${index}`, index * 100, index * 7),
+    }));
+
+  it("selects every detected instance in rank order, lockstep with the indices", () => {
+    const result = applyConceptSelectAll([], [], detected(3));
+    expect(result.truncated).toBe(false);
+    expect(result.selections.map((selection) => selection.id)).toEqual([
+      "sofa:0",
+      "sofa:1",
+      "sofa:2",
+    ]);
+    expect(result.selectedInstanceIndices).toEqual([0, 1, 2]);
+    expect(result.addedInstanceIndices).toEqual([0, 1, 2]);
+  });
+
+  it("keeps the best-ranked MAX_BATCH_OBJECTS and reports truncation", () => {
+    const result = applyConceptSelectAll([], [], detected(7));
+    expect(result.selections).toHaveLength(MAX_BATCH_OBJECTS);
+    expect(result.selectedInstanceIndices).toEqual([0, 1, 2, 3, 4]);
+    expect(result.addedInstanceIndices).toEqual([0, 1, 2, 3, 4]);
+    expect(result.truncated).toBe(true);
+  });
+
+  it("is idempotent — already-selected instances add nothing", () => {
+    const first = applyConceptSelectAll([], [], detected(3));
+    const again = applyConceptSelectAll(
+      first.selections,
+      first.selectedInstanceIndices,
+      detected(3)
+    );
+    expect(again.selections).toEqual(first.selections);
+    expect(again.selectedInstanceIndices).toEqual(first.selectedInstanceIndices);
+    expect(again.addedInstanceIndices).toEqual([]);
+    expect(again.truncated).toBe(false);
+  });
+
+  it("fills only the remaining headroom when partially selected", () => {
+    const base = applyConceptSelectAll([], [], detected(4));
+    const result = applyConceptSelectAll(base.selections, base.selectedInstanceIndices, detected(7));
+    expect(result.selections).toHaveLength(MAX_BATCH_OBJECTS);
+    // Instance 4 is the only newcomer; 5 and 6 are left out by the cap.
+    expect(result.addedInstanceIndices).toEqual([4]);
+    expect(result.selectedInstanceIndices).toEqual([0, 1, 2, 3, 4]);
+    expect(result.truncated).toBe(true);
+  });
+
+  it("skips duplicate-point entries without breaking the rest", () => {
+    const result = applyConceptSelectAll(
+      [],
+      [],
+      detected(1).concat([
+        { instanceIndex: 1, entry: entry("lamp:1", 0.4, 0.4, "lamp") }, // rounds to sofa:0's seed (0,0)
+        { instanceIndex: 2, entry: entry("rug:2", 500, 500, "rug") },
+      ])
+    );
+    expect(result.selections.map((selection) => selection.id)).toEqual(["sofa:0", "rug:2"]);
+    expect(result.selectedInstanceIndices).toEqual([0, 2]);
+    expect(result.addedInstanceIndices).toEqual([0, 2]);
+    expect(result.truncated).toBe(false);
+  });
+
+  it("selects nothing from an empty detection", () => {
+    const result = applyConceptSelectAll([], [], []);
+    expect(result.selections).toEqual([]);
+    expect(result.selectedInstanceIndices).toEqual([]);
+    expect(result.addedInstanceIndices).toEqual([]);
+    expect(result.truncated).toBe(false);
+  });
+
+  it("does not mutate its inputs", () => {
+    const selections = [entry("sofa:0", 10, 20)];
+    const indices = [0];
+    applyConceptSelectAll(selections, indices, detected(7));
     expect(selections).toHaveLength(1);
     expect(indices).toEqual([0]);
   });

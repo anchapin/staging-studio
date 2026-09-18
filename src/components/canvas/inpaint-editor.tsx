@@ -27,8 +27,9 @@ import {
   CONCEPT_EVENT_LOG_PREFIX,
   DEFAULT_CONCEPT,
   isValidConceptName,
+  normalizeConceptInput,
 } from "@/lib/concept-chips";
-import { findInstanceAtPoint } from "@/lib/instance-hit-test";
+import { findInstanceAtPoint, instanceSeedPoint } from "@/lib/instance-hit-test";
 import {
   maskGridFromProviderPixels,
   paintMaskPixels,
@@ -37,6 +38,7 @@ import { computeMaskCanvasDimensions } from "@/lib/canvas-coords";
 import {
   MAX_BATCH_OBJECTS,
   advanceBatchProgress,
+  applyConceptSelectAll,
   applyConceptToggle,
   buildBatchPlan,
   initialBatchProgress,
@@ -45,6 +47,7 @@ import {
   type BatchProgress,
   type BatchPromptMode,
   type BatchSelection,
+  type ConceptSelectAllCandidate,
   type PerObjectBatchPlan,
 } from "@/lib/multi-select-batch";
 
@@ -273,6 +276,9 @@ export default function InpaintEditor({
   const [selectedInstanceIndices, setSelectedInstanceIndices] = useState<number[]>([]);
   const [conceptInput, setConceptInput] = useState("");
   const [conceptInputError, setConceptInputError] = useState<string | null>(null);
+  // Issue #249: non-blocking cap notice for "Select all detected" — the
+  // control fills the remaining headroom and names what it left out.
+  const [selectAllNotice, setSelectAllNotice] = useState<string | null>(null);
   const conceptInputId = useId();
   const [batchSelections, setBatchSelections] = useState<BatchSelection[]>([]);
   const [unionMaskDataUrl, setUnionMaskDataUrl] = useState<string | null>(null);
@@ -372,15 +378,17 @@ export default function InpaintEditor({
       // the toggles (issue #229), so it resets with them.
       setSelectedInstanceIndices([]);
       setBatchSelections([]);
+      setSelectAllNotice(null);
     },
     [imageUrl]
   );
 
-  // Free-text concept: validated client-side (mirroring the server's
-  // segmentConceptSchema) BEFORE any billed call can be built.
+  // Free-text concept: normalized (capitals forgiven, issue #249) then
+  // validated client-side (mirroring the server's segmentConceptSchema)
+  // BEFORE any billed call can be built.
   const handleConceptSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const candidate = conceptInput.trim();
+    const candidate = normalizeConceptInput(conceptInput);
     if (!isValidConceptName(candidate)) {
       setConceptInputError(
         'Use a single lowercase word or short phrase — 1–30 characters, lowercase letters, spaces, and hyphens only (no commas, numbers, or sentences). Try "sofa" or "wall art".'
@@ -518,7 +526,62 @@ export default function InpaintEditor({
     ]
   );
 
-  // Measure the source photo so the mask canvas can mirror its aspect ratio
+  // "Select all detected" (issue #249): bulk toggle-on over every decoded
+  // instance of the active concept, in rank order. Routing through
+  // applyConceptSelectAll keeps the cap + duplicate rules as the ONLY
+  // limit logic and moves both state pieces in lockstep; each instance
+  // this call actually selects emits its own selection_logged event (the
+  // same shape a click toggle emits — the corpus wants every selection).
+  // When detection found more than MAX_BATCH_OBJECTS, the best-ranked fit
+  // is selected and a role=status notice names what was left out.
+  const handleSelectAllDetected = useCallback(() => {
+    if (isProcessing) return;
+    if (!displayedResult || !decodedInstances) return;
+    const candidates: ConceptSelectAllCandidate[] = [];
+    for (let index = 0; index < decodedInstances.length; index++) {
+      const instance = decodedInstances[index];
+      if (!instance) continue;
+      const seed = instanceSeedPoint(instance);
+      if (!seed) continue;
+      candidates.push({
+        instanceIndex: index,
+        entry: {
+          id: `${displayedResult.concept}:${index}`,
+          point: seed,
+          maskDataUrl: instance.whiteMaskDataUrl,
+          conceptLabel: displayedResult.concept,
+        },
+      });
+    }
+    const result = applyConceptSelectAll(batchSelections, selectedInstanceIndices, candidates);
+    setSelectedInstanceIndices(result.selectedInstanceIndices);
+    setBatchSelections(result.selections);
+    for (const index of result.addedInstanceIndices) {
+      const instance = decodedInstances[index];
+      console.log(
+        `${CONCEPT_EVENT_LOG_PREFIX} ${JSON.stringify(
+          buildSelectionLoggedEvent({
+            roomId,
+            concept: displayedResult.concept,
+            instanceIndex: index,
+            score: instance?.score ?? null,
+          })
+        )}`
+      );
+    }
+    setSelectAllNotice(
+      result.truncated
+        ? `Selected ${result.selections.length} of ${candidates.length} detected — batch staging is limited to ${MAX_BATCH_OBJECTS} objects.`
+        : null
+    );
+  }, [
+    isProcessing,
+    displayedResult,
+    decodedInstances,
+    roomId,
+    batchSelections,
+    selectedInstanceIndices,
+  ]);
   // and export masks at the photo's exact pixel dimensions.
   useEffect(() => {
     if (!imageUrl) return;
@@ -565,6 +628,7 @@ export default function InpaintEditor({
       setDecodedInstances(null);
       setSelectedInstanceIndices([]);
       setConceptInputError(null);
+      setSelectAllNotice(null);
       onSourceChange?.(next);
     },
     [source, onSourceChange]
@@ -819,7 +883,12 @@ export default function InpaintEditor({
   }, []);
 
   const handleClearSelection = useCallback(() => {
+    // Issue #249: the canvas's selected-instance tints follow the set —
+    // a clear must empty BOTH pieces or solid-filled instances would
+    // outlive the panel that ran them.
     setBatchSelections([]);
+    setSelectedInstanceIndices([]);
+    setSelectAllNotice(null);
   }, []);
 
   // Clear Mask (canvas button) empties the grid — the selection state must
@@ -828,6 +897,13 @@ export default function InpaintEditor({
     setBatchSelections([]);
     setSelectedInstanceIndices([]);
   }, []);
+
+  // Issue #249: bulk-affordance enablement. `detectedCount` is the active
+  // concept's decodable instances; `selectionCount` is whichever state
+  // piece is ahead (they move in lockstep — the max guards a transient
+  // render between the two setState calls).
+  const detectedCount = decodedInstances?.filter(Boolean).length ?? 0;
+  const selectionCount = Math.max(batchSelections.length, selectedInstanceIndices.length);
 
   return (
     <div className="flex flex-col gap-6">
@@ -888,6 +964,30 @@ export default function InpaintEditor({
                   {chip}
                 </button>
               ))}
+              {/* Issue #249: bulk selection affordances. Select-all is a
+                  pure client-side walk over the decoded instances (zero
+                  billed calls); it stops at the batch cap and says so. */}
+              <button
+                type="button"
+                onClick={handleSelectAllDetected}
+                disabled={
+                  isProcessing ||
+                  conceptLoading ||
+                  detectedCount === 0 ||
+                  selectionCount >= Math.min(detectedCount, MAX_BATCH_OBJECTS)
+                }
+                className="px-2.5 py-1 text-xs rounded-md border border-stone-800 bg-white text-stone-800 hover:bg-stone-100 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Select all detected
+              </button>
+              <button
+                type="button"
+                onClick={handleClearSelection}
+                disabled={isProcessing || selectionCount === 0}
+                className="px-2.5 py-1 text-xs rounded-md border border-gray-300 bg-white text-stone-700 hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Clear selection
+              </button>
             </div>
             <form onSubmit={handleConceptSubmit} className="flex flex-wrap items-center gap-2">
               <label htmlFor={conceptInputId} className="text-xs text-stone-600">
@@ -936,6 +1036,11 @@ export default function InpaintEditor({
                   {buildConceptEmptyMessage(requestedConcept)}
                 </p>
               )}
+            {selectAllNotice && (
+              <p role="status" className="text-xs text-stone-600">
+                {selectAllNotice}
+              </p>
+            )}
           </div>
         )}
         <h4 className="text-sm font-medium text-stone-700 mb-2">Source Image</h4>
@@ -991,7 +1096,6 @@ export default function InpaintEditor({
           onRun={handleBatchRun}
           onRetryRemaining={handleBatchRetry}
           onRemoveLast={handleRemoveLastSelection}
-          onClearSelection={handleClearSelection}
         />
       )}
 

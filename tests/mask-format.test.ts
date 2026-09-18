@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 import {
+  extractMaskOutline,
   maskGridFromProviderPixels,
   paintMaskPixels,
 } from "@/lib/mask-format";
@@ -134,5 +135,97 @@ describe("paintMaskPixels", () => {
       0, 0, 0, 0,
       0, 0, 0, 0,
     ]);
+  });
+});
+
+describe("extractMaskOutline", () => {
+  // Issue #249: detected-only instances render as a faint wash PLUS a
+  // rank-colored outline; selected ones stay a solid fill. The outline is
+  // the boundary ring of the format-agnostic classification — interior
+  // object pixels and background stay fully transparent.
+  const OUTLINE: readonly [number, number, number] = [217, 119, 6];
+
+  it("outlines only the boundary ring of a solid object, leaving the interior transparent", () => {
+    // 5×5 with a 3×3 object at (1,1): 8 boundary pixels, 1 interior pixel.
+    const width = 5;
+    const height = 5;
+    const grayscale = new Uint8ClampedArray(width * height * 4);
+    for (let i = 0; i < width * height; i++) {
+      const x = i % width;
+      const y = Math.floor(i / width);
+      const inObject = x >= 1 && x <= 3 && y >= 1 && y <= 3;
+      const o = i * 4;
+      grayscale[o] = grayscale[o + 1] = grayscale[o + 2] = inObject ? 255 : 0;
+      grayscale[o + 3] = 255;
+    }
+    const out = extractMaskOutline(grayscale, width, height, { outlineColor: OUTLINE });
+
+    const isOutline = (x: number, y: number) => {
+      const o = (y * width + x) * 4;
+      return (
+        out[o] === OUTLINE[0] && out[o + 1] === OUTLINE[1] && out[o + 2] === OUTLINE[2] && out[o + 3] === 255
+      );
+    };
+    const isTransparent = (x: number, y: number) => {
+      const o = (y * width + x) * 4;
+      return out[o + 3] === 0;
+    };
+    // Boundary ring: all 3×3-object pixels except the (2,2) interior.
+    for (let y = 1; y <= 3; y++) {
+      for (let x = 1; x <= 3; x++) {
+        if (x === 2 && y === 2) {
+          expect(isTransparent(x, y), `interior (${x},${y}) must be transparent`).toBe(true);
+        } else {
+          expect(isOutline(x, y), `boundary (${x},${y}) must be outlined`).toBe(true);
+        }
+      }
+    }
+    // Background corners stay transparent.
+    expect(isTransparent(0, 0)).toBe(true);
+    expect(isTransparent(4, 4)).toBe(true);
+  });
+
+  it("treats the canvas edge as a boundary (off-grid neighbor = background)", () => {
+    // 3×1 object spanning the full 3×1 canvas: every pixel borders the
+    // canvas edge, so all three are outline pixels.
+    const data = makeRgba([
+      [255, 255, 255, 255],
+      [255, 255, 255, 255],
+      [255, 255, 255, 255],
+    ]);
+    const out = extractMaskOutline(data, 3, 1, { outlineColor: OUTLINE });
+    for (let x = 0; x < 3; x++) {
+      const o = x * 4;
+      expect(Array.from(out.slice(o, o + 3))).toEqual([...OUTLINE]);
+      expect(out[o + 3]).toBe(255);
+    }
+  });
+
+  it("produces the SAME outline from both encodings of the same geometry", () => {
+    const width = 4;
+    const height = 4;
+    const grayscale = new Uint8ClampedArray(width * height * 4);
+    const cutout = new Uint8ClampedArray(width * height * 4);
+    for (let i = 0; i < width * height; i++) {
+      const x = i % width;
+      const y = Math.floor(i / width);
+      const inObject = x >= 1 && x <= 2 && y >= 0 && y <= 2;
+      const o = i * 4;
+      grayscale[o] = grayscale[o + 1] = grayscale[o + 2] = inObject ? 255 : 0;
+      grayscale[o + 3] = 255;
+      cutout[o + 3] = inObject ? 255 : 0;
+    }
+    expect(
+      Array.from(extractMaskOutline(grayscale, width, height, { outlineColor: OUTLINE }))
+    ).toEqual(Array.from(extractMaskOutline(cutout, width, height, { outlineColor: OUTLINE })));
+  });
+
+  it("returns an all-transparent buffer for an empty mask", () => {
+    const width = 2;
+    const height = 2;
+    const data = new Uint8ClampedArray(width * height * 4); // opaque black
+    for (let i = 0; i < width * height; i++) data[i * 4 + 3] = 255;
+    const out = extractMaskOutline(data, width, height, { outlineColor: OUTLINE });
+    expect(Array.from(out)).toEqual(new Array(width * height * 4).fill(0));
   });
 });
