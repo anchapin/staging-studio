@@ -54,6 +54,14 @@ export interface SegmentCacheEntry {
   maskDataUrls: string[];
   /** Provider confidence per instance, parallel to `maskDataUrls`. */
   scores: number[];
+  /**
+   * Per-instance vision labels (issue #252), parallel to `maskDataUrls`;
+   * null = unlabeled (vision call pending/failed — the concept string is
+   * the fallback). Absent for entries stored before labeling resolved:
+   * cache hits return labels the moment the billed detection's labels
+   * landed in the cache.
+   */
+  labels?: Array<string | null>;
 }
 
 export interface SegmentCacheOptions {
@@ -80,6 +88,9 @@ export function buildSegmentCacheKey(imageUrl: string, concept: string): string 
 function approxEntryBytes(entry: SegmentCacheEntry): number {
   let total = 0;
   for (const url of entry.maskDataUrls) total += url.length;
+  if (entry.labels) {
+    for (const label of entry.labels) total += label?.length ?? 0;
+  }
   return total;
 }
 
@@ -140,13 +151,14 @@ export class SegmentCache {
   put(
     imageUrl: string,
     concept: string,
-    result: { maskDataUrls: string[]; scores: number[] }
+    result: { maskDataUrls: string[]; scores: number[]; labels?: Array<string | null> }
   ): void {
     const key = buildSegmentCacheKey(imageUrl, concept);
     const entry: SegmentCacheEntry = {
       concept,
       maskDataUrls: result.maskDataUrls,
       scores: result.scores,
+      ...(result.labels ? { labels: result.labels } : {}),
     };
     const previous = this.entries.get(key);
     if (previous !== undefined) {

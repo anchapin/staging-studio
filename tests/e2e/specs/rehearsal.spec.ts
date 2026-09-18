@@ -7,6 +7,7 @@ import {
   interceptFurnishingsDetection,
   interceptGenerateCopy,
   interceptInpaint,
+  interceptLabelInstances,
   login,
   mockStorageEntries,
   paintMaskZigzag,
@@ -37,6 +38,7 @@ test.describe("rehearsal drill", () => {
     // Issue #231: the editor auto-fires a SAM 3.1 detection on open —
     // both editor visits are covered by this one interception.
     interceptFurnishingsDetection(page);
+    interceptLabelInstances(page); // issue #252: billed detections label via OpenAI — keep it mocked
     interceptGenerateCopy(page);
     interceptExportPdf(page, "success");
 
@@ -152,6 +154,7 @@ test.describe("rehearsal drill", () => {
     const inpaint = interceptInpaint(page);
     inpaint.respondWithTerminalFailure();
     interceptFurnishingsDetection(page); // editor-open auto-fire stays hermetic
+    interceptLabelInstances(page); // issue #252: keep the labeling call mocked too
 
     await login(page);
     await page.goto(REHEARSAL_PROJECT);

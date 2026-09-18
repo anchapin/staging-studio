@@ -25,9 +25,11 @@ type MaskTool = "brush" | "fill" | "select";
 /**
  * Rank→color palette for instance overlays (issue #228). Six hues,
  * cycled by score rank, so adjacent instances stay distinguishable. RGB
- * tuples feed `paintMaskPixels` directly (issue #248).
+ * tuples feed `paintMaskPixels` directly (issue #248). Exported since
+ * issue #252 so the batch panel's number chips can carry the SAME color
+ * as a region's canvas tint (D4: tint and chip double-encode the mapping).
  */
-const INSTANCE_OVERLAY_PALETTE: Array<readonly [number, number, number]> = [
+export const INSTANCE_OVERLAY_PALETTE: Array<readonly [number, number, number]> = [
   [0x22, 0xc5, 0x5f],
   [0xf9, 0x73, 0x16],
   [0x3b, 0x82, 0xf6],
@@ -35,6 +37,12 @@ const INSTANCE_OVERLAY_PALETTE: Array<readonly [number, number, number]> = [
   [0x06, 0xb6, 0xd4],
   [0xea, 0xb3, 0x08],
 ];
+
+/** CSS color for palette slot `index` (cycles), shared with the panel chips. */
+export function paletteCssColor(index: number): string {
+  const [r, g, b] = INSTANCE_OVERLAY_PALETTE[((index % INSTANCE_OVERLAY_PALETTE.length) + INSTANCE_OVERLAY_PALETTE.length) % INSTANCE_OVERLAY_PALETTE.length];
+  return `rgb(${r} ${g} ${b})`;
+}
 
 /**
  * Issue #249: detected-only vs selected must be distinguishable at a
@@ -85,6 +93,13 @@ export interface InstanceOverlay {
   /** Score rank, 0-based. */
   rank: number;
   selected: boolean;
+  /**
+   * Issue #252 D4: when the instance is SELECTED, its region's palette
+   * slot (region position in the batch set) — every member of a merged
+   * region tints with the SAME color, matching its numbered badge and the
+   * panel chip. Unset (or for unselected instances) the rank color is used.
+   */
+  colorIndex?: number;
 }
 
 interface InpaintMaskCanvasProps {
@@ -274,8 +289,11 @@ export default function InpaintMaskCanvas({
     for (const overlay of instanceOverlays) {
       const img = cache.get(overlay.maskDataUrl);
       if (!img || !img.complete || !img.naturalWidth) continue;
-      const paletteColor =
-        INSTANCE_OVERLAY_PALETTE[overlay.rank % INSTANCE_OVERLAY_PALETTE.length];
+      const paletteColor = INSTANCE_OVERLAY_PALETTE[
+        (overlay.selected && overlay.colorIndex !== undefined
+          ? overlay.colorIndex
+          : overlay.rank) % INSTANCE_OVERLAY_PALETTE.length
+      ];
       // Tint the mask with the rank color: alpha is DERIVED from the
       // format-agnostic classification (issue #248) — a grayscale provider
       // mask decodes fully opaque, which the replaced `source-in` fill

@@ -9,6 +9,7 @@ import { CONCEPT_INSTANCE_GRAYSCALE_MASKS } from "../cutout-png";
 import {
   interceptFurnishingsDetection,
   interceptInpaint,
+  interceptLabelInstances,
   login,
   openFocusedEditor,
   whitePixelShare,
@@ -46,6 +47,9 @@ test.describe("sam 3.1 concept find-and-replace flow", () => {
   }) => {
     const inpaint = interceptInpaint(page);
     const detection = interceptFurnishingsDetection(page);
+    // Issue #252: the editor labels billed detections via ONE batched
+    // OpenAI vision call — mocked here; cache hits must never re-fire it.
+    const labeling = interceptLabelInstances(page);
     detection.respondWithMaskDataUrls(CONCEPT_INSTANCE_GRAYSCALE_MASKS);
 
     // The toggles emit the training-corpus event (W3 depends on the
@@ -101,6 +105,12 @@ test.describe("sam 3.1 concept find-and-replace flow", () => {
     await page.getByRole("button", { name: "sofa" }).click();
     expect(detection.requestCount()).toBe(3);
 
+    // Issue #252 (AC-3.2/3.5): each billed detection labeled its instances
+    // via ONE batched vision call; the cache hit above must NOT re-fire it.
+    await expect
+      .poll(() => labeling.requestCount(), { timeout: 15_000 })
+      .toBe(3);
+
     // ---- 3. Toggle two detected instances (clicks are free) ------------
     const selectButton = page.getByRole("button", { name: "Select Regions" });
     await expect(selectButton).toBeEnabled();
@@ -117,7 +127,7 @@ test.describe("sam 3.1 concept find-and-replace flow", () => {
     expect(box.width).toBeGreaterThan(0);
     expect(box.height).toBeGreaterThan(0);
 
-    const batchPanel = page.locator('section[aria-label="Batch object staging"]');
+    const batchPanel = page.locator('section[aria-label="Batch region staging"]');
 
     // Instance 0 is the full-width band at rows 30–34 — a canvas-center
     // click lands inside it. The retry wrapper absorbs the decode race

@@ -13,6 +13,8 @@ import {
   type PerObjectBatchPlan,
 } from "@/lib/multi-select-batch";
 import { buildPrefill } from "@/lib/prompt-prefill";
+import { resolveRegionLabel } from "@/lib/vision-labels";
+import { paletteCssColor } from "./inpaint-mask-canvas";
 
 /**
  * The per-object batch in flight or kept alive after a failure (for the
@@ -43,6 +45,12 @@ interface BatchStagingPanelProps {
   /** Re-run only the unfinished steps of the failed batch. */
   onRetryRemaining: () => void;
   onRemoveLast: () => void;
+  /**
+   * Issue #252 D4: per-instance vision labels (parallel to the detection
+   * response), or null while unlabeled. Feeds region labels and pre-fill;
+   * the concept string is the fallback.
+   */
+  instanceLabels?: Array<string | null> | null;
 }
 
 /**
@@ -64,6 +72,7 @@ export default function BatchStagingPanel({
   onRun,
   onRetryRemaining,
   onRemoveLast,
+  instanceLabels,
 }: BatchStagingPanelProps) {
   const [mode, setMode] = useState<BatchPromptMode>("thematic");
   const [thematicPrompt, setThematicPrompt] = useState("");
@@ -78,10 +87,26 @@ export default function BatchStagingPanel({
   // (union) field stays empty on purpose — "Replace the furniture, rug
   // with…" is nonsense across a union mask; that path owns the holistic
   // vocabulary (its textarea keeps the plain "" initial state above).
+  // Issue #252 D4: the label source of truth is the vision label when
+  // available, the concept string otherwise. A merged region's label joins
+  // its unique member labels ("sofa and coffee table"); a single-instance
+  // region uses its own label. Feeds row headers AND pre-fill (AC-3.3/3.4).
+  const regionLabel = (selection: BatchSelection): string => {
+    const members = selection.memberInstanceIndices ?? [];
+    const memberLabels = members.map((index) => instanceLabels?.[index] ?? null);
+    return resolveRegionLabel(memberLabels, selection.conceptLabel ?? "");
+  };
+
+  /** Row header: region label with the positional `Region N` as fallback. */
+  const entryLabel = (selection: BatchSelection, index: number) => {
+    const label = regionLabel(selection);
+    return label || batchStepLabel(index);
+  };
+
   const orderedPrompts = selections.map((selection) =>
     promptsBySelection[selection.id] !== undefined
       ? promptsBySelection[selection.id]
-      : buildPrefill(selection.conceptLabel)
+      : buildPrefill(regionLabel(selection) || selection.conceptLabel)
   );
   const batchRunning = processing && activeBatch !== null;
   const thematicReady = thematicPrompt.trim().length > 0;
@@ -96,9 +121,7 @@ export default function BatchStagingPanel({
     setPromptsBySelection((previous) => ({ ...previous, [selectionId]: value }));
   };
 
-  /** Concept name for concept-sourced entries; positional `Object N` otherwise. */
-  const entryLabel = (selection: BatchSelection, index: number) =>
-    selection.conceptLabel ?? batchStepLabel(index);
+  /** Concept name for concept-sourced entries; positional `Region N` otherwise. */
 
   const handleRun = () => {
     if (!canRun) return;
@@ -201,15 +224,25 @@ export default function BatchStagingPanel({
           ) : (
             <>
               <p className="text-sm font-medium text-stone-700" id="batch-per-object-label">
-                One prompt per object (applied in order; results stack)
+                One prompt per region (applied in order; results stack)
               </p>
               <ol className="mt-1 flex flex-col gap-2">
                 {selections.map((selection, index) => (
                   <li key={selection.id} className="flex flex-col">
                     <label
                       htmlFor={`batch-prompt-${selection.id}`}
-                      className="text-xs font-medium text-stone-600"
+                      className="flex items-center gap-1.5 text-xs font-medium text-stone-600"
                     >
+                      {/* Issue #252 D4 (AC-3.1): numbered chip matching the
+                          canvas badge, colored with the region's canvas tint
+                          (region i → palette[i]) — per-object mode only. */}
+                      <span
+                        aria-hidden="true"
+                        className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold text-white"
+                        style={{ backgroundColor: paletteCssColor(index) }}
+                      >
+                        {index + 1}
+                      </span>
                       {entryLabel(selection, index)} prompt
                     </label>
                     <input
@@ -218,8 +251,8 @@ export default function BatchStagingPanel({
                       value={orderedPrompts[index]}
                       onChange={(event) => setPrompt(selection.id, event.target.value)}
                       placeholder={
-                        selection.conceptLabel
-                          ? `e.g. replace the ${selection.conceptLabel} with ...`
+                        entryLabel(selection, index)
+                          ? `e.g. replace the ${entryLabel(selection, index)} with ...`
                           : `e.g. replace ${batchStepLabel(index).toLowerCase()} with ...`
                       }
                       className="mt-0.5 w-full rounded-md border border-stone-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-stone-500"

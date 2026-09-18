@@ -37,6 +37,7 @@ import {
 import { maskGridFromPixels } from "@/lib/mask-flood-fill";
 import { computeMaskCanvasDimensions } from "@/lib/canvas-coords";
 import { fillHoles, closeRegion, MERGE_PROXIMITY_PX } from "@/lib/mask-postprocess";
+import { maskBounds, topmostLeftmostPoint } from "@/lib/vision-labels";
 import {
   MAX_BATCH_OBJECTS,
   advanceBatchProgress,
@@ -141,6 +142,45 @@ async function composeUnionMaskDataUrl(
     0
   );
   return canvas.toDataURL("image/png");
+}
+
+/**
+ * Rasterizes one instance crop from the displayed source image for the
+ * batched vision-labeling call (issue #252 D4): crops the instance's
+ * bounding box (plus 4% context padding) at the photo's natural
+ * dimensions, downscales the long edge to 320px to keep the vision
+ * request cheap, and serializes as JPEG. Null when the image or crop
+ * fails. Browser-only.
+ */
+async function cropInstanceDataUrl(
+  sourceImg: HTMLImageElement,
+  bounds: { minX: number; minY: number; maxX: number; maxY: number },
+  naturalDims: { width: number; height: number }
+): Promise<string | null> {
+  const padX = Math.round((bounds.maxX - bounds.minX + 1) * 0.04);
+  const padY = Math.round((bounds.maxY - bounds.minY + 1) * 0.04);
+  const cropX = Math.max(0, bounds.minX - padX);
+  const cropY = Math.max(0, bounds.minY - padY);
+  const cropW = Math.min(naturalDims.width, bounds.maxX + 1 + padX) - cropX;
+  const cropH = Math.min(naturalDims.height, bounds.maxY + 1 + padY) - cropY;
+  if (cropW <= 0 || cropH <= 0) return null;
+
+  const long = Math.max(cropW, cropH);
+  const scale = long > 320 ? 320 / long : 1;
+  const outW = Math.max(1, Math.round(cropW * scale));
+  const outH = Math.max(1, Math.round(cropH * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = outW;
+  canvas.height = outH;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(sourceImg, cropX, cropY, cropW, cropH, 0, 0, outW, outH);
+  try {
+    return canvas.toDataURL("image/jpeg", 0.8);
+  } catch {
+    return null;
+  }
 }
 
 /** Decodes mask data URLs into RGBA buffers at one shared geometry. Browser-only. */
@@ -385,6 +425,15 @@ export default function InpaintEditor({
   // control fills the remaining headroom and names what it left out.
   const [selectAllNotice, setSelectAllNotice] = useState<string | null>(null);
   const conceptInputId = useId();
+  // Issue #252 D4: per-instance vision labels (parallel to
+  // `decodedInstances`; null = unlabeled). Non-blocking: rows render with
+  // the concept string until (and unless) labels arrive.
+  const [instanceLabels, setInstanceLabels] = useState<Array<string | null> | null>(null);
+  // Keys (imageUrl#concept) of detections that cost a billed call — vision
+  // labeling fires ONLY for these (cache hits must never bill OpenAI).
+  const networkDetectionKeysRef = useRef(new Set<string>());
+  // Keys already labeled this session (dedupe across effect re-runs).
+  const labeledKeysRef = useRef(new Set<string>());
   const [batchSelections, setBatchSelections] = useState<BatchSelection[]>([]);
   const [unionMaskDataUrl, setUnionMaskDataUrl] = useState<string | null>(null);
   const [selectionReset, setSelectionReset] = useState<{
@@ -453,9 +502,12 @@ export default function InpaintEditor({
   const conceptLoading = conceptSegments.status === "warming";
 
   // Install fetched results into the cache so re-selecting the concept
-  // later is free (the hook itself never writes the cache).
+  // later is free (the hook itself never writes the cache). The fetched
+  // key is recorded as a BILLED detection — the trigger for optional
+  // vision labeling (issue #252 D4); cache hits never get that marker.
   useEffect(() => {
     if (conceptSegments.result) {
+      networkDetectionKeysRef.current.add(`${imageUrl}#${conceptSegments.result.concept}`);
       segmentCacheRef.current?.put(
         imageUrl,
         conceptSegments.result.concept,
@@ -463,6 +515,93 @@ export default function InpaintEditor({
       );
     }
   }, [conceptSegments.result, imageUrl]);
+
+  // Issue #252 D4: ONE batched GPT-4o-mini vision request per billed
+  // detection names every instance. Non-blocking by design — rows render
+  // with the concept string until labels land, and any failure just keeps
+  // that fallback (AC-3.2). Labeled results are written back into the
+  // segment cache, so cache-served concepts restore labels instantly.
+  useEffect(() => {
+    if (!SAM_TOOL_ENABLED) return;
+    if (!roomId || !imageUrl || !imageDims) return;
+    if (!displayedResult || !decodedInstances) return;
+
+    // Cache-served labels restore instantly (no network, no billing).
+    if (displayedResult.labels) {
+      setInstanceLabels(displayedResult.labels);
+      return;
+    }
+    const key = `${imageUrl}#${displayedResult.concept}`;
+    if (!networkDetectionKeysRef.current.has(key)) return;
+    if (labeledKeysRef.current.has(key)) return;
+    labeledKeysRef.current.add(key);
+
+    let cancelled = false;
+    void (async () => {
+      const sourceImg = await loadImage(imageUrl).catch(() => null);
+      if (!sourceImg) return;
+      const crops: Array<{ instanceIndex: number; cropDataUrl: string }> = [];
+      for (let index = 0; index < decodedInstances.length; index++) {
+        const instance = decodedInstances[index];
+        if (!instance) continue;
+        const bounds = maskBounds(instance.grid, instance.width, instance.height);
+        if (!bounds) continue;
+        // Grid (mask-canvas) space → natural pixel space for the crop.
+        const scaleX = imageDims.width / instance.width;
+        const scaleY = imageDims.height / instance.height;
+        const naturalBounds = {
+          minX: Math.floor(bounds.minX * scaleX),
+          minY: Math.floor(bounds.minY * scaleY),
+          maxX: Math.ceil(bounds.maxX * scaleX),
+          maxY: Math.ceil(bounds.maxY * scaleY),
+        };
+        const cropDataUrl = await cropInstanceDataUrl(sourceImg, naturalBounds, imageDims);
+        if (cancelled) return;
+        if (cropDataUrl) crops.push({ instanceIndex: index, cropDataUrl });
+      }
+      if (cancelled || crops.length === 0) return;
+      try {
+        const response = await fetch("/api/label-instances", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            roomId,
+            concept: displayedResult.concept,
+            crops,
+          }),
+        });
+        if (!response.ok) return;
+        const data = (await response.json()) as { labels?: unknown };
+        if (!Array.isArray(data.labels)) return;
+        const labels: Array<string | null> = new Array(displayedResult.maskDataUrls.length).fill(
+          null
+        );
+        for (const entry of data.labels) {
+          if (
+            entry &&
+            typeof entry === "object" &&
+            typeof (entry as { instanceIndex?: unknown }).instanceIndex === "number" &&
+            typeof (entry as { label?: unknown }).label === "string"
+          ) {
+            const index = (entry as { instanceIndex: number }).instanceIndex;
+            if (index >= 0 && index < labels.length) labels[index] = (entry as { label: string }).label;
+          }
+        }
+        if (cancelled) return;
+        setInstanceLabels(labels);
+        segmentCacheRef.current?.put(imageUrl, displayedResult.concept, {
+          maskDataUrls: displayedResult.maskDataUrls,
+          scores: displayedResult.scores,
+          labels,
+        });
+      } catch {
+        // Silent by design: labels are enrichment, the concept fallback stands.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [displayedResult, decodedInstances, imageUrl, imageDims, roomId]);
 
   // Surface hook results for the active concept (cache-served or fetched).
   useEffect(() => {
@@ -479,6 +618,7 @@ export default function InpaintEditor({
       setRequestedConcept(concept);
       setConceptInputError(null);
       setDisplayedResult(segmentCacheRef.current?.get(imageUrl, concept) ?? null);
+      setInstanceLabels(null);
       // Toggle state is per-concept (issue #228); the batch set mirrors
       // the toggles (issue #229), so it resets with them.
       setSelectedInstanceIndices([]);
@@ -523,22 +663,72 @@ export default function InpaintEditor({
     };
   }, [displayedResult, imageDims]);
 
-  // Overlay descriptors for the canvas's tinted instance layer.
+  // Overlay descriptors for the canvas's tinted instance layer. Since
+  // issue #252 D2/D4, SELECTED instances tint with their REGION's palette
+  // color (all members of a merged region share one color — matching the
+  // region's badge and panel chip); detected-only instances keep their
+  // score-rank color.
   const instanceOverlays = useMemo(() => {
     if (!displayedResult || !decodedInstances) return undefined;
-    const overlays: Array<{ id: string; maskDataUrl: string; rank: number; selected: boolean }> = [];
+    const regionIndexByInstance = new Map<number, number>();
+    batchSelections.forEach((selection, position) => {
+      for (const member of selection.memberInstanceIndices ?? []) {
+        regionIndexByInstance.set(member, position);
+      }
+    });
+    const overlays: Array<{
+      id: string;
+      maskDataUrl: string;
+      rank: number;
+      selected: boolean;
+      colorIndex?: number;
+    }> = [];
     for (let index = 0; index < displayedResult.maskDataUrls.length; index++) {
       const instance = decodedInstances[index];
       if (!instance) continue;
+      const selected = selectedInstanceIndices.includes(index);
+      const regionIndex = regionIndexByInstance.get(index);
       overlays.push({
         id: `${displayedResult.concept}:${index}`,
         maskDataUrl: displayedResult.maskDataUrls[index],
         rank: index,
-        selected: selectedInstanceIndices.includes(index),
+        selected,
+        ...(selected && regionIndex !== undefined ? { colorIndex: regionIndex } : {}),
       });
     }
     return overlays;
-  }, [displayedResult, decodedInstances, selectedInstanceIndices]);
+  }, [displayedResult, decodedInstances, selectedInstanceIndices, batchSelections]);
+
+  // Issue #252 D4: numbered canvas badges, one per pending region, positioned
+  // at the topmost-leftmost pixel of the region's member union (grid space
+  // scaled to natural pixels) so a merged region is anchored on its actual
+  // shape rather than any single member's seed point.
+  const selectionMarkers = useMemo(() => {
+    if (!decodedInstances || batchSelections.length === 0) return undefined;
+    if (!imageDims) return undefined;
+    return batchSelections.flatMap((selection, position) => {
+      const members = selection.memberInstanceIndices ?? [];
+      // Union's topmost-leftmost pixel = the minimum (y, then x) over the
+      // members' own topmost-leftmost points (D4).
+      let best: { x: number; y: number } | null = null;
+      for (const member of members) {
+        const instance = decodedInstances[member];
+        if (!instance) continue;
+        const point = topmostLeftmostPoint(instance.grid, instance.width, instance.height);
+        if (!point) continue;
+        if (!best || point.y < best.y || (point.y === best.y && point.x < best.x)) best = point;
+      }
+      if (!best) return [];
+      return [
+        {
+          id: selection.id,
+          x: best.x * (imageDims.width / (decodedInstances[0]?.width ?? imageDims.width)),
+          y: best.y * (imageDims.height / (decodedInstances[0]?.height ?? imageDims.height)),
+          index: position + 1,
+        },
+      ];
+    });
+  }, [batchSelections, decodedInstances, imageDims]);
 
   // The source in effect for the CURRENT run, captured at start time so the
   // completion callback reports the right one even if the selector (or the
@@ -745,6 +935,7 @@ export default function InpaintEditor({
       // union/reset state follows the selection set via effects.
       setBatchSelections([]);
       regionMaskCacheRef.current.clear();
+      setInstanceLabels(null);
       segmentCacheRef.current?.clear();
       setRequestedConcept(DEFAULT_CONCEPT);
       setDisplayedResult(null);
@@ -1236,6 +1427,7 @@ export default function InpaintEditor({
           segmentDisabled={isProcessing || conceptLoading}
           segmenting={conceptLoading}
           instanceOverlays={instanceOverlays}
+          selectionMarkers={selectionMarkers}
           expansionRadius={maskExpansion}
           fullWidth={fullWidth}
           selectionReset={selectionReset}
@@ -1277,6 +1469,7 @@ export default function InpaintEditor({
           onRun={handleBatchRun}
           onRetryRemaining={handleBatchRetry}
           onRemoveLast={handleRemoveLastSelection}
+          instanceLabels={instanceLabels}
         />
       )}
 

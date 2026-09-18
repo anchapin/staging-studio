@@ -4,6 +4,7 @@ import { E2E_EDITOR_PROJECT_ID, E2E_EDITOR_ROOM_ID } from "../env";
 import {
   interceptFurnishingsDetection,
   interceptInpaint,
+  interceptLabelInstances,
   login,
   openFocusedEditor,
   paintMaskZigzag,
@@ -32,6 +33,9 @@ test.describe("mask painting", () => {
     // Issue #231: the concept tool is compiled ON, so the editor-open
     // auto-fire must land on the mock, never the real fal-backed route.
     interceptFurnishingsDetection(page);
+    // Issue #252: billed detections trigger the vision-labeling call —
+    // it must land on the mock, never the real OpenAI-backed route.
+    interceptLabelInstances(page);
 
     await login(page);
     await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");

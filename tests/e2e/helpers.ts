@@ -377,6 +377,42 @@ export function interceptGenerateCopy(page: Page): void {  page.route("**/api/ge
 }
 
 /**
+ * Intercepts the OpenAI-backed vision-labeling route (issue #252). The
+ * editor fires this after every billed detection (cache-miss), so EVERY
+ * editor-opening spec that triggers a fresh detection must register it —
+ * the browser call never reaches the real route handler, so no
+ * OPENAI_API_KEY is exercised. Returns a counter for assertions.
+ */
+export function interceptLabelInstances(page: Page): { requestCount(): number } {
+  let requestCount = 0;
+  page.route("**/api/label-instances", (route) => {
+    if (route.request().method() !== "POST") {
+      void route.fallback();
+      return;
+    }
+    requestCount += 1;
+    const body = JSON.parse(route.request().postData() ?? "{}") as {
+      concept?: string;
+      crops?: Array<{ instanceIndex: number }>;
+    };
+    const labels = (body.crops ?? []).map((crop) => ({
+      instanceIndex: crop.instanceIndex,
+      label: `E2E ${body.concept ?? "furniture"} ${crop.instanceIndex + 1}`,
+    }));
+    void route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ success: true, labels }),
+    });
+  });
+  return {
+    requestCount() {
+      return requestCount;
+    },
+  };
+}
+
+/**
  * Intercepts the Browserless-backed export route. `outcome` chooses
  * between a successful PDF download (rehearsal) and a simulated provider
  * outage (failure drill).
