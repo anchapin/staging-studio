@@ -9,6 +9,15 @@ import { buildCopyPrompt } from "@/lib/prompts";
 import { checklistItemSchema } from "@/lib/checklist-schema";
 import { classifyIntegrationError } from "@/lib/error-classify";
 import { describeNoObjectGeneratedError } from "@/lib/no-object-error";
+import {
+  DEFAULT_DAILY_COPY_LIMIT,
+  DAILY_LIMIT_ENV_VAR,
+  dailyQuotaExceededPayload,
+  evaluateDailyQuota,
+  getDailyUsage,
+  recordDailyUsage,
+  resolveDailyLimit,
+} from "@/lib/api-quota";
 import { saveRoomCopy, type GeneratedCopy } from "@/app/actions/room";
 
 const COPY_OUTPUT_ERROR_COPY = {
@@ -51,6 +60,36 @@ export async function POST(request: NextRequest) {
           message: "You must be signed in to generate copy.",
         },
         { status: 401 }
+      );
+    }
+
+    // Issue #201: daily per-user OpenAI cost guardrail, checked BEFORE any
+    // validation or DB work — a user at their cap never reaches gpt-4o-mini.
+    // Usage lives in the in-process daily counter (lib/api-quota.ts), which
+    // resets on cold start; that under-count limitation is documented there.
+    const copyLimit = resolveDailyLimit(
+      process.env[DAILY_LIMIT_ENV_VAR.copy],
+      DEFAULT_DAILY_COPY_LIMIT
+    );
+    const copyQuota = evaluateDailyQuota(
+      getDailyUsage("copy", user.id),
+      copyLimit
+    );
+    if (!copyQuota.allowed) {
+      console.warn(
+        JSON.stringify({
+          event: "generate_copy_daily_quota_exceeded",
+          userId: user.id,
+          used: copyQuota.used,
+          limit: copyQuota.limit,
+        })
+      );
+      return NextResponse.json(
+        {
+          success: false,
+          ...dailyQuotaExceededPayload(copyQuota, "Please try again tomorrow."),
+        },
+        { status: 429 }
       );
     }
 
@@ -102,6 +141,11 @@ export async function POST(request: NextRequest) {
         rawDirectives: room.rawDirectives,
       }),
     });
+
+    // Count the billable generation only after the provider call resolves:
+    // a failed/timeout attempt costs at most a few rejected tokens and does
+    // not count against the user's daily cap.
+    recordDailyUsage("copy", user.id);
 
     const generatedCopy: GeneratedCopy = {
       observedChallenge: copy.observedChallenge,
