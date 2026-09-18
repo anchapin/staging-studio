@@ -10,7 +10,7 @@ import {
   type CanvasPoint,
 } from "@/lib/canvas-coords";
 import { estimateMaskCoverage, shouldWarnLowCoverage } from "@/lib/mask-coverage";
-import { paintMaskPixels } from "@/lib/mask-format";
+import { extractMaskOutline, paintMaskPixels } from "@/lib/mask-format";
 import { floodFillMask, maskGridFromPixels } from "@/lib/mask-flood-fill";
 import {
   DEFAULT_MASK_EXPANSION_RADIUS,
@@ -34,6 +34,17 @@ const INSTANCE_OVERLAY_PALETTE: Array<readonly [number, number, number]> = [
   [0x06, 0xb6, 0xd4],
   [0xea, 0xb3, 0x08],
 ];
+
+/**
+ * Issue #249: detected-only vs selected must be distinguishable at a
+ * glance. A detected-only instance renders as a FAINT rank-colored wash
+ * plus a crisp rank-colored outline; a selected one renders as a solid
+ * rank-colored fill. (The pre-#249 scheme tinted both the same way and
+ * only dimmed selected — on a furnished room that read as "everything
+ * is selected".)
+ */
+const DETECTED_WASH_ALPHA = 0.15;
+const SELECTED_FILL_ALPHA = 0.45;
 
 /**
  * Issue #203: editor-side sync of the batch selection set. Whenever `id`
@@ -60,8 +71,10 @@ export interface SelectionMarker {
 /**
  * Issue #228: one detected concept instance to tint on the overlay
  * canvas. `rank` is the score rank (0 = highest score) and picks the
- * palette color; `selected` dims the instance (its pixels are already in
- * the white mask canvas above).
+ * palette color; issue #249 splits the rendering — `selected` instances
+ * render as a solid rank-colored fill (their pixels are already in the
+ * white mask canvas above), detected-only ones as a faint wash with a
+ * rank-colored outline.
  */
 export interface InstanceOverlay {
   /** Stable React key (concept + response position). */
@@ -217,9 +230,10 @@ export default function InpaintMaskCanvas({
   // ---------------------------------------------------------------------
   // Issue #228: score-ranked instance overlays. A dedicated canvas layer
   // (below the interactive mask canvas) tints each detected instance by
-  // rank; selected instances dim because their pixels already show as
-  // white in the mask canvas above. This layer is decorative only — it
-  // never touches the exported mask pixels.
+  // rank; since issue #249 selected instances render as a solid fill
+  // (their pixels already show as white in the mask canvas above) while
+  // detected-only ones stay a faint wash plus an outline. This layer is
+  // decorative only — it never touches the exported mask pixels.
   // ---------------------------------------------------------------------
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const instanceImageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
@@ -259,6 +273,8 @@ export default function InpaintMaskCanvas({
     for (const overlay of instanceOverlays) {
       const img = cache.get(overlay.maskDataUrl);
       if (!img || !img.complete || !img.naturalWidth) continue;
+      const paletteColor =
+        INSTANCE_OVERLAY_PALETTE[overlay.rank % INSTANCE_OVERLAY_PALETTE.length];
       // Tint the mask with the rank color: alpha is DERIVED from the
       // format-agnostic classification (issue #248) — a grayscale provider
       // mask decodes fully opaque, which the replaced `source-in` fill
@@ -274,18 +290,37 @@ export default function InpaintMaskCanvas({
         dims.width,
         dims.height,
         {
-          maskedColor:
-            INSTANCE_OVERLAY_PALETTE[overlay.rank % INSTANCE_OVERLAY_PALETTE.length],
+          maskedColor: paletteColor,
           transparentBackground: true,
         }
       );
+      // Issue #249: selected = solid rank-colored fill; detected-only =
+      // faint wash PLUS a crisp rank-colored outline, so "detected" and
+      // "selected" are distinguishable at a glance on furnished rooms.
       tintedCtx.putImageData(
         new ImageData(new Uint8ClampedArray(tintedData), dims.width, dims.height),
         0,
         0
       );
-      ctx.globalAlpha = overlay.selected ? 0.12 : 0.4;
+      ctx.globalAlpha = overlay.selected ? SELECTED_FILL_ALPHA : DETECTED_WASH_ALPHA;
       ctx.drawImage(tinted, 0, 0);
+      if (!overlay.selected) {
+        const outlineData = extractMaskOutline(tintedData, dims.width, dims.height, {
+          outlineColor: paletteColor,
+        });
+        const outlined = document.createElement("canvas");
+        outlined.width = dims.width;
+        outlined.height = dims.height;
+        const outlinedCtx = outlined.getContext("2d");
+        if (!outlinedCtx) continue;
+        outlinedCtx.putImageData(
+          new ImageData(new Uint8ClampedArray(outlineData), dims.width, dims.height),
+          0,
+          0
+        );
+        ctx.globalAlpha = 1;
+        ctx.drawImage(outlined, 0, 0);
+      }
     }
     ctx.globalAlpha = 1;
   }, [instanceOverlays, overlayTick, dims.width, dims.height]);
@@ -786,7 +821,7 @@ export default function InpaintMaskCanvas({
     activeTool === "fill"
       ? "Room mask canvas with the Fill Region tool active: draw a continuous outline around the object, arrow keys move the cursor, press P, Space, or Enter to fill the region under the cursor"
       : activeTool === "select"
-        ? "Room mask canvas with the Select Objects tool active: detected instances are tinted by rank, click one to toggle its shape in or out of the mask (clicks are free — detection already ran per concept), arrow keys move the cursor, press P, Space, or Enter to toggle the instance under the cursor"
+        ? "Room mask canvas with the Select Objects tool active: detected instances show as faint tinted shapes with colored outlines, selected instances as solid fills — click one to toggle its shape in or out of the mask (clicks are free — detection already ran per concept), arrow keys move the cursor, press P, Space, or Enter to toggle the instance under the cursor"
         : "Room mask painting canvas: arrow keys move the brush (hold Shift for fine steps), press P, Space, or Enter to start and stop painting";
 
   const canvasElement = (
@@ -913,7 +948,7 @@ export default function InpaintMaskCanvas({
         {/* Select Objects is flag-gated (SAM_TOOL_ENABLED): the sentence
             disappears with the tool if the kill switch is flipped off. */}
         {SAM_TOOL_ENABLED &&
-          " Select Objects detects every instance of the chosen concept in one call — pick a concept chip above, then click tinted objects on the photo to toggle them in or out of the mask. Re-clicks and re-toggles are free."}
+          " Select Objects detects every instance of the chosen concept in one call — pick a concept chip above, then click outlined objects to add them to the mask (outlines turn solid fills when selected). Re-clicks and re-toggles are free."}
       </p>
 
       {lowCoverage && (

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { findInstanceAtPoint, type InstanceMaskGrid } from "@/lib/instance-hit-test";
+import { findInstanceAtPoint, instanceSeedPoint, type InstanceMaskGrid } from "@/lib/instance-hit-test";
 
 /** Builds a grid from ASCII rows — `#` = object pixel, `.` = background. */
 function gridFromAscii(rows: string[]): InstanceMaskGrid {
@@ -25,6 +25,42 @@ const RIGHT_BLOB = gridFromAscii([
   "..##",
   "....",
 ]);
+
+describe("instanceSeedPoint", () => {
+  // Issue #249: "Select all detected" needs a representative point per
+  // instance so the batch entries inherit the same duplicate-point rule
+  // as click toggles. First set pixel in row-major order is deterministic
+  // and always lands inside the instance.
+  it("returns the first set pixel in row-major order", () => {
+    const blob = gridFromAscii([
+      "....",
+      ".##.",
+      "....",
+    ]);
+    expect(instanceSeedPoint(blob)).toEqual({ x: 1, y: 1 });
+  });
+
+  it("prefers an earlier row over an earlier column", () => {
+    const blob = gridFromAscii([
+      "..#.",
+      "#...",
+      "....",
+    ]);
+    expect(instanceSeedPoint(blob)).toEqual({ x: 2, y: 0 });
+  });
+
+  it("returns null for an all-background grid", () => {
+    const empty = gridFromAscii(["....", "...."]);
+    expect(instanceSeedPoint(empty)).toBeNull();
+  });
+
+  it("returns null for degenerate dims or a short grid", () => {
+    const zeroDims: InstanceMaskGrid = { grid: new Uint8Array(0), width: 0, height: 0 };
+    expect(instanceSeedPoint(zeroDims)).toBeNull();
+    const shortGrid: InstanceMaskGrid = { grid: new Uint8Array(2), width: 4, height: 4 };
+    expect(instanceSeedPoint(shortGrid)).toBeNull();
+  });
+});
 
 describe("findInstanceAtPoint", () => {
   it("returns the instance index containing the point", () => {

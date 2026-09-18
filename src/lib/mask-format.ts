@@ -89,3 +89,48 @@ export function paintMaskPixels(
   }
   return out;
 }
+
+/** Options for extracting an instance outline. */
+export interface ExtractOutlineOptions {
+  /** RGB applied to boundary pixels (the instance's rank color). */
+  outlineColor: readonly [number, number, number];
+}
+
+/**
+ * Extracts the BOUNDARY of a provider mask as RGBA pixels (issue #249):
+ * a classified object pixel is a boundary pixel when any 4-neighbor is
+ * background or off-grid; boundary pixels take
+ * {@link ExtractOutlineOptions.outlineColor} at full alpha, everything
+ * else — interior object pixels included — is fully transparent. The
+ * canvas overlays this ring on the faint detected-instance wash so
+ * detected-only reads differently from a selected (solid-fill) instance
+ * at a glance. Classification is the format-agnostic one, so grayscale
+ * and alpha-cutout masks outline identically. Returns a fresh buffer;
+ * the input is not mutated. Pure.
+ */
+export function extractMaskOutline(
+  data: Uint8ClampedArray | Uint8Array,
+  width: number,
+  height: number,
+  options: ExtractOutlineOptions
+): Uint8ClampedArray {
+  const grid = maskGridFromProviderPixels(data, width, height);
+  const [r, g, b] = options.outlineColor;
+  const out = new Uint8ClampedArray(width * height * 4);
+  const isObject = (x: number, y: number) =>
+    x >= 0 && x < width && y >= 0 && y < height && grid[y * width + x] === 1;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (grid[y * width + x] !== 1) continue;
+      const boundary =
+        !isObject(x - 1, y) || !isObject(x + 1, y) || !isObject(x, y - 1) || !isObject(x, y + 1);
+      if (!boundary) continue;
+      const o = (y * width + x) * 4;
+      out[o] = r;
+      out[o + 1] = g;
+      out[o + 2] = b;
+      out[o + 3] = 255;
+    }
+  }
+  return out;
+}

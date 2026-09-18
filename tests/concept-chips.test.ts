@@ -6,6 +6,7 @@ import {
   CONCEPT_CHIPS,
   DEFAULT_CONCEPT,
   isValidConceptName,
+  normalizeConceptInput,
 } from "@/lib/concept-chips";
 
 describe("CONCEPT_CHIPS", () => {
@@ -90,22 +91,50 @@ describe("isValidConceptName", () => {
   });
 });
 
+describe("normalizeConceptInput", () => {
+  // Issue #249: capitals are the common case the free-text field should
+  // forgive — normalization runs BEFORE validation, but validation itself
+  // (the server-schema mirror) stays strict.
+  it("lowercases and trims so capitalized input passes validation", () => {
+    expect(normalizeConceptInput("Sofa")).toBe("sofa");
+    expect(isValidConceptName(normalizeConceptInput("Sofa"))).toBe(true);
+  });
+
+  it("normalizes multi-word capitalized phrases", () => {
+    expect(normalizeConceptInput("  Wall Art  ")).toBe("wall art");
+    expect(isValidConceptName(normalizeConceptInput("Wall Art"))).toBe(true);
+  });
+
+  it("passes already-lowercase values through unchanged", () => {
+    expect(normalizeConceptInput("wall art")).toBe("wall art");
+    expect(normalizeConceptInput("  rug  ")).toBe("rug");
+  });
+
+  it("still fails validation when normalization cannot fix the value", () => {
+    expect(isValidConceptName(normalizeConceptInput("Sofa1"))).toBe(false);
+    expect(isValidConceptName(normalizeConceptInput("Sofa, Chair"))).toBe(false);
+    expect(isValidConceptName(normalizeConceptInput("   "))).toBe(false);
+  });
+});
+
 describe("buildConceptEmptyMessage", () => {
-  it("suggests the furniture catch-all for other concepts", () => {
+  // Issue #249: the brush is named FIRST — when detection finds nothing,
+  // the brush is the reliable fallback and must not read as an afterthought.
+  it("suggests the brush first, then the furniture catch-all, for other concepts", () => {
     expect(buildConceptEmptyMessage("sofa")).toBe(
-      "no sofa found — try 'furniture' or the brush"
+      "no sofa found — paint the area with the brush, or try 'furniture'"
     );
   });
 
-  it("points at other concepts/brush when the default itself found nothing", () => {
+  it("suggests the brush first, then other concepts, when the default found nothing", () => {
     expect(buildConceptEmptyMessage("furniture")).toBe(
-      "no furniture found — try another concept or the brush"
+      "no furniture found — paint the area with the brush, or try another concept"
     );
   });
 
   it("falls back to the default for an unvalidated concept", () => {
     expect(buildConceptEmptyMessage("")).toBe(
-      "no furniture found — try another concept or the brush"
+      "no furniture found — paint the area with the brush, or try another concept"
     );
   });
 });

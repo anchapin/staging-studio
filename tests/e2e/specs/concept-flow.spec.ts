@@ -17,7 +17,8 @@ import {
 const CONSOLE_EVENT_PREFIX = "[concept-tool] ";
 
 /**
- * SAM 3.1 concept find-and-replace, end to end (issue #231).
+ * SAM 3.1 concept find-and-replace, end to end (issue #231; #249 adds the
+ * free-text normalization and select-all/clear affordances).
  *
  * The REAL UI path runs with the flag ON: the editor-open auto-fire, the
  * concept chips, the per-instance toggles, the #230 pre-filled prompts,
@@ -84,6 +85,22 @@ test.describe("sam 3.1 concept find-and-replace flow", () => {
       .toBe(2);
     expect(detection.submitBody().concept).toBe("sofa");
 
+    // ---- 2b. Free-text concepts are case-normalized (#249) -------------
+    // "Rug" reaches the route as "rug" (the server schema rejects
+    // capitals) and bills ONE new (image, concept) call; the fixture
+    // answers with the same two-instance response regardless of concept.
+    await page.getByLabel("Custom concept:").fill("Rug");
+    // exact: true — "Detect" would substring-match the "Select all
+    // detected" affordance button (#249).
+    await page.getByRole("button", { name: "Detect", exact: true }).click();
+    await expect
+      .poll(() => detection.requestCount(), { timeout: 15_000 })
+      .toBe(3);
+    expect(detection.submitBody().concept).toBe("rug");
+    // Returning to sofa is a cache hit — zero billed calls.
+    await page.getByRole("button", { name: "sofa" }).click();
+    expect(detection.requestCount()).toBe(3);
+
     // ---- 3. Toggle two detected instances (clicks are free) ------------
     const selectButton = page.getByRole("button", { name: "Select Objects" });
     await expect(selectButton).toBeEnabled();
@@ -123,7 +140,31 @@ test.describe("sam 3.1 concept find-and-replace flow", () => {
     }).toPass({ timeout: 15_000 });
 
     // Toggles are pure client-side hit-tests — zero extra detection calls.
-    expect(detection.requestCount()).toBe(2);
+    expect(detection.requestCount()).toBe(3);
+
+    // ---- 3b. Bulk affordances (#249): disabled-when-complete, clear, ---
+    //      select-all rebuilds with zero billed calls
+    const selectAllButton = page.getByRole("button", { name: "Select all detected" });
+    const clearSelectionButton = page.getByRole("button", { name: "Clear selection" });
+
+    // Both detected instances are already selected (step 3), so select-all
+    // is disabled — there is nothing left to add — and reports no calls.
+    await expect(selectAllButton).toBeDisabled();
+    await expect(clearSelectionButton).toBeEnabled();
+    expect(detection.requestCount()).toBe(3);
+
+    // Clear empties BOTH state pieces: the panel unmounts, the canvas
+    // shows the instances as detected-only again, and select-all re-arms.
+    await clearSelectionButton.click();
+    await expect(batchPanel).toBeHidden();
+    await expect(selectAllButton).toBeEnabled();
+
+    // Select-all rebuilds the whole set from the cached detection — zero
+    // billed calls — and disables itself again once everything is selected.
+    await selectAllButton.click();
+    await expect(batchPanel.getByText("2 / 5 objects")).toBeVisible();
+    expect(detection.requestCount()).toBe(3);
+    await expect(selectAllButton).toBeDisabled();
 
     // ---- 4. Pre-filled prompts (#230): per-object rows carry the -------
     //      concept text; the union (thematic) field stays empty.
@@ -212,7 +253,8 @@ test.describe("sam 3.1 concept find-and-replace flow", () => {
     // ---- 8. Cache-served chip return: furniture is already warm ---------
     await page.getByRole("button", { name: "furniture" }).click();
     // The SegmentCache serves the repeat concept without a fetch — the
-    // effect would have fired synchronously on an uncached switch.
-    expect(detection.requestCount()).toBe(2);
+    // effect would have fired synchronously on an uncached switch. (The
+    // three billed calls so far: auto-fire furniture, sofa, normalized rug.)
+    expect(detection.requestCount()).toBe(3);
   });
 });

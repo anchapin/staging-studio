@@ -63,3 +63,27 @@ export function findInstanceAtPoint(
   }
   return null;
 }
+
+/**
+ * A deterministic representative point for one detected instance: its
+ * first set pixel in row-major order (issue #249). "Select all detected"
+ * builds each batch entry from this point so the entries inherit the
+ * reducer's duplicate-point rule exactly like click toggles do.
+ *
+ * Contract: returns `null` when the grid has no set pixel or is degenerate
+ * (non-positive dims, or shorter than width × height — the same skip rules
+ * as {@link findInstanceAtPoint}). Side effects: none (pure).
+ */
+export function instanceSeedPoint(
+  instance: InstanceMaskGrid
+): { x: number; y: number } | null {
+  const { grid, width, height } = instance;
+  if (width <= 0 || height <= 0) return null;
+  if (grid.length < width * height) return null;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (grid[y * width + x] === 1) return { x, y };
+    }
+  }
+  return null;
+}

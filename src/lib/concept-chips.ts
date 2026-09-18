@@ -71,18 +71,31 @@ export function isValidConceptName(value: unknown): value is string {
 }
 
 /**
+ * Forgives the common free-text slip — capitals — before validation
+ * (issue #249): trims and lowercases. Run the result through
+ * {@link isValidConceptName}; normalization can't rescue commas, digits,
+ * or over-length phrases, and validation (the server-schema mirror) stays
+ * strict on purpose.
+ * Side effects: none (pure).
+ */
+export function normalizeConceptInput(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+/**
  * Negative-result copy for a concept detection that legitimately found
  * nothing (an empty `maskDataUrls` is a valid response, not an error).
- * The literal-suggestion variant only makes sense for non-default
- * concepts; the catch-all falls back to pointing at the other chips and
- * the brush.
+ * The brush is named FIRST (issue #249) — when detection comes up empty
+ * it is the reliable fallback. The literal-suggestion variant only makes
+ * sense for non-default concepts; the catch-all falls back to pointing
+ * at the other chips.
  * Side effects: none (pure).
  */
 export function buildConceptEmptyMessage(concept: string): string {
   const name = isValidConceptName(concept) ? concept.trim() : DEFAULT_CONCEPT;
   return name === DEFAULT_CONCEPT
-    ? `no ${name} found — try another concept or the brush`
-    : `no ${name} found — try '${DEFAULT_CONCEPT}' or the brush`;
+    ? `no ${name} found — paint the area with the brush, or try another concept`
+    : `no ${name} found — paint the area with the brush, or try '${DEFAULT_CONCEPT}'`;
 }
 
 /** Stable console prefix so operators can filter concept-tool events. */

@@ -43,7 +43,6 @@ interface BatchStagingPanelProps {
   /** Re-run only the unfinished steps of the failed batch. */
   onRetryRemaining: () => void;
   onRemoveLast: () => void;
-  onClearSelection: () => void;
 }
 
 /**
@@ -65,7 +64,6 @@ export default function BatchStagingPanel({
   onRun,
   onRetryRemaining,
   onRemoveLast,
-  onClearSelection,
 }: BatchStagingPanelProps) {
   const [mode, setMode] = useState<BatchPromptMode>("thematic");
   const [thematicPrompt, setThematicPrompt] = useState("");
@@ -130,14 +128,9 @@ export default function BatchStagingPanel({
           >
             Undo last
           </button>
-          <button
-            type="button"
-            onClick={onClearSelection}
-            disabled={disabled || selections.length === 0}
-            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Clear selection
-          </button>
+          {/* Issue #249: "Clear selection" moved beside the concept chips
+              (inpaint-editor) — the one global control, instead of a
+              duplicate button whose accessible name collided with it. */}
         </div>
       </div>
 
