@@ -3,7 +3,10 @@
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import type { ChecklistItem } from "@/lib/checklist-schema";
-import type { RoomCopyEditInput } from "@/lib/room-copy-edit-schema";
+import {
+  roomCopyEditSchema,
+  type RoomCopyEditInput,
+} from "@/lib/room-copy-edit-schema";
 import {
   resolveSelectionAfterDelete,
   touchUpCountsBySlot,
@@ -108,10 +111,11 @@ export async function saveRoomCopy(
  * AI output), absent fields are left untouched so an autosave of one
  * field can never clobber the others.
  *
- * Contract: `edits` must already be validated by
- * `roomCopyEditSchema` at the caller (the action is a thin trusted
- * writer, matching the other actions in this file). Requires an
- * authenticated session whose Prisma user owns the room's project — the
+ * Contract: `edits` is validated here with `roomCopyEditSchema` —
+ * server actions receive client-controlled input, so only the four
+ * editable fields (prose 1–2000 chars, valid checklist items) can ever
+ * reach Prisma. Requires an authenticated session whose Prisma user
+ * owns the room's project — the
  * update runs with an ownership `where` filter, so a foreign roomId
  * silently matches nothing and returns "Not authenticated" rather than
  * throwing or leaking existence. Failures are caught and reported,
@@ -122,14 +126,23 @@ export async function saveRoomCopy(
  * `console.error`. No path revalidation (callers refresh locally).
  *
  * @param roomId ID of the room to update.
- * @param edits Validated partial copy edits; only present fields are written.
+ * @param edits Partial copy edits; validated, then only present fields are written.
  * @returns `{ success: true }` on write, or
- *   `{ success: false, error }` when unauthenticated or the update fails.
+ *   `{ success: false, error }` when unauthenticated, the payload is
+ *   invalid, or the update fails.
  */
 export async function saveRoomCopyEdits(
   roomId: string,
   edits: RoomCopyEditInput
 ): Promise<{ success: boolean; error?: string }> {
+  const parsed = roomCopyEditSchema.safeParse(edits);
+  if (!parsed.success) {
+    return failure(
+      parsed.error.issues[0]?.message ?? "Invalid copy edits payload"
+    );
+  }
+  const validated = parsed.data;
+
   const ownershipWhere = await getOwnedRoomWhere(roomId);
   if (!ownershipWhere) {
     return failure("Not authenticated");
@@ -141,17 +154,17 @@ export async function saveRoomCopyEdits(
     buyerPsychology: string;
     checklistItems: ChecklistItem[];
   }> = {};
-  if (edits.observedChallenge !== undefined) {
-    data.observedChallenge = edits.observedChallenge;
+  if (validated.observedChallenge !== undefined) {
+    data.observedChallenge = validated.observedChallenge;
   }
-  if (edits.recommendation !== undefined) {
-    data.recommendation = edits.recommendation;
+  if (validated.recommendation !== undefined) {
+    data.recommendation = validated.recommendation;
   }
-  if (edits.buyerPsychology !== undefined) {
-    data.buyerPsychology = edits.buyerPsychology;
+  if (validated.buyerPsychology !== undefined) {
+    data.buyerPsychology = validated.buyerPsychology;
   }
-  if (edits.checklistItems !== undefined) {
-    data.checklistItems = edits.checklistItems;
+  if (validated.checklistItems !== undefined) {
+    data.checklistItems = validated.checklistItems;
   }
 
   try {

@@ -11,6 +11,7 @@ import {
   E2E_EMAIL,
   E2E_REHEARSAL_PROJECT_ID,
   E2E_REHEARSAL_ROOM_ID,
+  E2E_LOOKBOOK_ROOM_ID,
   E2E_UPLOAD_PROJECT_ID,
   E2E_UPLOAD_ROOM_ID,
   E2E_USER_ID,
@@ -214,6 +215,28 @@ async function seed(): Promise<void> {
                   {
                     id: E2E_REHEARSAL_ROOM_ID,
                     name: "Rehearsal Room",
+                  },
+                  {
+                    id: E2E_LOOKBOOK_ROOM_ID,
+                    name: "Lookbook Suite",
+                    observedChallenge:
+                      "North-facing living room reads dim in listing photos.",
+                    recommendation:
+                      "Layer warm lamps and lighten textiles to lift the space.",
+                    buyerPsychology:
+                      "Empty nesters read brightness as low-maintenance comfort.",
+                    checklistItems: [
+                      {
+                        item: "Replace burnt-out bulbs with warm white",
+                        category: "Minor Repair",
+                        priority: "High",
+                      },
+                      {
+                        item: "Store oversized recliner during showings",
+                        category: "DIY/Declutter",
+                        priority: "Critical",
+                      },
+                    ],
                   },
                 ],
               },

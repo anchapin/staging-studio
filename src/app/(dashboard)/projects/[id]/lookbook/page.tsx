@@ -5,10 +5,9 @@ import Link from "next/link";
 
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
-import {
-  LookbookPreviewView,
-  type PreviewProject,
-} from "@/app/(print)/preview/[id]/lookbook-preview-view";
+import type { PreviewProject } from "@/app/(print)/preview/[id]/lookbook-preview-view";
+
+import { LookbookEditor } from "./lookbook-editor";
 
 interface LookbookPageProps {
   params: Promise<{ id: string }>;
@@ -117,10 +116,9 @@ export default async function LookbookPage({ params }: LookbookPageProps) {
       </div>
 
       {/* Letter-proportioned on-screen rendering of the print lookbook —
-          see .paper-preview in globals.css (issue #250). */}
-      <div className="paper-preview">
-        <LookbookPreviewView project={previewProject} />
-      </div>
+          see .paper-preview in globals.css (issue #250). Edit/Preview
+          modes, autosave, and generate-once live in LookbookEditor. */}
+      <LookbookEditor project={previewProject} />
     </div>
   );
 }
