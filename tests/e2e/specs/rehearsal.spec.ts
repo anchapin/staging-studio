@@ -4,6 +4,7 @@ import { roomPhotoFixture } from "../fixtures";
 import { E2E_REHEARSAL_PROJECT_ID, E2E_REHEARSAL_ROOM_ID } from "../env";
 import {
   interceptExportPdf,
+  interceptFurnishingsDetection,
   interceptGenerateCopy,
   interceptInpaint,
   login,
@@ -33,6 +34,9 @@ test.describe("rehearsal drill", () => {
   }) => {
     const file = roomPhotoFixture();
     const inpaint = interceptInpaint(page);
+    // Issue #231: the editor auto-fires a SAM 3.1 detection on open —
+    // both editor visits are covered by this one interception.
+    interceptFurnishingsDetection(page);
     interceptGenerateCopy(page);
     interceptExportPdf(page, "success");
 
@@ -106,10 +110,12 @@ test.describe("rehearsal drill", () => {
     await expect(page.getByText("Pack away personal photos")).toBeVisible();
 
     // ---- Export (Browserless simulated, success) ------------------------
-    const exportButton = page.getByRole("button", { name: "Export PDF" });
-    await exportButton.click();
-    const download = page.waitForEvent("download", { timeout: 20_000 });
-    expect((await download).suggestedFilename()).toBe("303 Rehearsal Road.pdf");
+    // Register the download listener BEFORE the click: the intercepted
+    // fetch resolves in milliseconds, and a late listener misses the
+    // event entirely.
+    const downloadPromise = page.waitForEvent("download", { timeout: 20_000 });
+    await page.getByRole("button", { name: "Export PDF" }).click();
+    expect((await downloadPromise).suggestedFilename()).toBe("303 Rehearsal Road.pdf");
     await expect(page.getByText("PDF exported successfully!")).toBeVisible();
 
     // ---- Byte-identity of the upload this rehearsal performed -----------
@@ -129,6 +135,7 @@ test.describe("rehearsal drill", () => {
   }) => {
     const inpaint = interceptInpaint(page);
     inpaint.respondWithTerminalFailure();
+    interceptFurnishingsDetection(page); // editor-open auto-fire stays hermetic
 
     await login(page);
     await page.goto(REHEARSAL_PROJECT);

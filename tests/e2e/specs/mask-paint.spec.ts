@@ -1,14 +1,9 @@
 import { expect, test } from "@playwright/test";
 
-import {
-  E2E_EDITOR_PROJECT_ID,
-  E2E_EDITOR_ROOM_ID,
-  SAM_TOOL_ENABLED_IN_E2E_BUILD,
-} from "../env";
+import { E2E_EDITOR_PROJECT_ID, E2E_EDITOR_ROOM_ID } from "../env";
 import {
   interceptFurnishingsDetection,
   interceptInpaint,
-  interceptSegment,
   login,
   openFocusedEditor,
   paintMaskZigzag,
@@ -34,6 +29,9 @@ test.describe("mask painting", () => {
     page,
   }) => {
     const inpaint = interceptInpaint(page);
+    // Issue #231: the concept tool is compiled ON, so the editor-open
+    // auto-fire must land on the mock, never the real fal-backed route.
+    interceptFurnishingsDetection(page);
 
     await login(page);
     await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
@@ -88,6 +86,7 @@ test.describe("mask painting", () => {
 
   test("Fill Region floods a region through a single trusted click", async ({ page }) => {
     const inpaint = interceptInpaint(page);
+    interceptFurnishingsDetection(page); // editor-open auto-fire stays hermetic
 
     await login(page);
     await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
@@ -126,6 +125,8 @@ test.describe("mask painting", () => {
   });
 
   test("Clear Mask resets the editor back to the disabled state", async ({ page }) => {
+    interceptFurnishingsDetection(page); // editor-open auto-fire stays hermetic
+
     await login(page);
     await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
 
@@ -157,6 +158,7 @@ test.describe("mask painting on high-DPI displays", () => {
   test.use({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2 });
 
   async function openEditorWithDirectives(page: import("@playwright/test").Page): Promise<void> {
+    interceptFurnishingsDetection(page); // editor-open auto-fire stays hermetic
     await login(page);
     await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
     const directives = page.getByLabel("Staging directives (required)");
@@ -277,120 +279,6 @@ test.describe("mask painting on high-DPI displays", () => {
 });
 
 /**
- * Click-to-segment (issue #183, revived by issue #202).
- *
- * The Select Object tool sends one clicked point to /api/segment; the
- * SAM-backed route is intercepted (no paid call) and fulfills with a mask
- * fixture whose white quadrant is observable in the exported /api/inpaint
- * mask. Covers the issue's guardrails: the editor-open pre-warm ping is
- * classified separately and costs zero "clicks", repeat clicks on the same
- * point are deduped, and a failing SAM call shows an error while leaving
- * the canvas (and therefore the pending inpaint mask) untouched.
- */
-test.describe("select object segmentation", () => {
-  // Issue #228: the point-SAM flow these specs exercise (warm-ping ping,
-  // per-click /api/segment calls) was REPLACED by SAM 3.1 concept
-  // selection. Until the fal-ai/sam-3-1 interception and the replacement
-  // concept-tool specs land with #231, the e2e build compiles the tool
-  // OFF (SAM_TOOL_ENABLED_IN_E2E_BUILD) so the editor-open auto-fire can
-  // never reach the real route — these legacy specs skip meanwhile.
-  test.skip(
-    !SAM_TOOL_ENABLED_IN_E2E_BUILD,
-    "concept-tool e2e specs arrive with #231; the flag is compiled off in the e2e build"
-  );
-
-  test("one click paints the segment mask and feeds the inpaint flow", async ({ page }) => {
-    const inpaint = interceptInpaint(page);
-    const segment = interceptSegment(page);
-
-    await login(page);
-    await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
-
-    // Issue #202: opening the editor pre-warms the segment path with
-    // exactly one warm ping — never counted as a click.
-    await expect
-      .poll(() => segment.warmRequestCount(), { timeout: 15_000 })
-      .toBe(1);
-
-    // Apply Inpainting requires staging directives before it will run.
-    const directives = page.getByLabel("Staging directives (required)");
-    await expect(directives).toBeVisible();
-    await directives.fill("Add a neutral linen sofa and a warm wood coffee table.");
-
-    const selectButton = page.getByRole("button", { name: "Select Object" });
-    await selectButton.click();
-    await expect(selectButton).toHaveAttribute("aria-pressed", "true");
-
-    const canvas = page
-      .getByRole("application")
-      .locator('canvas[aria-label^="Room mask canvas with the Select Object tool"]');
-    await expect(canvas).toBeVisible();
-    await canvas.scrollIntoViewIfNeeded();
-    const box = (await canvas.boundingBox())!;
-
-    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-
-    const applyButton = page.getByRole("button", { name: "Apply Inpainting" });
-    await expect(applyButton).toBeEnabled({ timeout: 15_000 });
-
-    // The click reached /api/segment as a bounded point in natural pixels.
-    const body = segment.submitBody();
-    expect(body.warm).toBeUndefined();
-    const point = body.point as { x: number; y: number };
-    expect(point.x).toBeGreaterThan(0);
-    expect(point.y).toBeGreaterThan(0);
-    expect(point.x).toBeLessThanOrEqual(body.imageWidth as number);
-    expect(point.y).toBeLessThanOrEqual(body.imageHeight as number);
-
-    // A repeat click on the same point is deduped — still exactly one
-    // real request, so the paid SAM endpoint is not re-invoked.
-    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    await expect
-      .poll(() => segment.segmentRequestCount(), { timeout: 5_000 })
-      .toBe(1);
-
-    // The segment mask merged onto the canvas feeds the real inpaint flow.
-    await applyButton.click();
-    await expect(page.getByText("Inpainting completed successfully!")).toBeVisible({
-      timeout: 20_000,
-    });
-
-    const whiteShare = await whitePixelShare(page, inpaint.maskDataUrl());
-    expect(whiteShare).toBeGreaterThan(0.05);
-    expect(whiteShare).toBeLessThan(0.9);
-  });
-
-  test("a failing segment call shows an error and leaves the mask intact", async ({ page }) => {
-    const segment = interceptSegment(page);
-
-    await login(page);
-    await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
-
-    await page.getByRole("button", { name: "Select Object" }).click();
-
-    const canvas = page
-      .getByRole("application")
-      .locator('canvas[aria-label^="Room mask canvas with the Select Object tool"]');
-    await expect(canvas).toBeVisible();
-    await canvas.scrollIntoViewIfNeeded();
-    const box = (await canvas.boundingBox())!;
-
-    // First click succeeds and paints the fixture mask.
-    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    const applyButton = page.getByRole("button", { name: "Apply Inpainting" });
-    await expect(applyButton).toBeEnabled({ timeout: 15_000 });
-
-    // Second click fails; the error surfaces and the mask survives.
-    segment.respondWithFailure();
-    await page.mouse.click(box.x + box.width * 0.25, box.y + box.height * 0.25);
-    await expect(page.getByText("Simulated SAM failure (e2e).")).toBeVisible({
-      timeout: 15_000,
-    });
-    await expect(applyButton).toBeEnabled();
-  });
-});
-
-/**
  * "Restage furnishings" preset (issue #223).
  *
  * The preset's regeneration mask is the union of detected per-object
@@ -453,7 +341,9 @@ test.describe("restage furnishings preset", () => {
     await expect(
       page.getByText("No furnishings were detected in this photo.")
     ).toBeVisible({ timeout: 15_000 });
-    expect(detection.requestCount()).toBe(1);
+    // Two detections: the editor-open auto-fire (issue #228) and the
+    // preset's own click-scoped fetch — both intercepted, zero fal calls.
+    expect(detection.requestCount()).toBe(2);
     // The failure must not fall back to a geometric full-room mask (the
     // regression being fixed) — no inpaint run is ever submitted.
     expect(() => inpaint.submitBody()).toThrow();
