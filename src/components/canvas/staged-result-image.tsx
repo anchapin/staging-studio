@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Image from "next/image";
 
 /**
@@ -23,8 +24,10 @@ interface StagedResultImageProps {
   /** Visible variant label, e.g. "Variant B — staged". */
   label: string;
   /**
-   * Focused-room layout (issue #169): render at the taller full-width frame
-   * height so the staged result matches the room photo above it.
+   * Focused-room layout (issue #169): span the full content width so the
+   * staged result matches the room photo above it. Since #188 the frame
+   * height follows the photo's aspect ratio (viewport-capped), so this only
+   * affects sizing.
    */
   largeImage?: boolean;
 }
@@ -41,19 +44,59 @@ export default function StagedResultImage({
   label,
   largeImage = false,
 }: StagedResultImageProps) {
+  /**
+   * Natural pixel dimensions of the loaded photo (issue #188). The frame
+   * adopts the photo's own aspect ratio so the FULL image stays visible —
+   * a fixed-height frame with `object-cover` cropped the bottom (and top)
+   * off wide photos. Null until the photo loads; the fixed `frameHeight`
+   * fallback covers that window.
+   */
+  const [imageAspect, setImageAspect] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
+
+  // Measure the photo once it loads (same pattern as RoomCanvas /
+  // InpaintEditor). `window.Image` — not the imported next/image component —
+  // is the DOM constructor here.
+  useEffect(() => {
+    const img = new window.Image();
+    img.onload = () => {
+      if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+        setImageAspect({ width: img.naturalWidth, height: img.naturalHeight });
+      }
+    };
+    img.src = afterImageUrl;
+    return () => {
+      img.onload = null;
+    };
+  }, [afterImageUrl]);
+
   const frameHeight = largeImage ? "h-96" : "h-64";
   const imageSizes = largeImage ? FOCUSED_IMAGE_SIZES : GRID_IMAGE_SIZES;
 
   return (
     <div
-      className={`relative ${frameHeight} overflow-hidden rounded-lg border border-stone-200 bg-stone-100`}
+      className={`relative w-full overflow-hidden rounded-lg border border-stone-200 bg-stone-100 ${
+        imageAspect ? "max-h-[70vh]" : frameHeight
+      }`}
+      style={
+        imageAspect
+          ? { aspectRatio: `${imageAspect.width} / ${imageAspect.height}` }
+          : undefined
+      }
     >
+      {/*
+        Issue #188: letterbox with `object-contain` instead of cropping with
+        `object-cover` — the staged result must be fully visible, never cut
+        off at the bottom.
+      */}
       <Image
         src={afterImageUrl}
         alt={alt}
         fill
         sizes={imageSizes}
-        className="object-cover"
+        className="object-contain"
       />
       <div className="absolute left-3 top-3 rounded-md bg-black/60 px-2 py-1 text-xs font-medium text-white">
         {label}
