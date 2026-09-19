@@ -37,6 +37,7 @@ import {
   isValidConceptName,
   normalizeConceptInput,
 } from "@/lib/concept-chips";
+import { clipClassifyBatch, clipPrewarm } from "@/lib/clip-zero-shot";
 import { findInstanceAtPoint, instanceSeedPoint } from "@/lib/instance-hit-test";
 import {
   maskGridFromProviderPixels,
@@ -501,6 +502,14 @@ export default function InpaintEditor({
     segmentCacheRef.current = new SegmentCache();
   }
 
+  // Issue #277: pre-warm the CLIP model on editor mount so the first
+  // clipClassify call is instant (model loaded during idle time via
+  // requestIdleCallback; zero cost when CLIP is never used).
+  useEffect(() => {
+    if (!SAM_TOOL_ENABLED) return;
+    clipPrewarm();
+  }, []);
+
   // Issue #228: auto-fire the `furniture` catch-all detection the moment
   // the editor's image has loaded — the real call IS the prewarm (the old
   // `warm: true` ping is gone; one call per (image, concept) returns every
@@ -630,6 +639,52 @@ export default function InpaintEditor({
       cancelled = true;
     };
   }, [displayedResult, decodedInstances, imageUrl, imageDims, roomId]);
+
+  // Issue #277: CLIP client-side zero-shot labeling (parallel path to the
+  // billed GPT-4o-mini vision labeling above). CLIP runs on the white-on-
+  // black mask crops — a white-on-black preview is sufficient for CLIP to
+  // identify furniture types. The top label becomes the row header and the
+  // prompt pre-fill seed. Non-blocking: rows render with the concept string
+  // until labels land. Graceful degradation: any failure leaves null labels
+  // (the concept fallback stands). Runs ONLY when no server labels exist
+  // yet (instanceLabels === null) so the billed path takes precedence.
+  useEffect(() => {
+    if (!SAM_TOOL_ENABLED) return;
+    if (!decodedInstances || instanceLabels !== null) return;
+    // Only run CLIP when we have crops but no labels yet; the billed path
+    // populates instanceLabels when it responds, blocking re-runs via the
+    // instanceLabels !== null guard above.
+
+    const crops = decodedInstances
+      .map((instance, index) =>
+        instance ? { id: String(index), imageUrl: instance.whiteMaskDataUrl } : null
+      )
+      .filter((c): c is { id: string; imageUrl: string } => c !== null);
+
+    if (crops.length === 0) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const results = await clipClassifyBatch(crops);
+        if (cancelled) return;
+        const labels: Array<string | null> = new Array(decodedInstances.length).fill(null);
+        for (const [id, result] of results) {
+          const index = parseInt(id, 10);
+          if (result.kind === "success" && result.topLabels.length > 0) {
+            labels[index] = result.topLabels[0]!.label;
+          }
+        }
+        if (cancelled) return;
+        setInstanceLabels(labels);
+      } catch {
+        // Silent by design: CLIP labels are enrichment, the concept fallback stands.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [decodedInstances, instanceLabels]);
 
   // Surface hook results for the active concept (cache-served or fetched).
   useEffect(() => {
@@ -849,6 +904,7 @@ export default function InpaintEditor({
             concept: displayedResult.concept,
             instanceIndex: hit,
             score: instance.score,
+            editedLabel: instanceLabels?.[hit] ?? undefined,
           })
         )}`
       );
@@ -861,6 +917,7 @@ export default function InpaintEditor({
       batchSelections,
       selectedInstanceIndices,
       showError,
+      instanceLabels,
     ]
   );
 
@@ -905,6 +962,7 @@ export default function InpaintEditor({
             concept: displayedResult.concept,
             instanceIndex: index,
             score: instance?.score ?? null,
+            editedLabel: instanceLabels?.[index] ?? undefined,
           })
         )}`
       );
@@ -921,6 +979,7 @@ export default function InpaintEditor({
     roomId,
     batchSelections,
     selectedInstanceIndices,
+    instanceLabels,
   ]);
   // and export masks at the photo's exact pixel dimensions.
   useEffect(() => {
