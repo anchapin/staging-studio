@@ -179,3 +179,64 @@ export const furnishingsSegmentRequestSchema = z
     concept: segmentConceptSchema.optional(),
   })
   .strict();
+
+/** Upper bound on instances per vision-labeling request (mirrors detection). */
+export const VISION_LABEL_MAX_CROPS = 30;
+
+/**
+ * Zod schema for one client-side instance crop: its detection-response
+ * index and a `data:image/*` crop of that instance (the client rasterizes
+ * the crop from the displayed source image — the server never fetches a
+ * remote resource for vision input).
+ * Side effects: none (pure validation).
+ */
+export const visionLabelCropSchema = z
+  .object({
+    instanceIndex: z.number().int().min(0).max(VISION_LABEL_MAX_CROPS - 1),
+    cropDataUrl: z
+      .string()
+      .startsWith("data:image/")
+      .min(100, { message: "Crop data is missing." })
+      .max(1_500_000, { message: "Crop exceeds the size limit." }),
+  })
+  .strict();
+
+/**
+ * Zod schema for the `POST /api/label-instances` request body (issue
+ * #252): ONE batched GPT-4o-mini vision request naming every instance of
+ * a successful billed detection. `roomId` scopes the request to a room
+ * the caller owns (the route re-checks ownership server-side);
+ * `concept` ({@link segmentConceptSchema}) is the detection prompt the
+ * vision model uses as a hint; `crops` carries one crop per instance.
+ * Cache hits never reach this route (labeling is OpenAI-billed), so
+ * there is no cache/warm flag. `.strict()` rejects unknown keys.
+ * Side effects: none (pure validation); the OpenAI call happens in the
+ * route, gated by `assertOpenAIConfigured()`/`OPENAI_API_KEY`.
+ */
+export const visionLabelRequestSchema = z
+  .object({
+    roomId: z.string().min(1),
+    concept: segmentConceptSchema,
+    crops: z
+      .array(visionLabelCropSchema)
+      .min(1)
+      .max(VISION_LABEL_MAX_CROPS),
+  })
+  .strict();
+
+/**
+ * Zod schema for the structured vision output the route asks the model
+ * for: one short noun-phrase label per instance index. The route coerces
+ * this into `{ labels: [{ instanceIndex, label }] }` for the client.
+ * Side effects: none (pure validation).
+ */
+export const visionLabelOutputSchema = z.object({
+  labels: z
+    .array(
+      z.object({
+        instanceIndex: z.number().int().min(0),
+        label: z.string().trim().min(1).max(60),
+      })
+    )
+    .max(VISION_LABEL_MAX_CROPS),
+});

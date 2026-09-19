@@ -7,8 +7,10 @@ import {
   interceptFurnishingsDetection,
   interceptGenerateCopy,
   interceptInpaint,
+  interceptLabelInstances,
   login,
   mockStorageEntries,
+  openEditorTab,
   paintMaskZigzag,
   uploadRoomPhotoViaUi,
   whitePixelShare,
@@ -37,6 +39,7 @@ test.describe("rehearsal drill", () => {
     // Issue #231: the editor auto-fires a SAM 3.1 detection on open —
     // both editor visits are covered by this one interception.
     interceptFurnishingsDetection(page);
+    interceptLabelInstances(page); // issue #252: billed detections label via OpenAI — keep it mocked
     interceptGenerateCopy(page);
     interceptExportPdf(page, "success");
 
@@ -72,6 +75,9 @@ test.describe("rehearsal drill", () => {
     // ---- Directives + mask --------------------------------------------
     await page.getByLabel("Staging directives (required)").fill(DIRECTIVES);
     await paintMaskZigzag(page);
+    // Issue #252: the single-object run affordance lives in the Manual
+    // paint tab; the editor opens on Auto detect (flag on).
+    await openEditorTab(page, "Manual paint");
     const applyButton = page.getByRole("button", { name: "Apply Inpainting" });
     await expect(applyButton).toBeEnabled();
 
@@ -152,6 +158,7 @@ test.describe("rehearsal drill", () => {
     const inpaint = interceptInpaint(page);
     inpaint.respondWithTerminalFailure();
     interceptFurnishingsDetection(page); // editor-open auto-fire stays hermetic
+    interceptLabelInstances(page); // issue #252: keep the labeling call mocked too
 
     await login(page);
     await page.goto(REHEARSAL_PROJECT);
@@ -169,6 +176,9 @@ test.describe("rehearsal drill", () => {
 
     await page.getByLabel("Staging directives (required)").fill(DIRECTIVES);
     await paintMaskZigzag(page);
+    // Issue #252: the single-object run affordance lives in the Manual
+    // paint tab; the editor opens on Auto detect (flag on).
+    await openEditorTab(page, "Manual paint");
 
     await page.getByRole("button", { name: "Apply Inpainting" }).click();
 

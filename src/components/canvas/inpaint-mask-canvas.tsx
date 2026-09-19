@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useEffect, useCallback, useMemo, useId } from "react";
+import { useRef, useState, useEffect, useLayoutEffect, useCallback, useMemo, useId } from "react";
 import { Loader2 } from "lucide-react";
 import {
   clientPointToCanvas,
@@ -16,6 +16,7 @@ import {
   DEFAULT_MASK_EXPANSION_RADIUS,
   dilateMaskGrid,
 } from "@/lib/mask-dilation";
+import { fillHoles } from "@/lib/mask-postprocess";
 import { SAM_TOOL_ENABLED } from "@/lib/sam-tool";
 
 /** Tools for building the mask: freehand paint, flood-fill, or concept select. */
@@ -24,9 +25,11 @@ type MaskTool = "brush" | "fill" | "select";
 /**
  * Rank→color palette for instance overlays (issue #228). Six hues,
  * cycled by score rank, so adjacent instances stay distinguishable. RGB
- * tuples feed `paintMaskPixels` directly (issue #248).
+ * tuples feed `paintMaskPixels` directly (issue #248). Exported since
+ * issue #252 so the batch panel's number chips can carry the SAME color
+ * as a region's canvas tint (D4: tint and chip double-encode the mapping).
  */
-const INSTANCE_OVERLAY_PALETTE: Array<readonly [number, number, number]> = [
+export const INSTANCE_OVERLAY_PALETTE: Array<readonly [number, number, number]> = [
   [0x22, 0xc5, 0x5f],
   [0xf9, 0x73, 0x16],
   [0x3b, 0x82, 0xf6],
@@ -34,6 +37,12 @@ const INSTANCE_OVERLAY_PALETTE: Array<readonly [number, number, number]> = [
   [0x06, 0xb6, 0xd4],
   [0xea, 0xb3, 0x08],
 ];
+
+/** CSS color for palette slot `index` (cycles), shared with the panel chips. */
+export function paletteCssColor(index: number): string {
+  const [r, g, b] = INSTANCE_OVERLAY_PALETTE[((index % INSTANCE_OVERLAY_PALETTE.length) + INSTANCE_OVERLAY_PALETTE.length) % INSTANCE_OVERLAY_PALETTE.length];
+  return `rgb(${r} ${g} ${b})`;
+}
 
 /**
  * Issue #249: detected-only vs selected must be distinguishable at a
@@ -84,6 +93,13 @@ export interface InstanceOverlay {
   /** Score rank, 0-based. */
   rank: number;
   selected: boolean;
+  /**
+   * Issue #252 D4: when the instance is SELECTED, its region's palette
+   * slot (region position in the batch set) — every member of a merged
+   * region tints with the SAME color, matching its numbered badge and the
+   * panel chip. Unset (or for unselected instances) the rank color is used.
+   */
+  colorIndex?: number;
 }
 
 interface InpaintMaskCanvasProps {
@@ -227,6 +243,45 @@ export default function InpaintMaskCanvas({
 
   const hasOverlay = Boolean(overlayImageSrc);
 
+  // Issue #252 D5/AC-L1: in the laptop-fixed editor the photo stack must
+  // fit the height the layout actually gives it (page-level scrolling is
+  // gone at lg+), not just its width. The aspect wrapper is width-fit by
+  // default, which overflows a short container; measuring the scroll host
+  // lets the wrapper shrink so the whole canvas stays visible and paintable
+  // (a clipped canvas swallows pointer events below the fold). Purely
+  // presentational: display size only, backing store and mask math are
+  // untouched.
+  const photoStackRef = useRef<HTMLDivElement | null>(null);
+  const hintRef = useRef<HTMLParagraphElement | null>(null);
+  const [fitWidth, setFitWidth] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    if (!fullWidth || !hasOverlay) {
+      setFitWidth(null);
+      return;
+    }
+    const stack = photoStackRef.current;
+    const host = stack?.parentElement?.parentElement ?? null; // the flex-1 scroll container
+    if (!stack || !host) return;
+
+    const measure = () => {
+      const hostBox = host.getBoundingClientRect();
+      if (hostBox.height <= 0) return;
+      const reserved = (hintRef.current?.offsetHeight ?? 0) + 16; // hint + flex gap
+      const availableHeight = Math.max(120, hostBox.height - reserved);
+      const aspect = dims.width > 0 && dims.height > 0 ? dims.width / dims.height : 1;
+      const fitted = Math.min(hostBox.width, availableHeight * aspect);
+      setFitWidth(Math.max(160, Math.floor(fitted)));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(host);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [fullWidth, hasOverlay, dims.width, dims.height]);
+
   // ---------------------------------------------------------------------
   // Issue #228: score-ranked instance overlays. A dedicated canvas layer
   // (below the interactive mask canvas) tints each detected instance by
@@ -273,8 +328,11 @@ export default function InpaintMaskCanvas({
     for (const overlay of instanceOverlays) {
       const img = cache.get(overlay.maskDataUrl);
       if (!img || !img.complete || !img.naturalWidth) continue;
-      const paletteColor =
-        INSTANCE_OVERLAY_PALETTE[overlay.rank % INSTANCE_OVERLAY_PALETTE.length];
+      const paletteColor = INSTANCE_OVERLAY_PALETTE[
+        (overlay.selected && overlay.colorIndex !== undefined
+          ? overlay.colorIndex
+          : overlay.rank) % INSTANCE_OVERLAY_PALETTE.length
+      ];
       // Tint the mask with the rank color: alpha is DERIVED from the
       // format-agnostic classification (issue #248) — a grayscale provider
       // mask decodes fully opaque, which the replaced `source-in` fill
@@ -530,9 +588,14 @@ export default function InpaintMaskCanvas({
     // instead of preserved. Dilation runs in logical mask-canvas pixel space
     // (dims) BEFORE the scale-to-natural-dimensions step and only rewrites
     // mask pixels — the source photo is never touched. A radius of 0 keeps
-    // the live canvas as the export source (today's exact output).
+    // the un-dilated mask.
+    //
+    // Issue #252 D3: filling runs LAST in the composition pipeline —
+    // dilation can seal unpainted pockets — so every manual mask reaching
+    // /api/inpaint is hole-free ("no donut reaches FLUX"). Strokes stay raw
+    // while drawing; this is the run-composition point.
     let maskSource: HTMLCanvasElement = canvas;
-    if (expansionRadius > 0) {
+    {
       const paint = document.createElement("canvas");
       paint.width = dims.width;
       paint.height = dims.height;
@@ -541,14 +604,20 @@ export default function InpaintMaskCanvas({
       paintCtx.drawImage(canvas, 0, 0, dims.width, dims.height);
       const paintData = paintCtx.getImageData(0, 0, dims.width, dims.height);
       const grid = maskGridFromPixels(paintData.data, dims.width, dims.height);
-      const dilated = dilateMaskGrid(grid, dims.width, dims.height, expansionRadius);
-      if (!dilated) return;
+      const dilated =
+        expansionRadius > 0
+          ? dilateMaskGrid(grid, dims.width, dims.height, expansionRadius)
+          : null;
+      if (expansionRadius > 0 && !dilated) return;
+      const baseMask = dilated ? dilated.mask : grid;
+      const filled = fillHoles(baseMask, dims.width, dims.height);
+      const finalMask = filled ? filled.mask : baseMask;
 
       const grown = paintCtx.createImageData(dims.width, dims.height);
       const grownData = grown.data;
-      for (let i = 0; i < dilated.mask.length; i++) {
+      for (let i = 0; i < finalMask.length; i++) {
         const o = i * 4;
-        if (dilated.mask[i] === 1) {
+        if (finalMask[i] === 1) {
           grownData[o] = 255;
           grownData[o + 1] = 255;
           grownData[o + 2] = 255;
@@ -821,7 +890,7 @@ export default function InpaintMaskCanvas({
     activeTool === "fill"
       ? "Room mask canvas with the Fill Region tool active: draw a continuous outline around the object, arrow keys move the cursor, press P, Space, or Enter to fill the region under the cursor"
       : activeTool === "select"
-        ? "Room mask canvas with the Select Objects tool active: detected instances show as faint tinted shapes with colored outlines, selected instances as solid fills — click one to toggle its shape in or out of the mask (clicks are free — detection already ran per concept), arrow keys move the cursor, press P, Space, or Enter to toggle the instance under the cursor"
+        ? "Room mask canvas with the Select Regions tool active: detected instances show as faint tinted shapes with colored outlines, selected instances as solid fills — click one to toggle its shape in or out of the mask (clicks are free — detection already ran per concept), arrow keys move the cursor, press P, Space, or Enter to toggle the instance under the cursor"
         : "Room mask painting canvas: arrow keys move the brush (hold Shift for fine steps), press P, Space, or Enter to start and stop painting";
 
   const canvasElement = (
@@ -907,14 +976,18 @@ export default function InpaintMaskCanvas({
     >
       {hasOverlay ? (
         <div
+          ref={photoStackRef}
           className={
             fullWidth
-              ? "relative w-full min-h-48"
+              ? "relative mx-auto w-full min-h-48"
               : "relative w-full max-w-md min-h-48"
           }
           style={
             aspectRatio && aspectRatio > 0
-              ? { aspectRatio: `${dims.width} / ${dims.height}` }
+              ? {
+                  aspectRatio: `${dims.width} / ${dims.height}`,
+                  ...(fitWidth !== null ? { width: `${fitWidth}px` } : {}),
+                }
               : undefined
           }
         >
@@ -939,7 +1012,7 @@ export default function InpaintMaskCanvas({
 
       {/* Cover-vs-outline semantics: the mask is region replacement, not
           selection — everything painted is regenerated. */}
-      <p id={maskingHintId} className="text-xs text-stone-700">
+      <p ref={hintRef} id={maskingHintId} className="text-xs text-stone-700">
         <span className="font-medium">How masking works:</span> Paint over the
         entire object or area you want changed — everything painted is
         regenerated, everything else is preserved. A thin outline won&apos;t
@@ -948,7 +1021,7 @@ export default function InpaintMaskCanvas({
         {/* Select Objects is flag-gated (SAM_TOOL_ENABLED): the sentence
             disappears with the tool if the kill switch is flipped off. */}
         {SAM_TOOL_ENABLED &&
-          " Select Objects detects every instance of the chosen concept in one call — pick a concept chip above, then click outlined objects to add them to the mask (outlines turn solid fills when selected). Re-clicks and re-toggles are free."}
+          " Select Regions detects every instance of the chosen concept in one call — pick a concept chip above, then click outlined instances to add them to the mask (outlines turn solid fills when selected). Nearby instances fuse into one region. Re-clicks and re-toggles are free."}
       </p>
 
       {lowCoverage && (
@@ -1014,7 +1087,7 @@ export default function InpaintMaskCanvas({
                   Selecting...
                 </>
               ) : (
-                "Select Objects"
+                "Select Regions"
               )}
             </button>
           )}
