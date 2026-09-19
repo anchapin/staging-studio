@@ -3,7 +3,7 @@
  * (issue #203).
  *
  * Pro-editing epic part 2: consecutive Select Object clicks accumulate into
- * a pending selection set (capped, see {@link MAX_BATCH_OBJECTS}), and the
+ * a pending selection set (capped, see {@link MAX_BATCH_REGIONS}), and the
  * batch is applied either as
  *
  * - **thematic** — one prompt over the union mask of every selected object
@@ -28,11 +28,11 @@
 import { isMaskedPixel } from "./mask-coverage";
 
 /**
- * Batch size cap. Each object is a separate billed FLUX.1 Fill generation,
- * and per-object results stack sequentially — small batches keep fal queue
+ * Batch size cap. Each region is a separate billed FLUX.1 Fill generation,
+ * and per-region results stack sequentially — small batches keep fal queue
  * time, daily quota spend (#201), and result predictability bounded.
  */
-export const MAX_BATCH_OBJECTS = 5;
+export const MAX_BATCH_REGIONS = 5;
 
 /**
  * One pending multi-select object: where it was selected and its own mask.
@@ -79,7 +79,7 @@ export type SelectionSetAction =
 /** Result of a reduction: the next set plus why an `add` was refused. */
 export interface SelectionSetReduction {
   selections: BatchSelection[];
-  /** `cap` = at {@link MAX_BATCH_OBJECTS}; `duplicate` = same rounded point. */
+  /** `cap` = at {@link MAX_BATCH_REGIONS}; `duplicate` = same rounded point. */
   rejected: "cap" | "duplicate" | null;
 }
 
@@ -87,7 +87,7 @@ export interface SelectionSetReduction {
  * Reduces the pending multi-select selection set.
  *
  * Contract: `add` refuses (state unchanged, `rejected` set) when the set is
- * at {@link MAX_BATCH_OBJECTS} or when an existing selection rounds to the
+ * at {@link MAX_BATCH_REGIONS} or when an existing selection rounds to the
  * same natural pixel point (clicking the same object twice). `removeLast`
  * on an empty set is a no-op. Never mutates the input array.
  * Side effects: none (pure).
@@ -98,7 +98,7 @@ export function reduceSelectionSet(
 ): SelectionSetReduction {
   switch (action.type) {
     case "add": {
-      if (state.length >= MAX_BATCH_OBJECTS) {
+      if (state.length >= MAX_BATCH_REGIONS) {
         return { selections: state, rejected: "cap" };
       }
       const roundedX = Math.round(action.selection.point.x);
@@ -143,7 +143,7 @@ export interface ConceptToggleReduction {
  * shows as selected (issue #229).
  *
  * Contract: toggling ON routes through {@link reduceSelectionSet}'s `add`,
- * so the cap ({@link MAX_BATCH_OBJECTS}) and duplicate-point rules are the
+ * so the cap ({@link MAX_BATCH_REGIONS}) and duplicate-point rules are the
  * existing ones — no new limit logic. A refused add leaves BOTH pieces
  * unchanged (the instance does not light up on the canvas either).
  * Toggling OFF removes by id and rank; removing an absent id/index is a
@@ -201,7 +201,7 @@ export interface ConceptSelectAllReduction {
  * Bulk toggle-on for the editor's "Select all detected" control
  * (issue #249). Candidates arrive in score-ranked order; each one routes
  * through {@link reduceSelectionSet}'s `add`, so the cap
- * ({@link MAX_BATCH_OBJECTS}) and duplicate-point rules stay the ONLY
+ * ({@link MAX_BATCH_REGIONS}) and duplicate-point rules stay the ONLY
  * limit logic — a cap refusal stops the walk and reports `truncated`,
  * a duplicate refusal just skips that candidate. Already-selected
  * instances add nothing (the control is idempotent). Both state pieces
@@ -221,7 +221,7 @@ export function applyConceptSelectAll(
 
   for (const candidate of candidates) {
     if (nextIndices.includes(candidate.instanceIndex)) continue;
-    if (nextSelections.length >= MAX_BATCH_OBJECTS) {
+    if (nextSelections.length >= MAX_BATCH_REGIONS) {
       truncated = true;
       break;
     }
