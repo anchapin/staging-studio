@@ -260,6 +260,9 @@ export default function InpaintEditor({
   // the mask is dispatched, so bezels/frames at the painted boundary are
   // regenerated too. 0 restores the un-dilated mask.
   const [maskExpansion, setMaskExpansion] = useState(DEFAULT_MASK_EXPANSION_RADIUS);
+  // Issue #234: when enabled, dilate further downward than upward so floor
+  // shadows cast by objects are swallowed by the regenerated region.
+  const [includeFloorShadow, setIncludeFloorShadow] = useState(false);
   const { toasts, showError, showSuccess, dismissToast } = useToast();
 
   // Concept-selection state (issue #228): the detection concept drives
@@ -1056,6 +1059,7 @@ export default function InpaintEditor({
           segmenting={conceptLoading}
           instanceOverlays={instanceOverlays}
           expansionRadius={maskExpansion}
+          includeFloorShadow={includeFloorShadow}
           fullWidth={fullWidth}
           selectionReset={selectionReset}
           onMaskCleared={handleMaskCleared}
@@ -1078,6 +1082,22 @@ export default function InpaintEditor({
           Grows the mask outward before submitting so frames, bezels, and
           mounts at the painted edge are replaced too. 0 keeps the mask
           exactly as painted.
+        </p>
+
+        {/* Issue #234: floor-shadow toggle — dilates the mask further downward than
+            upward so cast shadows on the floor are included in the regenerated region. */}
+        <label className="flex items-center gap-2 text-sm text-stone-700">
+          <input
+            type="checkbox"
+            checked={includeFloorShadow}
+            onChange={(e) => setIncludeFloorShadow(e.target.checked)}
+            className="h-4 w-4 accent-stone-800"
+          />
+          Include floor shadow
+        </label>
+        <p className="text-xs text-gray-500">
+          Extends the mask further downward so cast shadows on the floor are
+          swallowed by the regenerated region. Best for furniture on hard floors.
         </p>
       </div>
 
