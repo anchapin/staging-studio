@@ -3,7 +3,7 @@
  * (issue #203).
  *
  * Pro-editing epic part 2: consecutive Select Object clicks accumulate into
- * a pending selection set (capped, see {@link MAX_BATCH_OBJECTS}), and the
+ * a pending selection set (capped, see {@link MAX_BATCH_REGIONS}), and the
  * batch is applied either as
  *
  * - **thematic** — one prompt over the union mask of every selected object
@@ -36,7 +36,7 @@ import { MERGE_PROXIMITY_PX } from "./mask-postprocess";
  * Since issue #252 the unit is a merged REGION (one or more proximate
  * object masks), not a single object.
  */
-export const MAX_BATCH_OBJECTS = 5;
+export const MAX_BATCH_REGIONS = 5;
 
 /**
  * One pending multi-select region: where it was seeded and its own mask.
@@ -138,7 +138,7 @@ export type SelectionSetAction =
 /** Result of a reduction: the next set plus why an `add` was refused. */
 export interface SelectionSetReduction {
   selections: BatchSelection[];
-  /** `cap` = at {@link MAX_BATCH_OBJECTS}; `duplicate` = same rounded point. */
+  /** `cap` = at {@link MAX_BATCH_REGIONS}; `duplicate` = same rounded point. */
   rejected: "cap" | "duplicate" | null;
 }
 
@@ -146,7 +146,7 @@ export interface SelectionSetReduction {
  * Reduces the pending multi-select selection set.
  *
  * Contract: `add` refuses (state unchanged, `rejected` set) when the set is
- * at {@link MAX_BATCH_OBJECTS} or when an existing selection rounds to the
+ * at {@link MAX_BATCH_REGIONS} or when an existing selection rounds to the
  * same natural pixel point (clicking the same object twice). `removeLast`
  * on an empty set is a no-op. Never mutates the input array.
  * Side effects: none (pure).
@@ -157,7 +157,7 @@ export function reduceSelectionSet(
 ): SelectionSetReduction {
   switch (action.type) {
     case "add": {
-      if (state.length >= MAX_BATCH_OBJECTS) {
+      if (state.length >= MAX_BATCH_REGIONS) {
         return { selections: state, rejected: "cap" };
       }
       const roundedX = Math.round(action.selection.point.x);
@@ -221,7 +221,7 @@ export interface ConceptToggleContext {
  * one row, one prompt, one billed run — and never consumes cap headroom.
  * Without a proximity match (or without grids) the toggle routes through
  * {@link reduceSelectionSet}'s `add`, so the cap
- * ({@link MAX_BATCH_OBJECTS}) and duplicate rules stay the existing ones.
+ * ({@link MAX_BATCH_REGIONS}) and duplicate rules stay the existing ones.
  * A refused add leaves BOTH pieces unchanged. Callers pass `turningOn`
  * consistent with `selectedInstanceIndices`. Never mutates the inputs.
  * Side effects: none (pure).
@@ -340,7 +340,7 @@ export interface ConceptSelectAllReduction {
  * by the SUM of their member detection scores (ties keep rank order);
  * ranking walks components, first merging any that sit within proximity of
  * an existing region (merging never consumes headroom), then filling the
- * remaining headroom ({@link MAX_BATCH_OBJECTS} rows). When components
+ * remaining headroom ({@link MAX_BATCH_REGIONS} rows). When components
  * outrun the headroom the rest are left out and `truncated` reports it —
  * unlike the pre-#252 top-5 rule, ≤ 5 components always selects EVERY
  * instance, so fragments of one visual group no longer burn slots.
@@ -469,7 +469,7 @@ export function applyConceptSelectAll(
       continue;
     }
 
-    if (nextSelections.length >= MAX_BATCH_OBJECTS) {
+    if (nextSelections.length >= MAX_BATCH_REGIONS) {
       truncated = true;
       break;
     }

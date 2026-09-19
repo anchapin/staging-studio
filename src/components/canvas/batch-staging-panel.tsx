@@ -28,7 +28,7 @@ export interface ActiveBatch {
 interface BatchStagingPanelProps {
   /** The pending selection set, in toggle order. */
   selections: BatchSelection[];
-  /** Selection cap (mirrors MAX_BATCH_OBJECTS; shown in the copy). */
+  /** Selection cap (mirrors MAX_BATCH_REGIONS; shown in the copy). */
   maxObjects: number;
   /** True while segmenting or otherwise busy — block prompt edits + ops. */
   disabled: boolean;

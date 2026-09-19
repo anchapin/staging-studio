@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  MAX_BATCH_OBJECTS,
+  MAX_BATCH_REGIONS,
   applyConceptSelectAll,
   applyConceptToggle,
   masksWithinProximity,
@@ -43,12 +43,12 @@ describe("applyConceptToggle", () => {
   it("toggle-on inherits the batch cap from the existing reducer", () => {
     let selections: BatchSelection[] = [];
     let indices: number[] = [];
-    for (let i = 0; i < MAX_BATCH_OBJECTS; i++) {
+    for (let i = 0; i < MAX_BATCH_REGIONS; i++) {
       const step = applyConceptToggle(selections, indices, entry(`sofa:${i}`, i * 100, 0), i, true);
       selections = step.selections;
       indices = step.selectedInstanceIndices;
     }
-    expect(selections).toHaveLength(MAX_BATCH_OBJECTS);
+    expect(selections).toHaveLength(MAX_BATCH_REGIONS);
 
     const refused = applyConceptToggle(selections, indices, entry("sofa:5", 9999, 9999), 5, true);
     expect(refused.rejected).toBe("cap");
@@ -229,7 +229,7 @@ describe("proximity merging (issue #252 D2)", () => {
       selections: [] as BatchSelection[],
       selectedInstanceIndices: [] as number[],
     };
-    for (let i = 0; i < MAX_BATCH_OBJECTS; i++) {
+    for (let i = 0; i < MAX_BATCH_REGIONS; i++) {
       grids.set(i, cellGrid(64, 1, [[i * 12, 0]]));
       state = applyConceptToggle(
         state.selections,
@@ -240,7 +240,7 @@ describe("proximity merging (issue #252 D2)", () => {
         { instanceGrids: grids }
       );
     }
-    expect(state.selections).toHaveLength(MAX_BATCH_OBJECTS);
+    expect(state.selections).toHaveLength(MAX_BATCH_REGIONS);
     // Instance 5 sits 4px from instance 0's mask → merges into region 0.
     grids.set(5, cellGrid(64, 1, [[4, 0]]));
     const merged = applyConceptToggle(
@@ -252,7 +252,7 @@ describe("proximity merging (issue #252 D2)", () => {
       { instanceGrids: grids }
     );
     expect(merged.rejected).toBeNull();
-    expect(merged.selections).toHaveLength(MAX_BATCH_OBJECTS);
+    expect(merged.selections).toHaveLength(MAX_BATCH_REGIONS);
     expect(merged.selections[0]?.memberInstanceIndices).toEqual([0, 5]);
   });
 });
@@ -284,9 +284,9 @@ describe("applyConceptSelectAll", () => {
     expect(result.addedInstanceIndices).toEqual([0, 1, 2]);
   });
 
-  it("keeps the best-ranked MAX_BATCH_OBJECTS and reports truncation", () => {
+  it("keeps the best-ranked MAX_BATCH_REGIONS and reports truncation", () => {
     const result = applyConceptSelectAll([], [], detected(7));
-    expect(result.selections).toHaveLength(MAX_BATCH_OBJECTS);
+    expect(result.selections).toHaveLength(MAX_BATCH_REGIONS);
     expect(result.selectedInstanceIndices).toEqual([0, 1, 2, 3, 4]);
     expect(result.addedInstanceIndices).toEqual([0, 1, 2, 3, 4]);
     expect(result.truncated).toBe(true);
@@ -308,7 +308,7 @@ describe("applyConceptSelectAll", () => {
   it("fills only the remaining headroom when partially selected", () => {
     const base = applyConceptSelectAll([], [], detected(4));
     const result = applyConceptSelectAll(base.selections, base.selectedInstanceIndices, detected(7));
-    expect(result.selections).toHaveLength(MAX_BATCH_OBJECTS);
+    expect(result.selections).toHaveLength(MAX_BATCH_REGIONS);
     // Instance 4 is the only newcomer; 5 and 6 are left out by the cap.
     expect(result.addedInstanceIndices).toEqual([4]);
     expect(result.selectedInstanceIndices).toEqual([0, 1, 2, 3, 4]);
