@@ -233,7 +233,12 @@ export default function RoomCanvas({
            photo is the product and must be fully visible. */
         <div
           className={`relative group w-full overflow-hidden ${
-            imageAspect ? "max-h-[70vh]" : frameHeight
+            imageAspect
+              ? // Issue #265: 70vh was too tall at 1280x720 laptops — shrink
+                // the cap on smaller viewports so the canvas keeps ~180px.
+                // At 768px 45vh ≈ 346px; at 720px 35vh ≈ 252px.
+                "max-h-[45vh] sm:max-h-[35vh]"
+              : frameHeight
           }`}
           style={
             imageAspect

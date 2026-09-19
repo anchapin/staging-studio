@@ -65,14 +65,14 @@ export const DATABASE_URL = `postgresql://e2e:e2e@127.0.0.1:${POSTGRES_PORT}/sta
 /**
  * Fake "fal.ai" staged-result URL persisted after a completed inpaint.
  *
- * Must satisfy the app's real `roomPatchSchema` (https + `*.supabase.co`),
- * so it uses a fixture hostname that does not exist. Real pixels reach the
- * browser anyway: helpers intercept `/_next/image` for this host and
- * fulfill with the local fixture PNG (the optimizer itself is never
- * invoked because the request never leaves the browser).
+ * Uses MOCK_SUPABASE_URL so the next/image optimizer can fetch it
+ * server-side (dangerouslyAllowLocalIP=true in next.config; the hostname
+ * resolves to 127.0.0.1). The browser intercepts `/_next/image` via
+ * STAGED_RESULT_HOST and fulfills with fixture bytes when the URL contains
+ * the fixture host; otherwise the mock storage serves the registered object.
  */
 export const STAGED_RESULT_PUBLIC_URL =
-  "https://e2e-fixture.supabase.co/storage/v1/object/public/staged-results/e2e-staged.png";
+  `${MOCK_SUPABASE_URL}/storage/v1/object/public/staged-results/e2e-staged.png`;
 
 /** Host marker used to detect staged-fixture requests inside `/_next/image`. */
 export const STAGED_RESULT_HOST = "e2e-fixture.supabase.co";

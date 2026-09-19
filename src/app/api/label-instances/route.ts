@@ -7,6 +7,19 @@ import {
   visionLabelRequestSchema,
   visionLabelOutputSchema,
 } from "@/lib/ai-route-schemas";
+import {
+  getCachedVisionLabels,
+  upsertVisionLabels,
+} from "@/lib/vision-labels";
+import {
+  DEFAULT_DAILY_LABEL_LIMIT,
+  DAILY_LIMIT_ENV_VAR,
+  dailyQuotaExceededPayload,
+  evaluateDailyQuota,
+  getDailyUsage,
+  recordDailyUsage,
+  resolveDailyLimit,
+} from "@/lib/api-quota";
 
 /**
  * POST /api/label-instances (issue #252 D4 / WS3).
@@ -20,16 +33,18 @@ import {
  *
  * Billing note: this call is OpenAI-billed and is triggered only for
  * cache-miss detections by the client — cache hits never reach this
- * route. The generic daily copy quota intentionally does not apply:
- * detection itself is already quota-gated upstream (fal, #201), which
- * bounds how often labeling can fire.
+ * route. A per-user daily label quota (issue #263) is checked before
+ * any AI work; the limit is configurable via DAILY_LABEL_LIMIT.
+ *
+ * Issue #266: results are cached in the VisionLabel table so re-opening
+ * the editor does not re-bill GPT-4o-mini.
  *
  * Contract: 401 unauthenticated; 404 when the room is not owned by the
- * caller; 400 on a schema-invalid body; 500 with a classified message on
- * provider failure. Success returns
- * `{ success: true, labels: [{ instanceIndex, label }] }` — labels for
- * instances the model could not name are simply absent (the client keeps
- * the concept fallback for those slots).
+ * caller; 400 on a schema-invalid body; 429 when the daily label quota
+ * is exhausted; 500 with a classified message on provider failure. Success
+ * returns `{ success: true, labels: [{ instanceIndex, label }] }` — labels
+ * for instances the model could not name are simply absent (the client
+ * keeps the concept fallback for those slots).
  */
 
 export async function POST(request: NextRequest) {
@@ -46,6 +61,37 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Issue #263: daily per-user OpenAI vision cost guardrail, checked
+    // BEFORE any validation or DB work — a user at their cap never reaches
+    // gpt-4o-mini. Usage lives in the in-process daily counter
+    // (lib/api-quota.ts), which resets on cold start; that under-count
+    // limitation is documented there.
+    const labelLimit = resolveDailyLimit(
+      process.env[DAILY_LIMIT_ENV_VAR.label],
+      DEFAULT_DAILY_LABEL_LIMIT
+    );
+    const labelQuota = evaluateDailyQuota(
+      getDailyUsage("label", user.id),
+      labelLimit
+    );
+    if (!labelQuota.allowed) {
+      console.warn(
+        JSON.stringify({
+          event: "label_instances_daily_quota_exceeded",
+          userId: user.id,
+          used: labelQuota.used,
+          limit: labelQuota.limit,
+        })
+      );
+      return NextResponse.json(
+        {
+          success: false,
+          ...dailyQuotaExceededPayload(labelQuota, "Please try again tomorrow."),
+        },
+        { status: 429 }
+      );
+    }
+
     const parsed = visionLabelRequestSchema.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json(
@@ -58,7 +104,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { roomId, concept, crops } = parsed.data;
+    const { roomId, concept, crops, imageUrl } = parsed.data;
 
     // Ownership: same check as the detection route — the room must belong
     // to a project owned by the authenticated user.
@@ -79,9 +125,20 @@ export async function POST(request: NextRequest) {
 
     assertOpenAIConfigured();
 
+    // Issue #266: check the persistent cache before billing GPT-4o-mini.
+    const instanceIndices = crops.map((c: { instanceIndex: number }) => c.instanceIndex);
+    const cached = await getCachedVisionLabels({ imageUrl, concept, instanceIndices });
+    if (cached.length > 0) {
+      const labels = cached.map((row: { instanceIndex: number; label: string }) => ({
+        instanceIndex: row.instanceIndex,
+        label: row.label,
+      }));
+      return NextResponse.json({ success: true, labels }, { status: 200 });
+    }
+
     // Crop data URLs → raw base64 (the AI SDK's `file` part takes decoded
     // bytes; the deprecated `image` part is avoided).
-    const cropsWithBytes = crops.map((crop) => ({
+    const cropsWithBytes = crops.map((crop: { instanceIndex: number; cropDataUrl: string }) => ({
       instanceIndex: crop.instanceIndex,
       base64: crop.cropDataUrl.slice(crop.cropDataUrl.indexOf(",") + 1),
     }));
@@ -102,7 +159,7 @@ export async function POST(request: NextRequest) {
                 '(e.g. "accent chair", "coffee table"). Keep labels under 6 words.',
                 "If a crop is ambiguous, use the most likely furniture name.",
                 `Respond with one label per instance index (${crops
-                  .map((crop) => crop.instanceIndex)
+                  .map((crop: { instanceIndex: number }) => crop.instanceIndex)
                   .join(", ")}).`,
               ].join(" "),
             },
@@ -116,11 +173,32 @@ export async function POST(request: NextRequest) {
       ],
     });
 
-    // Keep only labels for instance indices the caller actually sent — the
-    // model occasionally echoes stray indices, and the client keys labels
+    // Keep only labels for instance indices the caller actually sent —
+    // the model occasionally echoes stray indices, and the client keys labels
     // by detection-response index.
-    const requested = new Set(crops.map((crop) => crop.instanceIndex));
-    const labels = object.labels.filter((entry) => requested.has(entry.instanceIndex));
+    const requested = new Set(crops.map((crop: { instanceIndex: number }) => crop.instanceIndex));
+    const labels = object.labels.filter((entry: { instanceIndex: number }) =>
+      requested.has(entry.instanceIndex)
+    );
+
+    // Count the billable generation only after the provider call resolves:
+    // a failed/timeout attempt costs at most a few rejected tokens and does
+    // not count against the user's daily cap.
+    recordDailyUsage("label", user.id);
+
+    // Issue #266: persist successful labels so re-opening the editor skips billing.
+    if (labels.length > 0) {
+      await upsertVisionLabels({
+        imageUrl,
+        concept,
+        results: labels.map(
+          (l: { instanceIndex: number; label: string }) => ({
+            instanceIndex: l.instanceIndex,
+            label: l.label,
+          })
+        ),
+      });
+    }
 
     return NextResponse.json({ success: true, labels }, { status: 200 });
   } catch (error) {

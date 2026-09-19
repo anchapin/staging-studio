@@ -37,7 +37,6 @@ import {
   isValidConceptName,
   normalizeConceptInput,
 } from "@/lib/concept-chips";
-import { clipClassifyBatch, clipPrewarm } from "@/lib/clip-zero-shot";
 import { findInstanceAtPoint, instanceSeedPoint } from "@/lib/instance-hit-test";
 import {
   maskGridFromProviderPixels,
@@ -48,7 +47,7 @@ import { computeMaskCanvasDimensions } from "@/lib/canvas-coords";
 import { fillHoles, closeRegion, MERGE_PROXIMITY_PX } from "@/lib/mask-postprocess";
 import { maskBounds, topmostLeftmostPoint } from "@/lib/vision-labels";
 import {
-  MAX_BATCH_OBJECTS,
+  MAX_BATCH_REGIONS,
   advanceBatchProgress,
   applyConceptSelectAll,
   applyConceptToggle,
@@ -425,6 +424,9 @@ export default function InpaintEditor({
   // the mask is dispatched, so bezels/frames at the painted boundary are
   // regenerated too. 0 restores the un-dilated mask.
   const [maskExpansion, setMaskExpansion] = useState(DEFAULT_MASK_EXPANSION_RADIUS);
+  // Issue #234: when enabled, dilate further downward than upward so floor
+  // shadows cast by objects are swallowed by the regenerated region.
+  const [includeFloorShadow, setIncludeFloorShadow] = useState(false);
   const { toasts, showError, showSuccess, dismissToast } = useToast();
 
   // Concept-selection state (issue #228): the detection concept drives
@@ -501,14 +503,6 @@ export default function InpaintEditor({
   if (!segmentCacheRef.current) {
     segmentCacheRef.current = new SegmentCache();
   }
-
-  // Issue #277: pre-warm the CLIP model on editor mount so the first
-  // clipClassify call is instant (model loaded during idle time via
-  // requestIdleCallback; zero cost when CLIP is never used).
-  useEffect(() => {
-    if (!SAM_TOOL_ENABLED) return;
-    clipPrewarm();
-  }, []);
 
   // Issue #228: auto-fire the `furniture` catch-all detection the moment
   // the editor's image has loaded — the real call IS the prewarm (the old
@@ -603,6 +597,7 @@ export default function InpaintEditor({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             roomId,
+            imageUrl,
             concept: displayedResult.concept,
             crops,
           }),
@@ -639,52 +634,6 @@ export default function InpaintEditor({
       cancelled = true;
     };
   }, [displayedResult, decodedInstances, imageUrl, imageDims, roomId]);
-
-  // Issue #277: CLIP client-side zero-shot labeling (parallel path to the
-  // billed GPT-4o-mini vision labeling above). CLIP runs on the white-on-
-  // black mask crops — a white-on-black preview is sufficient for CLIP to
-  // identify furniture types. The top label becomes the row header and the
-  // prompt pre-fill seed. Non-blocking: rows render with the concept string
-  // until labels land. Graceful degradation: any failure leaves null labels
-  // (the concept fallback stands). Runs ONLY when no server labels exist
-  // yet (instanceLabels === null) so the billed path takes precedence.
-  useEffect(() => {
-    if (!SAM_TOOL_ENABLED) return;
-    if (!decodedInstances || instanceLabels !== null) return;
-    // Only run CLIP when we have crops but no labels yet; the billed path
-    // populates instanceLabels when it responds, blocking re-runs via the
-    // instanceLabels !== null guard above.
-
-    const crops = decodedInstances
-      .map((instance, index) =>
-        instance ? { id: String(index), imageUrl: instance.whiteMaskDataUrl } : null
-      )
-      .filter((c): c is { id: string; imageUrl: string } => c !== null);
-
-    if (crops.length === 0) return;
-
-    let cancelled = false;
-    void (async () => {
-      try {
-        const results = await clipClassifyBatch(crops);
-        if (cancelled) return;
-        const labels: Array<string | null> = new Array(decodedInstances.length).fill(null);
-        for (const [id, result] of results) {
-          const index = parseInt(id, 10);
-          if (result.kind === "success" && result.topLabels.length > 0) {
-            labels[index] = result.topLabels[0]!.label;
-          }
-        }
-        if (cancelled) return;
-        setInstanceLabels(labels);
-      } catch {
-        // Silent by design: CLIP labels are enrichment, the concept fallback stands.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [decodedInstances, instanceLabels]);
 
   // Surface hook results for the active concept (cache-served or fetched).
   useEffect(() => {
@@ -885,7 +834,7 @@ export default function InpaintEditor({
       );
       if (toggled.rejected === "cap") {
         showError(
-          `Batch staging is limited to ${MAX_BATCH_OBJECTS} regions — undo or clear one to add more.`
+          `Batch staging is limited to ${MAX_BATCH_REGIONS} regions — undo or clear one to add more.`
         );
         return;
       }
@@ -904,7 +853,6 @@ export default function InpaintEditor({
             concept: displayedResult.concept,
             instanceIndex: hit,
             score: instance.score,
-            editedLabel: instanceLabels?.[hit] ?? undefined,
           })
         )}`
       );
@@ -917,7 +865,6 @@ export default function InpaintEditor({
       batchSelections,
       selectedInstanceIndices,
       showError,
-      instanceLabels,
     ]
   );
 
@@ -927,7 +874,7 @@ export default function InpaintEditor({
   // limit logic and moves both state pieces in lockstep; each instance
   // this call actually selects emits its own selection_logged event (the
   // same shape a click toggle emits — the corpus wants every selection).
-  // When detection found more than MAX_BATCH_OBJECTS, the best-ranked fit
+  // When detection found more than MAX_BATCH_REGIONS, the best-ranked fit
   // is selected and a role=status notice names what was left out.
   const handleSelectAllDetected = useCallback(() => {
     if (isProcessing) return;
@@ -962,14 +909,13 @@ export default function InpaintEditor({
             concept: displayedResult.concept,
             instanceIndex: index,
             score: instance?.score ?? null,
-            editedLabel: instanceLabels?.[index] ?? undefined,
           })
         )}`
       );
     }
     setSelectAllNotice(
       result.truncated
-        ? `Selected ${result.selections.length} of ${candidates.length} detected — batch staging is limited to ${MAX_BATCH_OBJECTS} regions.`
+        ? `Selected ${result.selections.length} of ${candidates.length} detected — batch staging is limited to ${MAX_BATCH_REGIONS} regions.`
         : null
     );
   }, [
@@ -979,7 +925,6 @@ export default function InpaintEditor({
     roomId,
     batchSelections,
     selectedInstanceIndices,
-    instanceLabels,
   ]);
   // and export masks at the photo's exact pixel dimensions.
   useEffect(() => {
@@ -1428,31 +1373,79 @@ export default function InpaintEditor({
             {secondaryPane}
           </div>
         )}
-        <div
-          className={`flex flex-col gap-3 ${
-            fullWidth ? "lg:min-h-0 lg:flex-1 lg:overflow-y-auto" : ""
-          }`}
-        >
-          <h4 className="text-sm font-medium text-stone-700 mb-2">Source Image</h4>
-          <InpaintMaskCanvas
-            overlayImageSrc={imageUrl}
-            aspectRatio={aspectRatio}
-            naturalWidth={imageDims?.width ?? null}
-            naturalHeight={imageDims?.height ?? null}
-            initialMaskDataUrl={maskDataUrl}
-            onMaskChange={setMaskDataUrl}
-            onInstanceToggle={handleInstanceToggle}
-            segmentDisabled={isProcessing || conceptLoading}
-            segmenting={conceptLoading}
-            instanceOverlays={instanceOverlays}
-            selectionMarkers={selectionMarkers}
-            expansionRadius={maskExpansion}
-            fullWidth={fullWidth}
-            selectionReset={selectionReset}
-            onMaskCleared={handleMaskCleared}
+        <h4 className="text-sm font-medium text-stone-700 mb-2">Source Image</h4>
+        <InpaintMaskCanvas
+          overlayImageSrc={imageUrl}
+          aspectRatio={aspectRatio}
+          naturalWidth={imageDims?.width ?? null}
+          naturalHeight={imageDims?.height ?? null}
+          initialMaskDataUrl={maskDataUrl}
+          onMaskChange={setMaskDataUrl}
+          onInstanceToggle={handleInstanceToggle}
+          segmentDisabled={isProcessing || conceptLoading}
+          segmenting={conceptLoading}
+          instanceOverlays={instanceOverlays}
+          selectionMarkers={selectionMarkers}
+          expansionRadius={maskExpansion}
+          includeFloorShadow={includeFloorShadow}
+          fullWidth={fullWidth}
+          selectionReset={selectionReset}
+          onMaskCleared={handleMaskCleared}
+        />
+
+        <label className="flex items-center gap-2 text-sm text-stone-700">
+          Mask Expansion:
+          <input
+            type="range"
+            min={0}
+            max={MAX_MASK_EXPANSION_RADIUS}
+            value={maskExpansion}
+            onChange={(e) => setMaskExpansion(Number(e.target.value))}
+            aria-describedby="mask-expansion-hint"
+            className="w-32"
           />
-        </div>
+          <span className="w-10 text-right">{maskExpansion}px</span>
+        </label>
+        <p id="mask-expansion-hint" className="text-xs text-gray-500">
+          Grows the mask outward before submitting so frames, bezels, and
+          mounts at the painted edge are replaced too. 0 keeps the mask
+          exactly as painted.
+        </p>
+
+        {/* Issue #234: floor-shadow toggle — dilates the mask further downward than
+            upward so cast shadows on the floor are included in the regenerated region. */}
+        <label className="flex items-center gap-2 text-sm text-stone-700">
+          <input
+            type="checkbox"
+            checked={includeFloorShadow}
+            onChange={(e) => setIncludeFloorShadow(e.target.checked)}
+            className="h-4 w-4 accent-stone-800"
+          />
+          Include floor shadow
+        </label>
+        <p className="text-xs text-gray-500">
+          Extends the mask further downward so cast shadows on the floor are
+          swallowed by the regenerated region. Best for furniture on hard floors.
+        </p>
       </div>
+
+      {/* Issue #203 panel, fed since #229 by the concept toggles: appears
+          once at least one detected instance has been toggled in. Thematic
+          runs go through the shared single-run launcher; per-object plans
+          execute sequentially with per-step progress and a retry
+          affordance. */}
+      {batchSelections.length > 0 && (
+        <BatchStagingPanel
+          selections={batchSelections}
+          maxObjects={MAX_BATCH_REGIONS}
+          disabled={isProcessing || conceptLoading}
+          processing={isProcessing}
+          activeBatch={activeBatch}
+          onRun={handleBatchRun}
+          onRetryRemaining={handleBatchRetry}
+          onRemoveLast={handleRemoveLastSelection}
+        />
+      )}
 
       {/* ---- RIGHT PANE: fixed-width control panel ----------------------- */}
       <div
@@ -1680,7 +1673,7 @@ export default function InpaintEditor({
                         isProcessing ||
                         conceptLoading ||
                         detectedCount === 0 ||
-                        selectionCount >= Math.min(detectedCount, MAX_BATCH_OBJECTS)
+                        selectionCount >= Math.min(detectedCount, MAX_BATCH_REGIONS)
                       }
                       className="px-2.5 py-1 text-xs rounded-md border border-stone-800 bg-white text-stone-800 hover:bg-stone-100 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                     >
@@ -1760,7 +1753,7 @@ export default function InpaintEditor({
               {batchSelections.length > 0 && (
                 <BatchStagingPanel
                   selections={batchSelections}
-                  maxObjects={MAX_BATCH_OBJECTS}
+                  maxObjects={MAX_BATCH_REGIONS}
                   disabled={isProcessing || conceptLoading}
                   processing={isProcessing}
                   activeBatch={activeBatch}

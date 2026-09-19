@@ -1,7 +1,8 @@
 /**
  * Daily per-user cost/quota guardrails for the paid-API surfaces
- * (issue #201): fal.ai inpainting, OpenAI copy generation, Browserless
- * PDF export, and fal.ai SAM 3.1 segmentation (issue #226).
+ * (issue #201): fal.ai inpainting, OpenAI copy generation, OpenAI
+ * vision label instances (issue #263), Browserless PDF export, and
+ * fal.ai SAM 3.1 segmentation (issue #226).
  *
  * Mechanism per surface:
  * - `inpaint` (fal.ai): every successful queue submit already persists an
@@ -19,6 +20,9 @@
  * - `segment` (fal.ai SAM 3.1 concept calls, issue #226): same rationale
  *   as `copy`/`export` — no log table and no schema change — so it also
  *   rides the in-process daily counter.
+ * - `label` (OpenAI gpt-4o-mini vision, issue #263): same rationale as
+ *   `copy` — billed per call with no persistent log table — so it rides
+ *   the in-process daily counter alongside copy.
  *
  * KNOWN LIMITATION (in-process counter): on serverless platforms each
  * Lambda/instance keeps its own counter, so a cold start (or traffic
@@ -46,10 +50,11 @@
  * day) — compare against the providers' dashboard spend alerts.
  */
 
-export type QuotaSurface = "copy" | "export" | "segment";
+export type QuotaSurface = "copy" | "export" | "label" | "segment";
 
 export const DEFAULT_DAILY_INPAINT_LIMIT = 20;
 export const DEFAULT_DAILY_COPY_LIMIT = 50;
+export const DEFAULT_DAILY_LABEL_LIMIT = 50;
 export const DEFAULT_DAILY_EXPORT_LIMIT = 20;
 export const DEFAULT_DAILY_SEGMENT_LIMIT = 100;
 /**
@@ -63,6 +68,7 @@ export const SEGMENT_DAILY_LIMIT = DEFAULT_DAILY_SEGMENT_LIMIT;
 export const DAILY_LIMIT_ENV_VAR = {
   inpaint: "DAILY_INPAINT_LIMIT",
   copy: "DAILY_COPY_LIMIT",
+  label: "DAILY_LABEL_LIMIT",
   export: "DAILY_EXPORT_LIMIT",
   segment: "DAILY_SEGMENT_LIMIT",
 } as const;
