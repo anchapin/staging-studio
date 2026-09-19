@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 const IMAGE_HOST_PATTERN = /(^|\.)supabase\.co$|(^|\.)fal\.ai$/;
+const LOCAL_HOST_PATTERN = /^127\.0\.0\.1$|^localhost$/;
 
 const imageUrlSchema = z
   .string()
@@ -8,11 +9,21 @@ const imageUrlSchema = z
   .refine(
     (value) => {
       const url = new URL(value);
-      return url.protocol === "https:" && IMAGE_HOST_PATTERN.test(url.hostname);
+      if (url.protocol === "https:") {
+        return IMAGE_HOST_PATTERN.test(url.hostname);
+      }
+      // Issue #264: allow http://127.0.0.1 and http://localhost for the e2e
+      // harness mock storage. next.config images.remotePatterns already allows
+      // loopback; the schema must also permit it so seeded fixture URLs pass
+      // server-side validation before next/image render.
+      if (url.protocol === "http:") {
+        return LOCAL_HOST_PATTERN.test(url.hostname);
+      }
+      return false;
     },
     {
       message:
-        "Image URL must be https with host *.supabase.co or *.fal.ai (per next.config.ts images.remotePatterns)",
+        "Image URL must be https with host *.supabase.co or *.fal.ai, or http://127.0.0.1/localhost (e2e mock storage)",
     }
   );
 
@@ -27,11 +38,11 @@ const imageUrlSchema = z
  * `.strict()` rejects unknown keys outright.
  *
  * Contract: every image URL must be HTTPS on `*.supabase.co` or
- * `*.fal.ai`, mirroring `next.config.ts` `images.remotePatterns` — a URL
- * from any other host fails validation (otherwise `next/image` would
- * throw at render time). `selectedVariantIndex` must be 0 or 1. An
- * entirely empty body (`{}`) parses, so the PATCH route must reject it
- * before handing `parsed.data` to Prisma (`updateMany` throws on empty
+ * `*.fal.ai`, OR http://127.0.0.1/localhost for the e2e harness mock
+ * storage. The http allowance is e2e-only (issue #264); production URLs
+ * always use https remote hosts. `selectedVariantIndex` must be 0 or 1.
+ * An entirely empty body (`{}`) parses, so the PATCH route must reject
+ * it before handing `parsed.data` to Prisma (`updateMany` throws on empty
  * `data`).
  *
  * Side effects: none — pure validation; no env vars needed.
