@@ -23,18 +23,24 @@ hermetically; this runbook checks the things only the **live** provider can tell
 
 The concept tool is billed **once per (image, concept) detection** — chip clicks,
 instance toggles, and repeat selections are free after the first call. Each
-batched object is then a separate FLUX.1 Fill generation.
+batched **region** is then one FLUX.1 Fill generation (one prompt, one run,
+one billed call). Merged regions fuse nearby instances automatically (within 5
+grid px) so one row may represent multiple detected objects.
 
 - [ ] Read the current listed price for `fal-ai/sam-3-1/image` on the fal.ai
       dashboard (Billing → Usage, or the model page's price line) and record it:
       `$________ per detection call`
 - [ ] Read the current FLUX.1 Fill price and record it: `$________ per image`
+- [ ] Read the GPT-4o-mini vision-label price (one call per billed detection,
+      cached with the segment cache): `$________ per labeling call`
 - [ ] Worked example for the demo (fill from the numbers above):
-      1 detection (`furniture`) + 1 detection (`sofa`) + 1 per-object FLUX run
-      = `$________` for the entire find-and-replace beat
+      1 detection (`furniture`) + 1 detection (`sofa`) + 1 region FLUX run
+      + 1 vision label call = `$________` for the entire find-and-replace beat
 - [ ] Confirm the Vercel function log shows one `segment_concept_timing` line per
       detection (billing events are logged only for completed detections) and
       that the count matches what the demo actually ran
+- [ ] Confirm exactly one `POST /api/label-instances` call fires per billed
+      detection (vision labels are never billed on cache hits)
 - [ ] Sanity-check the daily quota knobs (`/api/segment/furnishings` returns 429
       with "You've reached today's limit for this action." once exhausted) — the
       demo must stay comfortably under the limit
@@ -60,12 +66,15 @@ the number Lauren feels.
 ## 4. Score spread on real firm photos
 
 Instance quality is score-ranked (index 0 = highest). The numbers decide whether
-click-to-toggle is trustworthy on Circle G's real listings.
+click-to-toggle is trustworthy on Circle G's real listings. Region merges are
+driven by proximity (≤5 grid px → same region); merged regions carry the
+sum of member scores as their ranking signal.
 
 - [ ] On ≥5 real before-photos, run the `furniture` catch-all plus 2 specific
       concepts each (`sofa`, `artwork`, `lamp`, …)
 - [ ] For each toggle, read the `[concept-tool] selection_logged` console event
-      (`score` field) and record: photo, concept, instance count, score range
+      (`score` field) and record: photo, concept, instance count, region count,
+      score range
 - [ ] Healthy: top instances score distinctly above the tail (spread ≥ ~0.15
       between best and worst) and the tinted overlays align with real objects.
       If scores cluster or the tint lands on nothing, mark the photo
@@ -74,7 +83,56 @@ click-to-toggle is trustworthy on Circle G's real listings.
       concept — that is a valid result (the UI says "no <concept> found — try
       'furniture' or the brush"), but it must not happen on the demo room
 
-## 5. Failure-copy checks (trigger each once)
+## 5. Select-all region-batching logic
+
+Select-all (the "Select all detected" button) walks the proximity graph of
+detected instances and groups them into connected components. The cap logic
+differs from the old per-object behaviour:
+
+- [ ] **≤5 connected components:** every detected region is selected — the
+      button becomes disabled and the notice reads "All N regions selected"
+- [ ] **>5 connected components:** the top N regions by member score sum are
+      selected; the rest are left unselected and the notice reads
+      "Top N regions selected; N regions left out (increase cap or clear to
+      refine)"
+- [ ] Verify the cap notice is accurate after toggling individual regions
+      (the count of selected regions updates in real time)
+- [ ] Verify nearby instances (≤5 grid px apart) are pre-merged into one region
+      in the batch panel row — one badge, one prompt field, one billed run
+
+## 6. Vision labels
+
+One GPT-4o-mini vision call fires per **billed** detection (never on cache
+hits). The label appears in the batch panel row and on the canvas badge.
+
+- [ ] On a fresh detection (uncached), confirm exactly one
+      `POST /api/label-instances` request fires (visible in Network tab)
+- [ ] On a re-select of a cached concept, confirm **zero** label calls fire
+      (cache hit — label is served from the cached detection)
+- [ ] Verify the batch panel row label matches the vision concept (e.g.
+      "E2E sofa-1" or similar GPT-assigned name); if no label arrived,
+      the concept string falls back (e.g. "sofa")
+- [ ] Merged regions show a combined label joining unique member labels
+      ("sofa and coffee table"); the best known label pre-fills the prompt
+
+## 7. Editor layout — two-pane / tabbed (lg+)
+
+On viewports ≥1366×768 the editor uses a two-pane layout: canvas on the left,
+an internally-scrolling 380px panel on the right. Below that it stacks
+vertically. Three tabs manage the workflow:
+
+- **Entire room** — visible only when the source image is the original photo
+- **Manual paint** — brush + mask drawing
+- **Auto detect** — concept chip bar, custom concept input, detected instances
+
+- [ ] Confirm the two-pane layout appears at lg+ and stacked below
+- [ ] Confirm the "Entire room" tab is hidden when editing a staged variant
+      (only original photos qualify for the preset shortcut)
+- [ ] Confirm the batch staging panel sits inside the right panel and its
+      "Batch staging N / 5 objects" count reflects **region** count, not raw
+      instance count
+
+## 8. Failure-copy checks (trigger each once)
 
 Every failure must surface actionable copy, never a dead end. Trigger each and
 compare against the expected strings.
@@ -93,12 +151,17 @@ compare against the expected strings.
       detection never clobbers a staged variant)
 - [ ] All six strings read as-is; any drift is a copy regression — file it
 
-## 6. Go / no-go
+## 9. Go / no-go
 
 - [ ] Pricing recorded, demo-beat cost under the agreed ceiling
 - [ ] p95 detection latency under the ~30s narration budget
 - [ ] Demo room's score spread healthy (or the demo room switched to a healthy one)
+- [ ] Select-all cap logic behaves correctly at ≤5 and >5 regions
+- [ ] Vision label calls fire exactly once per billed detection and zero on cache hits
+- [ ] Two-pane / tabbed layout renders correctly at lg+; stacked below
 - [ ] All six failure-copy checks pass
 
 Any unchecked box → run the beat brush-first in the demo and keep find-and-replace
 as a stretch reveal, exactly like the >90s variant reveal in the main script.
+
+(End of file - total 164 lines)
