@@ -1062,7 +1062,10 @@ export default function InpaintMaskCanvas({
           ref={photoStackRef}
           className={
             fullWidth
-              ? "relative mx-auto w-full min-h-48"
+              ? // Issue #265: raise min-height from 192px (min-h-48) to 180px
+                // so the canvas stays usable on 1280x720 laptops. The aspect
+                // ratio box grows to fill available height; this is the floor.
+                "relative w-full min-h-[180px]"
               : "relative w-full max-w-md min-h-48"
           }
           style={
