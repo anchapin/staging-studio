@@ -14,7 +14,7 @@ import { extractMaskOutline, paintMaskPixels } from "@/lib/mask-format";
 import { floodFillMask, maskGridFromPixels } from "@/lib/mask-flood-fill";
 import {
   DEFAULT_MASK_EXPANSION_RADIUS,
-  dilateMaskGrid,
+  dilateMaskGridDirectional,
 } from "@/lib/mask-dilation";
 import { fillHoles } from "@/lib/mask-postprocess";
 import { SAM_TOOL_ENABLED } from "@/lib/sam-tool";
@@ -149,6 +149,12 @@ interface InpaintMaskCanvasProps {
    */
   expansionRadius?: number;
   /**
+   * Issue #234: when true, dilate further downward than upward so cast floor
+   * shadows are included in the regenerated region. Has no effect when
+   * `expansionRadius` is 0.
+   */
+  includeFloorShadow?: boolean;
+  /**
    * Issue #203: numbered badges (1-based) for each pending batch selection,
    * positioned by natural-pixel click point. Pure DOM overlay — like the
    * brush cursor, they never touch canvas pixels, so the exported mask
@@ -183,6 +189,7 @@ export default function InpaintMaskCanvas({
   segmenting = false,
   instanceOverlays,
   expansionRadius = DEFAULT_MASK_EXPANSION_RADIUS,
+  includeFloorShadow = false,
   selectionMarkers,
   selectionReset = null,
   onMaskCleared,
@@ -687,12 +694,13 @@ export default function InpaintMaskCanvas({
       paintCtx.drawImage(canvas, 0, 0, dims.width, dims.height);
       const paintData = paintCtx.getImageData(0, 0, dims.width, dims.height);
       const grid = maskGridFromPixels(paintData.data, dims.width, dims.height);
-      const dilated =
-        expansionRadius > 0
-          ? dilateMaskGrid(grid, dims.width, dims.height, expansionRadius)
-          : null;
-      if (expansionRadius > 0 && !dilated) return;
-      const baseMask = dilated ? dilated.mask : grid;
+      // Issue #234: directional dilation extends further downward when
+      // includeFloorShadow is true, swallowing cast shadows on the floor.
+      const dilated = dilateMaskGridDirectional(grid, dims.width, dims.height, expansionRadius, {
+        includeFloorShadow,
+      });
+      if (!dilated) return;
+      const baseMask = dilated.mask;
       const filled = fillHoles(baseMask, dims.width, dims.height);
       const finalMask = filled ? filled.mask : baseMask;
 
@@ -739,7 +747,7 @@ export default function InpaintMaskCanvas({
       );
       setLowCoverage(shouldWarnLowCoverage(coverage));
     }
-  }, [naturalWidth, naturalHeight, onMaskChange, expansionRadius, dims.width, dims.height]);
+  }, [naturalWidth, naturalHeight, onMaskChange, expansionRadius, includeFloorShadow, dims.width, dims.height]);
 
   // Re-export when the expansion radius changes so the dispatched mask
   // always reflects the current dilation setting (issue #180). Refs keep the
@@ -751,6 +759,7 @@ export default function InpaintMaskCanvas({
   }, [hasPainted]);
 
   const lastAppliedRadiusRef = useRef(expansionRadius);
+  const lastAppliedIncludeFloorShadowRef = useRef(includeFloorShadow);
   useEffect(() => {
     const previous = lastAppliedRadiusRef.current;
     lastAppliedRadiusRef.current = expansionRadius;
@@ -758,6 +767,16 @@ export default function InpaintMaskCanvas({
     if (!hasPaintedRef.current) return;
     exportMask();
   }, [expansionRadius, exportMask]);
+
+  // Issue #234: also re-export when includeFloorShadow toggles so the
+  // dispatched mask always reflects the current directional setting.
+  useEffect(() => {
+    const previous = lastAppliedIncludeFloorShadowRef.current;
+    lastAppliedIncludeFloorShadowRef.current = includeFloorShadow;
+    if (previous === includeFloorShadow) return;
+    if (!hasPaintedRef.current) return;
+    exportMask();
+  }, [includeFloorShadow, exportMask]);
 
   const clearMask = () => {
     const canvas = canvasRef.current;

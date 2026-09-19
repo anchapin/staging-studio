@@ -424,6 +424,9 @@ export default function InpaintEditor({
   // the mask is dispatched, so bezels/frames at the painted boundary are
   // regenerated too. 0 restores the un-dilated mask.
   const [maskExpansion, setMaskExpansion] = useState(DEFAULT_MASK_EXPANSION_RADIUS);
+  // Issue #234: when enabled, dilate further downward than upward so floor
+  // shadows cast by objects are swallowed by the regenerated region.
+  const [includeFloorShadow, setIncludeFloorShadow] = useState(false);
   const { toasts, showError, showSuccess, dismissToast } = useToast();
 
   // Concept-selection state (issue #228): the detection concept drives
@@ -1370,31 +1373,79 @@ export default function InpaintEditor({
             {secondaryPane}
           </div>
         )}
-        <div
-          className={`flex flex-col gap-3 ${
-            fullWidth ? "lg:min-h-0 lg:flex-1 lg:overflow-y-auto" : ""
-          }`}
-        >
-          <h4 className="text-sm font-medium text-stone-700 mb-2">Source Image</h4>
-          <InpaintMaskCanvas
-            overlayImageSrc={imageUrl}
-            aspectRatio={aspectRatio}
-            naturalWidth={imageDims?.width ?? null}
-            naturalHeight={imageDims?.height ?? null}
-            initialMaskDataUrl={maskDataUrl}
-            onMaskChange={setMaskDataUrl}
-            onInstanceToggle={handleInstanceToggle}
-            segmentDisabled={isProcessing || conceptLoading}
-            segmenting={conceptLoading}
-            instanceOverlays={instanceOverlays}
-            selectionMarkers={selectionMarkers}
-            expansionRadius={maskExpansion}
-            fullWidth={fullWidth}
-            selectionReset={selectionReset}
-            onMaskCleared={handleMaskCleared}
+        <h4 className="text-sm font-medium text-stone-700 mb-2">Source Image</h4>
+        <InpaintMaskCanvas
+          overlayImageSrc={imageUrl}
+          aspectRatio={aspectRatio}
+          naturalWidth={imageDims?.width ?? null}
+          naturalHeight={imageDims?.height ?? null}
+          initialMaskDataUrl={maskDataUrl}
+          onMaskChange={setMaskDataUrl}
+          onInstanceToggle={handleInstanceToggle}
+          segmentDisabled={isProcessing || conceptLoading}
+          segmenting={conceptLoading}
+          instanceOverlays={instanceOverlays}
+          selectionMarkers={selectionMarkers}
+          expansionRadius={maskExpansion}
+          includeFloorShadow={includeFloorShadow}
+          fullWidth={fullWidth}
+          selectionReset={selectionReset}
+          onMaskCleared={handleMaskCleared}
+        />
+
+        <label className="flex items-center gap-2 text-sm text-stone-700">
+          Mask Expansion:
+          <input
+            type="range"
+            min={0}
+            max={MAX_MASK_EXPANSION_RADIUS}
+            value={maskExpansion}
+            onChange={(e) => setMaskExpansion(Number(e.target.value))}
+            aria-describedby="mask-expansion-hint"
+            className="w-32"
           />
-        </div>
+          <span className="w-10 text-right">{maskExpansion}px</span>
+        </label>
+        <p id="mask-expansion-hint" className="text-xs text-gray-500">
+          Grows the mask outward before submitting so frames, bezels, and
+          mounts at the painted edge are replaced too. 0 keeps the mask
+          exactly as painted.
+        </p>
+
+        {/* Issue #234: floor-shadow toggle — dilates the mask further downward than
+            upward so cast shadows on the floor are included in the regenerated region. */}
+        <label className="flex items-center gap-2 text-sm text-stone-700">
+          <input
+            type="checkbox"
+            checked={includeFloorShadow}
+            onChange={(e) => setIncludeFloorShadow(e.target.checked)}
+            className="h-4 w-4 accent-stone-800"
+          />
+          Include floor shadow
+        </label>
+        <p className="text-xs text-gray-500">
+          Extends the mask further downward so cast shadows on the floor are
+          swallowed by the regenerated region. Best for furniture on hard floors.
+        </p>
       </div>
+
+      {/* Issue #203 panel, fed since #229 by the concept toggles: appears
+          once at least one detected instance has been toggled in. Thematic
+          runs go through the shared single-run launcher; per-object plans
+          execute sequentially with per-step progress and a retry
+          affordance. */}
+      {batchSelections.length > 0 && (
+        <BatchStagingPanel
+          selections={batchSelections}
+          maxObjects={MAX_BATCH_REGIONS}
+          disabled={isProcessing || conceptLoading}
+          processing={isProcessing}
+          activeBatch={activeBatch}
+          onRun={handleBatchRun}
+          onRetryRemaining={handleBatchRetry}
+          onRemoveLast={handleRemoveLastSelection}
+        />
+      )}
 
       {/* ---- RIGHT PANE: fixed-width control panel ----------------------- */}
       <div
