@@ -26,18 +26,23 @@
  */
 
 import { isMaskedPixel } from "./mask-coverage";
+import { dilateMaskGrid } from "./mask-dilation";
+import { MERGE_PROXIMITY_PX } from "./mask-postprocess";
 
 /**
  * Batch size cap. Each region is a separate billed FLUX.1 Fill generation,
  * and per-region results stack sequentially — small batches keep fal queue
  * time, daily quota spend (#201), and result predictability bounded.
+ * Since issue #252 the unit is a merged REGION (one or more proximate
+ * object masks), not a single object.
  */
 export const MAX_BATCH_REGIONS = 5;
 
 /**
- * One pending multi-select object: where it was selected and its own mask.
+ * One pending multi-select region: where it was seeded and its own mask.
  * Since issue #229 the only source is the concept tool's toggled instances;
- * the set structure and reducer are unchanged from #203.
+ * since issue #252 the entry represents a merged region — one or more
+ * proximate instance masks OR-unioned (composition happens browser-side).
  */
 export interface BatchSelection {
   /** Unique, stable id for the lifetime of the selection set. */
@@ -46,25 +51,79 @@ export interface BatchSelection {
    * Selection point, used as the duplicate key (same rounded point = same
    * object). Concept-sourced entries carry the toggle point in mask-canvas
    * pixel space; the exact space only needs to be homogeneous within one
-   * set, which holds now that every entry is concept-sourced.
+   * set, which holds now that every entry is concept-sourced. For a merged
+   * region this is the seed point of its first (best-ranked) member.
    */
   point: { x: number; y: number };
   /**
-   * The object's white-on-black mask as a `data:image` PNG, already scaled
+   * The region's white-on-black mask as a `data:image` PNG, already scaled
    * to the photo's natural pixel dimensions (the editor normalizes on
-   * selection, so every mask in the set shares one geometry).
+   * selection, so every mask in the set shares one geometry). For a merged
+   * region the editor recomposes this from the members' masks
+   * (union → closing → hole fill, issue #252 D2/D3).
    */
   maskDataUrl: string;
   /**
    * Detection concept the instance was toggled from (issue #229), shown in
-   * the batch panel; omitting it falls back to the positional `Object N`
+   * the batch panel; omitting it falls back to the positional `Region N`
    * label.
    */
   conceptLabel?: string;
+  /**
+   * Detection-response indices of the instances fused into this region
+   * (issue #252 D2), in ascending response order. A single-instance region
+   * carries exactly its own index. Optional for backwards compatibility
+   * with callers that predate the region model — such entries cannot take
+   * part in proximity merging (no member grids are known).
+   */
+  memberInstanceIndices?: number[];
 }
 
-/** How prompts map onto the selected objects. */
+/** How prompts map onto the selected regions. */
 export type BatchPromptMode = "thematic" | "per-object";
+
+/**
+ * A detected instance's binary mask at mask-canvas resolution (the space
+ * {@link MERGE_PROXIMITY_PX} lives in). Grids of one detection response
+ * share dimensions.
+ */
+export interface InstanceMaskGrid {
+  grid: Uint8Array;
+  width: number;
+  height: number;
+}
+
+/**
+ * True when the two masks lie within `radius` grid pixels of each other:
+ * dilating `a` by `radius` (circular kernel, same semantics as
+ * `dilateMaskGrid`) reaches some cell of `b`. This is exact mask-to-mask
+ * proximity — the edge predicate for both the toggle path's merge decision
+ * and select-all's proximity graph (issue #252 D2). Radius 0 still matches
+ * overlapping/touching masks. Malformed geometry returns false.
+ * Side effects: none (pure).
+ */
+export function masksWithinProximity(
+  a: Uint8Array,
+  b: Uint8Array,
+  width: number,
+  height: number,
+  radius: number
+): boolean {
+  if (width <= 0 || height <= 0) return false;
+  if (!Number.isInteger(width) || !Number.isInteger(height)) return false;
+
+  const total = width * height;
+  if (a.length < total || b.length < total) return false;
+
+  const r = Number.isFinite(radius) ? Math.max(0, Math.floor(radius)) : 0;
+  const dilated = dilateMaskGrid(a, width, height, r);
+  if (!dilated) return false;
+
+  for (let i = 0; i < total; i++) {
+    if (dilated.mask[i] === 1 && b[i] === 1) return true;
+  }
+  return false;
+}
 
 // ---------------------------------------------------------------------------
 // Selection set reducer
@@ -137,18 +196,34 @@ export interface ConceptToggleReduction {
 }
 
 /**
+ * Grids for every detected instance of the active concept, by
+ * detection-response index. Supplying this context turns ON the proximity
+ * merge (issue #252 D2): a toggled instance whose mask comes within
+ * {@link MERGE_PROXIMITY_PX} of an existing region's member mask fuses
+ * into that region instead of adding a row.
+ */
+export interface ConceptToggleContext {
+  instanceGrids: ReadonlyMap<number, InstanceMaskGrid>;
+}
+
+/**
  * Applies one concept-instance toggle to BOTH pieces of selection state —
  * the batch selection set and the canvas's tinted-instance indices — in
  * lockstep, so the batch panel can never disagree with what the canvas
  * shows as selected (issue #229).
  *
- * Contract: toggling ON routes through {@link reduceSelectionSet}'s `add`,
- * so the cap ({@link MAX_BATCH_REGIONS}) and duplicate-point rules are the
- * existing ones — no new limit logic. A refused add leaves BOTH pieces
- * unchanged (the instance does not light up on the canvas either).
- * Toggling OFF removes by id and rank; removing an absent id/index is a
- * no-op. Callers pass `turningOn` consistent with `selectedInstanceIndices`
- * (the toggle target's membership). Never mutates the inputs.
+ * Contract: toggling OFF removes by id and rank; removing an absent
+ * id/index is a no-op. Toggling ON first checks the duplicate-point rule
+ * (unchanged precedence), then — when `context` supplies grids — the
+ * proximity merge: the instance fuses into the FIRST region one of whose
+ * member masks lies within {@link MERGE_PROXIMITY_PX} of the instance's
+ * mask (issue #252 D2). Merging updates only that region's membership —
+ * one row, one prompt, one billed run — and never consumes cap headroom.
+ * Without a proximity match (or without grids) the toggle routes through
+ * {@link reduceSelectionSet}'s `add`, so the cap
+ * ({@link MAX_BATCH_REGIONS}) and duplicate rules stay the existing ones.
+ * A refused add leaves BOTH pieces unchanged. Callers pass `turningOn`
+ * consistent with `selectedInstanceIndices`. Never mutates the inputs.
  * Side effects: none (pure).
  */
 export function applyConceptToggle(
@@ -156,7 +231,8 @@ export function applyConceptToggle(
   selectedInstanceIndices: number[],
   entry: BatchSelection,
   instanceIndex: number,
-  turningOn: boolean
+  turningOn: boolean,
+  context?: ConceptToggleContext
 ): ConceptToggleReduction {
   if (!turningOn) {
     return {
@@ -165,7 +241,54 @@ export function applyConceptToggle(
       rejected: null,
     };
   }
-  const reduction = reduceSelectionSet(selections, { type: "add", selection: entry });
+
+  const entryGrid = context?.instanceGrids.get(instanceIndex);
+  if (context && entryGrid) {
+    // Duplicate-point precedence: the same rounded point is the same object
+    // regardless of mask proximity (unchanged rule).
+    const duplicate = reduceSelectionSet(selections, { type: "add", selection: entry });
+    if (duplicate.rejected === "duplicate") {
+      return { selections, selectedInstanceIndices, rejected: "duplicate" };
+    }
+
+    for (const selection of selections) {
+      const members = selection.memberInstanceIndices;
+      if (!members) continue;
+      const near = members.some((member) => {
+        const memberGrid = context.instanceGrids.get(member);
+        return memberGrid
+          ? masksWithinProximity(
+              entryGrid.grid,
+              memberGrid.grid,
+              memberGrid.width,
+              memberGrid.height,
+              MERGE_PROXIMITY_PX
+            )
+          : false;
+      });
+      if (near) {
+        return {
+          selections: selections.map((candidate) =>
+            candidate.id === selection.id
+              ? {
+                  ...candidate,
+                  memberInstanceIndices: [...members, instanceIndex].sort((a, b) => a - b),
+                }
+              : candidate
+          ),
+          selectedInstanceIndices: selectedInstanceIndices.includes(instanceIndex)
+            ? selectedInstanceIndices
+            : [...selectedInstanceIndices, instanceIndex],
+          rejected: null,
+        };
+      }
+    }
+  }
+
+  const reduction = reduceSelectionSet(selections, {
+    type: "add",
+    selection: { ...entry, memberInstanceIndices: entry.memberInstanceIndices ?? [instanceIndex] },
+  });
   if (reduction.rejected !== null) {
     return { selections: reduction.selections, selectedInstanceIndices, rejected: reduction.rejected };
   }
@@ -178,12 +301,20 @@ export function applyConceptToggle(
   };
 }
 
-/** One candidate for {@link applyConceptSelectAll}: a detected instance plus the entry it would add. */
+/**
+ * One candidate for {@link applyConceptSelectAll}: a detected instance plus
+ * the entry it would add, its detection score (for component ranking), and
+ * its mask-canvas grid (for proximity edges).
+ */
 export interface ConceptSelectAllCandidate {
   /** Position in the score-ranked detection response. */
   instanceIndex: number;
   /** The batch entry built from that instance's seed point. */
   entry: BatchSelection;
+  /** Provider confidence, or null when the response omitted it (counts 0). */
+  score: number | null;
+  /** The instance's mask at mask-canvas resolution. */
+  grid: InstanceMaskGrid;
 }
 
 /** Result of a bulk select-all: both state pieces plus what this call added. */
@@ -193,50 +324,166 @@ export interface ConceptSelectAllReduction {
   selectedInstanceIndices: number[];
   /** Indices of instances THIS call selected — the caller emits one `selection_logged` per entry. */
   addedInstanceIndices: number[];
-  /** True when detection found more selectable instances than the cap allowed. */
+  /** True when detection produced more regions than the cap allowed. */
   truncated: boolean;
 }
 
 /**
  * Bulk toggle-on for the editor's "Select all detected" control
- * (issue #249). Candidates arrive in score-ranked order; each one routes
- * through {@link reduceSelectionSet}'s `add`, so the cap
- * ({@link MAX_BATCH_REGIONS}) and duplicate-point rules stay the ONLY
- * limit logic — a cap refusal stops the walk and reports `truncated`,
- * a duplicate refusal just skips that candidate. Already-selected
- * instances add nothing (the control is idempotent). Both state pieces
- * move in lockstep with {@link applyConceptToggle}'s guarantee: the batch
- * panel and the canvas can never disagree. Never mutates the inputs.
- * Side effects: none (pure).
+ * (issue #249, reworked by #252).
+ *
+ * Algorithm: candidates (already-selected instances are skipped, as are
+ * duplicate rounded seed points — that rule is unchanged) are clustered by
+ * a proximity graph — an edge joins two instances whose masks lie within
+ * {@link MERGE_PROXIMITY_PX} — and each connected component becomes ONE
+ * region: one row, one badge, one prompt, one billed run. Components rank
+ * by the SUM of their member detection scores (ties keep rank order);
+ * ranking walks components, first merging any that sit within proximity of
+ * an existing region (merging never consumes headroom), then filling the
+ * remaining headroom ({@link MAX_BATCH_REGIONS} rows). When components
+ * outrun the headroom the rest are left out and `truncated` reports it —
+ * unlike the pre-#252 top-5 rule, ≤ 5 components always selects EVERY
+ * instance, so fragments of one visual group no longer burn slots.
+ *
+ * Both state pieces move in lockstep with {@link applyConceptToggle}'s
+ * guarantee: the batch panel and the canvas can never disagree. Never
+ * mutates the inputs. Side effects: none (pure).
  */
 export function applyConceptSelectAll(
   selections: BatchSelection[],
   selectedInstanceIndices: number[],
   candidates: readonly ConceptSelectAllCandidate[]
 ): ConceptSelectAllReduction {
+  const grids = new Map<number, InstanceMaskGrid>();
+  for (const candidate of candidates) grids.set(candidate.instanceIndex, candidate.grid);
+
+  // Walk candidates in rank order: skip already-selected instances and
+  // duplicate rounded seed points (vs the existing set AND this walk).
+  const kept: ConceptSelectAllCandidate[] = [];
+  const keptPoints: Array<{ x: number; y: number }> = [];
+  for (const candidate of candidates) {
+    if (selectedInstanceIndices.includes(candidate.instanceIndex)) continue;
+    const roundedX = Math.round(candidate.entry.point.x);
+    const roundedY = Math.round(candidate.entry.point.y);
+    const duplicate =
+      selections.some(
+        (selection) =>
+          Math.round(selection.point.x) === roundedX &&
+          Math.round(selection.point.y) === roundedY
+      ) ||
+      keptPoints.some((point) => Math.round(point.x) === roundedX && Math.round(point.y) === roundedY);
+    if (duplicate) continue;
+    kept.push(candidate);
+    keptPoints.push(candidate.entry.point);
+  }
+
+  // Proximity graph over kept candidates + connected components (BFS).
+  const componentOf = new Map<number, number>(); // instanceIndex → component id
+  const components: Array<{ members: ConceptSelectAllCandidate[]; scoreSum: number }> = [];
+  for (let i = 0; i < kept.length; i++) {
+    const candidate = kept[i];
+    if (candidate === undefined) continue;
+    if (componentOf.has(candidate.instanceIndex)) continue;
+    const componentId = components.length;
+    const members: ConceptSelectAllCandidate[] = [candidate];
+    let scoreSum = candidate.score ?? 0;
+    componentOf.set(candidate.instanceIndex, componentId);
+    const queue: ConceptSelectAllCandidate[] = [candidate];
+    while (queue.length > 0) {
+      const current = queue.pop();
+      if (current === undefined) break;
+      for (const other of kept) {
+        if (componentOf.has(other.instanceIndex)) continue;
+        const near = masksWithinProximity(
+          current.grid.grid,
+          other.grid.grid,
+          current.grid.width,
+          current.grid.height,
+          MERGE_PROXIMITY_PX
+        );
+        if (!near) continue;
+        componentOf.set(other.instanceIndex, componentId);
+        members.push(other);
+        scoreSum += other.score ?? 0;
+        queue.push(other);
+      }
+    }
+    components.push({ members, scoreSum });
+  }
+
+  // Rank: score sum descending, ties keep first-seen (rank) order.
+  const ranked = components
+    .map((component, index) => ({ component, index }))
+    .sort((a, b) => b.component.scoreSum - a.component.scoreSum || a.index - b.index);
+
   let nextSelections = selections;
   let nextIndices = selectedInstanceIndices;
   const addedInstanceIndices: number[] = [];
   let truncated = false;
 
-  for (const candidate of candidates) {
-    if (nextIndices.includes(candidate.instanceIndex)) continue;
+  const addIndices = (memberIndices: number[]): void => {
+    for (const index of memberIndices) {
+      if (!nextIndices.includes(index)) nextIndices = [...nextIndices, index];
+      addedInstanceIndices.push(index);
+    }
+  };
+
+  for (const { component } of ranked) {
+    const memberIndices = component.members
+      .map((member) => member.instanceIndex)
+      .sort((a, b) => a - b);
+
+    // Merge into an existing region when any member mask lies within
+    // proximity of the region's own member masks (issue #252 D2 parity
+    // with the toggle path) — merging never consumes headroom.
+    const mergeTarget = nextSelections.findIndex((selection) => {
+      const members = selection.memberInstanceIndices;
+      if (!members || members.length === 0) return false;
+      return members.some((member) => {
+        const memberGrid = grids.get(member);
+        if (!memberGrid) return false;
+        return component.members.some((candidate) =>
+          masksWithinProximity(
+            candidate.grid.grid,
+            memberGrid.grid,
+            memberGrid.width,
+            memberGrid.height,
+            MERGE_PROXIMITY_PX
+          )
+        );
+      });
+    });
+    if (mergeTarget !== -1) {
+      nextSelections = nextSelections.map((selection, index) =>
+        index === mergeTarget
+          ? {
+              ...selection,
+              memberInstanceIndices: [
+                ...(selection.memberInstanceIndices ?? []),
+                ...memberIndices,
+              ],
+            }
+          : selection
+      );
+      addIndices(memberIndices);
+      continue;
+    }
+
     if (nextSelections.length >= MAX_BATCH_REGIONS) {
       truncated = true;
       break;
     }
-    const reduction = reduceSelectionSet(nextSelections, {
-      type: "add",
-      selection: candidate.entry,
-    });
-    if (reduction.rejected === "duplicate") continue;
-    if (reduction.rejected === "cap") {
-      truncated = true;
-      break;
-    }
-    nextSelections = reduction.selections;
-    nextIndices = [...nextIndices, candidate.instanceIndex];
-    addedInstanceIndices.push(candidate.instanceIndex);
+
+    const first = component.members[0];
+    if (!first) continue;
+    nextSelections = [
+      ...nextSelections,
+      {
+        ...first.entry,
+        memberInstanceIndices: memberIndices,
+      },
+    ];
+    addIndices(memberIndices);
   }
 
   return { selections: nextSelections, selectedInstanceIndices: nextIndices, addedInstanceIndices, truncated };
@@ -299,10 +546,10 @@ export function unionMaskBuffers(buffers: BatchMaskBuffer[]): BatchMaskBuffer | 
 // Batch plan builder
 // ---------------------------------------------------------------------------
 
-/** One per-object step: this object's mask paired with this object's prompt. */
+/** One per-region step: this region's mask paired with this region's prompt. */
 export interface BatchPlanStep {
   selectionId: string;
-  /** Human label, e.g. `Object 2` (1-based selection order). */
+  /** Human label, e.g. `Region 2` (1-based region order). */
   label: string;
   maskDataUrl: string;
   promptDirectives: string;
@@ -337,9 +584,9 @@ export type BatchPlanResult =
   | { ok: true; plan: BatchPlan }
   | { ok: false; error: string };
 
-/** 1-based display label for a selection/step index. */
+/** 1-based display label for a region/step index (issue #252: "regions" copy). */
 export function batchStepLabel(index: number): string {
-  return `Object ${index + 1}`;
+  return `Region ${index + 1}`;
 }
 
 /** Prompt bound mirrored from the inpaint route's `promptDirectives` schema. */
@@ -367,7 +614,7 @@ function promptError(prompt: string, label: string): string | null {
  */
 export function buildBatchPlan(input: BuildBatchPlanInput): BatchPlanResult {
   if (input.selections.length === 0) {
-    return { ok: false, error: "Select at least one object before running a batch." };
+    return { ok: false, error: "Select at least one region before running a batch." };
   }
 
   if (input.mode === "thematic") {
@@ -390,7 +637,7 @@ export function buildBatchPlan(input: BuildBatchPlanInput): BatchPlanResult {
   }
 
   if (input.perObjectPrompts.length !== input.selections.length) {
-    return { ok: false, error: "Every selected object needs its own prompt." };
+    return { ok: false, error: "Every selected region needs its own prompt." };
   }
 
   const steps: BatchPlanStep[] = [];
@@ -501,7 +748,7 @@ export function remainingStepCount(progress: BatchProgress): number {
 }
 
 /**
- * Human progress text for a running batch, e.g. `Object 2 of 3`; null
+ * Human progress text for a running batch, e.g. `Region 2 of 3`; null
  * when no step is currently running.
  */
 export function batchProgressText(progress: BatchProgress): string | null {

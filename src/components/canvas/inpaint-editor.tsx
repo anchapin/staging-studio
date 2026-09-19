@@ -1,11 +1,19 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef, useMemo, useId } from "react";
+import type { ReactNode } from "react";
 import InpaintMaskCanvas from "./inpaint-mask-canvas";
+import EditorTabBar, {
+  editorTabId,
+  editorTabPanelId,
+  type EditorTab,
+  type EditorTabId,
+} from "./editor-tab-bar";
 import { useToast, ToastContainer } from "@/components/ui/toast";
 import { Loader2 } from "lucide-react";
 import { useInpaintStatus } from "./use-inpaint-status";
 import {
+  entireRoomTabVisible,
   inpaintSourceLabel,
   inpaintSourcesEqual,
   type InpaintSource,
@@ -34,13 +42,18 @@ import {
   maskGridFromProviderPixels,
   paintMaskPixels,
 } from "@/lib/mask-format";
+import { maskGridFromPixels } from "@/lib/mask-flood-fill";
 import { computeMaskCanvasDimensions } from "@/lib/canvas-coords";
+import { fillHoles, closeRegion, MERGE_PROXIMITY_PX } from "@/lib/mask-postprocess";
+import { maskBounds, topmostLeftmostPoint } from "@/lib/vision-labels";
 import {
   MAX_BATCH_REGIONS,
   advanceBatchProgress,
   applyConceptSelectAll,
   applyConceptToggle,
+  batchProgressText,
   buildBatchPlan,
+  hasFailedStep,
   initialBatchProgress,
   reduceSelectionSet,
   unionMaskBuffers,
@@ -48,6 +61,7 @@ import {
   type BatchPromptMode,
   type BatchSelection,
   type ConceptSelectAllCandidate,
+  type InstanceMaskGrid,
   type PerObjectBatchPlan,
 } from "@/lib/multi-select-batch";
 
@@ -80,6 +94,14 @@ interface InpaintEditorProps {
    * available content width instead of the compact card cap.
    */
   fullWidth?: boolean;
+  /**
+   * Issue #252 D5: content rendered above the mask canvas in the left
+   * pane (the focused page's room imagery, variant strip, and directives
+   * sections). At lg+ this area is height-capped and scrolls internally
+   * so the canvas and the control panel stay in view without page-level
+   * scrolling.
+   */
+  secondaryPane?: ReactNode;
 }
 
 /** Resolves when the image is loaded; rejects on a load error. */
@@ -104,11 +126,88 @@ async function composeUnionMaskDataUrl(
   height: number
 ): Promise<string | null> {
   if (maskDataUrls.length === 0) return null;
-  const buffers: Array<{
-    width: number;
-    height: number;
-    data: Uint8ClampedArray;
-  }> = [];
+  const buffers = await decodeMaskBuffers(maskDataUrls, width, height);
+  if (!buffers) return null;
+  const union = unionMaskBuffers(buffers);
+  if (!union) return null;
+
+  // Issue #252 D3: hole-fill the union at composition (filling runs last —
+  // unioning region masks can seal new enclosed pockets), so the thematic
+  // run never receives a donut.
+  const unionGrid = maskGridFromPixels(union.data, union.width, union.height);
+  const filledUnion = fillHoles(unionGrid, union.width, union.height);
+  if (filledUnion) {
+    const unionData = union.data;
+    for (let i = 0; i < filledUnion.mask.length; i++) {
+      const o = i * 4;
+      if (filledUnion.mask[i] === 1) {
+        unionData[o] = 255;
+        unionData[o + 1] = 255;
+        unionData[o + 2] = 255;
+      }
+      unionData[o + 3] = 255;
+    }
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.putImageData(
+    new ImageData(new Uint8ClampedArray(union.data), union.width, union.height),
+    0,
+    0
+  );
+  return canvas.toDataURL("image/png");
+}
+
+/**
+ * Rasterizes one instance crop from the displayed source image for the
+ * batched vision-labeling call (issue #252 D4): crops the instance's
+ * bounding box (plus 4% context padding) at the photo's natural
+ * dimensions, downscales the long edge to 320px to keep the vision
+ * request cheap, and serializes as JPEG. Null when the image or crop
+ * fails. Browser-only.
+ */
+async function cropInstanceDataUrl(
+  sourceImg: HTMLImageElement,
+  bounds: { minX: number; minY: number; maxX: number; maxY: number },
+  naturalDims: { width: number; height: number }
+): Promise<string | null> {
+  const padX = Math.round((bounds.maxX - bounds.minX + 1) * 0.04);
+  const padY = Math.round((bounds.maxY - bounds.minY + 1) * 0.04);
+  const cropX = Math.max(0, bounds.minX - padX);
+  const cropY = Math.max(0, bounds.minY - padY);
+  const cropW = Math.min(naturalDims.width, bounds.maxX + 1 + padX) - cropX;
+  const cropH = Math.min(naturalDims.height, bounds.maxY + 1 + padY) - cropY;
+  if (cropW <= 0 || cropH <= 0) return null;
+
+  const long = Math.max(cropW, cropH);
+  const scale = long > 320 ? 320 / long : 1;
+  const outW = Math.max(1, Math.round(cropW * scale));
+  const outH = Math.max(1, Math.round(cropH * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = outW;
+  canvas.height = outH;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(sourceImg, cropX, cropY, cropW, cropH, 0, 0, outW, outH);
+  try {
+    return canvas.toDataURL("image/jpeg", 0.8);
+  } catch {
+    return null;
+  }
+}
+
+/** Decodes mask data URLs into RGBA buffers at one shared geometry. Browser-only. */
+async function decodeMaskBuffers(
+  maskDataUrls: string[],
+  width: number,
+  height: number
+): Promise<Array<{ width: number; height: number; data: Uint8ClampedArray }> | null> {
+  const buffers: Array<{ width: number; height: number; data: Uint8ClampedArray }> = [];
   for (const url of maskDataUrls) {
     try {
       const img = await loadImage(url);
@@ -127,18 +226,49 @@ async function composeUnionMaskDataUrl(
       return null;
     }
   }
+  return buffers;
+}
+
+/**
+ * Composes one merged region's mask (issue #252 D2/D3): union the member
+ * masks, morphologically close with the proximity radius scaled to natural
+ * dimensions (bridges the seam between fused objects), then fill holes
+ * (closing can seal new pockets; filling runs last). Browser-only.
+ */
+async function composeRegionMaskDataUrl(
+  maskDataUrls: string[],
+  width: number,
+  height: number,
+  closeRadius: number
+): Promise<string | null> {
+  if (maskDataUrls.length === 0) return null;
+  const buffers = await decodeMaskBuffers(maskDataUrls, width, height);
+  if (!buffers) return null;
   const union = unionMaskBuffers(buffers);
   if (!union) return null;
+
+  const unionGrid = maskGridFromPixels(union.data, union.width, union.height);
+  const closed = closeRegion(unionGrid, width, height, closeRadius);
+  const closedGrid = closed ? closed.mask : unionGrid;
+  const filled = fillHoles(closedGrid, width, height);
+  const finalGrid = filled ? filled.mask : closedGrid;
+
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let i = 0; i < finalGrid.length; i++) {
+    const o = i * 4;
+    if (finalGrid[i] === 1) {
+      data[o] = 255;
+      data[o + 1] = 255;
+      data[o + 2] = 255;
+    }
+    data[o + 3] = 255;
+  }
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
-  ctx.putImageData(
-    new ImageData(new Uint8ClampedArray(union.data), union.width, union.height),
-    0,
-    0
-  );
+  ctx.putImageData(new ImageData(data, width, height), 0, 0);
   return canvas.toDataURL("image/png");
 }
 
@@ -200,18 +330,51 @@ async function decodeConceptInstance(
       naturalDims.height,
       { maskedColor: [255, 255, 255] }
     );
+
+    // Issue #252 D3: hole-fill the region mask at composition time so the
+    // canvas tint and the dispatched mask are identical and donut-free
+    // (WYSIWYG). The natural-resolution mask is re-classified from the
+    // painted buffer (white-on-black is stable through the classifier),
+    // hole-filled, and written back as pure white/black pixels.
+    const naturalGrid = maskGridFromProviderPixels(
+      painted,
+      naturalDims.width,
+      naturalDims.height
+    );
+    const filledNatural = fillHoles(naturalGrid, naturalDims.width, naturalDims.height);
+    if (filledNatural && filledNatural.filledCount > 0) {
+      for (let i = 0; i < filledNatural.mask.length; i++) {
+        const o = i * 4;
+        if (filledNatural.mask[i] === 1) {
+          painted[o] = 255;
+          painted[o + 1] = 255;
+          painted[o + 2] = 255;
+          painted[o + 3] = 255;
+        } else {
+          painted[o] = 0;
+          painted[o + 1] = 0;
+          painted[o + 2] = 0;
+          painted[o + 3] = 255;
+        }
+      }
+    }
     whiteCtx.putImageData(
       new ImageData(new Uint8ClampedArray(painted), naturalDims.width, naturalDims.height),
       0,
       0
     );
 
+    // Same invariant for the hit-test grid the toggle path reasons about.
+    let grid = maskGridFromProviderPixels(
+      gridPixels.data,
+      gridDims.width,
+      gridDims.height
+    );
+    const filledGrid = fillHoles(grid, gridDims.width, gridDims.height);
+    if (filledGrid) grid = filledGrid.mask;
+
     return {
-      grid: maskGridFromProviderPixels(
-        gridPixels.data,
-        gridDims.width,
-        gridDims.height
-      ),
+      grid,
       width: gridDims.width,
       height: gridDims.height,
       score,
@@ -253,6 +416,7 @@ export default function InpaintEditor({
   onInpaintComplete,
   onActiveConceptLabelChange,
   fullWidth = false,
+  secondaryPane,
 }: InpaintEditorProps) {
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
   const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
@@ -280,6 +444,15 @@ export default function InpaintEditor({
   // control fills the remaining headroom and names what it left out.
   const [selectAllNotice, setSelectAllNotice] = useState<string | null>(null);
   const conceptInputId = useId();
+  // Issue #252 D4: per-instance vision labels (parallel to
+  // `decodedInstances`; null = unlabeled). Non-blocking: rows render with
+  // the concept string until (and unless) labels arrive.
+  const [instanceLabels, setInstanceLabels] = useState<Array<string | null> | null>(null);
+  // Keys (imageUrl#concept) of detections that cost a billed call — vision
+  // labeling fires ONLY for these (cache hits must never bill OpenAI).
+  const networkDetectionKeysRef = useRef(new Set<string>());
+  // Keys already labeled this session (dedupe across effect re-runs).
+  const labeledKeysRef = useRef(new Set<string>());
   const [batchSelections, setBatchSelections] = useState<BatchSelection[]>([]);
   const [unionMaskDataUrl, setUnionMaskDataUrl] = useState<string | null>(null);
   const [selectionReset, setSelectionReset] = useState<{
@@ -348,9 +521,12 @@ export default function InpaintEditor({
   const conceptLoading = conceptSegments.status === "warming";
 
   // Install fetched results into the cache so re-selecting the concept
-  // later is free (the hook itself never writes the cache).
+  // later is free (the hook itself never writes the cache). The fetched
+  // key is recorded as a BILLED detection — the trigger for optional
+  // vision labeling (issue #252 D4); cache hits never get that marker.
   useEffect(() => {
     if (conceptSegments.result) {
+      networkDetectionKeysRef.current.add(`${imageUrl}#${conceptSegments.result.concept}`);
       segmentCacheRef.current?.put(
         imageUrl,
         conceptSegments.result.concept,
@@ -358,6 +534,103 @@ export default function InpaintEditor({
       );
     }
   }, [conceptSegments.result, imageUrl]);
+
+  // Issue #252 D4: ONE batched GPT-4o-mini vision request per billed
+  // detection names every instance. Non-blocking by design — rows render
+  // with the concept string until labels land, and any failure just keeps
+  // that fallback (AC-3.2). Labeled results are written back into the
+  // segment cache, so cache-served concepts restore labels instantly.
+  useEffect(() => {
+    if (!SAM_TOOL_ENABLED) return;
+    if (!roomId || !imageUrl || !imageDims) return;
+    if (!displayedResult || !decodedInstances) return;
+
+    // Cache-served labels restore instantly (no network, no billing).
+    if (displayedResult.labels) {
+      setInstanceLabels(displayedResult.labels);
+      return;
+    }
+    const key = `${imageUrl}#${displayedResult.concept}`;
+    if (!networkDetectionKeysRef.current.has(key)) return;
+    if (labeledKeysRef.current.has(key)) return;
+    labeledKeysRef.current.add(key);
+
+    let cancelled = false;
+    void (async () => {
+      // crossOrigin=anonymous keeps the crop canvas untainted so
+      // toDataURL can rasterize crops (the storage mock and Supabase both
+      // send permissive CORS headers; a CORS failure just skips labeling).
+      const sourceImg = await new Promise<HTMLImageElement | null>((resolve) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => resolve(img);
+        img.onerror = () => resolve(null);
+        img.src = imageUrl;
+      });
+      if (!sourceImg) return;
+      const crops: Array<{ instanceIndex: number; cropDataUrl: string }> = [];
+      for (let index = 0; index < decodedInstances.length; index++) {
+        const instance = decodedInstances[index];
+        if (!instance) continue;
+        const bounds = maskBounds(instance.grid, instance.width, instance.height);
+        if (!bounds) continue;
+        // Grid (mask-canvas) space → natural pixel space for the crop.
+        const scaleX = imageDims.width / instance.width;
+        const scaleY = imageDims.height / instance.height;
+        const naturalBounds = {
+          minX: Math.floor(bounds.minX * scaleX),
+          minY: Math.floor(bounds.minY * scaleY),
+          maxX: Math.ceil(bounds.maxX * scaleX),
+          maxY: Math.ceil(bounds.maxY * scaleY),
+        };
+        const cropDataUrl = await cropInstanceDataUrl(sourceImg, naturalBounds, imageDims);
+        if (cancelled) return;
+        if (cropDataUrl) crops.push({ instanceIndex: index, cropDataUrl });
+      }
+      if (cancelled || crops.length === 0) return;
+      try {
+        const response = await fetch("/api/label-instances", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            roomId,
+            imageUrl,
+            concept: displayedResult.concept,
+            crops,
+          }),
+        });
+        if (!response.ok) return;
+        const data = (await response.json()) as { labels?: unknown };
+        if (!Array.isArray(data.labels)) return;
+        const labels: Array<string | null> = new Array(displayedResult.maskDataUrls.length).fill(
+          null
+        );
+        for (const entry of data.labels) {
+          if (
+            entry &&
+            typeof entry === "object" &&
+            typeof (entry as { instanceIndex?: unknown }).instanceIndex === "number" &&
+            typeof (entry as { label?: unknown }).label === "string"
+          ) {
+            const index = (entry as { instanceIndex: number }).instanceIndex;
+            if (index >= 0 && index < labels.length) labels[index] = (entry as { label: string }).label;
+          }
+        }
+        if (cancelled) return;
+        setInstanceLabels(labels);
+        segmentCacheRef.current?.put(imageUrl, displayedResult.concept, {
+          maskDataUrls: displayedResult.maskDataUrls,
+          scores: displayedResult.scores,
+          labels,
+        });
+      } catch {
+        // Silent by design: labels are enrichment, the concept fallback stands.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [displayedResult, decodedInstances, imageUrl, imageDims, roomId]);
 
   // Surface hook results for the active concept (cache-served or fetched).
   useEffect(() => {
@@ -374,6 +647,7 @@ export default function InpaintEditor({
       setRequestedConcept(concept);
       setConceptInputError(null);
       setDisplayedResult(segmentCacheRef.current?.get(imageUrl, concept) ?? null);
+      setInstanceLabels(null);
       // Toggle state is per-concept (issue #228); the batch set mirrors
       // the toggles (issue #229), so it resets with them.
       setSelectedInstanceIndices([]);
@@ -418,22 +692,72 @@ export default function InpaintEditor({
     };
   }, [displayedResult, imageDims]);
 
-  // Overlay descriptors for the canvas's tinted instance layer.
+  // Overlay descriptors for the canvas's tinted instance layer. Since
+  // issue #252 D2/D4, SELECTED instances tint with their REGION's palette
+  // color (all members of a merged region share one color — matching the
+  // region's badge and panel chip); detected-only instances keep their
+  // score-rank color.
   const instanceOverlays = useMemo(() => {
     if (!displayedResult || !decodedInstances) return undefined;
-    const overlays: Array<{ id: string; maskDataUrl: string; rank: number; selected: boolean }> = [];
+    const regionIndexByInstance = new Map<number, number>();
+    batchSelections.forEach((selection, position) => {
+      for (const member of selection.memberInstanceIndices ?? []) {
+        regionIndexByInstance.set(member, position);
+      }
+    });
+    const overlays: Array<{
+      id: string;
+      maskDataUrl: string;
+      rank: number;
+      selected: boolean;
+      colorIndex?: number;
+    }> = [];
     for (let index = 0; index < displayedResult.maskDataUrls.length; index++) {
       const instance = decodedInstances[index];
       if (!instance) continue;
+      const selected = selectedInstanceIndices.includes(index);
+      const regionIndex = regionIndexByInstance.get(index);
       overlays.push({
         id: `${displayedResult.concept}:${index}`,
         maskDataUrl: displayedResult.maskDataUrls[index],
         rank: index,
-        selected: selectedInstanceIndices.includes(index),
+        selected,
+        ...(selected && regionIndex !== undefined ? { colorIndex: regionIndex } : {}),
       });
     }
     return overlays;
-  }, [displayedResult, decodedInstances, selectedInstanceIndices]);
+  }, [displayedResult, decodedInstances, selectedInstanceIndices, batchSelections]);
+
+  // Issue #252 D4: numbered canvas badges, one per pending region, positioned
+  // at the topmost-leftmost pixel of the region's member union (grid space
+  // scaled to natural pixels) so a merged region is anchored on its actual
+  // shape rather than any single member's seed point.
+  const selectionMarkers = useMemo(() => {
+    if (!decodedInstances || batchSelections.length === 0) return undefined;
+    if (!imageDims) return undefined;
+    return batchSelections.flatMap((selection, position) => {
+      const members = selection.memberInstanceIndices ?? [];
+      // Union's topmost-leftmost pixel = the minimum (y, then x) over the
+      // members' own topmost-leftmost points (D4).
+      let best: { x: number; y: number } | null = null;
+      for (const member of members) {
+        const instance = decodedInstances[member];
+        if (!instance) continue;
+        const point = topmostLeftmostPoint(instance.grid, instance.width, instance.height);
+        if (!point) continue;
+        if (!best || point.y < best.y || (point.y === best.y && point.x < best.x)) best = point;
+      }
+      if (!best) return [];
+      return [
+        {
+          id: selection.id,
+          x: best.x * (imageDims.width / (decodedInstances[0]?.width ?? imageDims.width)),
+          y: best.y * (imageDims.height / (decodedInstances[0]?.height ?? imageDims.height)),
+          index: position + 1,
+        },
+      ];
+    });
+  }, [batchSelections, decodedInstances, imageDims]);
 
   // The source in effect for the CURRENT run, captured at start time so the
   // completion callback reports the right one even if the selector (or the
@@ -478,6 +802,20 @@ export default function InpaintEditor({
       if (hit === null) return;
       const instance = decodedInstances[hit];
       if (!instance) return;
+      // Issue #252 D2: proximity merging engages when instance grids are
+      // available — toggling a mask within MERGE_PROXIMITY_PX of an
+      // existing region's members fuses into that region (one row, one
+      // prompt, one billed run; the region mask is recomposed below).
+      const instanceGrids = new Map<number, InstanceMaskGrid>();
+      decodedInstances.forEach((decoded, index) => {
+        if (decoded) {
+          instanceGrids.set(index, {
+            grid: decoded.grid,
+            width: decoded.width,
+            height: decoded.height,
+          });
+        }
+      });
       const toggled = applyConceptToggle(
         batchSelections,
         selectedInstanceIndices,
@@ -488,7 +826,8 @@ export default function InpaintEditor({
           conceptLabel: displayedResult.concept,
         },
         hit,
-        !selectedInstanceIndices.includes(hit)
+        !selectedInstanceIndices.includes(hit),
+        { instanceGrids }
       );
       if (toggled.rejected === "cap") {
         showError(
@@ -551,6 +890,8 @@ export default function InpaintEditor({
           maskDataUrl: instance.whiteMaskDataUrl,
           conceptLabel: displayedResult.concept,
         },
+        score: instance.score,
+        grid: { grid: instance.grid, width: instance.width, height: instance.height },
       });
     }
     const result = applyConceptSelectAll(batchSelections, selectedInstanceIndices, candidates);
@@ -622,6 +963,8 @@ export default function InpaintEditor({
       // segmented against the previous image — they must not leak. The
       // union/reset state follows the selection set via effects.
       setBatchSelections([]);
+      regionMaskCacheRef.current.clear();
+      setInstanceLabels(null);
       segmentCacheRef.current?.clear();
       setRequestedConcept(DEFAULT_CONCEPT);
       setDisplayedResult(null);
@@ -665,6 +1008,64 @@ export default function InpaintEditor({
       cancelled = true;
     };
   }, [batchSelections, imageDims]);
+
+  // Issue #252 D2: keep merged regions' masks composed from their members —
+  // union → closing → hole fill at the photo's natural dimensions (WYSIWYG:
+  // the canvas tint, the dispatched per-region mask, and the thematic union
+  // all agree). Single-instance regions keep their decoded white mask, so
+  // only multi-member regions are recomposed here. The cache is keyed by
+  // id + membership, so a merge that later gains another member recomposes
+  // exactly once.
+  const regionMaskCacheRef = useRef(new Map<string, string>());
+  useEffect(() => {
+    if (!imageDims) return;
+    const pending = batchSelections.filter((selection) => {
+      const members = selection.memberInstanceIndices;
+      if (!members || members.length <= 1) return false;
+      const key = `${selection.id}:${members.join(",")}`;
+      return regionMaskCacheRef.current.get(key) !== selection.maskDataUrl;
+    });
+    if (pending.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      const gridEntry = decodedInstances?.find((instance) => instance) ?? null;
+      const naturalLong = Math.max(imageDims.width, imageDims.height);
+      const gridLong = gridEntry
+        ? Math.max(gridEntry.width, gridEntry.height)
+        : naturalLong;
+      // MERGE_PROXIMITY_PX is defined in mask-canvas grid pixels; scale it
+      // to the natural-dimension space the region masks live in.
+      const closeRadius = Math.max(1, Math.round(MERGE_PROXIMITY_PX * (naturalLong / gridLong)));
+      for (const selection of pending) {
+        const members = selection.memberInstanceIndices ?? [];
+        const memberUrls = members
+          .map((index) => decodedInstances?.[index]?.whiteMaskDataUrl)
+          .filter((url): url is string => Boolean(url));
+        if (memberUrls.length !== members.length) continue;
+        const url = await composeRegionMaskDataUrl(
+          memberUrls,
+          imageDims.width,
+          imageDims.height,
+          closeRadius
+        );
+        if (cancelled) return;
+        if (!url) continue;
+        const key = `${selection.id}:${members.join(",")}`;
+        regionMaskCacheRef.current.set(key, url);
+        setBatchSelections((previous) =>
+          previous.map((candidate) =>
+            candidate.id === selection.id &&
+            (candidate.memberInstanceIndices ?? []).join(",") === members.join(",")
+              ? { ...candidate, maskDataUrl: url }
+              : candidate
+          )
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [batchSelections, imageDims, decodedInstances]);
 
   // Issue #203: a selection-set change invalidates a finished (e.g.
   // failed) batch's plan — drop it so the panel never offers a retry
@@ -822,7 +1223,7 @@ export default function InpaintEditor({
         setSelectedInstanceIndices([]);
         showSuccess(
           `Batch complete — ${plan.steps.length} ${
-            plan.steps.length === 1 ? "object" : "objects"
+            plan.steps.length === 1 ? "region" : "regions"
           } staged.`
         );
       } finally {
@@ -905,263 +1306,416 @@ export default function InpaintEditor({
   const detectedCount = decodedInstances?.filter(Boolean).length ?? 0;
   const selectionCount = Math.max(batchSelections.length, selectedInstanceIndices.length);
 
+  // Issue #252 D5: control-panel tab state — purely presentational, so
+  // switching never touches staging state (AC-L5). The default follows
+  // the SAM flag: Auto detect when the tool compiles in, Manual paint
+  // otherwise (the Detect tab is flag-gated away without it).
+  const [activeTab, setActiveTab] = useState<EditorTabId>(
+    SAM_TOOL_ENABLED ? "detect" : "manual"
+  );
+  const tabIdBase = useId();
+  // AC-L4: tab availability is a pure function of the displayed base
+  // image — Entire room only over the original photo. Derived in render
+  // (zero effects): over a variant the tab disappears and the panel lands
+  // on Manual; switching back brings Entire room (and its active state)
+  // straight back.
+  const showEntireRoomTab = entireRoomTabVisible(source);
+  const effectiveTab =
+    activeTab === "entire" && !showEntireRoomTab ? "manual" : activeTab;
+  const editorTabs: EditorTab[] = [
+    ...(showEntireRoomTab
+      ? [{ id: "entire" as const, label: "Entire room" }]
+      : []),
+    {
+      id: "manual",
+      label: "Manual paint",
+      // Un-run work badge (AC-L5): a painted-but-unapplied mask.
+      badge: maskDataUrl ? true : undefined,
+    },
+    ...(SAM_TOOL_ENABLED
+      ? [
+          {
+            id: "detect" as const,
+            label: "Auto detect",
+            // Un-run work badge: pending region selections.
+            badge: selectionCount > 0 ? selectionCount : undefined,
+          },
+        ]
+      : []),
+  ];
+
   return (
-    <div className="flex flex-col gap-6">
-      {sourceOptions.length > 1 && (
-        <fieldset className="rounded-md border border-stone-200 p-3">
-          <legend className="px-1 text-sm font-medium text-stone-700">
-            Edit from
-          </legend>
-          <div className="flex flex-wrap gap-x-4 gap-y-2">
-            {sourceOptions.map((option) => (
-              <label
-                key={inpaintSourceLabel(option)}
-                className="inline-flex cursor-pointer items-center gap-2 text-sm text-stone-700"
-              >
-                <input
-                  type="radio"
-                  name={`inpaint-source-${roomId}`}
-                  value={inpaintSourceLabel(option)}
-                  checked={inpaintSourcesEqual(option, source)}
-                  disabled={isProcessing}
-                  onChange={() => handleSourceChange(option)}
-                  className="h-4 w-4 accent-stone-800"
-                />
-                {inpaintSourceLabel(option)}
-              </label>
-            ))}
-          </div>
-        </fieldset>
-      )}
-
-      <div className="flex flex-col gap-3">
-        {/* Issue #228: concept chips + validated free text. Chips enforce
-            single-concept by construction; free text is validated with
-            isValidConceptName (the server schema's client mirror) BEFORE
-            any billed call is built. Flag-gated with the tool itself. */}
-        {SAM_TOOL_ENABLED && (
-          <div className="flex flex-col gap-2">
-            <div
-              role="group"
-              aria-label="Detection concept"
-              aria-busy={conceptLoading}
-              className="flex flex-wrap items-center gap-2"
-            >
-              <span className="text-sm font-medium text-stone-700">Concept:</span>
-              {CONCEPT_CHIPS.map((chip) => (
-                <button
-                  key={chip}
-                  type="button"
-                  aria-pressed={requestedConcept === chip}
-                  disabled={isProcessing}
-                  onClick={() => handleConceptChange(chip)}
-                  className={
-                    requestedConcept === chip
-                      ? "px-2.5 py-1 text-xs rounded-full border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors"
-                      : "px-2.5 py-1 text-xs rounded-full border border-gray-300 bg-white text-stone-700 hover:bg-gray-50 transition-colors"
-                  }
-                >
-                  {chip}
-                </button>
-              ))}
-              {/* Issue #249: bulk selection affordances. Select-all is a
-                  pure client-side walk over the decoded instances (zero
-                  billed calls); it stops at the batch cap and says so. */}
-              <button
-                type="button"
-                onClick={handleSelectAllDetected}
-                disabled={
-                  isProcessing ||
-                  conceptLoading ||
-                  detectedCount === 0 ||
-                  selectionCount >= Math.min(detectedCount, MAX_BATCH_REGIONS)
-                }
-                className="px-2.5 py-1 text-xs rounded-md border border-stone-800 bg-white text-stone-800 hover:bg-stone-100 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Select all detected
-              </button>
-              <button
-                type="button"
-                onClick={handleClearSelection}
-                disabled={isProcessing || selectionCount === 0}
-                className="px-2.5 py-1 text-xs rounded-md border border-gray-300 bg-white text-stone-700 hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Clear selection
-              </button>
-            </div>
-            <form onSubmit={handleConceptSubmit} className="flex flex-wrap items-center gap-2">
-              <label htmlFor={conceptInputId} className="text-xs text-stone-600">
-                Custom concept:
-              </label>
-              <input
-                id={conceptInputId}
-                type="text"
-                value={conceptInput}
-                onChange={(event) => {
-                  setConceptInput(event.target.value);
-                  if (conceptInputError) setConceptInputError(null);
-                }}
-                placeholder="e.g. wall art"
-                className="w-44 rounded-md border border-gray-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-stone-500"
-              />
-              <button
-                type="submit"
-                disabled={isProcessing}
-                className="px-2.5 py-1 text-xs rounded-md border border-stone-800 bg-white text-stone-800 hover:bg-stone-100 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Detect
-              </button>
-            </form>
-            {conceptInputError && (
-              <p role="alert" className="text-xs font-medium text-red-700">
-                {conceptInputError}
-              </p>
-            )}
-            {conceptLoading && (
-              <p role="status" className="text-xs text-stone-600">
-                Looking for {requestedConcept}…
-              </p>
-            )}
-            {!conceptLoading && conceptSegments.status === "failed" && (
-              <p role="status" className="text-xs font-medium text-amber-700">
-                Couldn&apos;t detect &quot;{requestedConcept}&quot; — try again, another
-                concept, or the brush.
-              </p>
-            )}
-            {!conceptLoading &&
-              displayedResult &&
-              displayedResult.concept === requestedConcept &&
-              displayedResult.maskDataUrls.length === 0 && (
-                <p role="status" className="text-xs text-stone-600">
-                  {buildConceptEmptyMessage(requestedConcept)}
-                </p>
-              )}
-            {selectAllNotice && (
-              <p role="status" className="text-xs text-stone-600">
-                {selectAllNotice}
-              </p>
-            )}
+    /* Issue #252 D5: laptop-first two-pane layout — mask canvas LEFT
+       sized to the remaining viewport, fixed-width control panel RIGHT;
+       both panes scroll internally so page-level scrolling dies at laptop
+       size (AC-L1/L2). Below lg the same tabs stack in one column
+       (AC-L6). */
+    <div
+      className={`flex flex-col gap-6 ${
+        fullWidth ? "lg:min-h-0 lg:flex-1 lg:flex-row lg:gap-6" : ""
+      }`}
+    >
+      {/* ---- LEFT PANE: room imagery (optional slot) + mask canvas ------ */}
+      <div
+        className={`flex min-w-0 flex-col gap-4 ${
+          fullWidth ? "lg:min-h-0 lg:flex-1" : ""
+        }`}
+      >
+        {secondaryPane && (
+          <div
+            className={`flex flex-col gap-6 ${
+              fullWidth ? "lg:max-h-[45%] lg:min-h-0 lg:overflow-y-auto" : ""
+            }`}
+          >
+            {secondaryPane}
           </div>
         )}
-        <h4 className="text-sm font-medium text-stone-700 mb-2">Source Image</h4>
-        <InpaintMaskCanvas
-          overlayImageSrc={imageUrl}
-          aspectRatio={aspectRatio}
-          naturalWidth={imageDims?.width ?? null}
-          naturalHeight={imageDims?.height ?? null}
-          initialMaskDataUrl={maskDataUrl}
-          onMaskChange={setMaskDataUrl}
-          onInstanceToggle={handleInstanceToggle}
-          segmentDisabled={isProcessing || conceptLoading}
-          segmenting={conceptLoading}
-          instanceOverlays={instanceOverlays}
-          expansionRadius={maskExpansion}
-          fullWidth={fullWidth}
-          selectionReset={selectionReset}
-          onMaskCleared={handleMaskCleared}
-        />
-
-        <label className="flex items-center gap-2 text-sm text-stone-700">
-          Mask Expansion:
-          <input
-            type="range"
-            min={0}
-            max={MAX_MASK_EXPANSION_RADIUS}
-            value={maskExpansion}
-            onChange={(e) => setMaskExpansion(Number(e.target.value))}
-            aria-describedby="mask-expansion-hint"
-            className="w-32"
-          />
-          <span className="w-10 text-right">{maskExpansion}px</span>
-        </label>
-        <p id="mask-expansion-hint" className="text-xs text-gray-500">
-          Grows the mask outward before submitting so frames, bezels, and
-          mounts at the painted edge are replaced too. 0 keeps the mask
-          exactly as painted.
-        </p>
-      </div>
-
-      {/* Issue #203 panel, fed since #229 by the concept toggles: appears
-          once at least one detected instance has been toggled in. Thematic
-          runs go through the shared single-run launcher; per-object plans
-          execute sequentially with per-step progress and a retry
-          affordance. */}
-      {batchSelections.length > 0 && (
-        <BatchStagingPanel
-          selections={batchSelections}
-          maxObjects={MAX_BATCH_REGIONS}
-          disabled={isProcessing || conceptLoading}
-          processing={isProcessing}
-          activeBatch={activeBatch}
-          onRun={handleBatchRun}
-          onRetryRemaining={handleBatchRetry}
-          onRemoveLast={handleRemoveLastSelection}
-        />
-      )}
-
-      <div className="flex items-center gap-4">
-        <button
-          onClick={handleInpaint}
-          disabled={isProcessing || conceptLoading || !maskDataUrl}
-          className={`
-            flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium
-            transition-colors
-            ${isProcessing || conceptLoading || !maskDataUrl
-              ? "bg-stone-300 text-stone-500 cursor-not-allowed"
-              : "bg-stone-800 text-white hover:bg-stone-700"
-            }
-          `}
+        <div
+          className={`flex flex-col gap-3 ${
+            fullWidth ? "lg:min-h-0 lg:flex-1 lg:overflow-y-auto" : ""
+          }`}
         >
-          {isProcessing ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Processing...
-            </>
-          ) : (
-            "Apply Inpainting"
-          )}
-        </button>
-
-        {isProcessing && statusText && (
-          <span className="text-sm text-stone-600">{statusText}</span>
-        )}
-      </div>
-
-      {/* Issue #191/#223 one-click preset, demoted to an optional shortcut
-          by issue #223: the brush → Apply Inpainting flow above is the
-          primary path and works on any source without running the preset
-          first. The preset detects furnishings and restages only those
-          regions (see stage-entire-room-preset.tsx). */}
-      <StageEntireRoomPreset
-        roomId={roomId}
-        imageUrl={imageUrl}
-        aesthetic={aesthetic}
-        imageWidth={imageDims?.width ?? null}
-        imageHeight={imageDims?.height ?? null}
-        disabled={isProcessing || conceptLoading}
-        processing={isProcessing}
-        statusText={statusText}
-        onRun={handleHolisticRun}
-        onError={showError}
-      />
-
-      {/* Issue #190 spike entry — kept as protocol documentation; the
-          polished one-click preset above (issue #191) does not depend on it. */}
-      <details className="no-print rounded-md border border-dashed border-stone-300 p-3 text-sm">
-        <summary className="cursor-pointer select-none text-stone-500">
-          Holistic staging spike (#190) — internal testing only
-        </summary>
-        <div className="pt-3">
-          <HolisticSpikePanel
-            aesthetic={aesthetic}
-            imageWidth={imageDims?.width ?? null}
-            imageHeight={imageDims?.height ?? null}
-            disabled={isProcessing || conceptLoading}
-            onRun={handleHolisticRun}
-            onError={showError}
+          <h4 className="text-sm font-medium text-stone-700 mb-2">Source Image</h4>
+          <InpaintMaskCanvas
+            overlayImageSrc={imageUrl}
+            aspectRatio={aspectRatio}
+            naturalWidth={imageDims?.width ?? null}
+            naturalHeight={imageDims?.height ?? null}
+            initialMaskDataUrl={maskDataUrl}
+            onMaskChange={setMaskDataUrl}
+            onInstanceToggle={handleInstanceToggle}
+            segmentDisabled={isProcessing || conceptLoading}
+            segmenting={conceptLoading}
+            instanceOverlays={instanceOverlays}
+            selectionMarkers={selectionMarkers}
+            expansionRadius={maskExpansion}
+            fullWidth={fullWidth}
+            selectionReset={selectionReset}
+            onMaskCleared={handleMaskCleared}
           />
         </div>
-      </details>
+      </div>
+
+      {/* ---- RIGHT PANE: fixed-width control panel ----------------------- */}
+      <div
+        className={`flex w-full flex-col gap-3 no-print ${
+          fullWidth ? "lg:min-h-0 lg:w-[380px] lg:shrink-0" : ""
+        }`}
+      >
+        {/* AC-L2: batch progress pins to the panel top during a run, so
+            it stays visible beside the canvas on every tab. The full
+            progress + retry affordance stays in the batch panel. */}
+        {activeBatch && (
+          <div
+            role="status"
+            className="flex shrink-0 items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800"
+          >
+            {!hasFailedStep(activeBatch.progress) && (
+              <Loader2
+                className="h-3.5 w-3.5 animate-spin"
+                aria-hidden="true"
+              />
+            )}
+            {batchProgressText(activeBatch.progress) ??
+              "Batch staging in progress…"}
+          </div>
+        )}
+        <div
+          className={`flex flex-col gap-4 ${
+            fullWidth ? "lg:min-h-0 lg:flex-1 lg:overflow-y-auto" : ""
+          }`}
+        >
+          {sourceOptions.length > 1 && (
+            <fieldset className="shrink-0 rounded-md border border-stone-200 p-3">
+              <legend className="px-1 text-sm font-medium text-stone-700">
+                Edit from
+              </legend>
+              <div className="flex flex-wrap gap-x-4 gap-y-2">
+                {sourceOptions.map((option) => (
+                  <label
+                    key={inpaintSourceLabel(option)}
+                    className="inline-flex cursor-pointer items-center gap-2 text-sm text-stone-700"
+                  >
+                    <input
+                      type="radio"
+                      name={`inpaint-source-${roomId}`}
+                      value={inpaintSourceLabel(option)}
+                      checked={inpaintSourcesEqual(option, source)}
+                      disabled={isProcessing}
+                      onChange={() => handleSourceChange(option)}
+                      className="h-4 w-4 accent-stone-800"
+                    />
+                    {inpaintSourceLabel(option)}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
+
+          <div className="sticky top-0 z-10 bg-stone-50 pb-1">
+            <EditorTabBar
+              tabs={editorTabs}
+              activeTab={effectiveTab}
+              onSelectTab={setActiveTab}
+              idBase={tabIdBase}
+            />
+          </div>
+
+          {/* Tab panels stay MOUNTED (hidden, not unmounted) so tab
+              switching performs zero state transitions — the batch
+              panel's prompts and mode survive round-trips (AC-L5). */}
+          <div
+            role="tabpanel"
+            id={editorTabPanelId(tabIdBase, "entire")}
+            aria-labelledby={editorTabId(tabIdBase, "entire")}
+            hidden={effectiveTab !== "entire"}
+          >
+            <div className="flex flex-col gap-6">
+              {/* Issue #191/#223 one-click preset, demoted to an optional
+                  shortcut by issue #223: the brush → Apply Inpainting flow
+                  is the primary path and works on any source without
+                  running the preset first. The preset detects furnishings
+                  and restages only those regions (see
+                  stage-entire-room-preset.tsx). Entire-room staging only
+                  ever runs over the original photo (AC-L4). */}
+              <StageEntireRoomPreset
+                roomId={roomId}
+                imageUrl={imageUrl}
+                aesthetic={aesthetic}
+                imageWidth={imageDims?.width ?? null}
+                imageHeight={imageDims?.height ?? null}
+                disabled={isProcessing || conceptLoading}
+                processing={isProcessing}
+                statusText={statusText}
+                onRun={handleHolisticRun}
+                onError={showError}
+              />
+
+              {/* Issue #190 spike entry — kept as protocol documentation;
+                  the polished one-click preset above (issue #191) does not
+                  depend on it. */}
+              <details className="no-print rounded-md border border-dashed border-stone-300 p-3 text-sm">
+                <summary className="cursor-pointer select-none text-stone-500">
+                  Holistic staging spike (#190) — internal testing only
+                </summary>
+                <div className="pt-3">
+                  <HolisticSpikePanel
+                    aesthetic={aesthetic}
+                    imageWidth={imageDims?.width ?? null}
+                    imageHeight={imageDims?.height ?? null}
+                    disabled={isProcessing || conceptLoading}
+                    onRun={handleHolisticRun}
+                    onError={showError}
+                  />
+                </div>
+              </details>
+            </div>
+          </div>
+
+          <div
+            role="tabpanel"
+            id={editorTabPanelId(tabIdBase, "manual")}
+            aria-labelledby={editorTabId(tabIdBase, "manual")}
+            hidden={effectiveTab !== "manual"}
+          >
+            <div className="flex flex-col gap-3">
+              {/* Manual-paint controls (AC-L7): the expansion slider plus
+                  the single-object run affordance. The brush / Fill Region
+                  / Select Regions toggles live in the canvas toolbar and
+                  stay beside the canvas on every tab, so painted work is
+                  always visible. */}
+              <label className="flex items-center gap-2 text-sm text-stone-700">
+                Mask Expansion:
+                <input
+                  type="range"
+                  min={0}
+                  max={MAX_MASK_EXPANSION_RADIUS}
+                  value={maskExpansion}
+                  onChange={(e) => setMaskExpansion(Number(e.target.value))}
+                  aria-describedby="mask-expansion-hint"
+                  className="w-32"
+                />
+                <span className="w-10 text-right">{maskExpansion}px</span>
+              </label>
+              <p id="mask-expansion-hint" className="text-xs text-gray-500">
+                Grows the mask outward before submitting so frames, bezels, and
+                mounts at the painted edge are replaced too. 0 keeps the mask
+                exactly as painted.
+              </p>
+
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={handleInpaint}
+                  disabled={isProcessing || conceptLoading || !maskDataUrl}
+                  className={`
+                    flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium
+                    transition-colors
+                    ${isProcessing || conceptLoading || !maskDataUrl
+                      ? "bg-stone-300 text-stone-500 cursor-not-allowed"
+                      : "bg-stone-800 text-white hover:bg-stone-700"
+                    }
+                  `}
+                >
+                  {isProcessing ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    "Apply Inpainting"
+                  )}
+                </button>
+
+                {isProcessing && statusText && (
+                  <span className="text-sm text-stone-600">{statusText}</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div
+            role="tabpanel"
+            id={editorTabPanelId(tabIdBase, "detect")}
+            aria-labelledby={editorTabId(tabIdBase, "detect")}
+            hidden={effectiveTab !== "detect"}
+          >
+            <div className="flex flex-col gap-3">
+              {/* Issue #228: concept chips + validated free text. Chips
+                  enforce single-concept by construction; free text is
+                  validated with isValidConceptName (the server schema's
+                  client mirror) BEFORE any billed call is built.
+                  Flag-gated with the tool itself (whole tab hides with the
+                  flag off — the default tab becomes Manual paint). */}
+              {SAM_TOOL_ENABLED && (
+                <div className="flex flex-col gap-2">
+                  <div
+                    role="group"
+                    aria-label="Detection concept"
+                    aria-busy={conceptLoading}
+                    className="flex flex-wrap items-center gap-2"
+                  >
+                    <span className="text-sm font-medium text-stone-700">Concept:</span>
+                    {CONCEPT_CHIPS.map((chip) => (
+                      <button
+                        key={chip}
+                        type="button"
+                        aria-pressed={requestedConcept === chip}
+                        disabled={isProcessing}
+                        onClick={() => handleConceptChange(chip)}
+                        className={
+                          requestedConcept === chip
+                            ? "px-2.5 py-1 text-xs rounded-full border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors"
+                            : "px-2.5 py-1 text-xs rounded-full border border-gray-300 bg-white text-stone-700 hover:bg-gray-50 transition-colors"
+                        }
+                      >
+                        {chip}
+                      </button>
+                    ))}
+                    {/* Issue #249: bulk selection affordances. Select-all
+                        is a pure client-side walk over the decoded
+                        instances (zero billed calls); it stops at the
+                        batch cap and says so. */}
+                    <button
+                      type="button"
+                      onClick={handleSelectAllDetected}
+                      disabled={
+                        isProcessing ||
+                        conceptLoading ||
+                        detectedCount === 0 ||
+                        selectionCount >= Math.min(detectedCount, MAX_BATCH_REGIONS)
+                      }
+                      className="px-2.5 py-1 text-xs rounded-md border border-stone-800 bg-white text-stone-800 hover:bg-stone-100 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Select all detected
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleClearSelection}
+                      disabled={isProcessing || selectionCount === 0}
+                      className="px-2.5 py-1 text-xs rounded-md border border-gray-300 bg-white text-stone-700 hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Clear selection
+                    </button>
+                  </div>
+                  <form onSubmit={handleConceptSubmit} className="flex flex-wrap items-center gap-2">
+                    <label htmlFor={conceptInputId} className="text-xs text-stone-600">
+                      Custom concept:
+                    </label>
+                    <input
+                      id={conceptInputId}
+                      type="text"
+                      value={conceptInput}
+                      onChange={(event) => {
+                        setConceptInput(event.target.value);
+                        if (conceptInputError) setConceptInputError(null);
+                      }}
+                      placeholder="e.g. wall art"
+                      className="w-44 rounded-md border border-gray-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-stone-500"
+                    />
+                    <button
+                      type="submit"
+                      disabled={isProcessing}
+                      className="px-2.5 py-1 text-xs rounded-md border border-stone-800 bg-white text-stone-800 hover:bg-stone-100 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Detect
+                    </button>
+                  </form>
+                  {conceptInputError && (
+                    <p role="alert" className="text-xs font-medium text-red-700">
+                      {conceptInputError}
+                    </p>
+                  )}
+                  {conceptLoading && (
+                    <p role="status" className="text-xs text-stone-600">
+                      Looking for {requestedConcept}…
+                    </p>
+                  )}
+                  {!conceptLoading && conceptSegments.status === "failed" && (
+                    <p role="status" className="text-xs font-medium text-amber-700">
+                      Couldn&apos;t detect &quot;{requestedConcept}&quot; — try again, another
+                      concept, or the brush.
+                    </p>
+                  )}
+                  {!conceptLoading &&
+                    displayedResult &&
+                    displayedResult.concept === requestedConcept &&
+                    displayedResult.maskDataUrls.length === 0 && (
+                      <p role="status" className="text-xs text-stone-600">
+                        {buildConceptEmptyMessage(requestedConcept)}
+                      </p>
+                    )}
+                  {selectAllNotice && (
+                    <p role="status" className="text-xs text-stone-600">
+                      {selectAllNotice}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Issue #203 panel, fed since #229 by the concept toggles:
+                  appears once at least one detected instance has been
+                  toggled in. Thematic runs go through the shared
+                  single-run launcher; per-object plans execute sequentially
+                  with per-step progress and a retry affordance. The panel
+                  stays mounted across tab switches (hidden, not
+                  unmounted), so its prompts never reset (AC-L5). */}
+              {batchSelections.length > 0 && (
+                <BatchStagingPanel
+                  selections={batchSelections}
+                  maxObjects={MAX_BATCH_REGIONS}
+                  disabled={isProcessing || conceptLoading}
+                  processing={isProcessing}
+                  activeBatch={activeBatch}
+                  onRun={handleBatchRun}
+                  onRetryRemaining={handleBatchRetry}
+                  onRemoveLast={handleRemoveLastSelection}
+                  instanceLabels={instanceLabels}
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>

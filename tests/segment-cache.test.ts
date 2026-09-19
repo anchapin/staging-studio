@@ -19,6 +19,36 @@ function entry(
   return { concept, maskDataUrls, scores };
 }
 
+describe("vision label storage (issue #252)", () => {
+  it("stores and returns labels with the entry; cache hits restore them", () => {
+    const cache = new SegmentCache();
+    cache.put(IMAGE, "sofa", {
+      maskDataUrls: ["data:image/png;base64,A"],
+      scores: [0.9],
+      labels: ["loveseat"],
+    });
+    const hit = cache.get(IMAGE, "sofa");
+    expect(hit?.labels).toEqual(["loveseat"]);
+  });
+
+  it("treats labels as optional: entries without them read back without them", () => {
+    const cache = new SegmentCache();
+    cache.put(IMAGE, "sofa", { maskDataUrls: ["data:image/png;base64,A"], scores: [0.9] });
+    expect(cache.get(IMAGE, "sofa")?.labels).toBeUndefined();
+  });
+
+  it("re-putting updates labels in place (labeling resolves after the mask)", () => {
+    const cache = new SegmentCache();
+    cache.put(IMAGE, "sofa", { maskDataUrls: ["data:image/png;base64,A"], scores: [0.9] });
+    cache.put(IMAGE, "sofa", {
+      maskDataUrls: ["data:image/png;base64,A"],
+      scores: [0.9],
+      labels: ["sectional sofa", null],
+    });
+    expect(cache.get(IMAGE, "sofa")?.labels).toEqual(["sectional sofa", null]);
+  });
+});
+
 describe("buildSegmentCacheKey", () => {
   // Issue #228 rekey: one billed call per (image, concept), so the cache
   // unit is the whole concept result — no more per-point keys.
