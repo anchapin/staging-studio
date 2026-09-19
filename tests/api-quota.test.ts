@@ -4,6 +4,7 @@ import {
   DEFAULT_DAILY_COPY_LIMIT,
   DEFAULT_DAILY_EXPORT_LIMIT,
   DEFAULT_DAILY_INPAINT_LIMIT,
+  DEFAULT_DAILY_LABEL_LIMIT,
   DEFAULT_DAILY_SEGMENT_LIMIT,
   DAILY_LIMIT_ENV_VAR,
   SEGMENT_DAILY_LIMIT,
@@ -220,10 +221,56 @@ describe("segment surface (SAM 3.1 concept calls, issue #226)", () => {
   });
 });
 
+describe("label surface (OpenAI gpt-4o-mini vision, issue #263)", () => {
+  it("records usage on its own in-process counter", () => {
+    expect(recordDailyUsage("label", "label-user-a", midDay)).toBe(1);
+    expect(getDailyUsage("label", "label-user-a", midDay)).toBe(1);
+    expect(getDailyUsage("copy", "label-user-a", midDay)).toBe(0);
+  });
+
+  it("blocks at the label limit and returns a retryable 429 payload", () => {
+    // One under the cap is still served...
+    expect(evaluateDailyQuota(DEFAULT_DAILY_LABEL_LIMIT - 1, DEFAULT_DAILY_LABEL_LIMIT, midDay).allowed).toBe(true);
+    // ...and the limit-th usage blocks the next request.
+    const decision = evaluateDailyQuota(DEFAULT_DAILY_LABEL_LIMIT, DEFAULT_DAILY_LABEL_LIMIT, midDay);
+    expect(decision).toEqual({
+      allowed: false,
+      used: DEFAULT_DAILY_LABEL_LIMIT,
+      limit: DEFAULT_DAILY_LABEL_LIMIT,
+      resetsAt: nextMidnight.toISOString(),
+    });
+
+    if (decision.allowed) throw new Error("expected blocked decision");
+    const payload = dailyQuotaExceededPayload(decision, "Please try again tomorrow.");
+    expect(payload).toEqual({
+      error: "Daily limit reached",
+      message: expect.stringContaining("Please try again tomorrow."),
+      retryable: true,
+      used: DEFAULT_DAILY_LABEL_LIMIT,
+      limit: DEFAULT_DAILY_LABEL_LIMIT,
+      resetsAt: nextMidnight.toISOString(),
+    });
+  });
+
+  it("resets at the daily rollover", () => {
+    const before = new Date(DAY.y, DAY.m, DAY.d, 23, 59, 59, 999);
+    const after = new Date(DAY.y, DAY.m, DAY.d + 1, 0, 0, 0, 0);
+
+    recordDailyUsage("label", "label-user-b", before);
+    expect(getDailyUsage("label", "label-user-b", before)).toBe(1);
+
+    // Next day starts from zero again.
+    expect(getDailyUsage("label", "label-user-b", after)).toBe(0);
+    recordDailyUsage("label", "label-user-b", after);
+    expect(getDailyUsage("label", "label-user-b", after)).toBe(1);
+  });
+});
+
 describe("default limits and env var names", () => {
   it("pin the shipped defaults", () => {
     expect(DEFAULT_DAILY_INPAINT_LIMIT).toBe(20);
     expect(DEFAULT_DAILY_COPY_LIMIT).toBe(50);
+    expect(DEFAULT_DAILY_LABEL_LIMIT).toBe(50);
     expect(DEFAULT_DAILY_EXPORT_LIMIT).toBe(20);
     expect(DEFAULT_DAILY_SEGMENT_LIMIT).toBe(100);
     expect(SEGMENT_DAILY_LIMIT).toBe(100);
@@ -233,6 +280,7 @@ describe("default limits and env var names", () => {
     expect(DAILY_LIMIT_ENV_VAR).toEqual({
       inpaint: "DAILY_INPAINT_LIMIT",
       copy: "DAILY_COPY_LIMIT",
+      label: "DAILY_LABEL_LIMIT",
       export: "DAILY_EXPORT_LIMIT",
       segment: "DAILY_SEGMENT_LIMIT",
     });

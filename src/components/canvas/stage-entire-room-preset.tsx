@@ -16,6 +16,7 @@ import {
   DEFAULT_MASK_EXPANSION_RADIUS,
   dilateMaskGrid,
 } from "@/lib/mask-dilation";
+import { fillHoles } from "@/lib/mask-postprocess";
 import { unionMaskBuffers } from "@/lib/multi-select-batch";
 
 /**
@@ -142,12 +143,14 @@ export default function StageEntireRoomPreset({
     if (detecting) return;
     setDetecting(true);
     try {
-      // 1. Detect furnishings (per-object provider masks, server
-      //    re-encoded as data URLs).
+      // 1. Detect furnishings via the generalized concept endpoint with the
+      //    explicit "furniture" concept (issue #239: the preset now calls the
+      //    same pathway as the concept prewarm hook instead of relying on the
+      //    omitted-concept default).
       const response = await fetch("/api/segment/furnishings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roomId, imageUrl }),
+        body: JSON.stringify({ roomId, imageUrl, concept: "furniture" }),
       });
       const data = await response.json().catch(() => null);
       if (!response.ok) {
@@ -188,10 +191,14 @@ export default function StageEntireRoomPreset({
       if (!dilated) {
         throw new Error("Could not build the furnishings mask. Please try again.");
       }
+      // Issue #252 D3: filling runs last — dilation can seal enclosed
+      // pockets, so the dispatched furnishings mask is always hole-free.
+      const filled = fillHoles(dilated.mask, imageWidth, imageHeight);
+      const finalMask = filled ? filled.mask : dilated.mask;
       const maskData = new Uint8ClampedArray(imageWidth * imageHeight * 4);
-      for (let i = 0; i < dilated.mask.length; i++) {
+      for (let i = 0; i < finalMask.length; i++) {
         const o = i * 4;
-        if (dilated.mask[i] === 1) {
+        if (finalMask[i] === 1) {
           maskData[o] = 255;
           maskData[o + 1] = 255;
           maskData[o + 2] = 255;

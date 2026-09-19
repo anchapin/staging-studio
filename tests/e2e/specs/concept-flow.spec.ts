@@ -9,6 +9,7 @@ import { CONCEPT_INSTANCE_GRAYSCALE_MASKS } from "../cutout-png";
 import {
   interceptFurnishingsDetection,
   interceptInpaint,
+  interceptLabelInstances,
   login,
   openFocusedEditor,
   whitePixelShare,
@@ -46,6 +47,9 @@ test.describe("sam 3.1 concept find-and-replace flow", () => {
   }) => {
     const inpaint = interceptInpaint(page);
     const detection = interceptFurnishingsDetection(page);
+    // Issue #252: the editor labels billed detections via ONE batched
+    // OpenAI vision call — mocked here; cache hits must never re-fire it.
+    const labeling = interceptLabelInstances(page);
     detection.respondWithMaskDataUrls(CONCEPT_INSTANCE_GRAYSCALE_MASKS);
 
     // The toggles emit the training-corpus event (W3 depends on the
@@ -101,42 +105,51 @@ test.describe("sam 3.1 concept find-and-replace flow", () => {
     await page.getByRole("button", { name: "sofa" }).click();
     expect(detection.requestCount()).toBe(3);
 
+    // Issue #252 (AC-3.2/3.5): each billed detection labeled its instances
+    // via ONE batched vision call; the cache hit above must NOT re-fire it.
+    await expect
+      .poll(() => labeling.requestCount(), { timeout: 15_000 })
+      .toBe(3);
+
     // ---- 3. Toggle two detected instances (clicks are free) ------------
-    const selectButton = page.getByRole("button", { name: "Select Objects" });
+    const selectButton = page.getByRole("button", { name: "Select Regions" });
     await expect(selectButton).toBeEnabled();
     await selectButton.click();
 
     const canvas = page
       .getByRole("application")
       .locator(
-        'canvas[aria-label^="Room mask canvas with the Select Objects tool active"]'
+        'canvas[aria-label^="Room mask canvas with the Select Regions tool active"]'
       );
     await expect(canvas).toBeVisible();
-    await canvas.scrollIntoViewIfNeeded();
-    const box = (await canvas.boundingBox())!;
-    expect(box.width).toBeGreaterThan(0);
-    expect(box.height).toBeGreaterThan(0);
+    // locator.click (not raw page.mouse): Playwright scrolls the TARGET
+    // POINT into view and verifies it receives the event — in the #252
+    // fixed layout the canvas can extend below the fold, where raw mouse
+    // coordinates silently miss (they cannot leave the viewport).
+    const clickAt = async (fx: number, fy: number): Promise<void> => {
+      const box = (await canvas.boundingBox())!;
+      await canvas.click({
+        position: { x: box.width * fx, y: box.height * fy },
+      });
+    };
 
-    const batchPanel = page.locator('section[aria-label="Batch object staging"]');
+    const batchPanel = page.locator('section[aria-label="Batch region staging"]');
 
     // Instance 0 is the full-width band at rows 30–34 — a canvas-center
     // click lands inside it. The retry wrapper absorbs the decode race
     // between the detection response and the client-side instance grids;
     // the passing attempt ends with the instance selected.
     await expect(async () => {
-      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-      await expect(batchPanel.getByText("1 / 5 objects")).toBeVisible();
+      await clickAt(0.5, 0.5);
+      await expect(batchPanel.getByText("1 / 5 regions")).toBeVisible();
     }).toPass({ timeout: 15_000 });
 
     // Instance 1 is the block at rows 44–60 × cols 4–40 — only a
     // lower-left click hits it (disjoint regions, best-ranked instance
     // containing the point wins).
     await expect(async () => {
-      await page.mouse.click(
-        box.x + box.width * 0.2,
-        box.y + box.height * 0.8
-      );
-      await expect(batchPanel.getByText("2 / 5 objects")).toBeVisible();
+      await clickAt(0.2, 0.8);
+      await expect(batchPanel.getByText("2 / 5 regions")).toBeVisible();
     }).toPass({ timeout: 15_000 });
 
     // Toggles are pure client-side hit-tests — zero extra detection calls.
@@ -162,26 +175,30 @@ test.describe("sam 3.1 concept find-and-replace flow", () => {
     // Select-all rebuilds the whole set from the cached detection — zero
     // billed calls — and disables itself again once everything is selected.
     await selectAllButton.click();
-    await expect(batchPanel.getByText("2 / 5 objects")).toBeVisible();
+    await expect(batchPanel.getByText("2 / 5 regions")).toBeVisible();
     expect(detection.requestCount()).toBe(3);
     await expect(selectAllButton).toBeDisabled();
 
-    // ---- 4. Pre-filled prompts (#230): per-object rows carry the -------
-    //      concept text; the union (thematic) field stays empty.
-    await expect(batchPanel.locator("li").filter({ hasText: /^sofa$/ })).toHaveCount(2);
+    // ---- 4. Vision labels (#252) + pre-filled prompts ------------------
+    //      Rows carry the mocked VISION labels ("E2E sofa N" — label source
+    //      of truth is the vision label, D4); the thematic field stays empty.
+    await expect(
+      batchPanel.locator("li").filter({ hasText: /^E2E sofa \d$/ })
+    ).toHaveCount(2);
     const thematicPrompt = batchPanel.getByLabel(
-      "Theme (applied to all selected objects at once)"
+      "Theme (applied to all selected regions at once)"
     );
     await expect(thematicPrompt).toHaveValue("");
 
     await batchPanel
-      .getByRole("radio", { name: "A separate prompt per object" })
+      .getByRole("radio", { name: "A separate prompt per region" })
       .check();
 
     const perObjectRows = batchPanel.locator('input[id^="batch-prompt-sofa:"]');
     await expect(perObjectRows).toHaveCount(2);
-    await expect(perObjectRows.nth(0)).toHaveValue("Replace the sofa with ");
-    await expect(perObjectRows.nth(1)).toHaveValue("Replace the sofa with ");
+    // Pre-fill uses the best known label (AC-3.4): the vision label.
+    await expect(perObjectRows.nth(0)).toHaveValue("Replace the E2E sofa 1 with ");
+    await expect(perObjectRows.nth(1)).toHaveValue("Replace the E2E sofa 2 with ");
 
     // The seed is editable text — finish both sentences.
     await perObjectRows.nth(0).fill("Replace the sofa with a boucle loveseat.");
@@ -190,7 +207,7 @@ test.describe("sam 3.1 concept find-and-replace flow", () => {
     // ---- 5. Batch dispatch: sequential per-object inpaint runs ---------
     await batchPanel.getByRole("button", { name: "Run batch" }).click();
     await expect(
-      page.getByText("Batch complete — 2 objects staged.")
+      page.getByText("Batch complete — 2 regions staged.")
     ).toBeVisible({ timeout: 30_000 });
 
     // Exactly one billed run per object, in panel order, each through the
