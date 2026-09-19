@@ -205,6 +205,12 @@ export default function InpaintMaskCanvas({
     [aspectRatio, width, height]
   );
 
+  // Issue #262: track the previous dims so we can detect when the canvas
+  // grid re-sizes due to the photo's aspect ratio finally resolving (null →
+  // a real value).  In that window the user may already be painting — we must
+  // not silently drop their strokes when the grid re-initializes.
+  const prevDimsRef = useRef(dims);
+
   // HiDPI support (issue #181): all painting happens in LOGICAL canvas
   // space (dims, the same space clientPointToCanvas produces). The backing
   // store is scaled up to device pixels and the 2D context is transformed
@@ -333,6 +339,77 @@ export default function InpaintMaskCanvas({
     initialMaskRef.current = initialMaskDataUrl;
   }, [initialMaskDataUrl]);
 
+  // Issue #262: preserve mask strokes when the canvas grid re-sizes due to
+  // the source photo's aspect ratio finally resolving (null → real value).
+  // Painting during the load window is now either preserved or visibly impossible
+  // (disabled) — never silently lost.
+  //
+  // When dims change we capture the current canvas content BEFORE initCanvas
+  // wipes it, then replay it scaled onto the new grid after initCanvas runs.
+  // A ref keeps `hasPainted` current for the effect without adding it as a
+  // reactive dependency. We also track the previous overlayImageSrc so we skip
+  // preservation when the source image itself changed (a mask is tied to one
+  // source image and must not survive onto a different image — issue #170).
+  // Note: hasPaintedRef is declared below in the expansion-radius section and
+  // shared here via the closure.
+  const prevOverlayRef = useRef(overlayImageSrc);
+
+  useEffect(() => {
+    const prev = prevDimsRef.current;
+    const prevOverlay = prevOverlayRef.current;
+
+    // Skip preservation when the source image changed — a mask belongs to one
+    // image and must not leak onto a different image's canvas (issue #170).
+    const sourceChanged = overlayImageSrc !== prevOverlay;
+
+    if (prev.width === dims.width && prev.height === dims.height) {
+      // Dims unchanged — still update refs so next dims change is clean.
+      prevDimsRef.current = dims;
+      prevOverlayRef.current = overlayImageSrc;
+      return;
+    }
+
+    // Dims changed — capture existing strokes before initCanvas wipes them.
+    // Capture the painting state HERE (not inside the deferred restore) because
+    // initCanvas resets hasPainted to false and the ref sync effect runs after
+    // we return, so hasPaintedRef.current would be stale by the time restore
+    // executes via queueMicrotask.
+    const wasPainted = hasPaintedRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    const oldDims = prev;
+    const newDims = dims;
+
+    // Only preserve strokes when the source image is the same (aspect ratio
+    // resize), not when switching images (source switch wipes intentionally).
+    const capturedDataUrl =
+      !sourceChanged && wasPainted && canvas && ctx
+        ? canvas.toDataURL("image/png")
+        : null;
+
+    prevDimsRef.current = newDims;
+    prevOverlayRef.current = overlayImageSrc;
+
+    if (!capturedDataUrl) return;
+
+    // Defer the restore until after initCanvas has set up the new grid.
+    const restore = () => {
+      const c = canvasRef.current;
+      const cg = c?.getContext("2d");
+      if (!c || !cg) return;
+      const img = new Image();
+      img.onload = () => {
+        cg.drawImage(img, 0, 0, oldDims.width, oldDims.height, 0, 0, newDims.width, newDims.height);
+      };
+      img.src = capturedDataUrl;
+    };
+
+    // queueMicrotask runs after the current synchronous chunk (both effects
+    // complete) but before the browser renders — initCanvas effect is already
+    // done by the time restore fires.
+    queueMicrotask(restore);
+  }, [dims, overlayImageSrc]);
+
   const initCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -369,6 +446,12 @@ export default function InpaintMaskCanvas({
   // mask drawn for one image must never survive onto the next. The ref sync
   // effect above runs first, so initCanvas reads the latest initial mask.
   useEffect(() => {
+    // Issue #262: track source changes so the dims-change effect above can
+    // distinguish aspect-ratio resize (preserve strokes) from source switch
+    // (don't preserve — mask belongs to the old image).
+    if (overlayImageSrc !== prevOverlayRef.current) {
+      prevOverlayRef.current = overlayImageSrc;
+    }
     initCanvas();
   }, [initCanvas, overlayImageSrc]);
 
