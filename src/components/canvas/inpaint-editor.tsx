@@ -594,6 +594,7 @@ export default function InpaintEditor({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             roomId,
+            imageUrl,
             concept: displayedResult.concept,
             crops,
           }),

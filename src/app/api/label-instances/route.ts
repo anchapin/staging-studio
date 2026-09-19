@@ -7,6 +7,10 @@ import {
   visionLabelRequestSchema,
   visionLabelOutputSchema,
 } from "@/lib/ai-route-schemas";
+import {
+  getCachedVisionLabels,
+  upsertVisionLabels,
+} from "@/lib/vision-labels";
 
 /**
  * POST /api/label-instances (issue #252 D4 / WS3).
@@ -23,6 +27,9 @@ import {
  * route. The generic daily copy quota intentionally does not apply:
  * detection itself is already quota-gated upstream (fal, #201), which
  * bounds how often labeling can fire.
+ *
+ * Issue #266: results are cached in the VisionLabel table so re-opening
+ * the editor does not re-bill GPT-4o-mini.
  *
  * Contract: 401 unauthenticated; 404 when the room is not owned by the
  * caller; 400 on a schema-invalid body; 500 with a classified message on
@@ -58,7 +65,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { roomId, concept, crops } = parsed.data;
+    const { roomId, concept, crops, imageUrl } = parsed.data;
 
     // Ownership: same check as the detection route — the room must belong
     // to a project owned by the authenticated user.
@@ -79,9 +86,20 @@ export async function POST(request: NextRequest) {
 
     assertOpenAIConfigured();
 
+    // Issue #266: check the persistent cache before billing GPT-4o-mini.
+    const instanceIndices = crops.map((c: { instanceIndex: number }) => c.instanceIndex);
+    const cached = await getCachedVisionLabels({ imageUrl, concept, instanceIndices });
+    if (cached.length > 0) {
+      const labels = cached.map((row: { instanceIndex: number; label: string }) => ({
+        instanceIndex: row.instanceIndex,
+        label: row.label,
+      }));
+      return NextResponse.json({ success: true, labels }, { status: 200 });
+    }
+
     // Crop data URLs → raw base64 (the AI SDK's `file` part takes decoded
     // bytes; the deprecated `image` part is avoided).
-    const cropsWithBytes = crops.map((crop) => ({
+    const cropsWithBytes = crops.map((crop: { instanceIndex: number; cropDataUrl: string }) => ({
       instanceIndex: crop.instanceIndex,
       base64: crop.cropDataUrl.slice(crop.cropDataUrl.indexOf(",") + 1),
     }));
@@ -102,7 +120,7 @@ export async function POST(request: NextRequest) {
                 '(e.g. "accent chair", "coffee table"). Keep labels under 6 words.',
                 "If a crop is ambiguous, use the most likely furniture name.",
                 `Respond with one label per instance index (${crops
-                  .map((crop) => crop.instanceIndex)
+                  .map((crop: { instanceIndex: number }) => crop.instanceIndex)
                   .join(", ")}).`,
               ].join(" "),
             },
@@ -116,11 +134,27 @@ export async function POST(request: NextRequest) {
       ],
     });
 
-    // Keep only labels for instance indices the caller actually sent — the
-    // model occasionally echoes stray indices, and the client keys labels
+    // Keep only labels for instance indices the caller actually sent —
+    // the model occasionally echoes stray indices, and the client keys labels
     // by detection-response index.
-    const requested = new Set(crops.map((crop) => crop.instanceIndex));
-    const labels = object.labels.filter((entry) => requested.has(entry.instanceIndex));
+    const requested = new Set(crops.map((crop: { instanceIndex: number }) => crop.instanceIndex));
+    const labels = object.labels.filter((entry: { instanceIndex: number }) =>
+      requested.has(entry.instanceIndex)
+    );
+
+    // Issue #266: persist successful labels so re-opening the editor skips billing.
+    if (labels.length > 0) {
+      await upsertVisionLabels({
+        imageUrl,
+        concept,
+        results: labels.map(
+          (l: { instanceIndex: number; label: string }) => ({
+            instanceIndex: l.instanceIndex,
+            label: l.label,
+          })
+        ),
+      });
+    }
 
     return NextResponse.json({ success: true, labels }, { status: 200 });
   } catch (error) {

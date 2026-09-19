@@ -89,3 +89,17 @@ model InpaintRequest {
 
   @@index([roomId])
 }
+
+// VisionLabel model: caches GPT-4o-mini vision labels for detected instances
+// so re-opening the editor does not re-bill (issue #266).
+model VisionLabel {
+  id             String   @id @default(cuid())
+  imageUrlHash   String   // hash of imageUrl (stable identifier)
+  concept        String   // e.g. "furniture", "rug", etc.
+  instanceIndex  Int
+  label          String   // GPT-4o-mini's label text
+  score          Float?
+  createdAt      DateTime @default(now())
+
+  @@unique([imageUrlHash, concept, instanceIndex])
+}

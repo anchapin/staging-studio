@@ -86,6 +86,57 @@ export function maskBounds(
   return { minX, minY, maxX, maxY };
 }
 
+import { prisma } from "@/lib/prisma";
+
+// ---------------------------------------------------------------------------
+// Issue #266: persistent vision-label cache so re-opening the editor skips billing
+// ---------------------------------------------------------------------------
+
+/** DJB2-style base36 hash of an imageUrl for stable DB keys */
+export function hashImageUrl(url: string): string {
+  let hash = 5381;
+  for (let i = 0; i < url.length; i++) {
+    hash = (hash << 5) + hash ^ url.charCodeAt(i);
+  }
+  return Math.abs(hash).toString(36);
+}
+
+export async function getCachedVisionLabels(params: {
+  imageUrl: string;
+  concept: string;
+  instanceIndices: number[];
+}) {
+  const { imageUrl, concept, instanceIndices } = params;
+  const imageUrlHash = hashImageUrl(imageUrl);
+  const labels = await prisma.visionLabel.findMany({
+    where: {
+      imageUrlHash,
+      concept,
+      instanceIndex: { in: instanceIndices },
+    },
+  });
+  return labels;
+}
+
+export async function upsertVisionLabels(params: {
+  imageUrl: string;
+  concept: string;
+  results: Array<{ instanceIndex: number; label: string; score?: number }>;
+}) {
+  const { imageUrl, concept, results } = params;
+  const imageUrlHash = hashImageUrl(imageUrl);
+  await prisma.visionLabel.createMany({
+    data: results.map((r) => ({
+      imageUrlHash,
+      concept,
+      instanceIndex: r.instanceIndex,
+      label: r.label,
+      score: r.score,
+    })),
+    skipDuplicates: true,
+  });
+}
+
 /**
  * The first painted cell scanning top-to-bottom, then left-to-right —
  * the badge anchor for a merged region (issue #252 D4: topmost-leftmost
