@@ -216,6 +216,7 @@ export const visionLabelCropSchema = z
 export const visionLabelRequestSchema = z
   .object({
     roomId: z.string().min(1),
+    imageUrl: aiImageUrlSchema,
     concept: segmentConceptSchema,
     crops: z
       .array(visionLabelCropSchema)
