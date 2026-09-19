@@ -79,6 +79,17 @@ export function inpaintSourcesEqual(a: InpaintSource, b: InpaintSource): boolean
 }
 
 /**
+ * Whether the editor's Entire-room staging tab is available (issue #252
+ * D5/AC-L4): visible iff the displayed base image is the ORIGINAL source
+ * photo — a full restage never runs on top of a staged result, so the tab
+ * hides over any variant and reappears when the base switches back. Pure
+ * function of the source alone, pinned by `tests/inpaint-source.test.ts`.
+ */
+export function entireRoomTabVisible(source: InpaintSource): boolean {
+  return source.kind === "original";
+}
+
+/**
  * The image URL an inpaint run edits from, or `null` when the source's
  * image is missing (callers fall back to the before photo; the selector
  * only ever offers existing variants, so this is defensive).

@@ -196,6 +196,7 @@ export const visionLabelCropSchema = z
     cropDataUrl: z
       .string()
       .startsWith("data:image/")
+      .min(100, { message: "Crop data is missing." })
       .max(1_500_000, { message: "Crop exceeds the size limit." }),
   })
   .strict();

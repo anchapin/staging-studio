@@ -79,6 +79,13 @@ export async function POST(request: NextRequest) {
 
     assertOpenAIConfigured();
 
+    // Crop data URLs → raw base64 (the AI SDK's `file` part takes decoded
+    // bytes; the deprecated `image` part is avoided).
+    const cropsWithBytes = crops.map((crop) => ({
+      instanceIndex: crop.instanceIndex,
+      base64: crop.cropDataUrl.slice(crop.cropDataUrl.indexOf(",") + 1),
+    }));
+
     const { object } = await generateObject({
       model: aiModel,
       schema: visionLabelOutputSchema,
@@ -99,9 +106,10 @@ export async function POST(request: NextRequest) {
                   .join(", ")}).`,
               ].join(" "),
             },
-            ...crops.map((crop) => ({
-              type: "image" as const,
-              image: crop.cropDataUrl,
+            ...cropsWithBytes.map((crop) => ({
+              type: "file" as const,
+              mediaType: "image/jpeg" as const,
+              data: crop.base64,
             })),
           ],
         },

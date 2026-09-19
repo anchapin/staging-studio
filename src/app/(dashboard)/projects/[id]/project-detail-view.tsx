@@ -527,15 +527,32 @@ export default function ProjectDetailView({
    */
   const focusedEditingSlot =
     focusedRoom && focusedInputs
-      ? resolveActiveEditingSlot(
-          focusedInputs.inpaintSource,
-          focusedInputs.pendingSource
-        )
-      : null;
+        ? resolveActiveEditingSlot(
+            focusedInputs.inpaintSource,
+            focusedInputs.pendingSource
+          )
+        : null;
+
+  // Issue #252 D5: laptop-first fixed-viewport layout for the focused
+  // editor — the page fills the dashboard shell's height and the editor's
+  // two panes scroll internally, so page-level scrolling dies at laptop
+  // size. Only when the editor actually renders (a before photo exists);
+  // grid and photo-less views keep the normal scrolling page.
+  const laptopFixedLayout =
+    layoutMode === "focused" &&
+    focusedRoom !== null &&
+    focusedInputs !== null &&
+    focusedRoom.beforeImageUrl !== null;
 
   return (
-    <div className="min-h-screen bg-stone-50">
-      <header className="bg-white border-b border-stone-200 px-8 py-4">
+    <div
+      className={
+        laptopFixedLayout
+          ? "flex min-h-screen flex-col bg-stone-50 lg:h-full lg:overflow-hidden"
+          : "min-h-screen bg-stone-50"
+      }
+    >
+      <header className="shrink-0 bg-white border-b border-stone-200 px-8 py-4">
         <div className="flex items-center justify-between">
           <div>
             <Link
@@ -566,32 +583,56 @@ export default function ProjectDetailView({
         </div>
       </header>
 
-      <main className="p-8">
+      <main
+        className={
+          laptopFixedLayout
+            ? "flex min-h-0 flex-1 flex-col p-8 lg:overflow-hidden"
+            : "p-8"
+        }
+      >
         {focusedRoom && focusedInputs && layoutMode === "focused" ? (
           /*
            * Focused single-room editing (issue #169): only this room's
            * imagery and editor render, spanning the full available content
            * width — no half-width grid card, no other rooms splitting
-           * attention. The mask canvas drops its compact cap (fullWidth),
-           * while the source selector (#170) and masking guidance (#171)
-           * stay exactly where the editor renders them. "All rooms" is the
-           * visible affordance back to the grid.
+           * attention. The mask canvas drops its compact cap (fullWidth).
+           * "All rooms" is the visible affordance back to the grid.
+           *
+           * Issue #252 D5: laptop-first fixed-viewport layout — the page
+           * fills the dashboard shell's height and the editor's two panes
+           * (mask canvas left, tabbed control panel right) scroll
+           * internally, so page-level scrolling dies at laptop size. The
+           * room imagery, variant strip, directives, staged result, and
+           * copy sections render through the editor's secondaryPane slot:
+           * height-capped and internally scrollable above the mask canvas
+           * at lg+.
            */
-          <div>
-            <button
-              type="button"
-              onClick={() => setEditorRoomId(null)}
-              className="inline-flex items-center gap-2 text-sm text-stone-500 hover:text-stone-700"
-            >
-              <ArrowLeft className="w-4 h-4" aria-hidden="true" />
-              All rooms
-            </button>
+          <div className="flex min-h-0 flex-col lg:flex-1">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+              <button
+                type="button"
+                onClick={() => setEditorRoomId(null)}
+                className="inline-flex items-center gap-2 text-sm text-stone-500 hover:text-stone-700"
+              >
+                <ArrowLeft className="w-4 h-4" aria-hidden="true" />
+                All rooms
+              </button>
+              <h2 className="font-playfair text-xl font-semibold text-stone-800">
+                {focusedRoom.name}
+              </h2>
+            </div>
 
-            <h2 className="font-playfair text-xl font-semibold text-stone-800 mt-4">
-              {focusedRoom.name}
-            </h2>
-
-            <div className="mt-6 space-y-8">
+            {/* One PERSISTENT RoomCanvas for the focused room, above the
+                photo/no-photo conditional: the upload flow completes by
+                flipping this branch (beforeImageUrl arrives), and a canvas
+                living INSIDE a branch would unmount mid-flight — wiping the
+                "Room photo upload complete." status before it can be read
+                (pre-#252 regression guard; the element also anchors the
+                a11y live region the upload flow announces through). At lg+
+                it is height-capped with internal scroll so it can never
+                push the fixed-layout editor below the overflow-hidden clip
+                (issue #252 D5: page-level scrolling dies at laptop size). */}
+            <div className="mt-4 lg:min-h-0 lg:max-h-[45%] lg:overflow-y-auto">
               <RoomCanvas
                 roomId={focusedRoom.id}
                 projectId={project.id}
@@ -607,160 +648,161 @@ export default function ProjectDetailView({
                   router.refresh();
                 }}
               />
-
-              {focusedRoom.beforeImageUrl && (
-                <VariantThumbnailStrip
-                  roomName={focusedRoom.name}
-                  originalUrl={focusedRoom.beforeImageUrl}
-                  pairs={focusedInputs.pairs}
-                  selection={resolveStripSelection(
-                    focusedRoom.selectedVariantIndex,
-                    focusedInputs.pairs
-                  )}
-                  onSelect={(selection) =>
-                    void handleStripSelect(focusedRoom, selection)
-                  }
-                  onDeleteVariant={(slot) =>
-                    void handleDeleteVariant(focusedRoom, slot)
-                  }
-                  deletingSlot={deletingSlotByRoom[focusedRoom.id] ?? null}
-                  touchUpCounts={touchUpCountsByRoom[focusedRoom.id] ?? null}
-                />
-              )}
-
-              {focusedRoom.beforeImageUrl ? (
-                <>
-                  <section aria-label="Staging directives">
-                    <label
-                      htmlFor={`directives-${focusedRoom.id}`}
-                      className="block text-sm font-medium text-stone-700 mb-1"
-                    >
-                      Staging directives (required)
-                    </label>
-                    <textarea
-                      id={`directives-${focusedRoom.id}`}
-                      value={focusedInputs.roomDirectives}
-                      onChange={(e) =>
-                        setDirectives((prev) => ({
-                          ...prev,
-                          [focusedRoom.id]: e.target.value,
-                        }))
-                      }
-                      maxLength={MAX_DIRECTIVE_LENGTH}
-                      rows={3}
-                      placeholder="e.g. Add a neutral linen sofa, warm wood coffee table, and layered lighting..."
-                      className="w-full px-3 py-2 border border-stone-300 rounded-md focus:outline-none focus:ring-2 focus:ring-stone-500 resize-none"
-                    />
-                    <p className="mt-1 text-xs text-stone-400 text-right">
-                      {focusedInputs.roomDirectives.length}/{MAX_DIRECTIVE_LENGTH}
-                    </p>
-                  </section>
-
-                  <section aria-label="AI staging">
-                    <h3 className="text-sm font-semibold text-stone-800 mb-3">
-                      AI Staging
-                    </h3>
-                    {focusedEditingSlot !== null && (
-                      <p
-                        role="status"
-                        className="mb-3 inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800 ring-1 ring-amber-200"
-                      >
-                        {variantTouchUpLabel(
-                          focusedEditingSlot,
-                          touchUpCountsByRoom[focusedRoom.id]?.[
-                            focusedEditingSlot
-                          ] ?? 0
-                        )}
-                      </p>
-                    )}
-                    <InpaintEditor
-                      roomId={focusedRoom.id}
-                      imageUrl={focusedInputs.inpaintImageUrl ?? ""}
-                      aesthetic={project.stagingAesthetic}
-                      promptDirectives={focusedInputs.roomDirectives.trim()}
-                      variantSlot={resolveInpaintTargetSlot(
-                        focusedRoom,
-                        focusedInputs.inpaintSource
-                      )}
-                      source={focusedInputs.inpaintSource}
-                      sourceOptions={listInpaintSources(focusedRoom)}
-                      fullWidth
-                      onSourceChange={(next) =>
-                        setInpaintSourceByRoom((prev) => ({
-                          ...prev,
-                          [focusedRoom.id]: next,
-                        }))
-                      }
-                      pendingRequestId={focusedInputs.pendingRequest?.id ?? null}
-                      pendingSource={focusedInputs.pendingSource}
-                      onActiveConceptLabelChange={(label) => {
-                        // Issue #230: seed the single-object staging
-                        // directives with the concept pre-fill, only when
-                        // the effective field is still empty — typed
-                        // directives are never clobbered, and clearing the
-                        // seed degrades to raw directives (no mode flag).
-                        if (!label) return;
-                        setDirectives((prev) => {
-                          const current =
-                            prev[focusedRoom.id] ?? focusedRoom.rawDirectives ?? "";
-                          if (current.trim().length > 0) return prev;
-                          return { ...prev, [focusedRoom.id]: buildPrefill(label) };
-                        });
-                      }}
-                      onInpaintComplete={(resultImageUrl, runSource) =>
-                        void persistInpaintResult(
-                          focusedRoom,
-                          resultImageUrl,
-                          runSource
-                        )
-                      }
-                    />
-                  </section>
-
-                  {focusedInputs.staged && (
-                    <section aria-label="Staged result">
-                      <h3 className="text-sm font-semibold text-stone-800 mb-3">
-                        Staged result
-                      </h3>
-                      <StagedResultImage
-                        afterImageUrl={focusedInputs.staged.afterImageUrl}
-                        alt={focusedInputs.staged.alt}
-                        label={focusedInputs.staged.label}
-                        largeImage
-                      />
-                    </section>
-                  )}
-
-                  <section
-                    aria-label="Room copy"
-                    className="border-t border-stone-200 pt-4"
-                  >
-                    <h3 className="text-sm font-semibold text-stone-800 mb-3">
-                      Room Copy
-                    </h3>
-                    <GenerateCopyForm
-                      roomId={focusedRoom.id}
-                      initialDirectives={focusedInputs.roomDirectives}
-                      onCopyGenerated={(
-                        _copy: GeneratedCopy,
-                        rawDirectives: string
-                      ) =>
-                        // The form saves directives before generating;
-                        // mirror them into the inpaint editor's state.
-                        setDirectives((prev) => ({
-                          ...prev,
-                          [focusedRoom.id]: rawDirectives,
-                        }))
-                      }
-                    />
-                  </section>
-                </>
-              ) : (
-                <p className="text-sm text-stone-500">
-                  Upload a room photo first to enable AI staging and copy.
-                </p>
-              )}
             </div>
+
+            {focusedRoom.beforeImageUrl ? (
+              <section
+                aria-label="AI staging"
+                className="mt-4 flex min-h-0 flex-col lg:flex-1"
+              >                <h3 className="text-sm font-semibold text-stone-800 mb-3">
+                  AI Staging
+                </h3>
+                {focusedEditingSlot !== null && (
+                  <p
+                    role="status"
+                    className="mb-3 inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800 ring-1 ring-amber-200"
+                  >
+                    {variantTouchUpLabel(
+                      focusedEditingSlot,
+                      touchUpCountsByRoom[focusedRoom.id]?.[
+                        focusedEditingSlot
+                      ] ?? 0
+                    )}
+                  </p>
+                )}
+                <InpaintEditor
+                  roomId={focusedRoom.id}
+                  imageUrl={focusedInputs.inpaintImageUrl ?? ""}
+                  aesthetic={project.stagingAesthetic}
+                  promptDirectives={focusedInputs.roomDirectives.trim()}
+                  variantSlot={resolveInpaintTargetSlot(
+                    focusedRoom,
+                    focusedInputs.inpaintSource
+                  )}
+                  source={focusedInputs.inpaintSource}
+                  sourceOptions={listInpaintSources(focusedRoom)}
+                  fullWidth
+                  onSourceChange={(next) =>
+                    setInpaintSourceByRoom((prev) => ({
+                      ...prev,
+                      [focusedRoom.id]: next,
+                    }))
+                  }
+                  pendingRequestId={focusedInputs.pendingRequest?.id ?? null}
+                  pendingSource={focusedInputs.pendingSource}
+                  onActiveConceptLabelChange={(label) => {
+                    // Issue #230: seed the single-object staging
+                    // directives with the concept pre-fill, only when
+                    // the effective field is still empty — typed
+                    // directives are never clobbered, and clearing the
+                    // seed degrades to raw directives (no mode flag).
+                    if (!label) return;
+                    setDirectives((prev) => {
+                      const current =
+                        prev[focusedRoom.id] ?? focusedRoom.rawDirectives ?? "";
+                      if (current.trim().length > 0) return prev;
+                      return { ...prev, [focusedRoom.id]: buildPrefill(label) };
+                    });
+                  }}
+                  onInpaintComplete={(resultImageUrl, runSource) =>
+                    void persistInpaintResult(
+                      focusedRoom,
+                      resultImageUrl,
+                      runSource
+                    )
+                  }
+                  secondaryPane={
+                    <>
+                      <VariantThumbnailStrip
+                        roomName={focusedRoom.name}
+                        originalUrl={focusedRoom.beforeImageUrl}
+                        pairs={focusedInputs.pairs}
+                        selection={resolveStripSelection(
+                          focusedRoom.selectedVariantIndex,
+                          focusedInputs.pairs
+                        )}
+                        onSelect={(selection) =>
+                          void handleStripSelect(focusedRoom, selection)
+                        }
+                        onDeleteVariant={(slot) =>
+                          void handleDeleteVariant(focusedRoom, slot)
+                        }
+                        deletingSlot={deletingSlotByRoom[focusedRoom.id] ?? null}
+                        touchUpCounts={touchUpCountsByRoom[focusedRoom.id] ?? null}
+                      />
+
+                      <section aria-label="Staging directives">
+                        <label
+                          htmlFor={`directives-${focusedRoom.id}`}
+                          className="block text-sm font-medium text-stone-700 mb-1"
+                        >
+                          Staging directives (required)
+                        </label>
+                        <textarea
+                          id={`directives-${focusedRoom.id}`}
+                          value={focusedInputs.roomDirectives}
+                          onChange={(e) =>
+                            setDirectives((prev) => ({
+                              ...prev,
+                              [focusedRoom.id]: e.target.value,
+                            }))
+                          }
+                          maxLength={MAX_DIRECTIVE_LENGTH}
+                          rows={3}
+                          placeholder="e.g. Add a neutral linen sofa, warm wood coffee table, and layered lighting..."
+                          className="w-full px-3 py-2 border border-stone-300 rounded-md focus:outline-none focus:ring-2 focus:ring-stone-500 resize-none"
+                        />
+                        <p className="mt-1 text-xs text-stone-400 text-right">
+                          {focusedInputs.roomDirectives.length}/{MAX_DIRECTIVE_LENGTH}
+                        </p>
+                      </section>
+
+                      {focusedInputs.staged && (
+                        <section aria-label="Staged result">
+                          <h3 className="text-sm font-semibold text-stone-800 mb-3">
+                            Staged result
+                          </h3>
+                          <StagedResultImage
+                            afterImageUrl={focusedInputs.staged.afterImageUrl}
+                            alt={focusedInputs.staged.alt}
+                            label={focusedInputs.staged.label}
+                            largeImage
+                          />
+                        </section>
+                      )}
+
+                      <section
+                        aria-label="Room copy"
+                        className="border-t border-stone-200 pt-4"
+                      >
+                        <h3 className="text-sm font-semibold text-stone-800 mb-3">
+                          Room Copy
+                        </h3>
+                        <GenerateCopyForm
+                          roomId={focusedRoom.id}
+                          initialDirectives={focusedInputs.roomDirectives}
+                          onCopyGenerated={(
+                            _copy: GeneratedCopy,
+                            rawDirectives: string
+                          ) =>
+                            // The form saves directives before generating;
+                            // mirror them into the inpaint editor's state.
+                            setDirectives((prev) => ({
+                              ...prev,
+                              [focusedRoom.id]: rawDirectives,
+                            }))
+                          }
+                        />
+                      </section>
+                    </>
+                  }
+                />
+              </section>
+            ) : (
+              <p className="mt-6 text-sm text-stone-500">
+                Upload a room photo first to enable AI staging and copy.
+              </p>
+            )}
           </div>
         ) : (
           <>

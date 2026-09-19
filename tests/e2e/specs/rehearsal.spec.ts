@@ -10,6 +10,7 @@ import {
   interceptLabelInstances,
   login,
   mockStorageEntries,
+  openEditorTab,
   paintMaskZigzag,
   uploadRoomPhotoViaUi,
   whitePixelShare,
@@ -74,6 +75,9 @@ test.describe("rehearsal drill", () => {
     // ---- Directives + mask --------------------------------------------
     await page.getByLabel("Staging directives (required)").fill(DIRECTIVES);
     await paintMaskZigzag(page);
+    // Issue #252: the single-object run affordance lives in the Manual
+    // paint tab; the editor opens on Auto detect (flag on).
+    await openEditorTab(page, "Manual paint");
     const applyButton = page.getByRole("button", { name: "Apply Inpainting" });
     await expect(applyButton).toBeEnabled();
 
@@ -172,6 +176,9 @@ test.describe("rehearsal drill", () => {
 
     await page.getByLabel("Staging directives (required)").fill(DIRECTIVES);
     await paintMaskZigzag(page);
+    // Issue #252: the single-object run affordance lives in the Manual
+    // paint tab; the editor opens on Auto detect (flag on).
+    await openEditorTab(page, "Manual paint");
 
     await page.getByRole("button", { name: "Apply Inpainting" }).click();
 

@@ -32,7 +32,7 @@ describe("generateCopyRequestSchema", () => {
 });
 
 describe("visionLabelRequestSchema", () => {
-  const crop = { instanceIndex: 0, cropDataUrl: "data:image/png;base64,AAAA" };
+  const crop = { instanceIndex: 0, cropDataUrl: `data:image/jpeg;base64,${"A".repeat(200)}` };
 
   it("accepts a body with roomId, concept, and one or more crops", () => {
     const result = visionLabelRequestSchema.safeParse({
@@ -49,7 +49,7 @@ describe("visionLabelRequestSchema", () => {
     ).toBe(false);
     const tooMany = Array.from({ length: 31 }, (_, index) => ({
       instanceIndex: index,
-      cropDataUrl: "data:image/png;base64,AAAA",
+      cropDataUrl: `data:image/jpeg;base64,${"A".repeat(200)}`,
     }));
     expect(
       visionLabelRequestSchema.safeParse({ roomId: "r", concept: "sofa", crops: tooMany }).success

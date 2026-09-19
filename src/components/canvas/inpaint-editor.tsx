@@ -1,11 +1,19 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef, useMemo, useId } from "react";
+import type { ReactNode } from "react";
 import InpaintMaskCanvas from "./inpaint-mask-canvas";
+import EditorTabBar, {
+  editorTabId,
+  editorTabPanelId,
+  type EditorTab,
+  type EditorTabId,
+} from "./editor-tab-bar";
 import { useToast, ToastContainer } from "@/components/ui/toast";
 import { Loader2 } from "lucide-react";
 import { useInpaintStatus } from "./use-inpaint-status";
 import {
+  entireRoomTabVisible,
   inpaintSourceLabel,
   inpaintSourcesEqual,
   type InpaintSource,
@@ -43,7 +51,9 @@ import {
   advanceBatchProgress,
   applyConceptSelectAll,
   applyConceptToggle,
+  batchProgressText,
   buildBatchPlan,
+  hasFailedStep,
   initialBatchProgress,
   reduceSelectionSet,
   unionMaskBuffers,
@@ -84,6 +94,14 @@ interface InpaintEditorProps {
    * available content width instead of the compact card cap.
    */
   fullWidth?: boolean;
+  /**
+   * Issue #252 D5: content rendered above the mask canvas in the left
+   * pane (the focused page's room imagery, variant strip, and directives
+   * sections). At lg+ this area is height-capped and scrolls internally
+   * so the canvas and the control panel stay in view without page-level
+   * scrolling.
+   */
+  secondaryPane?: ReactNode;
 }
 
 /** Resolves when the image is loaded; rejects on a load error. */
@@ -398,6 +416,7 @@ export default function InpaintEditor({
   onInpaintComplete,
   onActiveConceptLabelChange,
   fullWidth = false,
+  secondaryPane,
 }: InpaintEditorProps) {
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
   const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
@@ -538,7 +557,16 @@ export default function InpaintEditor({
 
     let cancelled = false;
     void (async () => {
-      const sourceImg = await loadImage(imageUrl).catch(() => null);
+      // crossOrigin=anonymous keeps the crop canvas untainted so
+      // toDataURL can rasterize crops (the storage mock and Supabase both
+      // send permissive CORS headers; a CORS failure just skips labeling).
+      const sourceImg = await new Promise<HTMLImageElement | null>((resolve) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => resolve(img);
+        img.onerror = () => resolve(null);
+        img.src = imageUrl;
+      });
       if (!sourceImg) return;
       const crops: Array<{ instanceIndex: number; cropDataUrl: string }> = [];
       for (let index = 0; index < decodedInstances.length; index++) {
@@ -1194,7 +1222,7 @@ export default function InpaintEditor({
         setSelectedInstanceIndices([]);
         showSuccess(
           `Batch complete — ${plan.steps.length} ${
-            plan.steps.length === 1 ? "object" : "objects"
+            plan.steps.length === 1 ? "region" : "regions"
           } staged.`
         );
       } finally {
@@ -1277,265 +1305,416 @@ export default function InpaintEditor({
   const detectedCount = decodedInstances?.filter(Boolean).length ?? 0;
   const selectionCount = Math.max(batchSelections.length, selectedInstanceIndices.length);
 
+  // Issue #252 D5: control-panel tab state — purely presentational, so
+  // switching never touches staging state (AC-L5). The default follows
+  // the SAM flag: Auto detect when the tool compiles in, Manual paint
+  // otherwise (the Detect tab is flag-gated away without it).
+  const [activeTab, setActiveTab] = useState<EditorTabId>(
+    SAM_TOOL_ENABLED ? "detect" : "manual"
+  );
+  const tabIdBase = useId();
+  // AC-L4: tab availability is a pure function of the displayed base
+  // image — Entire room only over the original photo. Derived in render
+  // (zero effects): over a variant the tab disappears and the panel lands
+  // on Manual; switching back brings Entire room (and its active state)
+  // straight back.
+  const showEntireRoomTab = entireRoomTabVisible(source);
+  const effectiveTab =
+    activeTab === "entire" && !showEntireRoomTab ? "manual" : activeTab;
+  const editorTabs: EditorTab[] = [
+    ...(showEntireRoomTab
+      ? [{ id: "entire" as const, label: "Entire room" }]
+      : []),
+    {
+      id: "manual",
+      label: "Manual paint",
+      // Un-run work badge (AC-L5): a painted-but-unapplied mask.
+      badge: maskDataUrl ? true : undefined,
+    },
+    ...(SAM_TOOL_ENABLED
+      ? [
+          {
+            id: "detect" as const,
+            label: "Auto detect",
+            // Un-run work badge: pending region selections.
+            badge: selectionCount > 0 ? selectionCount : undefined,
+          },
+        ]
+      : []),
+  ];
+
   return (
-    <div className="flex flex-col gap-6">
-      {sourceOptions.length > 1 && (
-        <fieldset className="rounded-md border border-stone-200 p-3">
-          <legend className="px-1 text-sm font-medium text-stone-700">
-            Edit from
-          </legend>
-          <div className="flex flex-wrap gap-x-4 gap-y-2">
-            {sourceOptions.map((option) => (
-              <label
-                key={inpaintSourceLabel(option)}
-                className="inline-flex cursor-pointer items-center gap-2 text-sm text-stone-700"
-              >
-                <input
-                  type="radio"
-                  name={`inpaint-source-${roomId}`}
-                  value={inpaintSourceLabel(option)}
-                  checked={inpaintSourcesEqual(option, source)}
-                  disabled={isProcessing}
-                  onChange={() => handleSourceChange(option)}
-                  className="h-4 w-4 accent-stone-800"
-                />
-                {inpaintSourceLabel(option)}
-              </label>
-            ))}
-          </div>
-        </fieldset>
-      )}
-
-      <div className="flex flex-col gap-3">
-        {/* Issue #228: concept chips + validated free text. Chips enforce
-            single-concept by construction; free text is validated with
-            isValidConceptName (the server schema's client mirror) BEFORE
-            any billed call is built. Flag-gated with the tool itself. */}
-        {SAM_TOOL_ENABLED && (
-          <div className="flex flex-col gap-2">
-            <div
-              role="group"
-              aria-label="Detection concept"
-              aria-busy={conceptLoading}
-              className="flex flex-wrap items-center gap-2"
-            >
-              <span className="text-sm font-medium text-stone-700">Concept:</span>
-              {CONCEPT_CHIPS.map((chip) => (
-                <button
-                  key={chip}
-                  type="button"
-                  aria-pressed={requestedConcept === chip}
-                  disabled={isProcessing}
-                  onClick={() => handleConceptChange(chip)}
-                  className={
-                    requestedConcept === chip
-                      ? "px-2.5 py-1 text-xs rounded-full border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors"
-                      : "px-2.5 py-1 text-xs rounded-full border border-gray-300 bg-white text-stone-700 hover:bg-gray-50 transition-colors"
-                  }
-                >
-                  {chip}
-                </button>
-              ))}
-              {/* Issue #249: bulk selection affordances. Select-all is a
-                  pure client-side walk over the decoded instances (zero
-                  billed calls); it stops at the batch cap and says so. */}
-              <button
-                type="button"
-                onClick={handleSelectAllDetected}
-                disabled={
-                  isProcessing ||
-                  conceptLoading ||
-                  detectedCount === 0 ||
-                  selectionCount >= Math.min(detectedCount, MAX_BATCH_OBJECTS)
-                }
-                className="px-2.5 py-1 text-xs rounded-md border border-stone-800 bg-white text-stone-800 hover:bg-stone-100 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Select all detected
-              </button>
-              <button
-                type="button"
-                onClick={handleClearSelection}
-                disabled={isProcessing || selectionCount === 0}
-                className="px-2.5 py-1 text-xs rounded-md border border-gray-300 bg-white text-stone-700 hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Clear selection
-              </button>
-            </div>
-            <form onSubmit={handleConceptSubmit} className="flex flex-wrap items-center gap-2">
-              <label htmlFor={conceptInputId} className="text-xs text-stone-600">
-                Custom concept:
-              </label>
-              <input
-                id={conceptInputId}
-                type="text"
-                value={conceptInput}
-                onChange={(event) => {
-                  setConceptInput(event.target.value);
-                  if (conceptInputError) setConceptInputError(null);
-                }}
-                placeholder="e.g. wall art"
-                className="w-44 rounded-md border border-gray-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-stone-500"
-              />
-              <button
-                type="submit"
-                disabled={isProcessing}
-                className="px-2.5 py-1 text-xs rounded-md border border-stone-800 bg-white text-stone-800 hover:bg-stone-100 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Detect
-              </button>
-            </form>
-            {conceptInputError && (
-              <p role="alert" className="text-xs font-medium text-red-700">
-                {conceptInputError}
-              </p>
-            )}
-            {conceptLoading && (
-              <p role="status" className="text-xs text-stone-600">
-                Looking for {requestedConcept}…
-              </p>
-            )}
-            {!conceptLoading && conceptSegments.status === "failed" && (
-              <p role="status" className="text-xs font-medium text-amber-700">
-                Couldn&apos;t detect &quot;{requestedConcept}&quot; — try again, another
-                concept, or the brush.
-              </p>
-            )}
-            {!conceptLoading &&
-              displayedResult &&
-              displayedResult.concept === requestedConcept &&
-              displayedResult.maskDataUrls.length === 0 && (
-                <p role="status" className="text-xs text-stone-600">
-                  {buildConceptEmptyMessage(requestedConcept)}
-                </p>
-              )}
-            {selectAllNotice && (
-              <p role="status" className="text-xs text-stone-600">
-                {selectAllNotice}
-              </p>
-            )}
+    /* Issue #252 D5: laptop-first two-pane layout — mask canvas LEFT
+       sized to the remaining viewport, fixed-width control panel RIGHT;
+       both panes scroll internally so page-level scrolling dies at laptop
+       size (AC-L1/L2). Below lg the same tabs stack in one column
+       (AC-L6). */
+    <div
+      className={`flex flex-col gap-6 ${
+        fullWidth ? "lg:min-h-0 lg:flex-1 lg:flex-row lg:gap-6" : ""
+      }`}
+    >
+      {/* ---- LEFT PANE: room imagery (optional slot) + mask canvas ------ */}
+      <div
+        className={`flex min-w-0 flex-col gap-4 ${
+          fullWidth ? "lg:min-h-0 lg:flex-1" : ""
+        }`}
+      >
+        {secondaryPane && (
+          <div
+            className={`flex flex-col gap-6 ${
+              fullWidth ? "lg:max-h-[45%] lg:min-h-0 lg:overflow-y-auto" : ""
+            }`}
+          >
+            {secondaryPane}
           </div>
         )}
-        <h4 className="text-sm font-medium text-stone-700 mb-2">Source Image</h4>
-        <InpaintMaskCanvas
-          overlayImageSrc={imageUrl}
-          aspectRatio={aspectRatio}
-          naturalWidth={imageDims?.width ?? null}
-          naturalHeight={imageDims?.height ?? null}
-          initialMaskDataUrl={maskDataUrl}
-          onMaskChange={setMaskDataUrl}
-          onInstanceToggle={handleInstanceToggle}
-          segmentDisabled={isProcessing || conceptLoading}
-          segmenting={conceptLoading}
-          instanceOverlays={instanceOverlays}
-          selectionMarkers={selectionMarkers}
-          expansionRadius={maskExpansion}
-          fullWidth={fullWidth}
-          selectionReset={selectionReset}
-          onMaskCleared={handleMaskCleared}
-        />
-
-        <label className="flex items-center gap-2 text-sm text-stone-700">
-          Mask Expansion:
-          <input
-            type="range"
-            min={0}
-            max={MAX_MASK_EXPANSION_RADIUS}
-            value={maskExpansion}
-            onChange={(e) => setMaskExpansion(Number(e.target.value))}
-            aria-describedby="mask-expansion-hint"
-            className="w-32"
-          />
-          <span className="w-10 text-right">{maskExpansion}px</span>
-        </label>
-        <p id="mask-expansion-hint" className="text-xs text-gray-500">
-          Grows the mask outward before submitting so frames, bezels, and
-          mounts at the painted edge are replaced too. 0 keeps the mask
-          exactly as painted.
-        </p>
-      </div>
-
-      {/* Issue #203 panel, fed since #229 by the concept toggles: appears
-          once at least one detected instance has been toggled in. Thematic
-          runs go through the shared single-run launcher; per-object plans
-          execute sequentially with per-step progress and a retry
-          affordance. */}
-      {batchSelections.length > 0 && (
-        <BatchStagingPanel
-          selections={batchSelections}
-          maxObjects={MAX_BATCH_OBJECTS}
-          disabled={isProcessing || conceptLoading}
-          processing={isProcessing}
-          activeBatch={activeBatch}
-          onRun={handleBatchRun}
-          onRetryRemaining={handleBatchRetry}
-          onRemoveLast={handleRemoveLastSelection}
-          instanceLabels={instanceLabels}
-        />
-      )}
-
-      <div className="flex items-center gap-4">
-        <button
-          onClick={handleInpaint}
-          disabled={isProcessing || conceptLoading || !maskDataUrl}
-          className={`
-            flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium
-            transition-colors
-            ${isProcessing || conceptLoading || !maskDataUrl
-              ? "bg-stone-300 text-stone-500 cursor-not-allowed"
-              : "bg-stone-800 text-white hover:bg-stone-700"
-            }
-          `}
+        <div
+          className={`flex flex-col gap-3 ${
+            fullWidth ? "lg:min-h-0 lg:flex-1 lg:overflow-y-auto" : ""
+          }`}
         >
-          {isProcessing ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Processing...
-            </>
-          ) : (
-            "Apply Inpainting"
-          )}
-        </button>
-
-        {isProcessing && statusText && (
-          <span className="text-sm text-stone-600">{statusText}</span>
-        )}
-      </div>
-
-      {/* Issue #191/#223 one-click preset, demoted to an optional shortcut
-          by issue #223: the brush → Apply Inpainting flow above is the
-          primary path and works on any source without running the preset
-          first. The preset detects furnishings and restages only those
-          regions (see stage-entire-room-preset.tsx). */}
-      <StageEntireRoomPreset
-        roomId={roomId}
-        imageUrl={imageUrl}
-        aesthetic={aesthetic}
-        imageWidth={imageDims?.width ?? null}
-        imageHeight={imageDims?.height ?? null}
-        disabled={isProcessing || conceptLoading}
-        processing={isProcessing}
-        statusText={statusText}
-        onRun={handleHolisticRun}
-        onError={showError}
-      />
-
-      {/* Issue #190 spike entry — kept as protocol documentation; the
-          polished one-click preset above (issue #191) does not depend on it. */}
-      <details className="no-print rounded-md border border-dashed border-stone-300 p-3 text-sm">
-        <summary className="cursor-pointer select-none text-stone-500">
-          Holistic staging spike (#190) — internal testing only
-        </summary>
-        <div className="pt-3">
-          <HolisticSpikePanel
-            aesthetic={aesthetic}
-            imageWidth={imageDims?.width ?? null}
-            imageHeight={imageDims?.height ?? null}
-            disabled={isProcessing || conceptLoading}
-            onRun={handleHolisticRun}
-            onError={showError}
+          <h4 className="text-sm font-medium text-stone-700 mb-2">Source Image</h4>
+          <InpaintMaskCanvas
+            overlayImageSrc={imageUrl}
+            aspectRatio={aspectRatio}
+            naturalWidth={imageDims?.width ?? null}
+            naturalHeight={imageDims?.height ?? null}
+            initialMaskDataUrl={maskDataUrl}
+            onMaskChange={setMaskDataUrl}
+            onInstanceToggle={handleInstanceToggle}
+            segmentDisabled={isProcessing || conceptLoading}
+            segmenting={conceptLoading}
+            instanceOverlays={instanceOverlays}
+            selectionMarkers={selectionMarkers}
+            expansionRadius={maskExpansion}
+            fullWidth={fullWidth}
+            selectionReset={selectionReset}
+            onMaskCleared={handleMaskCleared}
           />
         </div>
-      </details>
+      </div>
+
+      {/* ---- RIGHT PANE: fixed-width control panel ----------------------- */}
+      <div
+        className={`flex w-full flex-col gap-3 no-print ${
+          fullWidth ? "lg:min-h-0 lg:w-[380px] lg:shrink-0" : ""
+        }`}
+      >
+        {/* AC-L2: batch progress pins to the panel top during a run, so
+            it stays visible beside the canvas on every tab. The full
+            progress + retry affordance stays in the batch panel. */}
+        {activeBatch && (
+          <div
+            role="status"
+            className="flex shrink-0 items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800"
+          >
+            {!hasFailedStep(activeBatch.progress) && (
+              <Loader2
+                className="h-3.5 w-3.5 animate-spin"
+                aria-hidden="true"
+              />
+            )}
+            {batchProgressText(activeBatch.progress) ??
+              "Batch staging in progress…"}
+          </div>
+        )}
+        <div
+          className={`flex flex-col gap-4 ${
+            fullWidth ? "lg:min-h-0 lg:flex-1 lg:overflow-y-auto" : ""
+          }`}
+        >
+          {sourceOptions.length > 1 && (
+            <fieldset className="shrink-0 rounded-md border border-stone-200 p-3">
+              <legend className="px-1 text-sm font-medium text-stone-700">
+                Edit from
+              </legend>
+              <div className="flex flex-wrap gap-x-4 gap-y-2">
+                {sourceOptions.map((option) => (
+                  <label
+                    key={inpaintSourceLabel(option)}
+                    className="inline-flex cursor-pointer items-center gap-2 text-sm text-stone-700"
+                  >
+                    <input
+                      type="radio"
+                      name={`inpaint-source-${roomId}`}
+                      value={inpaintSourceLabel(option)}
+                      checked={inpaintSourcesEqual(option, source)}
+                      disabled={isProcessing}
+                      onChange={() => handleSourceChange(option)}
+                      className="h-4 w-4 accent-stone-800"
+                    />
+                    {inpaintSourceLabel(option)}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
+
+          <div className="sticky top-0 z-10 bg-stone-50 pb-1">
+            <EditorTabBar
+              tabs={editorTabs}
+              activeTab={effectiveTab}
+              onSelectTab={setActiveTab}
+              idBase={tabIdBase}
+            />
+          </div>
+
+          {/* Tab panels stay MOUNTED (hidden, not unmounted) so tab
+              switching performs zero state transitions — the batch
+              panel's prompts and mode survive round-trips (AC-L5). */}
+          <div
+            role="tabpanel"
+            id={editorTabPanelId(tabIdBase, "entire")}
+            aria-labelledby={editorTabId(tabIdBase, "entire")}
+            hidden={effectiveTab !== "entire"}
+          >
+            <div className="flex flex-col gap-6">
+              {/* Issue #191/#223 one-click preset, demoted to an optional
+                  shortcut by issue #223: the brush → Apply Inpainting flow
+                  is the primary path and works on any source without
+                  running the preset first. The preset detects furnishings
+                  and restages only those regions (see
+                  stage-entire-room-preset.tsx). Entire-room staging only
+                  ever runs over the original photo (AC-L4). */}
+              <StageEntireRoomPreset
+                roomId={roomId}
+                imageUrl={imageUrl}
+                aesthetic={aesthetic}
+                imageWidth={imageDims?.width ?? null}
+                imageHeight={imageDims?.height ?? null}
+                disabled={isProcessing || conceptLoading}
+                processing={isProcessing}
+                statusText={statusText}
+                onRun={handleHolisticRun}
+                onError={showError}
+              />
+
+              {/* Issue #190 spike entry — kept as protocol documentation;
+                  the polished one-click preset above (issue #191) does not
+                  depend on it. */}
+              <details className="no-print rounded-md border border-dashed border-stone-300 p-3 text-sm">
+                <summary className="cursor-pointer select-none text-stone-500">
+                  Holistic staging spike (#190) — internal testing only
+                </summary>
+                <div className="pt-3">
+                  <HolisticSpikePanel
+                    aesthetic={aesthetic}
+                    imageWidth={imageDims?.width ?? null}
+                    imageHeight={imageDims?.height ?? null}
+                    disabled={isProcessing || conceptLoading}
+                    onRun={handleHolisticRun}
+                    onError={showError}
+                  />
+                </div>
+              </details>
+            </div>
+          </div>
+
+          <div
+            role="tabpanel"
+            id={editorTabPanelId(tabIdBase, "manual")}
+            aria-labelledby={editorTabId(tabIdBase, "manual")}
+            hidden={effectiveTab !== "manual"}
+          >
+            <div className="flex flex-col gap-3">
+              {/* Manual-paint controls (AC-L7): the expansion slider plus
+                  the single-object run affordance. The brush / Fill Region
+                  / Select Regions toggles live in the canvas toolbar and
+                  stay beside the canvas on every tab, so painted work is
+                  always visible. */}
+              <label className="flex items-center gap-2 text-sm text-stone-700">
+                Mask Expansion:
+                <input
+                  type="range"
+                  min={0}
+                  max={MAX_MASK_EXPANSION_RADIUS}
+                  value={maskExpansion}
+                  onChange={(e) => setMaskExpansion(Number(e.target.value))}
+                  aria-describedby="mask-expansion-hint"
+                  className="w-32"
+                />
+                <span className="w-10 text-right">{maskExpansion}px</span>
+              </label>
+              <p id="mask-expansion-hint" className="text-xs text-gray-500">
+                Grows the mask outward before submitting so frames, bezels, and
+                mounts at the painted edge are replaced too. 0 keeps the mask
+                exactly as painted.
+              </p>
+
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={handleInpaint}
+                  disabled={isProcessing || conceptLoading || !maskDataUrl}
+                  className={`
+                    flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium
+                    transition-colors
+                    ${isProcessing || conceptLoading || !maskDataUrl
+                      ? "bg-stone-300 text-stone-500 cursor-not-allowed"
+                      : "bg-stone-800 text-white hover:bg-stone-700"
+                    }
+                  `}
+                >
+                  {isProcessing ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    "Apply Inpainting"
+                  )}
+                </button>
+
+                {isProcessing && statusText && (
+                  <span className="text-sm text-stone-600">{statusText}</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div
+            role="tabpanel"
+            id={editorTabPanelId(tabIdBase, "detect")}
+            aria-labelledby={editorTabId(tabIdBase, "detect")}
+            hidden={effectiveTab !== "detect"}
+          >
+            <div className="flex flex-col gap-3">
+              {/* Issue #228: concept chips + validated free text. Chips
+                  enforce single-concept by construction; free text is
+                  validated with isValidConceptName (the server schema's
+                  client mirror) BEFORE any billed call is built.
+                  Flag-gated with the tool itself (whole tab hides with the
+                  flag off — the default tab becomes Manual paint). */}
+              {SAM_TOOL_ENABLED && (
+                <div className="flex flex-col gap-2">
+                  <div
+                    role="group"
+                    aria-label="Detection concept"
+                    aria-busy={conceptLoading}
+                    className="flex flex-wrap items-center gap-2"
+                  >
+                    <span className="text-sm font-medium text-stone-700">Concept:</span>
+                    {CONCEPT_CHIPS.map((chip) => (
+                      <button
+                        key={chip}
+                        type="button"
+                        aria-pressed={requestedConcept === chip}
+                        disabled={isProcessing}
+                        onClick={() => handleConceptChange(chip)}
+                        className={
+                          requestedConcept === chip
+                            ? "px-2.5 py-1 text-xs rounded-full border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors"
+                            : "px-2.5 py-1 text-xs rounded-full border border-gray-300 bg-white text-stone-700 hover:bg-gray-50 transition-colors"
+                        }
+                      >
+                        {chip}
+                      </button>
+                    ))}
+                    {/* Issue #249: bulk selection affordances. Select-all
+                        is a pure client-side walk over the decoded
+                        instances (zero billed calls); it stops at the
+                        batch cap and says so. */}
+                    <button
+                      type="button"
+                      onClick={handleSelectAllDetected}
+                      disabled={
+                        isProcessing ||
+                        conceptLoading ||
+                        detectedCount === 0 ||
+                        selectionCount >= Math.min(detectedCount, MAX_BATCH_OBJECTS)
+                      }
+                      className="px-2.5 py-1 text-xs rounded-md border border-stone-800 bg-white text-stone-800 hover:bg-stone-100 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Select all detected
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleClearSelection}
+                      disabled={isProcessing || selectionCount === 0}
+                      className="px-2.5 py-1 text-xs rounded-md border border-gray-300 bg-white text-stone-700 hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Clear selection
+                    </button>
+                  </div>
+                  <form onSubmit={handleConceptSubmit} className="flex flex-wrap items-center gap-2">
+                    <label htmlFor={conceptInputId} className="text-xs text-stone-600">
+                      Custom concept:
+                    </label>
+                    <input
+                      id={conceptInputId}
+                      type="text"
+                      value={conceptInput}
+                      onChange={(event) => {
+                        setConceptInput(event.target.value);
+                        if (conceptInputError) setConceptInputError(null);
+                      }}
+                      placeholder="e.g. wall art"
+                      className="w-44 rounded-md border border-gray-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-stone-500"
+                    />
+                    <button
+                      type="submit"
+                      disabled={isProcessing}
+                      className="px-2.5 py-1 text-xs rounded-md border border-stone-800 bg-white text-stone-800 hover:bg-stone-100 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Detect
+                    </button>
+                  </form>
+                  {conceptInputError && (
+                    <p role="alert" className="text-xs font-medium text-red-700">
+                      {conceptInputError}
+                    </p>
+                  )}
+                  {conceptLoading && (
+                    <p role="status" className="text-xs text-stone-600">
+                      Looking for {requestedConcept}…
+                    </p>
+                  )}
+                  {!conceptLoading && conceptSegments.status === "failed" && (
+                    <p role="status" className="text-xs font-medium text-amber-700">
+                      Couldn&apos;t detect &quot;{requestedConcept}&quot; — try again, another
+                      concept, or the brush.
+                    </p>
+                  )}
+                  {!conceptLoading &&
+                    displayedResult &&
+                    displayedResult.concept === requestedConcept &&
+                    displayedResult.maskDataUrls.length === 0 && (
+                      <p role="status" className="text-xs text-stone-600">
+                        {buildConceptEmptyMessage(requestedConcept)}
+                      </p>
+                    )}
+                  {selectAllNotice && (
+                    <p role="status" className="text-xs text-stone-600">
+                      {selectAllNotice}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Issue #203 panel, fed since #229 by the concept toggles:
+                  appears once at least one detected instance has been
+                  toggled in. Thematic runs go through the shared
+                  single-run launcher; per-object plans execute sequentially
+                  with per-step progress and a retry affordance. The panel
+                  stays mounted across tab switches (hidden, not
+                  unmounted), so its prompts never reset (AC-L5). */}
+              {batchSelections.length > 0 && (
+                <BatchStagingPanel
+                  selections={batchSelections}
+                  maxObjects={MAX_BATCH_OBJECTS}
+                  disabled={isProcessing || conceptLoading}
+                  processing={isProcessing}
+                  activeBatch={activeBatch}
+                  onRun={handleBatchRun}
+                  onRetryRemaining={handleBatchRetry}
+                  onRemoveLast={handleRemoveLastSelection}
+                  instanceLabels={instanceLabels}
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>

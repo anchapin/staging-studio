@@ -199,7 +199,7 @@ export default function BatchStagingPanel({
               onChange={() => setMode("per-object")}
               className="h-4 w-4 accent-stone-800"
             />
-            A separate prompt per object
+            A separate prompt per region
           </label>
         </div>
 
@@ -210,7 +210,7 @@ export default function BatchStagingPanel({
                 htmlFor="batch-thematic-prompt"
                 className="block text-sm font-medium text-stone-700"
               >
-                Theme (applied to all selected objects at once)
+                Theme (applied to all selected regions at once)
               </label>
               <textarea
                 id="batch-thematic-prompt"

@@ -6,6 +6,7 @@ import {
   interceptInpaint,
   interceptLabelInstances,
   login,
+  openEditorTab,
   openFocusedEditor,
   paintMaskZigzag,
   whitePixelGeometry,
@@ -13,6 +14,13 @@ import {
 } from "../helpers";
 
 const MIN_WHITE_SHARE = 0.01; // 1% of canvas pixels
+
+// Issue #252: EVERY editor-opening test bills a detection on open, and a
+// billed detection fires the OpenAI-backed vision-labeling call — it must
+// land on the network-layer mock in all of them, never the real route.
+test.beforeEach(({ page }) => {
+  interceptLabelInstances(page);
+});
 
 /**
  * Mask painting (issue #165 acceptance criterion 1).
@@ -46,6 +54,10 @@ test.describe("mask painting", () => {
     await expect(directives).toBeVisible();
     await directives.fill("Add a neutral linen sofa and a warm wood coffee table.");
 
+    // Issue #252: the single-object run affordance lives in the Manual
+    // paint tab; the editor opens on Auto detect (flag on).
+    await openEditorTab(page, "Manual paint");
+
     // "Apply Inpainting" is disabled until a mask exists — the UI state
     // transition this flow hinges on.
     const applyButton = page.getByRole("button", { name: "Apply Inpainting" });
@@ -65,13 +77,15 @@ test.describe("mask painting", () => {
 
     // Completion persists the staged image through the app's REAL room
     // PATCH route against the local database — the staged result section
-    // (issue #168) renders once that write lands.
+    // (issue #168) renders once that write lands, and the variant strip
+    // marks Variant A as selected from the SAME persisted row. (The save
+    // toast is ephemeral: under full-suite load it can dismiss before any
+    // assertion poll sees it, so the durable rendered state is asserted
+    // instead.)
     await expect(page.getByRole("heading", { name: "Staged result" })).toBeVisible({
       timeout: 20_000,
     });
-    await expect(
-      page.getByText("Staged image saved as Variant A.")
-    ).toBeVisible();
+    await expect(page.getByText("Variant A (Selected)")).toBeVisible();
 
     const body = inpaint.submitBody();
     expect(body.imageUrl).toContain(`/rooms/${E2E_EDITOR_ROOM_ID}/before-image.png`);
@@ -98,6 +112,10 @@ test.describe("mask painting", () => {
     const directives = page.getByLabel("Staging directives (required)");
     await expect(directives).toBeVisible();
     await directives.fill("Anchor the seating area with warm, neutral textures.");
+
+    // Issue #252: the single-object run affordance lives in the Manual
+    // paint tab; the editor opens on Auto detect (flag on).
+    await openEditorTab(page, "Manual paint");
 
     await page.getByRole("button", { name: "Fill Region" }).click();
     await expect(page.getByRole("button", { name: "Fill Region" })).toHaveAttribute(
@@ -134,6 +152,10 @@ test.describe("mask painting", () => {
     await login(page);
     await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
 
+    // Issue #252: the single-object run affordance lives in the Manual
+    // paint tab; the editor opens on Auto detect (flag on).
+    await openEditorTab(page, "Manual paint");
+
     const applyButton = page.getByRole("button", { name: "Apply Inpainting" });
     await expect(applyButton).toBeDisabled();
 
@@ -168,6 +190,9 @@ test.describe("mask painting on high-DPI displays", () => {
     const directives = page.getByLabel("Staging directives (required)");
     await expect(directives).toBeVisible();
     await directives.fill("Add a neutral linen sofa and a warm wood coffee table.");
+    // Issue #252: the single-object run affordance lives in the Manual
+    // paint tab; the editor opens on Auto detect (flag on).
+    await openEditorTab(page, "Manual paint");
   }
 
   function brushCanvas(page: import("@playwright/test").Page) {
@@ -277,8 +302,15 @@ test.describe("mask painting on high-DPI displays", () => {
     });
 
     const share = await whitePixelShare(page, inpaint.maskDataUrl());
+    // Issue #252 D3: the dispatched mask is CLOSED and hole-free — dilation
+    // (expansion default 15px) seals the stroke tips against the canvas
+    // edges, so the outer bands count as enclosed holes and fill at run
+    // composition. Pre-#252 this asserted an upper bound (< 0.6) pinning
+    // the still-open outer bands; the deliberate-donut opt-out is deferred
+    // to #259 §5. The lower bound keeps the seed-precision check that
+    // matters at export level: a seed on a painted line floods nothing and
+    // the dispatch stays stroke-only (≈0.1–0.3).
     expect(share).toBeGreaterThan(0.35);
-    expect(share).toBeLessThan(0.6);
   });
 });
 
@@ -300,6 +332,9 @@ test.describe("restage furnishings preset", () => {
 
     await login(page);
     await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
+
+    // Issue #252: the preset lives in the Entire room tab.
+    await openEditorTab(page, "Entire room");
 
     await page.getByRole("button", { name: "Restage furnishings" }).click();
 
@@ -339,6 +374,9 @@ test.describe("restage furnishings preset", () => {
 
     await login(page);
     await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
+
+    // Issue #252: the preset lives in the Entire room tab.
+    await openEditorTab(page, "Entire room");
 
     await page.getByRole("button", { name: "Restage furnishings" }).click();
 

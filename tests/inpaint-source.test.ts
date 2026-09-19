@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildInpaintResultPatch,
+  entireRoomTabVisible,
   healInpaintSource,
   inpaintSourceFromRequestRow,
   inpaintSourceLabel,
@@ -236,5 +237,16 @@ describe("inpaintSourceFromRequestRow", () => {
 
   it("treats unexpected values as an original-photo run", () => {
     expect(inpaintSourceFromRequestRow({ sourceSlot: 7 })).toEqual(ORIGINAL);
+  });
+});
+
+describe("entireRoomTabVisible", () => {
+  it("shows the Entire-room tab over the original photo (issue #252 AC-L4)", () => {
+    expect(entireRoomTabVisible(ORIGINAL)).toBe(true);
+  });
+
+  it("hides the Entire-room tab over a staged variant result", () => {
+    expect(entireRoomTabVisible(VARIANT_0)).toBe(false);
+    expect(entireRoomTabVisible(VARIANT_1)).toBe(false);
   });
 });

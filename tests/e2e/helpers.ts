@@ -53,6 +53,18 @@ export async function openFocusedEditor(
 }
 
 /**
+ * Issue #252 D5: the focused editor's controls live in tabbed panels
+ * (Entire room / Manual paint / Auto detect). Switches the control panel
+ * to the named tab — a no-op when that tab is already active.
+ */
+export async function openEditorTab(
+  page: Page,
+  name: "Entire room" | "Manual paint" | "Auto detect"
+): Promise<void> {
+  await page.getByRole("tab", { name }).click();
+}
+
+/**
  * Paints a multi-stroke zig-zag across the middle of the mask canvas with
  * REAL trusted mouse events (CDP input pipeline) — the exact interaction
  * class that silently failed under the PoC's dispatched-event driver
@@ -66,6 +78,27 @@ export async function paintMaskZigzag(page: Page): Promise<void> {
   // canvas sits below the fold in the focused editor, so bring it into
   // view before reading its viewport-relative box.
   await canvas.scrollIntoViewIfNeeded();
+
+  // The canvas re-initializes its mask grid when the source photo finishes
+  // loading (natural dims drive the backing-store size), which would wipe
+  // strokes painted before the settle — and a stale geometry would paint at
+  // wrong coordinates. The CSS box can stay identical across that swap (a
+  // square fixture keeps the aspect), so wait for the canvas BACKING
+  // attributes (width/height) to hold steady across two polls.
+  await page.waitForFunction(
+    () => {
+      const el = document.querySelector(
+        'canvas[aria-label^="Room mask painting canvas"]'
+      );
+      if (!(el instanceof HTMLCanvasElement)) return false;
+      const key = `${el.width}x${el.height}`;
+      const previous = el.dataset.e2eSettle;
+      el.dataset.e2eSettle = key;
+      return previous === key && previous !== "";
+    },
+    undefined,
+    { timeout: 15_000, polling: 150 }
+  );
 
   const box = await canvas.boundingBox();
   if (!box) throw new Error("mask canvas not laid out");

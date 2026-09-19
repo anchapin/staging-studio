@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useEffect, useCallback, useMemo, useId } from "react";
+import { useRef, useState, useEffect, useLayoutEffect, useCallback, useMemo, useId } from "react";
 import { Loader2 } from "lucide-react";
 import {
   clientPointToCanvas,
@@ -242,6 +242,45 @@ export default function InpaintMaskCanvas({
   );
 
   const hasOverlay = Boolean(overlayImageSrc);
+
+  // Issue #252 D5/AC-L1: in the laptop-fixed editor the photo stack must
+  // fit the height the layout actually gives it (page-level scrolling is
+  // gone at lg+), not just its width. The aspect wrapper is width-fit by
+  // default, which overflows a short container; measuring the scroll host
+  // lets the wrapper shrink so the whole canvas stays visible and paintable
+  // (a clipped canvas swallows pointer events below the fold). Purely
+  // presentational: display size only, backing store and mask math are
+  // untouched.
+  const photoStackRef = useRef<HTMLDivElement | null>(null);
+  const hintRef = useRef<HTMLParagraphElement | null>(null);
+  const [fitWidth, setFitWidth] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    if (!fullWidth || !hasOverlay) {
+      setFitWidth(null);
+      return;
+    }
+    const stack = photoStackRef.current;
+    const host = stack?.parentElement?.parentElement ?? null; // the flex-1 scroll container
+    if (!stack || !host) return;
+
+    const measure = () => {
+      const hostBox = host.getBoundingClientRect();
+      if (hostBox.height <= 0) return;
+      const reserved = (hintRef.current?.offsetHeight ?? 0) + 16; // hint + flex gap
+      const availableHeight = Math.max(120, hostBox.height - reserved);
+      const aspect = dims.width > 0 && dims.height > 0 ? dims.width / dims.height : 1;
+      const fitted = Math.min(hostBox.width, availableHeight * aspect);
+      setFitWidth(Math.max(160, Math.floor(fitted)));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(host);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [fullWidth, hasOverlay, dims.width, dims.height]);
 
   // ---------------------------------------------------------------------
   // Issue #228: score-ranked instance overlays. A dedicated canvas layer
@@ -937,14 +976,18 @@ export default function InpaintMaskCanvas({
     >
       {hasOverlay ? (
         <div
+          ref={photoStackRef}
           className={
             fullWidth
-              ? "relative w-full min-h-48"
+              ? "relative mx-auto w-full min-h-48"
               : "relative w-full max-w-md min-h-48"
           }
           style={
             aspectRatio && aspectRatio > 0
-              ? { aspectRatio: `${dims.width} / ${dims.height}` }
+              ? {
+                  aspectRatio: `${dims.width} / ${dims.height}`,
+                  ...(fitWidth !== null ? { width: `${fitWidth}px` } : {}),
+                }
               : undefined
           }
         >
@@ -969,7 +1012,7 @@ export default function InpaintMaskCanvas({
 
       {/* Cover-vs-outline semantics: the mask is region replacement, not
           selection — everything painted is regenerated. */}
-      <p id={maskingHintId} className="text-xs text-stone-700">
+      <p ref={hintRef} id={maskingHintId} className="text-xs text-stone-700">
         <span className="font-medium">How masking works:</span> Paint over the
         entire object or area you want changed — everything painted is
         regenerated, everything else is preserved. A thin outline won&apos;t
