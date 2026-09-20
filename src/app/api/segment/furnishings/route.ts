@@ -21,14 +21,14 @@ import {
 
 const FURNISHINGS_ERROR_COPY = {
   auth: {
-    error: "Authentication failed",
+    error: "Service unavailable",
     message:
-      "Unable to connect to the furnishings detection service. Please check your configuration.",
+      "We couldn't analyze the room's furniture right now. Try the Manual paint tab instead, or try again later.",
   },
   timeout: {
     error: "Request timeout",
     message:
-      "The furnishings detection service is taking too long to respond. Please try again.",
+      "The furnishings detection is taking too long. Try the Manual paint tab instead, or try again later.",
   },
   unknown: {
     error: "Furnishings detection failed",
