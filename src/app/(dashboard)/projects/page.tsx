@@ -51,7 +51,7 @@ async function ProjectsGrid() {
                 href={`/projects/${project.id}`}
                 className={`
                   group relative rounded-lg border bg-background shadow-sm transition-all hover:shadow-md
-                  ${isFeatured ? "col-span-2 row-span-2 p-8 lg:col-span-2 lg:row-span-2" : "p-5"}
+                  ${isFeatured ? "col-span-1 md:col-span-1 lg:col-span-2 row-span-1 lg:row-span-2 p-4 lg:p-8" : "p-5"}
                   ${recent && !isFeatured ? "border-amber-200 bg-gradient-to-br from-amber-50/50 to-background" : "border-border"}
                   ${!recent && !isFeatured && staged ? "border-emerald-100" : ""}
                 `}
@@ -78,7 +78,7 @@ async function ProjectsGrid() {
                   </div>
                 )}
 
-                <h2 className={`font-playfair font-semibold text-foreground ${isFeatured ? "text-2xl" : "text-lg"}`}>
+                <h2 className={`font-playfair font-semibold text-foreground ${isFeatured ? "text-lg md:text-xl lg:text-2xl" : "text-lg"}`}>
                   {project.propertyAddress}
                 </h2>
                 <p className={`mt-1 text-muted-foreground ${isFeatured ? "text-base" : "text-sm leading-relaxed"}`}>
