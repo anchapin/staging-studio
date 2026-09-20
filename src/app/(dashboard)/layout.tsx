@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getDashboardUserWithProjects } from "@/lib/dashboard-data";
-import { SignOutButton } from "@/components/dashboard/sign-out-button";
+import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 
 export const dynamic = "force-dynamic";
 
@@ -70,41 +70,7 @@ export default async function DashboardLayout({
           </Link>
         </div>
 
-        <nav className="px-4 pb-4">
-          <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            Projects
-          </p>
-          {userRow?.projects && userRow.projects.length > 0 ? (
-            <ul className="space-y-1">
-              {userRow.projects.map((project) => (
-                <li key={project.id}>
-                  <Link
-                    href={`/projects/${project.id}`}
-                    className="block rounded-md px-3 py-2 text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                  >
-                    <span className="font-medium">{project.clientName}</span>
-                    <br />
-                    <span className="text-xs text-muted-foreground">
-                      {project.propertyAddress}
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="px-3 py-2 text-sm text-muted-foreground">No projects yet</p>
-          )}
-        </nav>
-
-        <div className="absolute bottom-0 w-64 border-t border-border p-4">
-          <Link
-            href="/settings"
-            className="mb-1 block rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-          >
-            Settings
-          </Link>
-          <SignOutButton />
-        </div>
+<SidebarNav projects={userRow?.projects ?? []} />
       </aside>
 
       {/* Main content */}
