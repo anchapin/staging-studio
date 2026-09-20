@@ -4,6 +4,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import { resolveLoginErrorMessage } from "@/lib/login-error";
+import { Button } from "@/components/ui/button";
 
 function LoginForm() {
   const searchParams = useSearchParams();
@@ -162,13 +163,13 @@ function LoginForm() {
             </div>
           )}
 
-          <button
+          <Button
             type="submit"
             disabled={loading}
-            className="w-full rounded-md bg-primary py-2.5 font-medium text-primary-foreground transition-colors hover:bg-primary/80 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50"
+className="w-full"
           >
             {loading ? "Please wait..." : mode === "password" ? "Sign In" : "Send Magic Link"}
-          </button>
+          </Button>
         </form>
 
         <p className="text-center text-xs text-muted-foreground">
