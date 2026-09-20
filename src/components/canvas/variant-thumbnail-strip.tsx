@@ -83,10 +83,10 @@ export default function VariantThumbnailStrip({
           aria-pressed={selection === "original"}
           onClick={() => onSelect("original")}
           className={cn(
-            "relative block h-24 w-24 overflow-hidden rounded-md border bg-stone-100 transition-shadow",
+            "relative block h-24 w-24 overflow-hidden rounded-md border bg-muted transition-shadow",
             selection === "original"
-              ? "border-stone-800 ring-2 ring-stone-800 ring-offset-2"
-              : "border-stone-200 hover:border-stone-400"
+              ? "border-foreground ring-2 ring-ring ring-offset-2"
+              : "border-border hover:border-muted-foreground"
           )}
         >
           {originalUrl ? (
@@ -99,7 +99,7 @@ export default function VariantThumbnailStrip({
             />
           ) : (
             <span className="flex h-full w-full items-center justify-center">
-              <ImageIcon className="h-5 w-5 text-stone-300" aria-hidden="true" />
+              <ImageIcon className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
             </span>
           )}
           {selection === "original" && <SelectedBadge />}
@@ -122,10 +122,10 @@ export default function VariantThumbnailStrip({
                 aria-pressed={selected}
                 onClick={() => onSelect(slot)}
                 className={cn(
-                  "relative block h-24 w-24 overflow-hidden rounded-md border bg-stone-100 transition-shadow",
+                  "relative block h-24 w-24 overflow-hidden rounded-md border bg-muted transition-shadow",
                   selected
-                    ? "border-stone-800 ring-2 ring-stone-800 ring-offset-2"
-                    : "border-stone-200 hover:border-stone-400"
+                    ? "border-foreground ring-2 ring-ring ring-offset-2"
+                    : "border-border hover:border-muted-foreground"
                 )}
               >
                 {hasAfter && pair.after ? (
@@ -137,9 +137,9 @@ export default function VariantThumbnailStrip({
                     className="object-cover"
                   />
                 ) : (
-                  <span className="flex h-full w-full flex-col items-center justify-center gap-1 rounded-md border-2 border-dashed border-stone-300">
-                    <ImageIcon className="h-5 w-5 text-stone-300" aria-hidden="true" />
-                    <span className="px-1 text-center text-[10px] leading-none text-stone-400">
+                  <span className="flex h-full w-full flex-col items-center justify-center gap-1 rounded-md border-2 border-dashed border-border">
+                    <ImageIcon className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
+                    <span className="px-1 text-center text-[10px] leading-none text-muted-foreground">
                       Not staged yet
                     </span>
                   </span>
@@ -186,7 +186,7 @@ export default function VariantThumbnailStrip({
 /** Check badge pinned to a selected thumbnail's top-left corner. */
 function SelectedBadge() {
   return (
-    <span className="absolute left-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-stone-800 text-white">
+    <span className="absolute left-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-foreground text-background">
       <Check className="h-3 w-3" aria-hidden="true" />
       <span className="sr-only">(Selected)</span>
     </span>
@@ -205,7 +205,7 @@ function ThumbLabel({
     <span
       className={cn(
         "text-xs",
-        selected ? "font-semibold text-stone-800" : "text-stone-400"
+        selected ? "font-semibold text-foreground" : "text-muted-foreground"
       )}
     >
       {children}
