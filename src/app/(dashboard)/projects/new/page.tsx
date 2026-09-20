@@ -85,7 +85,7 @@ export default function NewProjectPage() {
         <h1 className="font-playfair text-3xl font-bold text-stone-800">
           New Project
         </h1>
-        <p className="mt-1 text-sm text-stone-600">
+        <p className="mt-1 text-sm leading-relaxed text-stone-600">
           Step 1: Property intake
         </p>
       </div>

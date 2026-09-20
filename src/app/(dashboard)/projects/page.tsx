@@ -25,7 +25,7 @@ export default async function ProjectsPage() {
           <h1 className="font-playfair text-3xl font-bold text-stone-800">
             Projects
           </h1>
-          <p className="mt-1 text-sm text-stone-600">
+          <p className="mt-1 text-sm leading-relaxed text-stone-600">
             Manage your staging lookbooks
           </p>
         </div>
@@ -41,7 +41,7 @@ export default async function ProjectsPage() {
       {projects.length === 0 ? (
         <div className="rounded-lg border-2 border-dashed border-stone-300 p-12 text-center">
           <p className="text-stone-600">No projects yet.</p>
-          <p className="mt-1 text-sm text-stone-500">
+          <p className="mt-1 text-sm leading-relaxed text-stone-500">
             Create your first staging project to get started.
           </p>
           <Link
@@ -62,7 +62,7 @@ export default async function ProjectsPage() {
               <h2 className="font-playfair text-lg font-semibold text-stone-800">
                 {project.propertyAddress}
               </h2>
-              <p className="mt-1 text-sm text-stone-600">{project.clientName}</p>
+              <p className="mt-1 text-sm leading-relaxed text-stone-600">{project.clientName}</p>
               <div className="mt-3 flex items-center justify-between">
                 <span className="rounded-full bg-stone-100 px-2.5 py-0.5 text-xs font-medium text-stone-700">
                   {project.stagingAesthetic}
