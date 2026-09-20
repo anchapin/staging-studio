@@ -149,8 +149,9 @@ export default function BatchStagingPanel({
             size="sm"
             onClick={onRemoveLast}
             disabled={disabled || selections.length === 0}
+            aria-label="Remove last selected region from batch"
           >
-            Undo last
+            Remove last
           </Button>
           {/* Issue #249: "Clear selection" moved beside the concept chips
               (inpaint-editor) — the one global control, instead of a
