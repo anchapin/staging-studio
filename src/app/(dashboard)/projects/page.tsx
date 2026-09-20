@@ -5,6 +5,7 @@ import { FolderPlus } from "lucide-react";
 import { Suspense } from "react";
 import { getDashboardUserWithProjects } from "@/lib/dashboard-data";
 import { buttonVariants } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { ProjectsGridSkeleton } from "@/components/ui/skeleton";
 
 function hasStagedResults(project: { rooms: { afterImageUrl: string | null; afterImageUrl2: string | null }[] }): boolean {
@@ -57,13 +58,13 @@ async function ProjectsGrid() {
               >
                 {isFeatured && (
                   <div className="mb-2 flex items-center gap-2">
-                    <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800">
+                    <Badge variant="warning" size={isFeatured ? "lg" : "default"}>
                       Featured
-                    </span>
+                    </Badge>
                     {recent && (
-                      <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
+                      <Badge variant="success" size={isFeatured ? "lg" : "default"}>
                         Recently Updated
-                      </span>
+                      </Badge>
                     )}
                   </div>
                 )}
@@ -71,8 +72,8 @@ async function ProjectsGrid() {
                 {!isFeatured && staged && (
                   <div className="absolute right-3 top-3">
                     <span className="flex h-2 w-2">
-                      <span className="absolute inline-flex h-2 w-2 animate-ping rounded-full bg-emerald-400 opacity-75" />
-                      <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                      <span className="absolute inline-flex h-2 w-2 animate-ping rounded-full bg-success/40 opacity-75" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
                     </span>
                   </div>
                 )}
@@ -86,13 +87,13 @@ async function ProjectsGrid() {
 
                 <div className={`flex items-center justify-between ${isFeatured ? "mt-5" : "mt-3"}`}>
                   <div className="flex items-center gap-2">
-                    <span className={`rounded-full bg-secondary ${isFeatured ? "px-3 py-1 text-sm" : "px-2.5 py-0.5 text-xs"} font-medium text-foreground`}>
+                    <Badge variant="secondary" size={isFeatured ? "lg" : "default"}>
                       {project.stagingAesthetic}
-                    </span>
+                    </Badge>
                     {staged && (
-                      <span className={`rounded-full bg-emerald-100 ${isFeatured ? "px-3 py-1 text-sm" : "px-2.5 py-0.5 text-xs"} font-medium text-emerald-700`}>
+                      <Badge variant="success" size={isFeatured ? "lg" : "default"}>
                         Staged
-                      </span>
+                      </Badge>
                     )}
                   </div>
                   <span className="text-xs text-muted-foreground">
