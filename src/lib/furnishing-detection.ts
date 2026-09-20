@@ -24,9 +24,8 @@
  *   (see `mask-coverage.ts`).
  *
  * This module keeps the endpoint choice, request payload shape, and
- * response parsing as pure logic (the same deep-module shape as
- * `segment-mask.ts`) so the endpoint can be re-spiked without touching
- * route or component code.
+ * response parsing as pure logic so the endpoint can be re-spiked
+ * without touching route or component code.
  */
 
 /** fal.ai SAM 3.1 image endpoint used for text-prompted furnishings detection. */
@@ -64,8 +63,7 @@ export function isFurnishingCoverageAdequate(coverage: number): boolean {
 }
 
 // Type alias (not interface) so the payload stays assignable to the
-// `Record<string, unknown>` input type of `fal.subscribe` — same pattern
-// as `FalSegmentPayload` in lib/segment-mask.ts.
+// `Record<string, unknown>` input type of `fal.subscribe`.
 export type FalFurnishingDetectionPayload = {
   image_url: string;
   /** Text concept the segmenter detects; see {@link FURNISHING_DETECTION_PROMPT}. */

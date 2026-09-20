@@ -17,7 +17,6 @@ import {
   dilateMaskGridDirectional,
 } from "@/lib/mask-dilation";
 import { fillHoles } from "@/lib/mask-postprocess";
-import { SAM_TOOL_ENABLED } from "@/lib/sam-tool";
 
 /** Tools for building the mask: freehand paint, flood-fill, or concept select. */
 type MaskTool = "brush" | "fill" | "select";
@@ -1123,10 +1122,7 @@ export default function InpaintMaskCanvas({
         regenerated, everything else is preserved. A thin outline won&apos;t
         change the interior, so cover the whole object (or draw an outline and
         use Fill Region on its inside).
-        {/* Select Objects is flag-gated (SAM_TOOL_ENABLED): the sentence
-            disappears with the tool if the kill switch is flipped off. */}
-        {SAM_TOOL_ENABLED &&
-          " Select Regions detects every instance of the chosen concept in one call — pick a concept chip above, then click outlined instances to add them to the mask (outlines turn solid fills when selected). Nearby instances fuse into one region. Re-clicks and re-toggles are free."}
+        {" Select Regions detects every instance of the chosen concept in one call — pick a concept chip above, then click outlined instances to add them to the mask (outlines turn solid fills when selected). Nearby instances fuse into one region. Re-clicks and re-toggles are free."}
       </p>
 
       {lowCoverage && (
@@ -1170,11 +1166,10 @@ export default function InpaintMaskCanvas({
           >
             Fill Region
           </button>
-          {/* Issue #228: the old per-click Select Object tool became the
-              concept-driven Select Objects tool. The spinner below is THE
-              processing indicator — visible on the tool itself while a
-              concept detection runs, not just in the editor's status line. */}
-          {SAM_TOOL_ENABLED && (
+          {/* Issue #228: the Select Objects tool runs SAM 3.1 concept
+              detection. The spinner below is THE processing indicator —
+              visible on the tool itself while a concept detection runs,
+              not just in the editor's status line. */}
             <button
               type="button"
               aria-pressed={activeTool === "select"}
@@ -1196,7 +1191,6 @@ export default function InpaintMaskCanvas({
                 "Select Regions"
               )}
             </button>
-          )}
         </div>
 
         {/* Brush size: touch-friendly at md+ with taller hit area */}

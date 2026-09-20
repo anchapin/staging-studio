@@ -3,7 +3,6 @@ import { expect, test } from "@playwright/test";
 import {
   E2E_CONCEPT_PROJECT_ID,
   E2E_CONCEPT_ROOM_ID,
-  SAM_TOOL_ENABLED_IN_E2E_BUILD,
 } from "../env";
 import { CONCEPT_INSTANCE_GRAYSCALE_MASKS } from "../cutout-png";
 import {
@@ -31,17 +30,8 @@ const CONSOLE_EVENT_PREFIX = "[concept-tool] ";
  * really serves. The alpha-cutout encoding stays pinned at unit level
  * (tests/mask-format.test.ts).
  *
- * Kill-switch semantics: when the flag is compiled OFF
- * (SAM_TOOL_ENABLED_IN_E2E_BUILD=false) the whole concept surface
- * disappears from the app, so this spec skips — flag-off runs never
- * exercise concept specs.
  */
 test.describe("sam 3.1 concept find-and-replace flow", () => {
-  test.skip(
-    !SAM_TOOL_ENABLED_IN_E2E_BUILD,
-    "concept tool is compiled off in the e2e build (kill switch); concept specs are skipped on flag-off runs"
-  );
-
   test("auto-fire → chip switch → toggle instances → pre-filled prompts → batch dispatch → variant written", async ({
     page,
   }) => {
