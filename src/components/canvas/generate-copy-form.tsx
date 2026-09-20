@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { useToast, ToastContainer } from "@/components/ui/toast";
+import { Badge } from "@/components/ui/badge";
 import { Loader2, Sparkles } from "lucide-react";
 import { saveRoomMetadata, saveRoomCopy } from "@/app/actions/room";
 
@@ -198,22 +199,28 @@ export default function GenerateCopyForm({
             <ul className="space-y-2">
               {copy.checklist.map((item, index) => (
                 <li key={index} className="flex items-start gap-2 text-sm">
-                  <span className={`
-                    px-1.5 py-0.5 rounded text-xs font-medium
-                    ${item.category === "DIY/Declutter" ? "bg-blue-100 text-blue-700" : ""}
-                    ${item.category === "Rental Inventory" ? "bg-purple-100 text-purple-700" : ""}
-                    ${item.category === "Minor Repair" ? "bg-amber-100 text-amber-700" : ""}
-                  `}>
+                  <Badge
+                    variant={
+                      item.category === "DIY/Declutter"
+                        ? "secondary"
+                        : item.category === "Rental Inventory"
+                          ? "outline"
+                          : "default"
+                    }
+                  >
                     {item.category}
-                  </span>
-                  <span className={`
-                    px-1.5 py-0.5 rounded text-xs font-medium
-                    ${item.priority === "Critical" ? "bg-red-100 text-red-700" : ""}
-                    ${item.priority === "High" ? "bg-orange-100 text-orange-700" : ""}
-                    ${item.priority === "Standard" ? "bg-green-100 text-green-700" : ""}
-                  `}>
+                  </Badge>
+                  <Badge
+                    variant={
+                      item.priority === "Critical"
+                        ? "destructive"
+                        : item.priority === "High"
+                          ? "warning"
+                          : "success"
+                    }
+                  >
                     {item.priority}
-                  </span>
+                  </Badge>
                   <span className="text-stone-700">{item.item}</span>
                 </li>
               ))}
