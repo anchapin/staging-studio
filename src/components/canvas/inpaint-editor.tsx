@@ -27,7 +27,6 @@ import StageEntireRoomPreset from "./stage-entire-room-preset";
 import BatchStagingPanel from "./batch-staging-panel";
 import { useConceptSegments } from "./use-segment-prewarm";
 import { SegmentCache, type SegmentCacheEntry } from "@/lib/segment-cache";
-import { SAM_TOOL_ENABLED } from "@/lib/sam-tool";
 import {
   buildConceptEmptyMessage,
   buildSelectionLoggedEvent,
@@ -38,6 +37,7 @@ import {
   normalizeConceptInput,
 } from "@/lib/concept-chips";
 import { findInstanceAtPoint, instanceSeedPoint } from "@/lib/instance-hit-test";
+import { logSelectionEvent } from "@/app/actions/selection-log";
 import {
   maskGridFromProviderPixels,
   paintMaskPixels,
@@ -510,7 +510,7 @@ export default function InpaintEditor({
   // instance, so there is nothing cheaper to warm with). Chip switches
   // reuse this machinery; the SegmentCache serves repeats without a fetch.
   const conceptSegments = useConceptSegments({
-    enabled: SAM_TOOL_ENABLED,
+    enabled: true,
     roomId,
     imageUrl: imageUrl || null,
     imageWidth: imageDims?.width ?? null,
@@ -544,7 +544,6 @@ export default function InpaintEditor({
   // that fallback (AC-3.2). Labeled results are written back into the
   // segment cache, so cache-served concepts restore labels instantly.
   useEffect(() => {
-    if (!SAM_TOOL_ENABLED) return;
     if (!roomId || !imageUrl || !imageDims) return;
     if (!displayedResult || !decodedInstances) return;
 
@@ -846,15 +845,24 @@ export default function InpaintEditor({
       }
       setSelectedInstanceIndices(toggled.selectedInstanceIndices);
       setBatchSelections(toggled.selections);
+      const selectionEvent = buildSelectionLoggedEvent({
+        roomId,
+        concept: displayedResult.concept,
+        instanceIndex: hit,
+        score: instance.score,
+      });
       console.log(
-        `${CONCEPT_EVENT_LOG_PREFIX} ${JSON.stringify(
-          buildSelectionLoggedEvent({
-            roomId,
-            concept: displayedResult.concept,
-            instanceIndex: hit,
-            score: instance.score,
-          })
-        )}`
+        `${CONCEPT_EVENT_LOG_PREFIX} ${JSON.stringify(selectionEvent)}`
+      );
+      // Durable write for training corpus (issue #238 / W3)
+      logSelectionEvent({
+        roomId,
+        concept: selectionEvent.concept,
+        instanceIndex: selectionEvent.instanceIndex,
+        score: selectionEvent.score ?? 0,
+        editedLabel: selectionEvent.editedLabel,
+      }).catch((err) =>
+        console.error("[selection-log] failed to persist:", err)
       );
     },
     [
@@ -902,15 +910,24 @@ export default function InpaintEditor({
     setBatchSelections(result.selections);
     for (const index of result.addedInstanceIndices) {
       const instance = decodedInstances[index];
+      const selectionEvent = buildSelectionLoggedEvent({
+        roomId,
+        concept: displayedResult.concept,
+        instanceIndex: index,
+        score: instance?.score ?? null,
+      });
       console.log(
-        `${CONCEPT_EVENT_LOG_PREFIX} ${JSON.stringify(
-          buildSelectionLoggedEvent({
-            roomId,
-            concept: displayedResult.concept,
-            instanceIndex: index,
-            score: instance?.score ?? null,
-          })
-        )}`
+        `${CONCEPT_EVENT_LOG_PREFIX} ${JSON.stringify(selectionEvent)}`
+      );
+      // Durable write for training corpus (issue #238 / W3)
+      logSelectionEvent({
+        roomId,
+        concept: selectionEvent.concept,
+        instanceIndex: selectionEvent.instanceIndex,
+        score: selectionEvent.score ?? 0,
+        editedLabel: selectionEvent.editedLabel,
+      }).catch((err) =>
+        console.error("[selection-log] failed to persist:", err)
       );
     }
     setSelectAllNotice(
@@ -1310,12 +1327,9 @@ export default function InpaintEditor({
   const selectionCount = Math.max(batchSelections.length, selectedInstanceIndices.length);
 
   // Issue #252 D5: control-panel tab state — purely presentational, so
-  // switching never touches staging state (AC-L5). The default follows
-  // the SAM flag: Auto detect when the tool compiles in, Manual paint
-  // otherwise (the Detect tab is flag-gated away without it).
-  const [activeTab, setActiveTab] = useState<EditorTabId>(
-    SAM_TOOL_ENABLED ? "detect" : "manual"
-  );
+  // switching never touches staging state (AC-L5). The default is the
+  // Auto detect tab.
+  const [activeTab, setActiveTab] = useState<EditorTabId>("detect");
   const tabIdBase = useId();
   // AC-L4: tab availability is a pure function of the displayed base
   // image — Entire room only over the original photo. Derived in render
@@ -1335,16 +1349,14 @@ export default function InpaintEditor({
       // Un-run work badge (AC-L5): a painted-but-unapplied mask.
       badge: maskDataUrl ? true : undefined,
     },
-    ...(SAM_TOOL_ENABLED
-      ? [
-          {
-            id: "detect" as const,
-            label: "Auto detect",
-            // Un-run work badge: pending region selections.
-            badge: selectionCount > 0 ? selectionCount : undefined,
-          },
-        ]
-      : []),
+    ...[
+      {
+        id: "detect" as const,
+        label: "Auto detect",
+        // Un-run work badge: pending region selections.
+        badge: selectionCount > 0 ? selectionCount : undefined,
+      },
+    ],
   ];
 
   return (
@@ -1352,28 +1364,29 @@ export default function InpaintEditor({
        sized to the remaining viewport, fixed-width control panel RIGHT;
        both panes scroll internally so page-level scrolling dies at laptop
        size (AC-L1/L2). Below lg the same tabs stack in one column
-       (AC-L6). */
+       (AC-L6). At md (768px-1023px) the layout stacks vertically to
+       prevent horizontal overflow on tablet screens (issue #317). */
     <div
       className={`flex flex-col gap-6 ${
-        fullWidth ? "lg:min-h-0 lg:flex-1 lg:flex-row lg:gap-6" : ""
+        fullWidth ? "md:flex-col lg:min-h-0 lg:flex-1 lg:flex-row lg:gap-6" : ""
       }`}
     >
       {/* ---- LEFT PANE: room imagery (optional slot) + mask canvas ------ */}
       <div
         className={`flex min-w-0 flex-col gap-4 ${
-          fullWidth ? "lg:min-h-0 lg:flex-1" : ""
+          fullWidth ? "md:min-h-0 lg:min-h-0 lg:flex-1" : ""
         }`}
       >
         {secondaryPane && (
           <div
             className={`flex flex-col gap-6 ${
-              fullWidth ? "lg:max-h-[45%] lg:min-h-0 lg:overflow-y-auto" : ""
+              fullWidth ? "md:max-h-none md:overflow-visible lg:max-h-[45%] lg:min-h-0 lg:overflow-y-auto" : ""
             }`}
           >
             {secondaryPane}
           </div>
         )}
-        <h4 className="text-sm font-medium text-stone-700 mb-2">Source Image</h4>
+        <h4 className="mb-2 text-sm font-medium text-stone-700">Source Image</h4>
         <InpaintMaskCanvas
           overlayImageSrc={imageUrl}
           aspectRatio={aspectRatio}
@@ -1450,7 +1463,7 @@ export default function InpaintEditor({
       {/* ---- RIGHT PANE: fixed-width control panel ----------------------- */}
       <div
         className={`flex w-full flex-col gap-3 no-print ${
-          fullWidth ? "lg:min-h-0 lg:w-[380px] lg:shrink-0" : ""
+          fullWidth ? "md:w-full md:flex-col lg:min-h-0 lg:w-[380px] lg:shrink-0" : ""
         }`}
       >
         {/* AC-L2: batch progress pins to the panel top during a run, so
@@ -1473,7 +1486,7 @@ export default function InpaintEditor({
         )}
         <div
           className={`flex flex-col gap-4 ${
-            fullWidth ? "lg:min-h-0 lg:flex-1 lg:overflow-y-auto" : ""
+            fullWidth ? "md:min-h-0 md:flex-1 md:overflow-visible lg:min-h-0 lg:flex-1 lg:overflow-y-auto" : ""
           }`}
         >
           {sourceOptions.length > 1 && (
@@ -1618,7 +1631,7 @@ export default function InpaintEditor({
                 </button>
 
                 {isProcessing && statusText && (
-                  <span className="text-sm text-stone-600">{statusText}</span>
+                  <span aria-live="polite" className="text-sm text-stone-600">{statusText}</span>
                 )}
               </div>
             </div>
@@ -1634,11 +1647,8 @@ export default function InpaintEditor({
               {/* Issue #228: concept chips + validated free text. Chips
                   enforce single-concept by construction; free text is
                   validated with isValidConceptName (the server schema's
-                  client mirror) BEFORE any billed call is built.
-                  Flag-gated with the tool itself (whole tab hides with the
-                  flag off — the default tab becomes Manual paint). */}
-              {SAM_TOOL_ENABLED && (
-                <div className="flex flex-col gap-2">
+                  client mirror) BEFORE any billed call is built. */}
+              <div className="flex flex-col gap-2">
                   <div
                     role="group"
                     aria-label="Detection concept"
@@ -1741,7 +1751,6 @@ export default function InpaintEditor({
                     </p>
                   )}
                 </div>
-              )}
 
               {/* Issue #203 panel, fed since #229 by the concept toggles:
                   appears once at least one detected instance has been

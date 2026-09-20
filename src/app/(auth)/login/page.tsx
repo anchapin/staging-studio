@@ -10,7 +10,9 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const errorParam = searchParams.get("error");
   const [email, setEmail] = useState("");
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [password, setPassword] = useState("");
+  const [passwordError, setPasswordError] = useState<string | null>(null);
   const [mode, setMode] = useState<"password" | "magic">("password");
   const [loading, setLoading] = useState(false);
   // A failed /auth/callback exchange lands back here with
@@ -124,11 +126,29 @@ function LoginForm() {
               id="email"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                if (emailError && e.target.value.trim()) setEmailError(null);
+              }}
+              onBlur={(e) => {
+                const value = e.target.value.trim();
+                if (!value) {
+                  setEmailError("Email is required");
+                } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+                  setEmailError("Please enter a valid email address");
+                }
+              }}
               required
-              className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+              aria-invalid={!!emailError}
+              aria-describedby={emailError ? "email-error" : undefined}
+              className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring aria-invalid:border-red-500"
               placeholder="you@example.com"
             />
+            {emailError && (
+              <p id="email-error" role="alert" className="mt-1 text-sm text-red-600">
+                {emailError}
+              </p>
+            )}
           </div>
 
           {mode === "password" && (
@@ -140,11 +160,24 @@ function LoginForm() {
                 id="password"
                 type="password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (passwordError && e.target.value) setPasswordError(null);
+                }}
+                onBlur={(e) => {
+                  if (!e.target.value) setPasswordError("Password is required");
+                }}
                 required
-                className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+                aria-invalid={!!passwordError}
+                aria-describedby={passwordError ? "password-error" : undefined}
+                className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring aria-invalid:border-red-500"
                 placeholder="••••••••"
               />
+              {passwordError && (
+                <p id="password-error" role="alert" className="mt-1 text-sm text-red-600">
+                  {passwordError}
+                </p>
+              )}
             </div>
           )}
 

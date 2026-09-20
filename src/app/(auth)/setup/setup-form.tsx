@@ -15,7 +15,9 @@ export function SetupForm({ email }: { email: string }) {
   const supabase = createClient();
   const [loading, setLoading] = useState(false);
   const [firmName, setFirmName] = useState("");
+  const [firmNameError, setFirmNameError] = useState<string | null>(null);
   const [ownerName, setOwnerName] = useState("");
+  const [ownerNameError, setOwnerNameError] = useState<string | null>(null);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [psychologyPageContent, setPsychologyPageContent] = useState("");
   const [signoffContent, setSignoffContent] = useState("");
@@ -76,7 +78,7 @@ export function SetupForm({ email }: { email: string }) {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background to-secondary px-4">
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-muted to-secondary px-4">
       <div className="w-full max-w-lg space-y-8 rounded-xl bg-card p-8 shadow-xl">
         <div className="text-center">
           <h1 className="font-cinzel text-3xl font-bold tracking-tight text-foreground">
@@ -96,11 +98,22 @@ export function SetupForm({ email }: { email: string }) {
               id="firmName"
               type="text"
               value={firmName}
-              onChange={(e) => setFirmName(e.target.value)}
+              onChange={(e) => {
+                setFirmName(e.target.value);
+                if (firmNameError && e.target.value.trim()) setFirmNameError(null);
+              }}
+              onBlur={(e) => {
+                if (!e.target.value.trim()) setFirmNameError("Firm name is required");
+              }}
               required
               className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
               placeholder="Circle G Designs"
             />
+            {firmNameError && (
+              <p id="firmName-error" role="alert" className="mt-1 text-sm text-red-600">
+                {firmNameError}
+              </p>
+            )}
           </div>
 
           <div>
@@ -111,11 +124,22 @@ export function SetupForm({ email }: { email: string }) {
               id="ownerName"
               type="text"
               value={ownerName}
-              onChange={(e) => setOwnerName(e.target.value)}
+              onChange={(e) => {
+                setOwnerName(e.target.value);
+                if (ownerNameError && e.target.value.trim()) setOwnerNameError(null);
+              }}
+              onBlur={(e) => {
+                if (!e.target.value.trim()) setOwnerNameError("Owner name is required");
+              }}
               required
               className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
               placeholder="Lauren Chapin"
             />
+            {ownerNameError && (
+              <p id="ownerName-error" role="alert" className="mt-1 text-sm text-red-600">
+                {ownerNameError}
+              </p>
+            )}
           </div>
 
           <div>
@@ -127,7 +151,7 @@ export function SetupForm({ email }: { email: string }) {
               type="file"
               accept="image/*"
               onChange={(e) => setLogoFile(e.target.files?.[0] || null)}
-              className="mt-1 block w-full text-sm text-muted-foreground file:mr-4 file:cursor-pointer file:rounded-md file:border-0 file:bg-secondary file:px-4 file:py-2 file:text-sm file:font-medium file:text-foreground hover:file:bg-secondary/80"
+              className="mt-1 block w-full text-sm text-muted-foreground file:mr-4 file:cursor-pointer file:rounded-md file:border-0 file:bg-secondary file:px-4 file:py-2 file:text-sm file:font-medium file:text-foreground hover:file:bg-accent"
             />
           </div>
 
