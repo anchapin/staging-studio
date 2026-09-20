@@ -53,22 +53,22 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
     }, 300);
   };
 
-  const bgColor = {
-    success: "bg-success/10 border-success/20",
-    error: "bg-destructive/10 border-destructive/20",
-    info: "bg-info/10 border-info/20",
-  }[toast.type];
-
-  const textColor = {
-    success: "text-success",
-    error: "text-destructive",
-    info: "text-info",
-  }[toast.type];
-
-  const iconColor = {
-    success: "text-success",
-    error: "text-destructive",
-    info: "text-info",
+  const colorMap = {
+    success: {
+      bg: "bg-success/10 border-success/20",
+      text: "text-success",
+      icon: "text-success",
+    },
+    error: {
+      bg: "bg-destructive/10 border-destructive/20",
+      text: "text-destructive",
+      icon: "text-destructive",
+    },
+    info: {
+      bg: "bg-info/10 border-info/20",
+      text: "text-info",
+      icon: "text-info",
+    },
   }[toast.type];
 
   return (
@@ -77,23 +77,23 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
       aria-live={toast.type === "error" ? "assertive" : "polite"}
       className={`
         flex items-center gap-3 px-4 py-3 rounded-lg border shadow-lg
-        ${bgColor} ${textColor}
+        ${colorMap.bg} ${colorMap.text}
         transition-all duration-300 ease-out
         ${isVisible ? "translate-x-0 opacity-100" : "translate-x-full opacity-0"}
       `}
     >
       {toast.type === "success" && (
-        <svg className={`w-5 h-5 ${iconColor}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <svg className={`w-5 h-5 ${colorMap.icon}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
         </svg>
       )}
       {toast.type === "error" && (
-        <svg className={`w-5 h-5 ${iconColor}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <svg className={`w-5 h-5 ${colorMap.icon}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
         </svg>
       )}
       {toast.type === "info" && (
-        <svg className={`w-5 h-5 ${iconColor}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <svg className={`w-5 h-5 ${colorMap.icon}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
       )}
@@ -111,7 +111,7 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
             flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium
             bg-white border border-gray-200 shadow-sm
             hover:bg-gray-50 transition-colors
-            ${iconColor}
+            ${colorMap.icon}
           `}
         >
           <RefreshCw className="w-3.5 h-3.5" />
