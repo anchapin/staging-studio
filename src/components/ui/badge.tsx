@@ -42,9 +42,9 @@ const badgeVariants = cva(
           "border border-transparent bg-muted text-muted-foreground",
       },
       size: {
-        default: "h-5 px-2 py-0.5 text-xs",
-        sm: "h-4 px-1.5 py-0 text-[10px]",
-        lg: "h-6 px-2.5 py-1 text-sm",
+        default: "min-h-11 min-w-11 h-5 px-2 py-0.5 text-xs",
+        sm: "min-h-11 min-w-11 h-4 px-1.5 py-0 text-[10px]",
+        lg: "min-h-11 min-w-11 h-6 px-2.5 py-1 text-sm",
       },
     },
     defaultVariants: {
