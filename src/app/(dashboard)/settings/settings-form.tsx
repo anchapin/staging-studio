@@ -97,7 +97,7 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="max-w-2xl space-y-6">
+    <form onSubmit={handleSubmit} className="max-w-md space-y-6">
       <div>
         <label
           htmlFor="firmName"
