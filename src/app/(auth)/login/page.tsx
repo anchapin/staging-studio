@@ -205,9 +205,6 @@ className="w-full"
           </Button>
         </form>
 
-        <p className="text-center text-xs text-muted-foreground">
-          For Circle G Designs — Lauren Chapin
-        </p>
       </div>
     </div>
   );
