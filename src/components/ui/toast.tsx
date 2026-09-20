@@ -22,12 +22,14 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
 
   useEffect(() => {
     setIsVisible(true);
+    // Non-error toasts auto-dismiss at 4s; errors persist until manually dismissed
+    const timeout = toast.type === "error" ? 8000 : 4000;
     const timer = setTimeout(() => {
       setIsVisible(false);
       setTimeout(() => onDismiss(toast.id), 300);
-    }, 8000);
+    }, timeout);
     return () => clearTimeout(timer);
-  }, [toast.id, onDismiss]);
+  }, [toast.id, toast.type, onDismiss]);
 
   const bgColor = {
     success: "bg-green-50 border-green-200",
@@ -116,10 +118,12 @@ interface ToastContainerProps {
 
 export function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm">
-      {toasts.map((toast) => (
-        <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} />
-      ))}
+    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 max-w-sm w-full px-4">
+      <div className="max-h-[50vh] overflow-y-auto flex flex-col gap-2">
+        {toasts.map((toast) => (
+          <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} />
+        ))}
+      </div>
     </div>
   );
 }
