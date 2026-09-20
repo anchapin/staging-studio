@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useId, useState } from "react";
+import { Button } from "@/components/ui/button";
 import {
   DEFAULT_HOLISTIC_MASK_STRATEGY_ID,
   HOLISTIC_MASK_STRATEGIES,
@@ -144,19 +145,12 @@ export default function HolisticSpikePanel({
           </select>
         </label>
 
-        <button
+        <Button
           onClick={handleRun}
           disabled={isRunDisabled}
-          className={`
-            px-3 py-1.5 rounded-md text-sm font-medium transition-colors
-            ${isRunDisabled
-              ? "bg-muted text-muted-foreground cursor-not-allowed"
-              : "bg-primary text-primary-foreground hover:bg-primary/90"
-            }
-          `}
         >
           Run holistic staging
-        </button>
+        </Button>
       </div>
 
       <p className="text-xs text-muted-foreground">

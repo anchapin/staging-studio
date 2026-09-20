@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { Button } from "@/components/ui/button";
 import { useToast, ToastContainer } from "@/components/ui/toast";
 import { Loader2, Sparkles } from "lucide-react";
 import { saveRoomMetadata, saveRoomCopy } from "@/app/actions/room";
@@ -139,21 +140,13 @@ export default function GenerateCopyForm({
           placeholder="Describe the key staging priorities and changes needed for this room..."
           rows={4}
           maxLength={2000}
-          className="w-full px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+          className="w-full px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-stone-500 resize-none"
         />
       </div>
 
-      <button
+      <Button
         onClick={handleGenerate}
         disabled={isGenerating || !rawDirectives.trim()}
-        className={`
-          flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium
-          transition-colors
-          ${isGenerating || !rawDirectives.trim()
-            ? "bg-muted text-muted-foreground cursor-not-allowed"
-            : "bg-primary text-primary-foreground hover:bg-primary/90"
-          }
-        `}
       >
         {isGenerating ? (
           <>
@@ -166,10 +159,10 @@ export default function GenerateCopyForm({
             Generate Copy
           </>
         )}
-      </button>
+      </Button>
 
       {copy && (
-        <div className="mt-6 p-4 bg-muted rounded-lg border border-input space-y-4">
+        <div className="mt-6 p-4 bg-card rounded-lg border border-stone-200 space-y-4">
           <div>
             <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
               Observed Challenge
