@@ -1,11 +1,25 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  hashImageUrl,
   joinRegionLabels,
   maskBounds,
   resolveRegionLabel,
   topmostLeftmostPoint,
 } from "@/lib/vision-labels";
+
+/** Builds a grid from rows of '0'/'1' characters. */
+
+describe("hashImageUrl", () => {
+  it("produces stable hashes", () => {
+    const url = "https://example.com/photo.jpg";
+    expect(hashImageUrl(url)).toBe(hashImageUrl(url));
+  });
+
+  it("different urls produce different hashes", () => {
+    expect(hashImageUrl("https://a.com")).not.toBe(hashImageUrl("https://b.com"));
+  });
+});
 
 /** Builds a grid from rows of '0'/'1' characters. */
 function rows(...lines: string[]): { grid: Uint8Array; width: number; height: number } {

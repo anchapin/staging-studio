@@ -14,7 +14,7 @@ import { extractMaskOutline, paintMaskPixels } from "@/lib/mask-format";
 import { floodFillMask, maskGridFromPixels } from "@/lib/mask-flood-fill";
 import {
   DEFAULT_MASK_EXPANSION_RADIUS,
-  dilateMaskGrid,
+  dilateMaskGridDirectional,
 } from "@/lib/mask-dilation";
 import { fillHoles } from "@/lib/mask-postprocess";
 import { SAM_TOOL_ENABLED } from "@/lib/sam-tool";
@@ -149,6 +149,12 @@ interface InpaintMaskCanvasProps {
    */
   expansionRadius?: number;
   /**
+   * Issue #234: when true, dilate further downward than upward so cast floor
+   * shadows are included in the regenerated region. Has no effect when
+   * `expansionRadius` is 0.
+   */
+  includeFloorShadow?: boolean;
+  /**
    * Issue #203: numbered badges (1-based) for each pending batch selection,
    * positioned by natural-pixel click point. Pure DOM overlay — like the
    * brush cursor, they never touch canvas pixels, so the exported mask
@@ -183,6 +189,7 @@ export default function InpaintMaskCanvas({
   segmenting = false,
   instanceOverlays,
   expansionRadius = DEFAULT_MASK_EXPANSION_RADIUS,
+  includeFloorShadow = false,
   selectionMarkers,
   selectionReset = null,
   onMaskCleared,
@@ -220,6 +227,12 @@ export default function InpaintMaskCanvas({
         : { width, height },
     [aspectRatio, width, height]
   );
+
+  // Issue #262: track the previous dims so we can detect when the canvas
+  // grid re-sizes due to the photo's aspect ratio finally resolving (null →
+  // a real value).  In that window the user may already be painting — we must
+  // not silently drop their strokes when the grid re-initializes.
+  const prevDimsRef = useRef(dims);
 
   // HiDPI support (issue #181): all painting happens in LOGICAL canvas
   // space (dims, the same space clientPointToCanvas produces). The backing
@@ -391,6 +404,77 @@ export default function InpaintMaskCanvas({
     initialMaskRef.current = initialMaskDataUrl;
   }, [initialMaskDataUrl]);
 
+  // Issue #262: preserve mask strokes when the canvas grid re-sizes due to
+  // the source photo's aspect ratio finally resolving (null → real value).
+  // Painting during the load window is now either preserved or visibly impossible
+  // (disabled) — never silently lost.
+  //
+  // When dims change we capture the current canvas content BEFORE initCanvas
+  // wipes it, then replay it scaled onto the new grid after initCanvas runs.
+  // A ref keeps `hasPainted` current for the effect without adding it as a
+  // reactive dependency. We also track the previous overlayImageSrc so we skip
+  // preservation when the source image itself changed (a mask is tied to one
+  // source image and must not survive onto a different image — issue #170).
+  // Note: hasPaintedRef is declared below in the expansion-radius section and
+  // shared here via the closure.
+  const prevOverlayRef = useRef(overlayImageSrc);
+
+  useEffect(() => {
+    const prev = prevDimsRef.current;
+    const prevOverlay = prevOverlayRef.current;
+
+    // Skip preservation when the source image changed — a mask belongs to one
+    // image and must not leak onto a different image's canvas (issue #170).
+    const sourceChanged = overlayImageSrc !== prevOverlay;
+
+    if (prev.width === dims.width && prev.height === dims.height) {
+      // Dims unchanged — still update refs so next dims change is clean.
+      prevDimsRef.current = dims;
+      prevOverlayRef.current = overlayImageSrc;
+      return;
+    }
+
+    // Dims changed — capture existing strokes before initCanvas wipes them.
+    // Capture the painting state HERE (not inside the deferred restore) because
+    // initCanvas resets hasPainted to false and the ref sync effect runs after
+    // we return, so hasPaintedRef.current would be stale by the time restore
+    // executes via queueMicrotask.
+    const wasPainted = hasPaintedRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    const oldDims = prev;
+    const newDims = dims;
+
+    // Only preserve strokes when the source image is the same (aspect ratio
+    // resize), not when switching images (source switch wipes intentionally).
+    const capturedDataUrl =
+      !sourceChanged && wasPainted && canvas && ctx
+        ? canvas.toDataURL("image/png")
+        : null;
+
+    prevDimsRef.current = newDims;
+    prevOverlayRef.current = overlayImageSrc;
+
+    if (!capturedDataUrl) return;
+
+    // Defer the restore until after initCanvas has set up the new grid.
+    const restore = () => {
+      const c = canvasRef.current;
+      const cg = c?.getContext("2d");
+      if (!c || !cg) return;
+      const img = new Image();
+      img.onload = () => {
+        cg.drawImage(img, 0, 0, oldDims.width, oldDims.height, 0, 0, newDims.width, newDims.height);
+      };
+      img.src = capturedDataUrl;
+    };
+
+    // queueMicrotask runs after the current synchronous chunk (both effects
+    // complete) but before the browser renders — initCanvas effect is already
+    // done by the time restore fires.
+    queueMicrotask(restore);
+  }, [dims, overlayImageSrc]);
+
   const initCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -427,6 +511,12 @@ export default function InpaintMaskCanvas({
   // mask drawn for one image must never survive onto the next. The ref sync
   // effect above runs first, so initCanvas reads the latest initial mask.
   useEffect(() => {
+    // Issue #262: track source changes so the dims-change effect above can
+    // distinguish aspect-ratio resize (preserve strokes) from source switch
+    // (don't preserve — mask belongs to the old image).
+    if (overlayImageSrc !== prevOverlayRef.current) {
+      prevOverlayRef.current = overlayImageSrc;
+    }
     initCanvas();
   }, [initCanvas, overlayImageSrc]);
 
@@ -604,12 +694,13 @@ export default function InpaintMaskCanvas({
       paintCtx.drawImage(canvas, 0, 0, dims.width, dims.height);
       const paintData = paintCtx.getImageData(0, 0, dims.width, dims.height);
       const grid = maskGridFromPixels(paintData.data, dims.width, dims.height);
-      const dilated =
-        expansionRadius > 0
-          ? dilateMaskGrid(grid, dims.width, dims.height, expansionRadius)
-          : null;
-      if (expansionRadius > 0 && !dilated) return;
-      const baseMask = dilated ? dilated.mask : grid;
+      // Issue #234: directional dilation extends further downward when
+      // includeFloorShadow is true, swallowing cast shadows on the floor.
+      const dilated = dilateMaskGridDirectional(grid, dims.width, dims.height, expansionRadius, {
+        includeFloorShadow,
+      });
+      if (!dilated) return;
+      const baseMask = dilated.mask;
       const filled = fillHoles(baseMask, dims.width, dims.height);
       const finalMask = filled ? filled.mask : baseMask;
 
@@ -656,7 +747,7 @@ export default function InpaintMaskCanvas({
       );
       setLowCoverage(shouldWarnLowCoverage(coverage));
     }
-  }, [naturalWidth, naturalHeight, onMaskChange, expansionRadius, dims.width, dims.height]);
+  }, [naturalWidth, naturalHeight, onMaskChange, expansionRadius, includeFloorShadow, dims.width, dims.height]);
 
   // Re-export when the expansion radius changes so the dispatched mask
   // always reflects the current dilation setting (issue #180). Refs keep the
@@ -668,6 +759,7 @@ export default function InpaintMaskCanvas({
   }, [hasPainted]);
 
   const lastAppliedRadiusRef = useRef(expansionRadius);
+  const lastAppliedIncludeFloorShadowRef = useRef(includeFloorShadow);
   useEffect(() => {
     const previous = lastAppliedRadiusRef.current;
     lastAppliedRadiusRef.current = expansionRadius;
@@ -675,6 +767,16 @@ export default function InpaintMaskCanvas({
     if (!hasPaintedRef.current) return;
     exportMask();
   }, [expansionRadius, exportMask]);
+
+  // Issue #234: also re-export when includeFloorShadow toggles so the
+  // dispatched mask always reflects the current directional setting.
+  useEffect(() => {
+    const previous = lastAppliedIncludeFloorShadowRef.current;
+    lastAppliedIncludeFloorShadowRef.current = includeFloorShadow;
+    if (previous === includeFloorShadow) return;
+    if (!hasPaintedRef.current) return;
+    exportMask();
+  }, [includeFloorShadow, exportMask]);
 
   const clearMask = () => {
     const canvas = canvasRef.current;
@@ -979,7 +1081,10 @@ export default function InpaintMaskCanvas({
           ref={photoStackRef}
           className={
             fullWidth
-              ? "relative mx-auto w-full min-h-48"
+              ? // Issue #265: raise min-height from 192px (min-h-48) to 180px
+                // so the canvas stays usable on 1280x720 laptops. The aspect
+                // ratio box grows to fill available height; this is the floor.
+                "relative w-full min-h-[180px]"
               : "relative w-full max-w-md min-h-48"
           }
           style={

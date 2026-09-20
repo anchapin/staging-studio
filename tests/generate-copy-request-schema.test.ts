@@ -33,42 +33,42 @@ describe("generateCopyRequestSchema", () => {
 
 describe("visionLabelRequestSchema", () => {
   const crop = { instanceIndex: 0, cropDataUrl: `data:image/jpeg;base64,${"A".repeat(200)}` };
+  const validBody = {
+    roomId: "room_123",
+    imageUrl: "https://xxxx.supabase.co/storage/v1/object/room.jpg",
+    concept: "sofa",
+    crops: [crop],
+  };
 
-  it("accepts a body with roomId, concept, and one or more crops", () => {
-    const result = visionLabelRequestSchema.safeParse({
-      roomId: "room_123",
-      concept: "sofa",
-      crops: [crop],
-    });
+  it("accepts a body with roomId, imageUrl, concept, and one or more crops", () => {
+    const result = visionLabelRequestSchema.safeParse(validBody);
     expect(result.success).toBe(true);
   });
 
   it("rejects an empty crop list and more than the max", () => {
     expect(
-      visionLabelRequestSchema.safeParse({ roomId: "r", concept: "sofa", crops: [] }).success
+      visionLabelRequestSchema.safeParse({ ...validBody, crops: [] }).success
     ).toBe(false);
     const tooMany = Array.from({ length: 31 }, (_, index) => ({
       instanceIndex: index,
       cropDataUrl: `data:image/jpeg;base64,${"A".repeat(200)}`,
     }));
     expect(
-      visionLabelRequestSchema.safeParse({ roomId: "r", concept: "sofa", crops: tooMany }).success
+      visionLabelRequestSchema.safeParse({ ...validBody, crops: tooMany }).success
     ).toBe(false);
   });
 
   it("rejects non-data-URL crops and invalid concepts", () => {
     expect(
       visionLabelRequestSchema.safeParse({
-        roomId: "r",
-        concept: "sofa",
+        ...validBody,
         crops: [{ instanceIndex: 0, cropDataUrl: "https://example.com/crop.png" }],
       }).success
     ).toBe(false);
     expect(
       visionLabelRequestSchema.safeParse({
-        roomId: "r",
+        ...validBody,
         concept: "Red Sofa!",
-        crops: [crop],
       }).success
     ).toBe(false);
   });
@@ -76,10 +76,8 @@ describe("visionLabelRequestSchema", () => {
   it("rejects unknown keys (strict)", () => {
     expect(
       visionLabelRequestSchema.safeParse({
-        roomId: "r",
-        concept: "sofa",
-        crops: [crop],
-        imageUrl: "https://example.com/room.jpg",
+        ...validBody,
+        extraField: "not allowed",
       }).success
     ).toBe(false);
   });

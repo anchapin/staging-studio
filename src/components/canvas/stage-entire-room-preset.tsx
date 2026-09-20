@@ -143,12 +143,14 @@ export default function StageEntireRoomPreset({
     if (detecting) return;
     setDetecting(true);
     try {
-      // 1. Detect furnishings (per-object provider masks, server
-      //    re-encoded as data URLs).
+      // 1. Detect furnishings via the generalized concept endpoint with the
+      //    explicit "furniture" concept (issue #239: the preset now calls the
+      //    same pathway as the concept prewarm hook instead of relying on the
+      //    omitted-concept default).
       const response = await fetch("/api/segment/furnishings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roomId, imageUrl }),
+        body: JSON.stringify({ roomId, imageUrl, concept: "furniture" }),
       });
       const data = await response.json().catch(() => null);
       if (!response.ok) {
