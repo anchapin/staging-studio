@@ -254,6 +254,7 @@ export default function RoomCanvas({
             className="object-contain"
           />
           <button
+            tabIndex={0}
             onClick={() => fileInputRef.current?.click()}
             className="absolute inset-0 bg-stone-900/50 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-white transition-opacity flex items-center justify-center"
             disabled={isUploading}
