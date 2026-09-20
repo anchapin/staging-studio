@@ -145,6 +145,17 @@
   }
 }
 
+/* Respect prefers-reduced-motion (WCAG 2.1 SC 2.3.3) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* On-screen paper preview for /projects/[id]/lookbook (issue #250).
    Scoped to .paper-preview so the print route and Browserless capture
    are untouched: pages keep their internal flex/grid layouts but lose
