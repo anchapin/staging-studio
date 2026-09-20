@@ -809,8 +809,25 @@ export default function ProjectDetailView({
             <h2 className="font-playfair text-xl font-semibold text-foreground mb-6">Rooms</h2>
 
             {project.rooms.length === 0 ? (
-              <div className="rounded-lg border-2 border-dashed border-border p-12 text-center">
-                <p className="text-muted-foreground">No rooms yet.</p>
+              <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border p-12 text-center">
+                <svg
+                  className="mb-3 h-12 w-12 text-muted-foreground"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={1.5}
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"
+                  />
+                </svg>
+                <p className="font-medium text-foreground">No rooms yet</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Upload a room photo to begin staging
+                </p>
               </div>
             ) : (
               <div className="grid gap-8 md:grid-cols-2">
