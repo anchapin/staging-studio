@@ -26,28 +26,28 @@ export default async function ProjectsPage() {
           <h1 className="font-playfair text-3xl font-bold text-foreground">
             Projects
           </h1>
-<p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
             Manage your staging lookbooks
           </p>
         </div>
 
         <Link
           href="/projects/new"
-className={buttonVariants({ variant: "default" })}
+          className={buttonVariants({ variant: "default" })}
         >
           + New Project
         </Link>
       </div>
 
       {projects.length === 0 ? (
-<div className="rounded-lg border-2 border-dashed border-border p-12 text-center">
+        <div className="rounded-lg border-2 border-dashed border-border p-12 text-center">
           <p className="text-muted-foreground">No projects yet.</p>
           <p className="mt-1 text-sm leading-relaxed text-muted-foreground/80">
             Create your first staging project to get started.
           </p>
           <Link
             href="/projects/new"
-className={buttonVariants({ variant: "default" })}
+            className={buttonVariants({ variant: "default" })}
           >
             Create Project
           </Link>
@@ -63,7 +63,7 @@ className={buttonVariants({ variant: "default" })}
               <h2 className="font-playfair text-lg font-semibold text-foreground">
                 {project.propertyAddress}
               </h2>
-<p className="mt-1 text-sm leading-relaxed text-muted-foreground">{project.clientName}</p>
+              <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{project.clientName}</p>
               <div className="mt-3 flex items-center justify-between">
                 <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-foreground">
                   {project.stagingAesthetic}
