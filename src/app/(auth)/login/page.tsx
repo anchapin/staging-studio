@@ -117,7 +117,7 @@ function LoginForm() {
 
         <form onSubmit={mode === "password" ? handlePasswordSignIn : handleMagicLink} className="space-y-6">
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-stone-700">
+            <label htmlFor="email" className="block text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Email address
             </label>
             <input
@@ -133,7 +133,7 @@ function LoginForm() {
 
           {mode === "password" && (
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-stone-700">
+              <label htmlFor="password" className="block text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Password
               </label>
               <input

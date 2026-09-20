@@ -734,7 +734,7 @@ export default function ProjectDetailView({
                       <section aria-label="Staging directives">
                         <label
                           htmlFor={`directives-${focusedRoom.id}`}
-                          className="block text-sm font-medium text-stone-700 mb-1"
+                          className="block text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1"
                         >
                           Staging directives (required)
                         </label>

@@ -101,7 +101,7 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
       <div>
         <label
           htmlFor="firmName"
-          className="block text-sm font-medium text-stone-700"
+          className="block text-xs font-medium uppercase tracking-wide text-muted-foreground"
         >
           Firm Name
         </label>
@@ -119,7 +119,7 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
       <div>
         <label
           htmlFor="ownerName"
-          className="block text-sm font-medium text-stone-700"
+          className="block text-xs font-medium uppercase tracking-wide text-muted-foreground"
         >
           Owner Name
         </label>
@@ -137,7 +137,7 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
       <div>
         <label
           htmlFor="logo"
-          className="block text-sm font-medium text-stone-700"
+          className="block text-xs font-medium uppercase tracking-wide text-muted-foreground"
         >
           Firm Logo <span className="text-stone-400">(optional)</span>
         </label>
@@ -158,7 +158,7 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
       <div>
         <label
           htmlFor="psychologyPageContent"
-          className="block text-sm font-medium text-stone-700"
+          className="block text-xs font-medium uppercase tracking-wide text-muted-foreground"
         >
           Psychology Page Content{" "}
           <span className="text-stone-400">(lookbook page 2)</span>
@@ -176,7 +176,7 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
       <div>
         <label
           htmlFor="signoffContent"
-          className="block text-sm font-medium text-stone-700"
+          className="block text-xs font-medium uppercase tracking-wide text-muted-foreground"
         >
           Sign-off Content{" "}
           <span className="text-stone-400">(final lookbook page)</span>
