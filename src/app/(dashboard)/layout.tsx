@@ -69,7 +69,7 @@ function SidebarOverlay({ projects }: { projects: { id: string; clientName: stri
         type="button"
         onClick={() => setOpen(true)}
         aria-label="Open navigation menu"
-        className="fixed left-4 top-4 z-50 flex h-10 w-10 items-center justify-center rounded-md bg-sidebar text-sidebar-foreground shadow-md hover:bg-stone-700 md:flex lg:hidden"
+        className="fixed left-4 top-4 z-50 flex h-11 w-11 items-center justify-center rounded-md bg-sidebar text-sidebar-foreground shadow-md hover:bg-stone-700 md:flex lg:hidden"
       >
         <Menu className="h-5 w-5" />
       </button>
@@ -101,7 +101,7 @@ function SidebarOverlay({ projects }: { projects: { id: string; clientName: stri
             type="button"
             onClick={() => setOpen(false)}
             aria-label="Close navigation menu"
-            className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-stone-700"
+            className="flex h-11 w-11 items-center justify-center rounded-md hover:bg-stone-700"
           >
             <X className="h-5 w-5" />
           </button>
@@ -110,7 +110,7 @@ function SidebarOverlay({ projects }: { projects: { id: string; clientName: stri
         <div className="p-4">
           <Link
             href="/projects/new"
-            className="mb-3 flex items-center gap-2 rounded-md bg-background px-3 py-2 text-sm font-medium text-foreground hover:bg-muted"
+            className="mb-3 flex items-center gap-2 rounded-md bg-background px-4 py-3 text-sm font-medium text-foreground hover:bg-muted"
             onClick={() => setOpen(false)}
           >
             <svg
