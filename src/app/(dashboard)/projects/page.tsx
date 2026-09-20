@@ -1,6 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { redirect } from "next/navigation";
+import { FolderPlus } from "lucide-react";
 import { getDashboardUserWithProjects } from "@/lib/dashboard-data";
 import { buttonVariants } from "@/components/ui/button";
 
@@ -51,9 +52,10 @@ export default async function ProjectsPage() {
       </div>
 
       {projects.length === 0 ? (
-        <div className="rounded-lg border-2 border-dashed border-border p-12 text-center">
-          <p className="text-muted-foreground">No projects yet.</p>
-          <p className="mt-1 text-sm leading-relaxed text-muted-foreground/80">
+        <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border p-12 text-center">
+          <FolderPlus className="mb-3 h-10 w-10 text-muted-foreground" aria-hidden="true" />
+          <p className="font-medium text-foreground">No projects yet</p>
+          <p className="mt-1 text-sm text-muted-foreground">
             Create your first staging project to get started.
           </p>
           <Link
