@@ -37,6 +37,15 @@ import type { SegmentCacheEntry } from "@/lib/segment-cache";
  * and one `segment_prewarm_timing` console event per attempt.
  */
 
+/** Why the auto-fire failed — drives user-facing fallback copy (issue #398). */
+export type SegmentPrewarmFailureReason =
+  /** The detection backend is unreachable (network error, DNS failure, etc.). */
+  | "service-unreachable"
+  /** Server returned a non-ok HTTP response (4xx/5xx). */
+  | "http-error"
+  /** Server returned ok but the response was unparseable. */
+  | "invalid-response";
+
 /** States of the editor-open concept auto-fire. */
 export type SegmentPrewarmStatus = "idle" | "warming" | "warm" | "failed";
 
@@ -63,6 +72,11 @@ export interface UseConceptSegmentsResult {
   status: SegmentPrewarmStatus;
   /** The latest detection result (cache-served or fetched), if any. */
   result: SegmentCacheEntry | null;
+  /**
+   * Why the auto-fire failed (only set when status === "failed").
+   * Used to show appropriate user-facing copy and fallback actions (issue #398).
+   */
+  failedReason: SegmentPrewarmFailureReason | null;
 }
 
 export function useConceptSegments({
@@ -76,6 +90,7 @@ export function useConceptSegments({
 }: UseConceptSegmentsArgs): UseConceptSegmentsResult {
   const [status, setStatus] = useState<SegmentPrewarmStatus>("idle");
   const [result, setResult] = useState<SegmentCacheEntry | null>(null);
+  const [failedReason, setFailedReason] = useState<SegmentPrewarmFailureReason | null>(null);
   // Dedupe guard: the effect re-runs on every render where its deps are
   // re-created; a completed (or in-flight) key must not re-fire.
   const warmedKeyRef = useRef<string | null>(null);
@@ -142,9 +157,17 @@ export function useConceptSegments({
           })
         );
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         // Aborts are lifecycle noise (dep change/unmount), not failures.
         if (controller.signal.aborted) return;
+        // TypeError with "Failed to fetch" = service unreachable (issue #398)
+        if (error instanceof TypeError && error.message.toLowerCase().includes("fetch")) {
+          setFailedReason("service-unreachable");
+        } else if (error instanceof Error && error.message.includes("HTTP ")) {
+          setFailedReason("http-error");
+        } else {
+          setFailedReason("invalid-response");
+        }
         setStatus("failed");
         emitSegmentTiming(
           buildSegmentPrewarmTimingEvent({
@@ -170,5 +193,5 @@ export function useConceptSegments({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, roomId, imageUrl, imageWidth, imageHeight, concept]);
 
-  return { status, result };
+  return { status, result, failedReason };
 }

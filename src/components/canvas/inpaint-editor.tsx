@@ -1769,10 +1769,28 @@ export default function InpaintEditor({
                     </p>
                   )}
                   {!conceptLoading && conceptSegments.status === "failed" && (
-                    <p role="status" className="text-xs font-medium text-amber-700">
-                      Couldn&apos;t detect &quot;{requestedConcept}&quot; — try again, another
-                      concept, or the brush.
-                    </p>
+                    <div className="flex flex-col gap-1">
+                      {conceptSegments.failedReason === "service-unreachable" ? (
+                        <>
+                          <p role="status" className="text-xs font-medium text-amber-700">
+                            The detection service is unavailable — the automatic furniture
+                            finder can&apos;t reach its server right now.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab("manual")}
+                            className="w-fit text-left text-xs font-medium text-blue-600 underline hover:text-blue-800"
+                          >
+                            Paint the area manually instead
+                          </button>
+                        </>
+                      ) : (
+                        <p role="status" className="text-xs font-medium text-amber-700">
+                          Couldn&apos;t detect &quot;{requestedConcept}&quot; — try again, another
+                          concept, or the brush.
+                        </p>
+                      )}
+                    </div>
                   )}
                   {!conceptLoading &&
                     displayedResult &&
