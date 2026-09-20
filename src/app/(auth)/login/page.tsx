@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import { resolveLoginErrorMessage } from "@/lib/login-error";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 function LoginForm() {
   const searchParams = useSearchParams();
@@ -122,7 +123,7 @@ function LoginForm() {
             <label htmlFor="email" className="block text-sm font-medium text-foreground">
               Email address
             </label>
-            <input
+            <Input
               id="email"
               type="email"
               value={email}
@@ -141,7 +142,7 @@ function LoginForm() {
               required
               aria-invalid={!!emailError}
               aria-describedby={emailError ? "email-error" : undefined}
-              className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring aria-invalid:border-red-500"
+              error={!!emailError}
               placeholder="you@example.com"
             />
             {emailError && (
@@ -156,7 +157,7 @@ function LoginForm() {
               <label htmlFor="password" className="block text-sm font-medium text-foreground">
                 Password
               </label>
-              <input
+              <Input
                 id="password"
                 type="password"
                 value={password}
@@ -170,7 +171,7 @@ function LoginForm() {
                 required
                 aria-invalid={!!passwordError}
                 aria-describedby={passwordError ? "password-error" : undefined}
-                className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring aria-invalid:border-red-500"
+                error={!!passwordError}
                 placeholder="••••••••"
               />
               {passwordError && (
@@ -205,9 +206,6 @@ className="w-full"
           </Button>
         </form>
 
-        <p className="text-center text-xs text-muted-foreground">
-          For Circle G Designs — Lauren Chapin
-        </p>
       </div>
     </div>
   );

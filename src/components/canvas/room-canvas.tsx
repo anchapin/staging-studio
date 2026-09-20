@@ -39,6 +39,7 @@ export default function RoomCanvas({
 }: RoomCanvasProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [progressMessage, setProgressMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pendingConfirm, setPendingConfirm] = useState<{
     storagePath: string;
@@ -52,6 +53,16 @@ export default function RoomCanvas({
   } | null>(null);
   const [liveMessage, setLiveMessage] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * Returns a contextual message based on upload progress stage (issue #376).
+   */
+  const getProgressMessage = (percent: number): string => {
+    if (percent >= 100) return "Complete!";
+    if (percent >= 85) return "Almost done...";
+    if (percent >= 50) return "Processing...";
+    return "Uploading...";
+  };
   /**
    * Natural pixel dimensions of the loaded photo (issue #188). The frame
    * adopts the photo's own aspect ratio so the FULL image stays visible —
@@ -117,6 +128,7 @@ export default function RoomCanvas({
     setPendingConfirm(null);
     setPendingUpload(null);
     setUploadProgress(100);
+    setProgressMessage(getProgressMessage(100));
     setLiveMessage("Room photo upload complete.");
     onUploadComplete?.(slot, confirmResult.publicUrl);
   };
@@ -149,9 +161,11 @@ export default function RoomCanvas({
 
     try {
       setUploadProgress(70);
+      setProgressMessage(getProgressMessage(70));
       await putToStorage(file, signedUrl);
 
       setUploadProgress(90);
+      setProgressMessage(getProgressMessage(90));
       setPendingUpload(null);
       setPendingConfirm({ storagePath, slot });
       await confirmUpload(storagePath, slot);
@@ -173,6 +187,7 @@ export default function RoomCanvas({
     setLiveMessage("");
     setIsUploading(true);
     setUploadProgress(0);
+    setProgressMessage(getProgressMessage(0));
     setPendingConfirm(null);
     setPendingUpload(null);
 
@@ -181,12 +196,16 @@ export default function RoomCanvas({
         maxSizeMB: 10,
         maxWidthOrHeight: 2048,
         useWebWorker: true,
-        onProgress: (percent: number) => setUploadProgress(percent),
+        onProgress: (percent: number) => {
+          setUploadProgress(percent);
+          setProgressMessage(getProgressMessage(percent));
+        },
       };
 
       const compressedFile = await imageCompression(file, options);
 
       setUploadProgress(50);
+      setProgressMessage(getProgressMessage(50));
 
       const signedUrlResult = await getSignedUploadUrl(
         roomId,
@@ -201,6 +220,7 @@ export default function RoomCanvas({
       const { signedUrl, storagePath } = signedUrlResult;
 
       setUploadProgress(70);
+      setProgressMessage(getProgressMessage(70));
       setPendingUpload({
         signedUrl,
         storagePath,
@@ -211,6 +231,7 @@ export default function RoomCanvas({
       await putToStorage(compressedFile, signedUrl);
 
       setUploadProgress(90);
+      setProgressMessage(getProgressMessage(90));
       setPendingConfirm({ storagePath, slot: variantSlot });
       await confirmUpload(storagePath, variantSlot);
     } catch (err) {
@@ -273,7 +294,7 @@ export default function RoomCanvas({
             <>
               <Loader2 className="w-10 h-10 animate-spin" />
               <span className="text-sm font-medium">
-                Uploading... {Math.round(uploadProgress)}%
+                {progressMessage} {Math.round(uploadProgress)}%
               </span>
               <div
                 role="progressbar"
