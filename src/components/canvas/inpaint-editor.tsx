@@ -464,6 +464,10 @@ export default function InpaintEditor({
   } | null>(null);
   const selectionResetIdRef = useRef(0);
 
+  // Issue #378: source change undo state
+  const previousSourceRef = useRef<InpaintSource | null>(null);
+  const [canUndoSource, setCanUndoSource] = useState(false);
+
   // Issue #203: per-object batch execution state. `activeBatch` holds the
   // running (or failed, awaiting retry) plan + progress; the refs carry
   // run outcomes out of the polling hook (which swallows errors into
@@ -978,6 +982,9 @@ export default function InpaintEditor({
   const handleSourceChange = useCallback(
     (next: InpaintSource) => {
       if (inpaintSourcesEqual(next, source)) return;
+      // Issue #378: save current source for undo before switching
+      previousSourceRef.current = source;
+      setCanUndoSource(true);
       setMaskDataUrl(null);
       // Issue #203: masks (and the selection set that produced them) were
       // segmented against the previous image — they must not leak. The
@@ -996,6 +1003,27 @@ export default function InpaintEditor({
     },
     [source, onSourceChange]
   );
+
+  // Issue #378: undo source change by restoring the previous source
+  const handleUndoSource = useCallback(() => {
+    if (!previousSourceRef.current) return;
+    const prev = previousSourceRef.current;
+    // Restore the previous source by calling handleSourceChange with the previous source
+    // This will trigger the full reset logic that handleSourceChange does
+    previousSourceRef.current = source;
+    setMaskDataUrl(null);
+    setBatchSelections([]);
+    regionMaskCacheRef.current.clear();
+    setInstanceLabels(null);
+    segmentCacheRef.current?.clear();
+    setRequestedConcept(DEFAULT_CONCEPT);
+    setDisplayedResult(null);
+    setDecodedInstances(null);
+    setSelectedInstanceIndices([]);
+    setConceptInputError(null);
+    setSelectAllNotice(null);
+    onSourceChange?.(prev);
+  }, [source, onSourceChange]);
 
   // Issue #203 (simplified by #229): keep the union mask (for thematic
   // runs + the batch panel) and the canvas's selection reset in lockstep
@@ -1513,6 +1541,15 @@ export default function InpaintEditor({
                   </label>
                 ))}
               </div>
+              {canUndoSource && (
+                <button
+                  type="button"
+                  onClick={handleUndoSource}
+                  className="mt-2 text-xs text-stone-500 underline hover:text-stone-700"
+                >
+                  Undo source change
+                </button>
+              )}
             </fieldset>
           )}
 
