@@ -1772,13 +1772,13 @@ export default function InpaintEditor({
                       {conceptSegments.failedReason === "service-unreachable" ? (
                         <>
                           <p role="status" className="text-xs font-medium text-amber-700">
-                            The detection service is unavailable — the automatic furniture
-                            finder can&apos;t reach its server right now.
+                            We couldn't reach the detection service. Try the Manual paint tab
+                            instead, or try again later.
                           </p>
                           <button
                             type="button"
                             onClick={() => setActiveTab("manual")}
-                            className="w-fit text-left text-xs font-medium text-blue-600 underline hover:text-blue-800"
+                            className="text-xs text-amber-700 underline hover:text-amber-900"
                           >
                             Paint the area manually instead
                           </button>

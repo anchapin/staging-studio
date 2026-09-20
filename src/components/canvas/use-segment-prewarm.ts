@@ -37,14 +37,11 @@ import type { SegmentCacheEntry } from "@/lib/segment-cache";
  * and one `segment_prewarm_timing` console event per attempt.
  */
 
-/** Why the auto-fire failed — drives user-facing fallback copy (issue #398). */
-export type SegmentPrewarmFailureReason =
-  /** The detection backend is unreachable (network error, DNS failure, etc.). */
-  | "service-unreachable"
-  /** Server returned a non-ok HTTP response (4xx/5xx). */
-  | "http-error"
-  /** Server returned ok but the response was unparseable. */
-  | "invalid-response";
+/** Reason for concept detection failure, used to show appropriate UI. */
+export type SegmentPrewarmFailedReason =
+  | "service-unreachable" // network/DNS failure
+  | "http-error" // 4xx/5xx response
+  | "invalid-response"; // response ok but concept not found
 
 /** States of the editor-open concept auto-fire. */
 export type SegmentPrewarmStatus = "idle" | "warming" | "warm" | "failed";
@@ -72,11 +69,8 @@ export interface UseConceptSegmentsResult {
   status: SegmentPrewarmStatus;
   /** The latest detection result (cache-served or fetched), if any. */
   result: SegmentCacheEntry | null;
-  /**
-   * Why the auto-fire failed (only set when status === "failed").
-   * Used to show appropriate user-facing copy and fallback actions (issue #398).
-   */
-  failedReason: SegmentPrewarmFailureReason | null;
+  /** The reason for failure, only set when status is "failed". */
+  failedReason?: SegmentPrewarmFailedReason;
 }
 
 export function useConceptSegments({
@@ -90,7 +84,7 @@ export function useConceptSegments({
 }: UseConceptSegmentsArgs): UseConceptSegmentsResult {
   const [status, setStatus] = useState<SegmentPrewarmStatus>("idle");
   const [result, setResult] = useState<SegmentCacheEntry | null>(null);
-  const [failedReason, setFailedReason] = useState<SegmentPrewarmFailureReason | null>(null);
+  const [failedReason, setFailedReason] = useState<SegmentPrewarmFailedReason | undefined>(undefined);
   // Dedupe guard: the effect re-runs on every render where its deps are
   // re-created; a completed (or in-flight) key must not re-fire.
   const warmedKeyRef = useRef<string | null>(null);
@@ -157,17 +151,19 @@ export function useConceptSegments({
           })
         );
       })
-      .catch((error: unknown) => {
+      .catch((err: unknown) => {
         // Aborts are lifecycle noise (dep change/unmount), not failures.
         if (controller.signal.aborted) return;
-        // TypeError with "Failed to fetch" = service unreachable (issue #398)
-        if (error instanceof TypeError && error.message.toLowerCase().includes("fetch")) {
-          setFailedReason("service-unreachable");
-        } else if (error instanceof Error && error.message.includes("HTTP ")) {
-          setFailedReason("http-error");
-        } else {
-          setFailedReason("invalid-response");
+        // Determine failure reason
+        let reason: SegmentPrewarmFailedReason = "http-error";
+        if (err instanceof TypeError && err.message.includes("fetch")) {
+          reason = "service-unreachable";
+        } else if (err instanceof Error) {
+          if (err.message.includes("HTTP 4") || err.message.includes("HTTP 5") || err.message.includes("Concept detection failed")) {
+            reason = "http-error";
+          }
         }
+        setFailedReason(reason);
         setStatus("failed");
         emitSegmentTiming(
           buildSegmentPrewarmTimingEvent({
