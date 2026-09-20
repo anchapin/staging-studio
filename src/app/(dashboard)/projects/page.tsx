@@ -22,31 +22,31 @@ export default async function ProjectsPage() {
     <div className="p-8">
       <div className="mb-8 flex items-center justify-between">
         <div>
-          <h1 className="font-playfair text-3xl font-bold text-stone-800">
+          <h1 className="font-playfair text-3xl font-bold text-foreground">
             Projects
           </h1>
-          <p className="mt-1 text-sm leading-relaxed text-stone-600">
+<p className="mt-1 text-sm leading-relaxed text-muted-foreground">
             Manage your staging lookbooks
           </p>
         </div>
 
         <Link
           href="/projects/new"
-          className="rounded-md bg-stone-800 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-700"
+          className="rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/80"
         >
           + New Project
         </Link>
       </div>
 
       {projects.length === 0 ? (
-        <div className="rounded-lg border-2 border-dashed border-stone-300 p-12 text-center">
-          <p className="text-stone-600">No projects yet.</p>
-          <p className="mt-1 text-sm leading-relaxed text-stone-500">
+<div className="rounded-lg border-2 border-dashed border-border p-12 text-center">
+          <p className="text-muted-foreground">No projects yet.</p>
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground/80">
             Create your first staging project to get started.
           </p>
           <Link
             href="/projects/new"
-            className="mt-4 inline-block rounded-md bg-stone-800 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-700"
+            className="mt-4 inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/80"
           >
             Create Project
           </Link>
@@ -57,17 +57,17 @@ export default async function ProjectsPage() {
             <Link
               key={project.id}
               href={`/projects/${project.id}`}
-              className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm transition-shadow hover:shadow-md"
+              className="rounded-lg border border-border bg-background p-6 shadow-sm transition-shadow hover:shadow-md"
             >
-              <h2 className="font-playfair text-lg font-semibold text-stone-800">
+              <h2 className="font-playfair text-lg font-semibold text-foreground">
                 {project.propertyAddress}
               </h2>
-              <p className="mt-1 text-sm leading-relaxed text-stone-600">{project.clientName}</p>
+<p className="mt-1 text-sm leading-relaxed text-muted-foreground">{project.clientName}</p>
               <div className="mt-3 flex items-center justify-between">
-                <span className="rounded-full bg-stone-100 px-2.5 py-0.5 text-xs font-medium text-stone-700">
+                <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-foreground">
                   {project.stagingAesthetic}
                 </span>
-                <span className="text-xs text-stone-500">
+                <span className="text-xs text-muted-foreground">
                   {project.rooms.length} room
                   {project.rooms.length !== 1 ? "s" : ""}
                 </span>

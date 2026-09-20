@@ -448,7 +448,7 @@ export default function ProjectDetailView({
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-stone-300 border-t-stone-800" />
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-primary" />
       </div>
     );
   }
@@ -457,8 +457,8 @@ export default function ProjectDetailView({
     if (projectFetchStateFromStatus(loadError.status) === "not-found") {
       return (
         <div className="p-8 text-center">
-          <h1 className="text-2xl font-bold text-stone-800">Project not found</h1>
-          <Link href="/dashboard" className="text-stone-600 hover:underline mt-4 inline-block">
+          <h1 className="text-2xl font-bold text-foreground">Project not found</h1>
+          <Link href="/dashboard" className="text-muted-foreground hover:underline mt-4 inline-block">
             Back to dashboard
           </Link>
         </div>
@@ -480,13 +480,13 @@ export default function ProjectDetailView({
           )}
           <button
             onClick={() => void loadProject()}
-            className="mt-4 rounded-md bg-stone-800 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-700"
+            className="mt-4 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/80"
           >
             Retry
           </button>
           <Link
             href="/dashboard"
-            className="mt-4 block text-stone-600 hover:underline text-sm"
+            className="mt-4 block text-muted-foreground hover:underline text-sm"
           >
             Back to dashboard
           </Link>
@@ -498,8 +498,8 @@ export default function ProjectDetailView({
   if (!project) {
     return (
       <div className="p-8 text-center">
-        <h1 className="text-2xl font-bold text-stone-800">Project not found</h1>
-        <Link href="/dashboard" className="text-stone-600 hover:underline mt-4 inline-block">
+        <h1 className="text-2xl font-bold text-foreground">Project not found</h1>
+        <Link href="/dashboard" className="text-muted-foreground hover:underline mt-4 inline-block">
           Back to dashboard
         </Link>
       </div>
@@ -548,26 +548,26 @@ export default function ProjectDetailView({
     <div
       className={
         laptopFixedLayout
-          ? "flex min-h-screen flex-col bg-stone-50 lg:h-full lg:overflow-hidden"
-          : "min-h-screen bg-stone-50"
+          ? "flex min-h-screen flex-col bg-background lg:h-full lg:overflow-hidden"
+          : "min-h-screen bg-background"
       }
     >
-      <header className="shrink-0 bg-white border-b border-stone-200 px-8 py-4">
+      <header className="shrink-0 bg-background border-b border-border px-8 py-4">
         <div className="flex items-center justify-between">
           <div>
             <Link
               href="/dashboard"
-              className="inline-flex items-center gap-2 text-sm text-stone-500 hover:text-stone-700"
+              className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
             >
               <ArrowLeft className="w-4 h-4" />
               Back to Dashboard
             </Link>
-            <h1 className="font-playfair text-2xl font-bold text-stone-800 mt-1">
+            <h1 className="font-playfair text-2xl font-bold text-foreground mt-1">
               {project.propertyAddress}
             </h1>
             <div className="mt-1 flex items-center gap-4">
-              <p className="text-sm text-stone-600">{project.clientName}</p>
-              <span className="rounded-full bg-stone-100 px-2.5 py-0.5 text-xs font-medium text-stone-700">
+              <p className="text-sm text-muted-foreground">{project.clientName}</p>
+              <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-foreground">
                 {project.stagingAesthetic}
               </span>
             </div>
@@ -575,7 +575,7 @@ export default function ProjectDetailView({
           <div className="flex items-center gap-3">
             <Link
               href={`/projects/${project.id}/lookbook`}
-              className="rounded-md border border-stone-300 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-100"
+              className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary"
             >
               Preview Lookbook
             </Link>
@@ -612,12 +612,12 @@ export default function ProjectDetailView({
               <button
                 type="button"
                 onClick={() => setEditorRoomId(null)}
-                className="inline-flex items-center gap-2 text-sm text-stone-500 hover:text-stone-700"
+                className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
               >
                 <ArrowLeft className="w-4 h-4" aria-hidden="true" />
                 All rooms
               </button>
-              <h2 className="font-playfair text-xl font-semibold text-stone-800">
+              <h2 className="font-playfair text-xl font-semibold text-foreground">
                 {focusedRoom.name}
               </h2>
             </div>
@@ -654,7 +654,7 @@ export default function ProjectDetailView({
               <section
                 aria-label="AI staging"
                 className="mt-4 flex min-h-0 flex-col lg:flex-1"
-              >                <h3 className="text-sm font-semibold text-stone-800 mb-3">
+              >                <h3 className="text-sm font-semibold text-foreground mb-3">
                   AI Staging
                 </h3>
                 {focusedEditingSlot !== null && (
@@ -734,7 +734,7 @@ export default function ProjectDetailView({
                       <section aria-label="Staging directives">
                         <label
                           htmlFor={`directives-${focusedRoom.id}`}
-                          className="block text-sm font-medium text-stone-700 mb-1"
+                          className="block text-sm font-medium text-foreground mb-1"
                         >
                           Staging directives (required)
                         </label>
@@ -750,16 +750,16 @@ export default function ProjectDetailView({
                           maxLength={MAX_DIRECTIVE_LENGTH}
                           rows={3}
                           placeholder="e.g. Add a neutral linen sofa, warm wood coffee table, and layered lighting..."
-                          className="w-full px-3 py-2 border border-stone-300 rounded-md focus:outline-none focus:ring-2 focus:ring-stone-500 resize-none"
+                          className="w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring resize-none"
                         />
-                        <p className="mt-1 text-xs text-stone-400 text-right">
+                        <p className="mt-1 text-xs text-muted-foreground text-right">
                           {focusedInputs.roomDirectives.length}/{MAX_DIRECTIVE_LENGTH}
                         </p>
                       </section>
 
                       {focusedInputs.staged && (
                         <section aria-label="Staged result">
-                          <h3 className="text-sm font-semibold text-stone-800 mb-3">
+                          <h3 className="text-sm font-semibold text-foreground mb-3">
                             Staged result
                           </h3>
                           <StagedResultImage
@@ -773,9 +773,9 @@ export default function ProjectDetailView({
 
                       <section
                         aria-label="Room copy"
-                        className="border-t border-stone-200 pt-4"
+                        className="border-t border-border pt-4"
                       >
-                        <h3 className="text-sm font-semibold text-stone-800 mb-3">
+                        <h3 className="text-sm font-semibold text-foreground mb-3">
                           Room Copy
                         </h3>
                         <GenerateCopyForm
@@ -799,18 +799,18 @@ export default function ProjectDetailView({
                 />
               </section>
             ) : (
-              <p className="mt-6 text-sm text-stone-500">
+              <p className="mt-6 text-sm text-muted-foreground">
                 Upload a room photo first to enable AI staging and copy.
               </p>
             )}
           </div>
         ) : (
           <>
-            <h2 className="font-playfair text-xl font-semibold text-stone-800 mb-6">Rooms</h2>
+            <h2 className="font-playfair text-xl font-semibold text-foreground mb-6">Rooms</h2>
 
             {project.rooms.length === 0 ? (
-              <div className="rounded-lg border-2 border-dashed border-stone-300 p-12 text-center">
-                <p className="text-stone-600">No rooms yet.</p>
+              <div className="rounded-lg border-2 border-dashed border-border p-12 text-center">
+                <p className="text-muted-foreground">No rooms yet.</p>
               </div>
             ) : (
               <div className="grid gap-8 md:grid-cols-2">
@@ -824,11 +824,11 @@ export default function ProjectDetailView({
                   return (
                     <div key={room.id} className="space-y-3">
                       <div className="flex items-center justify-between">
-                        <h3 className="font-medium text-stone-800">{room.name}</h3>
+                        <h3 className="font-medium text-foreground">{room.name}</h3>
                         <button
                           type="button"
                           onClick={() => openEditor(room.id)}
-                          className="inline-flex items-center gap-1.5 rounded-md border border-stone-300 px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-100"
+                          className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-secondary"
                         >
                           <PencilRuler className="w-4 h-4" aria-hidden="true" />
                           Edit staging
