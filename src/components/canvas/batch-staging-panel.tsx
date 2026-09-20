@@ -136,7 +136,7 @@ export default function BatchStagingPanel({
       aria-label="Batch region staging"
       className="no-print flex flex-col gap-3 rounded-md border border-input bg-card p-4"
     >
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <h4 className="text-sm font-semibold text-foreground">
           Batch staging
           <span className="ml-2 rounded bg-secondary px-1.5 py-0.5 text-xs font-normal text-muted-foreground">
@@ -219,7 +219,7 @@ export default function BatchStagingPanel({
                 onChange={(event) => setThematicPrompt(event.target.value)}
                 rows={2}
                 placeholder="e.g. replace the seating with warm mid-century pieces"
-                className="mt-1 w-full rounded-md border border-input px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-500"
+                className="mt-1 w-full rounded-md border border-input px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </>
           ) : (
@@ -256,7 +256,7 @@ export default function BatchStagingPanel({
                           ? `e.g. replace the ${entryLabel(selection, index)} with ...`
                           : `e.g. replace ${batchStepLabel(index).toLowerCase()} with ...`
                       }
-                      className="mt-0.5 w-full rounded-md border border-input px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-stone-500"
+                      className="mt-0.5 w-full rounded-md border border-input px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                     />
                   </li>
                 ))}
