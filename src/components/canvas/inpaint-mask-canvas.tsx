@@ -199,6 +199,11 @@ export default function InpaintMaskCanvas({
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(initialMaskDataUrl ?? null);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
 
+  // Issue #378: undo history stack for mask operations. Each entry is a
+  // snapshot of the canvas content before a painting operation (brush stroke,
+  // fill, or clear). Undo pops the stack to restore a previous state.
+  const [undoStack, setUndoStack] = useState<string[]>([]);
+
   // Masking-guidance state: which tool is active, whether anything has been
   // painted yet (drives the empty-state hint), and whether the exported mask
   // is suspiciously tiny (drives the low-coverage warning).
@@ -575,6 +580,65 @@ export default function InpaintMaskCanvas({
     ctx.fill();
   };
 
+  // Issue #378: capture the current canvas content as a data URL for the undo
+  // stack. Called before any destructive operation (stroke, fill, clear).
+  const captureUndoState = useCallback((): string | null => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    return canvas.toDataURL("image/png");
+  }, []);
+
+  // Issue #378: restore a previously captured undo state back onto the canvas.
+  const restoreUndoState = useCallback((dataUrl: string) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return false;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return false;
+    const img = new Image();
+    img.onload = () => {
+      ctx.fillStyle = "black";
+      ctx.fillRect(0, 0, dims.width, dims.height);
+      ctx.drawImage(img, 0, 0, dims.width, dims.height);
+    };
+    img.src = dataUrl;
+    return true;
+  }, [dims.width, dims.height]);
+
+  // Issue #378: pop the most recent undo state and restore it. Called both
+  // from the explicit Undo button and from the Cmd/Ctrl+Z keyboard shortcut.
+  const handleUndo = useCallback(() => {
+    if (undoStack.length === 0) return;
+    const previousState = undoStack[undoStack.length - 1];
+    if (!previousState) return;
+    if (restoreUndoState(previousState)) {
+      setUndoStack((prev) => prev.slice(0, -1));
+      // After restore, re-export to notify parent and update coverage warning
+      // Use a microtask to ensure canvas is painted before exporting
+      queueMicrotask(() => {
+        const currentDataUrl = canvasRef.current?.toDataURL("image/png") ?? null;
+        setMaskDataUrl(currentDataUrl);
+        onMaskChange?.(currentDataUrl);
+        // Update hasPainted based on whether there's any content
+        const canvas = canvasRef.current;
+        if (canvas) {
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            let hasContent = false;
+            for (let i = 0; i < data.length; i += 4) {
+              if (data[i] > 0 || data[i + 1] > 0 || data[i + 2] > 0) {
+                hasContent = true;
+                break;
+              }
+            }
+            setHasPainted(hasContent);
+          }
+        }
+      });
+    }
+  }, [undoStack, restoreUndoState, onMaskChange]);
+
   // Fill Region tool: flood-fills the unpainted region connected to the
   // click/cursor point with painted pixels. Designed for cover-the-object
   // semantics — draw a continuous outline around the object, then fill its
@@ -621,11 +685,21 @@ export default function InpaintMaskCanvas({
       return;
     }
     if (activeTool === "fill") {
+      // Issue #378: capture undo state before fill
+      const undoState = captureUndoState();
+      if (undoState !== null) {
+        setUndoStack((prev) => [...prev, undoState]);
+      }
       if (performFill(point)) {
         setHasPainted(true);
         exportMask();
       }
       return;
+    }
+    // Issue #378: capture undo state before brush stroke begins
+    const undoState = captureUndoState();
+    if (undoState !== null) {
+      setUndoStack((prev) => [...prev, undoState]);
     }
     setIsDrawing(true);
     lastPointRef.current = point;
@@ -778,7 +852,11 @@ export default function InpaintMaskCanvas({
   }, [includeFloorShadow, exportMask]);
 
   const clearMask = () => {
-    if (!window.confirm("Clear the entire mask? This cannot be undone.")) return;
+    // Issue #378: capture undo state before clearing so it can be undone
+    const undoState = captureUndoState();
+    if (undoState !== null) {
+      setUndoStack((prev) => [...prev, undoState]);
+    }
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -905,6 +983,13 @@ export default function InpaintMaskCanvas({
   };
 
   const handleCanvasKeyDown = (e: React.KeyboardEvent<HTMLCanvasElement>) => {
+    // Issue #378: Cmd/Ctrl+Z for undo
+    if ((e.metaKey || e.ctrlKey) && e.key === "z") {
+      e.preventDefault();
+      handleUndo();
+      return;
+    }
+
     const delta = ARROW_DELTAS[e.key];
     if (delta) {
       e.preventDefault();
@@ -1136,8 +1221,8 @@ export default function InpaintMaskCanvas({
 
       <p id={hintId} className="text-xs text-gray-500">
         Keyboard painting: Tab to the canvas, move the brush with the arrow keys
-        (Shift + arrow for fine steps), and press P, Space, or Enter to start or
-        stop painting. Brush Size and Clear Mask follow in the tab order.
+        (Shift + arrow for fine steps), press P, Space, or Enter to start or
+        stop painting, and Cmd/Ctrl+Z to undo. Brush Size and Clear Mask follow in the tab order.
       </p>
 
       {/* Issue #317: toolbar wraps at md+ and buttons have min-height 44px for touch */}
@@ -1214,6 +1299,15 @@ export default function InpaintMaskCanvas({
           className="px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors md:min-h-[44px]"
         >
           Clear Mask
+        </button>
+
+        <button
+          onClick={handleUndo}
+          disabled={undoStack.length === 0}
+          title="Undo (Cmd/Ctrl+Z)"
+          className="px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-50 md:min-h-[44px]"
+        >
+          Undo {undoStack.length > 0 && `(${undoStack.length})`}
         </button>
       </div>
 
