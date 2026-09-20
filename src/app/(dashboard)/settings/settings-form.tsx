@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase";
 import { updateUserSettings } from "@/app/actions/settings";
+import { Button } from "@/components/ui/button";
 
 interface SettingsFormProps {
   email: string;
@@ -210,13 +211,12 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
         </div>
       )}
 
-      <button
+      <Button
         type="submit"
         disabled={saving}
-        className="rounded-md bg-stone-800 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-700 focus:outline-none focus:ring-2 focus:ring-stone-500 focus:ring-offset-2 disabled:opacity-50"
       >
         {saving ? "Saving..." : "Save Settings"}
-      </button>
+      </Button>
     </form>
   );
 }

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getDashboardUserWithProjects } from "@/lib/dashboard-data";
+import { buttonVariants } from "@/components/ui/button";
 
 /**
  * Server-rendered projects list (issue #83). Reads Prisma through the same
@@ -32,7 +33,7 @@ export default async function ProjectsPage() {
 
         <Link
           href="/projects/new"
-          className="rounded-md bg-stone-800 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-700"
+          className={buttonVariants({ variant: "default" })}
         >
           + New Project
         </Link>
@@ -46,7 +47,7 @@ export default async function ProjectsPage() {
           </p>
           <Link
             href="/projects/new"
-            className="mt-4 inline-block rounded-md bg-stone-800 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-700"
+            className={buttonVariants({ variant: "default" })}
           >
             Create Project
           </Link>
