@@ -132,7 +132,7 @@ export default function GenerateCopyForm({
           htmlFor="staging-directives"
           className="block text-sm font-medium text-foreground mb-1"
         >
-          Staging Directives
+          Listing Notes
         </label>
         <textarea
           id="staging-directives"

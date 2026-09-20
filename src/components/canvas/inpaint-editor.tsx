@@ -1180,7 +1180,7 @@ export default function InpaintEditor({
 
   const handleInpaint = useCallback(async () => {
     if (!promptDirectives.trim()) {
-      showError("Please provide staging directives first.");
+      showError("Please fill in the staging directives field below.");
       return;
     }
 
