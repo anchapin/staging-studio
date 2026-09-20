@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
 import { Check, Circle, Loader2, X } from "lucide-react";
 import {
   batchProgressText,
@@ -143,14 +144,14 @@ export default function BatchStagingPanel({
           </span>
         </h4>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
+          <Button
+            variant="outline"
+            size="sm"
             onClick={onRemoveLast}
             disabled={disabled || selections.length === 0}
-            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             Undo last
-          </button>
+          </Button>
           {/* Issue #249: "Clear selection" moved beside the concept chips
               (inpaint-editor) — the one global control, instead of a
               duplicate button whose accessible name collided with it. */}
@@ -299,14 +300,13 @@ export default function BatchStagingPanel({
           </ol>
           {hasFailedStep(activeBatch.progress) && !batchRunning && (
             <div className="mt-3 flex flex-col gap-1.5">
-              <button
-                type="button"
+              <Button
                 onClick={onRetryRemaining}
                 disabled={processing}
-                className="w-fit rounded-md bg-stone-800 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-700 disabled:cursor-not-allowed disabled:bg-stone-300 disabled:text-stone-500"
+                className="w-fit"
               >
                 Retry remaining ({remainingStepCount(activeBatch.progress)})
-              </button>
+              </Button>
               <p className="text-xs text-stone-600">
                 Completed objects keep their staged results — only the
                 unfinished objects run again, picking up from the last
@@ -318,19 +318,10 @@ export default function BatchStagingPanel({
       )}
 
       <div className="flex items-center gap-3">
-        <button
-          type="button"
+        <Button
           onClick={handleRun}
           disabled={!canRun}
           aria-busy={processing}
-          className={`
-            flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium
-            transition-colors
-            ${canRun
-              ? "bg-stone-800 text-white hover:bg-stone-700"
-              : "bg-stone-300 text-stone-500 cursor-not-allowed"
-            }
-          `}
         >
           {processing ? (
             <>
@@ -340,7 +331,7 @@ export default function BatchStagingPanel({
           ) : (
             "Run batch"
           )}
-        </button>
+        </Button>
         {!processing && mode === "thematic" && !thematicReady && (
           <span className="text-xs text-stone-500">Enter a theme to enable the batch.</span>
         )}

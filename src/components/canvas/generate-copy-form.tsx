@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { Button } from "@/components/ui/button";
 import { useToast, ToastContainer } from "@/components/ui/toast";
 import { Loader2, Sparkles } from "lucide-react";
 import { saveRoomMetadata, saveRoomCopy } from "@/app/actions/room";
@@ -143,17 +144,9 @@ export default function GenerateCopyForm({
         />
       </div>
 
-      <button
+      <Button
         onClick={handleGenerate}
         disabled={isGenerating || !rawDirectives.trim()}
-        className={`
-          flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium
-          transition-colors
-          ${isGenerating || !rawDirectives.trim()
-            ? "bg-stone-300 text-stone-500 cursor-not-allowed"
-            : "bg-stone-800 text-white hover:bg-stone-700"
-          }
-        `}
       >
         {isGenerating ? (
           <>
@@ -166,7 +159,7 @@ export default function GenerateCopyForm({
             Generate Copy
           </>
         )}
-      </button>
+      </Button>
 
       {copy && (
         <div className="mt-6 p-4 bg-stone-50 rounded-lg border border-stone-200 space-y-4">
