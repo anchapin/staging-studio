@@ -137,10 +137,13 @@ interface ToastContainerProps {
 }
 
 export function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
+  // Cap at 3 most recent toasts, newest on top (issue #396: stale error toasts
+  // stacking over new success toasts)
+  const visibleToasts = toasts.slice(-3).reverse();
   return (
     <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 max-w-sm w-full px-4">
       <div className="max-h-[50vh] overflow-y-auto flex flex-col gap-2">
-        {toasts.map((toast) => (
+        {visibleToasts.map((toast) => (
           <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} />
         ))}
       </div>
