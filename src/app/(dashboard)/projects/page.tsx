@@ -1,8 +1,10 @@
 import Link from "next/link";
 import Image from "next/image";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import { getDashboardUserWithProjects } from "@/lib/dashboard-data";
 import { buttonVariants } from "@/components/ui/button";
+import { ProjectsGridSkeleton } from "@/components/ui/skeleton";
 
 function hasStagedResults(project: { rooms: { afterImageUrl: string | null; afterImageUrl2: string | null }[] }): boolean {
   return project.rooms.some((room) => room.afterImageUrl || room.afterImageUrl2);
@@ -14,43 +16,13 @@ function isRecent(updatedAt: Date): boolean {
   return updatedAt > sevenDaysAgo;
 }
 
-/**
- * Server-rendered projects list (issue #83). Reads Prisma through the same
- * request-cached loader the (dashboard) layout uses for the sidebar, so one
- * navigation runs one auth check and one query — no client auth
- * round-trip gates the first paint. Errors surface through this segment's
- * error boundary (error.tsx keeps the old "Failed to load projects." UI).
- */
-export default async function ProjectsPage() {
-  // Defensive: the layout awaits this same cached call and redirects
-  // unauthenticated/unprovisioned users before any data can render.
+async function ProjectsGrid() {
   const { sessionEmail, userRow } = await getDashboardUserWithProjects();
   if (!sessionEmail) redirect("/login");
   if (!userRow) redirect("/setup");
-
-  const projects = userRow.projects;
-
   return (
-    <div className="p-8">
-      <div className="mb-8 flex items-center justify-between">
-        <div>
-          <h1 className="font-playfair text-3xl font-bold text-foreground">
-            Projects
-          </h1>
-          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-            Manage your staging lookbooks
-          </p>
-        </div>
-
-        <Link
-          href="/projects/new"
-          className={buttonVariants({ variant: "default" })}
-        >
-          + New Project
-        </Link>
-      </div>
-
-      {projects.length === 0 ? (
+    <>
+      {userRow.projects.length === 0 ? (
         <div className="rounded-lg border-2 border-dashed border-border p-12 text-center">
           <p className="text-muted-foreground">No projects yet.</p>
           <p className="mt-1 text-sm leading-relaxed text-muted-foreground/80">
@@ -65,7 +37,7 @@ export default async function ProjectsPage() {
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {projects.map((project, index) => {
+          {userRow.projects.map((project, index) => {
             const staged = hasStagedResults(project);
             const recent = isRecent(new Date(project.updatedAt));
             const isFeatured = index === 0;
@@ -154,6 +126,34 @@ export default async function ProjectsPage() {
           })}
         </div>
       )}
+    </>
+  );
+}
+
+export default async function ProjectsPage() {
+  return (
+    <div className="p-8">
+      <div className="mb-8 flex items-center justify-between">
+        <div>
+          <h1 className="font-playfair text-3xl font-bold text-foreground">
+            Projects
+          </h1>
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+            Manage your staging lookbooks
+          </p>
+        </div>
+
+        <Link
+          href="/projects/new"
+          className={buttonVariants({ variant: "default" })}
+        >
+          + New Project
+        </Link>
+      </div>
+
+      <Suspense fallback={<ProjectsGridSkeleton count={6} />}>
+        <ProjectsGrid />
+      </Suspense>
     </div>
   );
 }
