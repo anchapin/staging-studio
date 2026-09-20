@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { X, RefreshCw } from "lucide-react";
 
 export interface Toast {
@@ -10,6 +10,8 @@ export interface Toast {
   retryable?: boolean;
   onRetry?: () => void;
   retryLabel?: string;
+  /** The selector of the element that triggered this toast, for focus return */
+  triggerSelector?: string;
 }
 
 interface ToastItemProps {
@@ -19,6 +21,15 @@ interface ToastItemProps {
 
 function ToastItem({ toast, onDismiss }: ToastItemProps) {
   const [isVisible, setIsVisible] = useState(false);
+  const dismissButtonRef = useRef<HTMLButtonElement>(null);
+
+  /** Restore focus to the trigger element that opened the toast */
+  const returnFocusToTrigger = useCallback(() => {
+    if (toast.triggerSelector) {
+      const triggerEl = document.querySelector<HTMLElement>(toast.triggerSelector);
+      triggerEl?.focus();
+    }
+  }, [toast.triggerSelector]);
 
   useEffect(() => {
     setIsVisible(true);
@@ -26,10 +37,21 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
     const timeout = toast.type === "error" ? 8000 : 4000;
     const timer = setTimeout(() => {
       setIsVisible(false);
-      setTimeout(() => onDismiss(toast.id), 300);
+      setTimeout(() => {
+        onDismiss(toast.id);
+        returnFocusToTrigger();
+      }, 300);
     }, timeout);
     return () => clearTimeout(timer);
-  }, [toast.id, toast.type, onDismiss]);
+  }, [toast.id, toast.type, onDismiss, returnFocusToTrigger]);
+
+  const handleDismiss = () => {
+    setIsVisible(false);
+    setTimeout(() => {
+      onDismiss(toast.id);
+      returnFocusToTrigger();
+    }, 300);
+  };
 
   const bgColor = {
     success: "bg-green-50 border-green-200",
@@ -98,10 +120,8 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
       )}
 
       <button
-        onClick={() => {
-          setIsVisible(false);
-          setTimeout(() => onDismiss(toast.id), 300);
-        }}
+        ref={dismissButtonRef}
+        onClick={handleDismiss}
         aria-label="Dismiss notification"
         className="p-1 rounded hover:bg-black/5 transition-colors"
       >
@@ -145,17 +165,18 @@ export function useToast() {
     message: string,
     retryable = false,
     onRetry?: () => void,
-    retryLabel?: string
+    retryLabel?: string,
+    triggerSelector?: string
   ) => {
-    return addToast({ type: "error", message, retryable, onRetry, retryLabel });
+    return addToast({ type: "error", message, retryable, onRetry, retryLabel, triggerSelector });
   };
 
-  const showSuccess = (message: string) => {
-    return addToast({ type: "success", message });
+  const showSuccess = (message: string, triggerSelector?: string) => {
+    return addToast({ type: "success", message, triggerSelector });
   };
 
-  const showInfo = (message: string) => {
-    return addToast({ type: "info", message });
+  const showInfo = (message: string, triggerSelector?: string) => {
+    return addToast({ type: "info", message, triggerSelector });
   };
 
   return {
