@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase";
 import { updateUserSettings } from "@/app/actions/settings";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 interface SettingsFormProps {
   email: string;
@@ -110,13 +111,12 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
           >
             Firm Name
           </label>
-          <input
+          <Input
             id="firmName"
             type="text"
             value={firmName}
             onChange={(e) => setFirmName(e.target.value)}
             required
-            className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
             placeholder="Circle G Designs"
           />
         </div>
@@ -128,13 +128,12 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
           >
             Owner Name
           </label>
-          <input
+          <Input
             id="ownerName"
             type="text"
             value={ownerName}
             onChange={(e) => setOwnerName(e.target.value)}
             required
-            className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
             placeholder="Lauren Chapin"
           />
         </div>
@@ -216,7 +215,7 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
           ref={errorRef}
           role="alert"
           tabIndex={-1}
-          className="rounded-md bg-red-50 p-3 text-sm text-red-700"
+          className="rounded-md bg-destructive/10 p-3 text-sm text-destructive"
         >
           {error}
         </div>
