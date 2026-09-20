@@ -181,7 +181,7 @@ export default function BatchStagingPanel({
       <fieldset disabled={disabled || processing} className="min-w-0">
         <legend className="px-1 text-sm font-medium text-foreground">Prompts</legend>
         <div className="mt-1 flex flex-col gap-1">
-          <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-foreground">
+          <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-foreground" title="Apply one style to all selected objects together">
             <input
               type="radio"
               name="batch-prompt-mode"
@@ -192,7 +192,10 @@ export default function BatchStagingPanel({
             />
             One theme for all regions
           </label>
-          <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-foreground">
+          <span className="ml-6 text-xs text-muted-foreground">
+            Apply one style to all selected objects together
+          </span>
+          <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-foreground" title="Customize the style for each object individually">
             <input
               type="radio"
               name="batch-prompt-mode"
@@ -203,6 +206,9 @@ export default function BatchStagingPanel({
             />
             A separate prompt per region
           </label>
+          <span className="ml-6 text-xs text-muted-foreground">
+            Customize the style for each object individually
+          </span>
         </div>
 
         <div className="mt-3">
