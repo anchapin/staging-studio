@@ -1618,7 +1618,7 @@ export default function InpaintEditor({
                 </button>
 
                 {isProcessing && statusText && (
-                  <span className="text-sm text-stone-600">{statusText}</span>
+                  <span aria-live="polite" className="text-sm text-stone-600">{statusText}</span>
                 )}
               </div>
             </div>

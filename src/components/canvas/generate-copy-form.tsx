@@ -129,7 +129,7 @@ export default function GenerateCopyForm({
       <div>
         <label
           htmlFor="staging-directives"
-          className="block text-sm font-medium text-stone-700 mb-1"
+          className="block text-sm font-medium text-foreground mb-1"
         >
           Staging Directives
         </label>
@@ -140,7 +140,7 @@ export default function GenerateCopyForm({
           placeholder="Describe the key staging priorities and changes needed for this room..."
           rows={4}
           maxLength={2000}
-          className="w-full px-3 py-2 border border-stone-300 rounded-md focus:outline-none focus:ring-2 focus:ring-stone-500 resize-none"
+          className="w-full px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-stone-500 resize-none"
         />
       </div>
 
@@ -162,30 +162,30 @@ export default function GenerateCopyForm({
       </Button>
 
       {copy && (
-        <div className="mt-6 p-4 bg-stone-50 rounded-lg border border-stone-200 space-y-4">
+        <div className="mt-6 p-4 bg-card rounded-lg border border-stone-200 space-y-4">
           <div>
-            <h4 className="text-xs font-semibold text-stone-500 uppercase tracking-wide">
+            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
               Observed Challenge
             </h4>
-            <p className="mt-1 text-stone-800">{copy.observedChallenge}</p>
+            <p className="mt-1 text-foreground">{copy.observedChallenge}</p>
           </div>
 
           <div>
-            <h4 className="text-xs font-semibold text-stone-500 uppercase tracking-wide">
+            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
               Recommendation
             </h4>
-            <p className="mt-1 text-stone-800">{copy.recommendation}</p>
+            <p className="mt-1 text-foreground">{copy.recommendation}</p>
           </div>
 
           <div>
-            <h4 className="text-xs font-semibold text-stone-500 uppercase tracking-wide">
+            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
               Buyer Psychology
             </h4>
-            <p className="mt-1 text-stone-800">{copy.buyerPsychology}</p>
+            <p className="mt-1 text-foreground">{copy.buyerPsychology}</p>
           </div>
 
           <div>
-            <h4 className="text-xs font-semibold text-stone-500 uppercase tracking-wide mb-2">
+            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
               Checklist
             </h4>
             <ul className="space-y-2">
@@ -207,7 +207,7 @@ export default function GenerateCopyForm({
                   `}>
                     {item.priority}
                   </span>
-                  <span className="text-stone-700">{item.item}</span>
+                  <span className="text-foreground">{item.item}</span>
                 </li>
               ))}
             </ul>
