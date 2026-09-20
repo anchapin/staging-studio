@@ -40,9 +40,9 @@ export function SidebarNav({ projects, onNavigate }: SidebarNavProps) {
                         : "text-stone-400"
                     } hover:bg-stone-800 hover:text-white`}
                   >
-                    <span className="font-medium">{project.clientName}</span>
+                    <span className="truncate font-medium" title={project.clientName}>{project.clientName}</span>
                     <br />
-                    <span className={`text-xs ${isActive ? "text-stone-300" : "text-stone-500"}`}>
+                    <span className={`truncate block text-xs ${isActive ? "text-stone-300" : "text-stone-500"}`} title={project.propertyAddress}>
                       {project.propertyAddress}
                     </span>
                   </Link>
