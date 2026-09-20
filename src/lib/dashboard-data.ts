@@ -34,8 +34,9 @@ const dashboardUserSelect = {
       clientName: true,
       stagingAesthetic: true,
       createdAt: true,
+      updatedAt: true,
       rooms: {
-        select: { id: true, name: true },
+        select: { id: true, name: true, afterImageUrl: true, afterImageUrl2: true },
       },
     },
   },

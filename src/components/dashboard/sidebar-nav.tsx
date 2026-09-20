@@ -1,0 +1,68 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { SignOutButton } from "@/components/dashboard/sign-out-button";
+
+interface Project {
+  id: string;
+  clientName: string;
+  propertyAddress: string;
+}
+
+interface SidebarNavProps {
+  projects: Project[];
+}
+
+export function SidebarNav({ projects }: SidebarNavProps) {
+  const pathname = usePathname();
+
+  return (
+    <>
+      <nav className="px-4 pb-4">
+        <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-stone-400">
+          Projects
+        </p>
+        {projects && projects.length > 0 ? (
+          <ul className="space-y-1">
+            {projects.map((project) => {
+              const isActive = pathname === `/projects/${project.id}`;
+              return (
+                <li key={project.id}>
+                  <Link
+                    href={`/projects/${project.id}`}
+                    className={`block rounded-md px-3 py-2 text-sm ${
+                      isActive
+                        ? "text-white font-medium"
+                        : "text-stone-400"
+                    } hover:bg-stone-800 hover:text-white`}
+                  >
+                    <span className="font-medium">{project.clientName}</span>
+                    <br />
+                    <span className={`text-xs ${isActive ? "text-stone-300" : "text-stone-500"}`}>
+                      {project.propertyAddress}
+                    </span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="px-3 py-2 text-sm text-stone-400">No projects yet</p>
+        )}
+      </nav>
+
+      <div className="absolute bottom-0 w-64 border-t border-stone-800 p-4">
+        <Link
+          href="/settings"
+          className={`mb-1 block rounded-md px-3 py-2 text-sm font-medium hover:bg-stone-800 hover:text-white ${
+            pathname === "/settings" ? "text-white" : "text-stone-400"
+          }`}
+        >
+          Settings
+        </Link>
+        <SignOutButton />
+      </div>
+    </>
+  );
+}
