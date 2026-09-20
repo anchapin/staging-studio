@@ -1,0 +1,105 @@
+// Prisma Schema for StagingStudio
+
+// Datasource
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// User model: firm branding and editable page templates
+model User {
+  id                    String    @id @default(cuid())
+  firmName              String    // "Circle G Designs"
+  ownerName             String    // "Lauren Chapin"
+  logoUrl               String?
+  email                 String?   @unique
+  psychologyPageContent String?   // Template for Page 2
+  signoffContent        String?   // Template for final page
+  createdAt             DateTime  @default(now())
+
+  projects Project[]
+}
+
+// Project model: a single staging job for one property
+model Project {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  propertyAddress String
+  clientName      String
+  targetBuyer     String   // e.g. "young professional couple", "growing family"
+  stagingAesthetic String  // e.g. "Organic Modern Luxury", "Warm Transitional"
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  rooms Room[]
+}
+
+// Room model: a single room within a project
+model Room {
+  id                   String   @id @default(cuid())
+  projectId            String
+  project              Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name                 String   // e.g. "Primary Bedroom", "Kitchen"
+
+  // Image URLs — Variant 1
+  beforeImageUrl       String?
+  afterImageUrl        String?
+
+  // Image URLs — Variant 2
+  beforeImageUrl2      String?
+  afterImageUrl2       String?
+
+  selectedVariantIndex Int?     @default(0) // 0 or 1 — which variant is selected for PDF
+
+  // AI outputs
+  rawDirectives        String?  // User's freeform bullet directives
+  observedChallenge    String?
+  recommendation       String?
+  buyerPsychology      String?
+  checklistItems       Json?    // Array of { item, category, priority }
+
+  createdAt            DateTime @default(now())
+
+  inpaintRequests InpaintRequest[]
+
+  @@index([projectId])
+}
+
+// InpaintRequest model: persisted fal.ai queue request (id = fal requestId)
+// so jobs survive serverless deadlines and page refreshes can resume polling.
+model InpaintRequest {
+  id          String   @id
+  roomId      String
+  room        Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  variantSlot Int      // 0 or 1 — which "after" variant slot this run targets
+  sourceSlot  Int?     // issue #170: null = run edits the original before photo;
+                       // 0 or 1 = run edits that variant's staged result and
+                       // overwrites its "after" slot in place (selection untouched).
+                       // Persisted so a pendingRequestId resume can apply the same
+                       // result-persistence semantics as the original submit.
+  status      String   // mirrors fal queue status: IN_QUEUE | IN_PROGRESS | COMPLETED | ERROR
+  resultUrl   String?  // filled when status is COMPLETED
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([roomId])
+}
+
+// VisionLabel model: caches GPT-4o-mini vision labels for detected instances
+// so re-opening the editor does not re-bill (issue #266).
+model VisionLabel {
+  id             String   @id @default(cuid())
+  imageUrlHash   String   // hash of imageUrl (stable identifier)
+  concept        String   // e.g. "furniture", "rug", etc.
+  instanceIndex  Int
+  label          String   // GPT-4o-mini's label text
+  score          Float?
+  createdAt      DateTime @default(now())
+
+  @@unique([imageUrlHash, concept, instanceIndex])
+}
