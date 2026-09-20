@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Home } from "lucide-react";
 import { getDashboardUserWithProjects } from "@/lib/dashboard-data";
 import { buttonVariants } from "@/components/ui/button";
 
@@ -40,10 +41,15 @@ export default async function ProjectsPage() {
       </div>
 
       {projects.length === 0 ? (
-        <div className="rounded-lg border-2 border-dashed border-stone-300 p-12 text-center">
-          <p className="text-stone-600">No projects yet.</p>
-          <p className="mt-1 text-sm leading-relaxed text-stone-500">
-            Create your first staging project to get started.
+        <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-stone-300 bg-stone-50/50 p-16 text-center">
+          <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-stone-100">
+            <Home className="h-10 w-10 text-stone-400" strokeWidth={1.5} />
+          </div>
+          <p className="mb-2 text-lg font-medium text-stone-700">
+            No projects yet
+          </p>
+          <p className="mb-6 max-w-sm text-sm leading-relaxed text-stone-500">
+            Create your first staging project to transform empty spaces into stunning lookbooks for your clients.
           </p>
           <Link
             href="/projects/new"

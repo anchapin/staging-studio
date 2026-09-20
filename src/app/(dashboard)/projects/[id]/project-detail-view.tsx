@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, PencilRuler } from "lucide-react";
+import { ArrowLeft, PencilRuler, DoorOpen } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 import { resolveFocusedRoom, resolveRoomLayoutMode } from "@/lib/focus-mode";
 import {
@@ -809,8 +809,16 @@ export default function ProjectDetailView({
             <h2 className="font-playfair text-xl font-semibold text-stone-800 mb-6">Rooms</h2>
 
             {project.rooms.length === 0 ? (
-              <div className="rounded-lg border-2 border-dashed border-stone-300 p-12 text-center">
-                <p className="text-stone-600">No rooms yet.</p>
+              <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-stone-300 bg-stone-50/50 p-16 text-center">
+                <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-stone-100">
+                  <DoorOpen className="h-10 w-10 text-stone-400" strokeWidth={1.5} />
+                </div>
+                <p className="mb-2 text-lg font-medium text-stone-700">
+                  No rooms yet
+                </p>
+                <p className="mb-6 max-w-sm text-sm leading-relaxed text-stone-500">
+                  Add rooms to this project to start staging. Upload photos and let AI transform each space.
+                </p>
               </div>
             ) : (
               <div className="grid gap-8 md:grid-cols-2">
