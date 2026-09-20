@@ -32,21 +32,21 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
   }, [toast.id, toast.type, onDismiss]);
 
   const bgColor = {
-    success: "bg-green-50 border-green-200",
-    error: "bg-red-50 border-red-200",
-    info: "bg-blue-50 border-blue-200",
+    success: "bg-success/10 border-success/20",
+    error: "bg-destructive/10 border-destructive/20",
+    info: "bg-info/10 border-info/20",
   }[toast.type];
 
   const textColor = {
-    success: "text-green-800",
-    error: "text-red-800",
-    info: "text-blue-800",
+    success: "text-success",
+    error: "text-destructive",
+    info: "text-info",
   }[toast.type];
 
   const iconColor = {
-    success: "text-green-500",
-    error: "text-red-500",
-    info: "text-blue-500",
+    success: "text-success",
+    error: "text-destructive",
+    info: "text-info",
   }[toast.type];
 
   return (
