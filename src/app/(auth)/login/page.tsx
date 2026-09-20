@@ -71,19 +71,19 @@ function LoginForm() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-stone-100 to-stone-200 px-4">
-      <div className="w-full max-w-md space-y-8 rounded-xl bg-white p-8 shadow-xl">
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-secondary to-muted px-4">
+      <div className="w-full max-w-md space-y-8 rounded-xl bg-background p-8 shadow-xl">
         <div className="text-center">
-          <h1 className="font-cinzel text-3xl font-bold tracking-tight text-stone-800">
+          <h1 className="font-cinzel text-3xl font-bold tracking-tight text-foreground">
             StagingStudio
           </h1>
-          <p className="mt-2 font-playfair text-sm text-stone-600">
+          <p className="mt-2 font-playfair text-sm text-muted-foreground">
             AI-Assisted Home Staging Lookbooks
           </p>
         </div>
 
         <div
-          className="flex gap-2 rounded-lg bg-stone-100 p-1"
+          className="flex gap-2 rounded-lg bg-secondary p-1"
           role="group"
           aria-label="Sign-in method"
           aria-live="polite"
@@ -94,8 +94,8 @@ function LoginForm() {
             aria-pressed={mode === "password"}
             className={`flex-1 rounded-md py-2 text-sm font-medium transition-colors ${
               mode === "password"
-                ? "bg-white shadow text-stone-900"
-                : "text-stone-600 hover:text-stone-900"
+                ? "bg-background shadow text-foreground"
+                : "text-muted-foreground hover:text-foreground"
             }`}
           >
             Password
@@ -106,8 +106,8 @@ function LoginForm() {
             aria-pressed={mode === "magic"}
             className={`flex-1 rounded-md py-2 text-sm font-medium transition-colors ${
               mode === "magic"
-                ? "bg-white shadow text-stone-900"
-                : "text-stone-600 hover:text-stone-900"
+                ? "bg-background shadow text-foreground"
+                : "text-muted-foreground hover:text-foreground"
             }`}
           >
             Magic Link
@@ -116,7 +116,7 @@ function LoginForm() {
 
         <form onSubmit={mode === "password" ? handlePasswordSignIn : handleMagicLink} className="space-y-6">
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-stone-700">
+            <label htmlFor="email" className="block text-sm font-medium text-foreground">
               Email address
             </label>
             <input
@@ -125,14 +125,14 @@ function LoginForm() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 shadow-sm focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500"
+              className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
               placeholder="you@example.com"
             />
           </div>
 
           {mode === "password" && (
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-stone-700">
+              <label htmlFor="password" className="block text-sm font-medium text-foreground">
                 Password
               </label>
               <input
@@ -141,7 +141,7 @@ function LoginForm() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 shadow-sm focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500"
+                className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
                 placeholder="••••••••"
               />
             </div>
@@ -165,13 +165,13 @@ function LoginForm() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-md bg-stone-800 py-2.5 font-medium text-white transition-colors hover:bg-stone-700 focus:outline-none focus:ring-2 focus:ring-stone-500 focus:ring-offset-2 disabled:opacity-50"
+            className="w-full rounded-md bg-primary py-2.5 font-medium text-primary-foreground transition-colors hover:bg-primary/80 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50"
           >
             {loading ? "Please wait..." : mode === "password" ? "Sign In" : "Send Magic Link"}
           </button>
         </form>
 
-        <p className="text-center text-xs text-stone-500">
+        <p className="text-center text-xs text-muted-foreground">
           For Circle G Designs — Lauren Chapin
         </p>
       </div>

@@ -31,18 +31,18 @@ export default async function DashboardLayout({
   // `sticky` chrome inside pages (lookbook toolbar, issue #250 feedback)
   // activates and the sidebar stays put while content scrolls.
   return (
-    <div className="flex h-screen bg-stone-50">
+    <div className="flex h-screen bg-background">
       {/* Skip link: first focusable element, jumps past the sidebar nav */}
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-stone-900 focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-white"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-foreground"
       >
         Skip to main content
       </a>
 
       {/* Sidebar */}
-      <aside className="no-print w-64 flex-shrink-0 overflow-y-auto bg-stone-900 text-white">
-        <div className="flex h-16 items-center border-b border-stone-800 px-6">
+      <aside className="no-print w-64 flex-shrink-0 overflow-y-auto bg-sidebar text-sidebar-foreground">
+        <div className="flex h-16 items-center border-b border-border px-6">
           <p className="font-cinzel text-lg font-bold tracking-wide">
             Circle G Designs
           </p>
@@ -51,7 +51,7 @@ export default async function DashboardLayout({
         <div className="p-4">
           <Link
             href="/projects/new"
-            className="mb-3 flex items-center gap-2 rounded-md bg-white px-3 py-2 text-sm font-medium text-stone-900 hover:bg-stone-100"
+            className="mb-3 flex items-center gap-2 rounded-md bg-background px-3 py-2 text-sm font-medium text-foreground hover:bg-muted"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -71,7 +71,7 @@ export default async function DashboardLayout({
         </div>
 
         <nav className="px-4 pb-4">
-          <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-stone-400">
+          <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             Projects
           </p>
           {userRow?.projects && userRow.projects.length > 0 ? (
@@ -80,11 +80,11 @@ export default async function DashboardLayout({
                 <li key={project.id}>
                   <Link
                     href={`/projects/${project.id}`}
-                    className="block rounded-md px-3 py-2 text-sm text-stone-300 hover:bg-stone-800 hover:text-white"
+                    className="block rounded-md px-3 py-2 text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                   >
                     <span className="font-medium">{project.clientName}</span>
                     <br />
-                    <span className="text-xs text-stone-400">
+                    <span className="text-xs text-muted-foreground">
                       {project.propertyAddress}
                     </span>
                   </Link>
@@ -92,14 +92,14 @@ export default async function DashboardLayout({
               ))}
             </ul>
           ) : (
-            <p className="px-3 py-2 text-sm text-stone-400">No projects yet</p>
+            <p className="px-3 py-2 text-sm text-muted-foreground">No projects yet</p>
           )}
         </nav>
 
-        <div className="absolute bottom-0 w-64 border-t border-stone-800 p-4">
+        <div className="absolute bottom-0 w-64 border-t border-border p-4">
           <Link
             href="/settings"
-            className="mb-1 block rounded-md px-3 py-2 text-sm font-medium text-stone-400 hover:bg-stone-800 hover:text-white"
+            className="mb-1 block rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           >
             Settings
           </Link>
