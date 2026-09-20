@@ -97,99 +97,119 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="max-w-md space-y-6">
-      <div>
-        <label
-          htmlFor="firmName"
-          className="block text-sm font-medium text-foreground"
-        >
-          Firm Name
-        </label>
-        <input
-          id="firmName"
-          type="text"
-          value={firmName}
-          onChange={(e) => setFirmName(e.target.value)}
-          required
-          className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
-          placeholder="Circle G Designs"
-        />
-      </div>
+    <form onSubmit={handleSubmit} className="max-w-md space-y-8">
+      <fieldset className="rounded-md border p-4 space-y-4">
+        <legend className="text-lg font-semibold text-foreground px-1">
+          Firm Branding
+        </legend>
 
-      <div>
-        <label
-          htmlFor="ownerName"
-          className="block text-sm font-medium text-foreground"
-        >
-          Owner Name
-        </label>
-        <input
-          id="ownerName"
-          type="text"
-          value={ownerName}
-          onChange={(e) => setOwnerName(e.target.value)}
-          required
-          className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
-          placeholder="Lauren Chapin"
-        />
-      </div>
+        <div>
+          <label
+            htmlFor="firmName"
+            className="block text-sm font-medium text-foreground"
+          >
+            Firm Name
+          </label>
+          <input
+            id="firmName"
+            type="text"
+            value={firmName}
+            onChange={(e) => setFirmName(e.target.value)}
+            required
+            className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+            placeholder="Circle G Designs"
+          />
+        </div>
 
-      <div>
-        <label
-          htmlFor="logo"
-          className="block text-sm font-medium text-foreground"
-        >
-          Firm Logo <span className="text-muted-foreground">(optional)</span>
-        </label>
-        <input
-          id="logo"
-          type="file"
-          accept="image/*"
-          onChange={(e) => setLogoFile(e.target.files?.[0] || null)}
-          className="mt-1 block w-full text-sm text-muted-foreground file:mr-4 file:cursor-pointer file:rounded-md file:border-0 file:bg-secondary file:px-4 file:py-2 file:text-sm file:font-medium file:text-foreground hover:file:bg-muted"
-        />
-        {initial.logoUrl && (
-          <p className="mt-1 text-xs text-muted-foreground">
-            A logo is currently set — upload a new file to replace it.
+        <div>
+          <label
+            htmlFor="ownerName"
+            className="block text-sm font-medium text-foreground"
+          >
+            Owner Name
+          </label>
+          <input
+            id="ownerName"
+            type="text"
+            value={ownerName}
+            onChange={(e) => setOwnerName(e.target.value)}
+            required
+            className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+            placeholder="Lauren Chapin"
+          />
+        </div>
+
+        <div>
+          <label
+            htmlFor="logo"
+            className="block text-sm font-medium text-foreground"
+          >
+            Firm Logo <span className="text-muted-foreground">(optional)</span>
+          </label>
+          <input
+            id="logo"
+            type="file"
+            accept="image/*"
+            onChange={(e) => setLogoFile(e.target.files?.[0] || null)}
+            className="mt-1 block w-full text-sm text-muted-foreground file:mr-4 file:cursor-pointer file:rounded-md file:border-0 file:bg-secondary file:px-4 file:py-2 file:text-sm file:font-medium file:text-foreground hover:file:bg-muted"
+          />
+          {initial.logoUrl && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              A logo is currently set — upload a new file to replace it.
+            </p>
+          )}
+        </div>
+      </fieldset>
+
+      <fieldset className="rounded-md border p-4 space-y-4">
+        <legend className="text-lg font-semibold text-foreground px-1">
+          Lookbook Templates
+        </legend>
+
+        <div>
+          <label
+            htmlFor="psychologyPageContent"
+            className="block text-sm font-medium text-foreground"
+          >
+            Psychology Page Content{" "}
+            <span className="text-muted-foreground">(lookbook page 2)</span>
+          </label>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Add a paragraph describing your ideal buyer and the emotional journey
+            you design for them.
           </p>
-        )}
-      </div>
+          <textarea
+            id="psychologyPageContent"
+            value={psychologyPageContent}
+            onChange={(e) => setPsychologyPageContent(e.target.value)}
+            rows={5}
+            className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+            placeholder="Describe your ideal buyer and the emotional journey you design..."
+          />
+        </div>
 
-      <div>
-        <label
-          htmlFor="psychologyPageContent"
-          className="block text-sm font-medium text-foreground"
-        >
-          Psychology Page Content{" "}
-          <span className="text-muted-foreground">(lookbook page 2)</span>
-        </label>
-        <textarea
-          id="psychologyPageContent"
-          value={psychologyPageContent}
-          onChange={(e) => setPsychologyPageContent(e.target.value)}
-          rows={5}
-          className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
-          placeholder="Describe your ideal buyer and the emotional journey you design..."
-        />
-      </div>
-
-      <div>
-        <label
-          htmlFor="signoffContent"
-          className="block text-sm font-medium text-foreground"
-        >
-          Sign-off Content{" "}
-          <span className="text-muted-foreground">(final lookbook page)</span>
-        </label>
-        <textarea
-          id="signoffContent"
-          value={signoffContent}
-          onChange={(e) => setSignoffContent(e.target.value)}
-          rows={5}
-          className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
-          placeholder="Your closing message to the buyer..."
-        />
-      </div>
+        <div>
+          <label
+            htmlFor="signoffContent"
+            className="block text-sm font-medium text-foreground"
+          >
+            Sign-off Content{" "}
+            <span className="text-muted-foreground">(final lookbook page)</span>
+          </label>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Add your closing message to the buyer — this appears as the final
+            page of every lookbook.
+          </p>
+          <textarea
+            id="signoffContent"
+            value={signoffContent}
+            onChange={(e) => setSignoffContent(e.target.value)}
+            rows={5}
+            className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+            placeholder="Your closing message to the buyer..."
+          />
+        </div>
+      </fieldset>
 
       {error && (
         <div
