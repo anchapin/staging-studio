@@ -102,7 +102,7 @@ export default function HolisticSpikePanel({
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-xs text-stone-500">
+      <p className="text-xs text-muted-foreground">
         Issue #190 spike: builds a full-room mask + aesthetic-derived prompt and
         runs it through the normal inpaint flow. The result lands in a variant
         slot; brush touch-ups can then stack on it via the &quot;Edit from&quot;
@@ -110,14 +110,14 @@ export default function HolisticSpikePanel({
       </p>
 
       <div className="flex flex-wrap items-center gap-4">
-        <label className="flex items-center gap-2 text-sm text-stone-700">
+        <label className="flex items-center gap-2 text-sm text-foreground">
           Mask strategy:
           <select
             id={strategySelectId}
             value={strategyId}
             disabled={disabled}
             onChange={(e) => setStrategyId(e.target.value as HolisticMaskStrategyId)}
-            className="rounded-md border border-stone-300 bg-white px-2 py-1 text-sm"
+            className="rounded-md border border-input bg-background px-2 py-1 text-sm"
           >
             {HOLISTIC_MASK_STRATEGIES.map((strategy) => (
               <option key={strategy.id} value={strategy.id}>
@@ -127,14 +127,14 @@ export default function HolisticSpikePanel({
           </select>
         </label>
 
-        <label className="flex items-center gap-2 text-sm text-stone-700">
+        <label className="flex items-center gap-2 text-sm text-foreground">
           Prompt variant:
           <select
             id={variantSelectId}
             value={promptVariant}
             disabled={disabled}
             onChange={(e) => setPromptVariant(e.target.value as HolisticPromptVariantId)}
-            className="rounded-md border border-stone-300 bg-white px-2 py-1 text-sm"
+            className="rounded-md border border-input bg-background px-2 py-1 text-sm"
           >
             {PROMPT_VARIANTS.map((variant) => (
               <option key={variant.id} value={variant.id}>
@@ -150,8 +150,8 @@ export default function HolisticSpikePanel({
           className={`
             px-3 py-1.5 rounded-md text-sm font-medium transition-colors
             ${isRunDisabled
-              ? "bg-stone-200 text-stone-400 cursor-not-allowed"
-              : "bg-stone-700 text-white hover:bg-stone-600"
+              ? "bg-muted text-muted-foreground cursor-not-allowed"
+              : "bg-primary text-primary-foreground hover:bg-primary/90"
             }
           `}
         >
@@ -159,7 +159,7 @@ export default function HolisticSpikePanel({
         </button>
       </div>
 
-      <p className="text-xs text-stone-500">
+      <p className="text-xs text-muted-foreground">
         {getHolisticMaskStrategy(strategyId)?.description}
       </p>
     </div>

@@ -133,12 +133,12 @@ export default function BatchStagingPanel({
   return (
     <section
       aria-label="Batch region staging"
-      className="no-print flex flex-col gap-3 rounded-md border border-stone-300 bg-stone-50 p-4"
+      className="no-print flex flex-col gap-3 rounded-md border border-input bg-muted p-4"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h4 className="text-sm font-semibold text-stone-800">
+        <h4 className="text-sm font-semibold text-foreground">
           Batch staging
-          <span className="ml-2 rounded bg-stone-200 px-1.5 py-0.5 text-xs font-normal text-stone-600">
+          <span className="ml-2 rounded bg-secondary px-1.5 py-0.5 text-xs font-normal text-muted-foreground">
             {selections.length} / {maxObjects} regions
           </span>
         </h4>
@@ -147,7 +147,7 @@ export default function BatchStagingPanel({
             type="button"
             onClick={onRemoveLast}
             disabled={disabled || selections.length === 0}
-            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-md border border-input bg-background px-3 py-1.5 text-sm transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
           >
             Undo last
           </button>
@@ -157,7 +157,7 @@ export default function BatchStagingPanel({
         </div>
       </div>
 
-      <p className="text-xs text-stone-600">
+      <p className="text-xs text-muted-foreground">
         Selected regions come from toggling detected instances on the photo;
         nearby instances fuse into one region. Batches are capped at {maxObjects}{" "}
         regions — each one is a separate billed generation, and per-region
@@ -165,11 +165,11 @@ export default function BatchStagingPanel({
         variant. Changing the selection rebuilds the mask.
       </p>
 
-      <ol className="flex flex-wrap gap-1.5 text-xs text-stone-700">
+      <ol className="flex flex-wrap gap-1.5 text-xs text-foreground">
         {selections.map((selection, index) => (
           <li
             key={selection.id}
-            className="rounded-full border border-stone-300 bg-white px-2 py-0.5"
+            className="rounded-full border border-input bg-background px-2 py-0.5"
           >
             {entryLabel(selection, index)}
           </li>
@@ -177,27 +177,27 @@ export default function BatchStagingPanel({
       </ol>
 
       <fieldset disabled={disabled || processing} className="min-w-0">
-        <legend className="px-1 text-sm font-medium text-stone-700">Prompts</legend>
+        <legend className="px-1 text-sm font-medium text-foreground">Prompts</legend>
         <div className="mt-1 flex flex-col gap-1">
-          <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-stone-700">
+          <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-foreground">
             <input
               type="radio"
               name="batch-prompt-mode"
               value="thematic"
               checked={mode === "thematic"}
               onChange={() => setMode("thematic")}
-              className="h-4 w-4 accent-stone-800"
+              className="h-4 w-4 accent-primary"
             />
             One theme for all regions
           </label>
-          <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-stone-700">
+          <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-foreground">
             <input
               type="radio"
               name="batch-prompt-mode"
               value="per-object"
               checked={mode === "per-object"}
               onChange={() => setMode("per-object")}
-              className="h-4 w-4 accent-stone-800"
+              className="h-4 w-4 accent-primary"
             />
             A separate prompt per region
           </label>
@@ -208,7 +208,7 @@ export default function BatchStagingPanel({
             <>
               <label
                 htmlFor="batch-thematic-prompt"
-                className="block text-sm font-medium text-stone-700"
+                className="block text-sm font-medium text-foreground"
               >
                 Theme (applied to all selected regions at once)
               </label>
@@ -218,12 +218,12 @@ export default function BatchStagingPanel({
                 onChange={(event) => setThematicPrompt(event.target.value)}
                 rows={2}
                 placeholder="e.g. replace the seating with warm mid-century pieces"
-                className="mt-1 w-full rounded-md border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-500"
+                className="mt-1 w-full rounded-md border border-input px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </>
           ) : (
             <>
-              <p className="text-sm font-medium text-stone-700" id="batch-per-object-label">
+              <p className="text-sm font-medium text-foreground" id="batch-per-object-label">
                 One prompt per region (applied in order; results stack)
               </p>
               <ol className="mt-1 flex flex-col gap-2">
@@ -231,14 +231,14 @@ export default function BatchStagingPanel({
                   <li key={selection.id} className="flex flex-col">
                     <label
                       htmlFor={`batch-prompt-${selection.id}`}
-                      className="flex items-center gap-1.5 text-xs font-medium text-stone-600"
+                      className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
                     >
                       {/* Issue #252 D4 (AC-3.1): numbered chip matching the
                           canvas badge, colored with the region's canvas tint
                           (region i → palette[i]) — per-object mode only. */}
                       <span
                         aria-hidden="true"
-                        className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold text-white"
+                        className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold text-primary-foreground"
                         style={{ backgroundColor: paletteCssColor(index) }}
                       >
                         {index + 1}
@@ -255,7 +255,7 @@ export default function BatchStagingPanel({
                           ? `e.g. replace the ${entryLabel(selection, index)} with ...`
                           : `e.g. replace ${batchStepLabel(index).toLowerCase()} with ...`
                       }
-                      className="mt-0.5 w-full rounded-md border border-stone-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-stone-500"
+                      className="mt-0.5 w-full rounded-md border border-input px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                     />
                   </li>
                 ))}
@@ -266,11 +266,11 @@ export default function BatchStagingPanel({
       </fieldset>
 
       {activeBatch && (
-        <div className="rounded-md border border-stone-200 bg-white p-3">
+        <div className="rounded-md border border-input bg-background p-3">
           <div className="flex items-center justify-between gap-2">
-            <h5 className="text-sm font-medium text-stone-800">Batch progress</h5>
+            <h5 className="text-sm font-medium text-foreground">Batch progress</h5>
             {runningText && (
-              <span role="status" className="text-xs text-stone-600">
+              <span role="status" className="text-xs text-muted-foreground">
                 Applying {runningText}
               </span>
             )}
@@ -280,15 +280,15 @@ export default function BatchStagingPanel({
               <li key={step.selectionId} className="flex items-start gap-2 text-sm">
                 <StepStatusIcon status={step.status} />
                 <span className="min-w-0">
-                  <span className="font-medium text-stone-800">{step.label}</span>
-                  <span className="ml-2 text-xs text-stone-500">
+                  <span className="font-medium text-foreground">{step.label}</span>
+                  <span className="ml-2 text-xs text-muted-foreground">
                     {step.status === "pending" && "Waiting"}
                     {step.status === "running" && "Applying..."}
                     {step.status === "completed" && "Done"}
                     {step.status === "failed" && "Failed"}
                   </span>
                   {step.status === "failed" && step.error && (
-                    <span className="block text-xs text-red-700">{step.error}</span>
+                    <span className="block text-xs text-destructive">{step.error}</span>
                   )}
                 </span>
                 <span className="sr-only">
@@ -303,11 +303,11 @@ export default function BatchStagingPanel({
                 type="button"
                 onClick={onRetryRemaining}
                 disabled={processing}
-                className="w-fit rounded-md bg-stone-800 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-700 disabled:cursor-not-allowed disabled:bg-stone-300 disabled:text-stone-500"
+                className="w-fit rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
               >
                 Retry remaining ({remainingStepCount(activeBatch.progress)})
               </button>
-              <p className="text-xs text-stone-600">
+              <p className="text-xs text-muted-foreground">
                 Completed objects keep their staged results — only the
                 unfinished objects run again, picking up from the last
                 completed result.
@@ -327,8 +327,8 @@ export default function BatchStagingPanel({
             flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium
             transition-colors
             ${canRun
-              ? "bg-stone-800 text-white hover:bg-stone-700"
-              : "bg-stone-300 text-stone-500 cursor-not-allowed"
+              ? "bg-primary text-primary-foreground hover:bg-primary/90"
+              : "bg-muted text-muted-foreground cursor-not-allowed"
             }
           `}
         >
@@ -342,10 +342,10 @@ export default function BatchStagingPanel({
           )}
         </button>
         {!processing && mode === "thematic" && !thematicReady && (
-          <span className="text-xs text-stone-500">Enter a theme to enable the batch.</span>
+          <span className="text-xs text-muted-foreground">Enter a theme to enable the batch.</span>
         )}
         {!processing && mode === "per-object" && !perObjectReady && (
-          <span className="text-xs text-stone-500">
+          <span className="text-xs text-muted-foreground">
             Every object needs a prompt to enable the batch.
           </span>
         )}
@@ -360,11 +360,11 @@ function StepStatusIcon({ status }: { status: BatchProgress["steps"][number]["st
   }
   if (status === "running") {
     return (
-      <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-stone-600" aria-hidden="true" />
+      <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-muted-foreground" aria-hidden="true" />
     );
   }
   if (status === "failed") {
     return <X className="mt-0.5 h-4 w-4 shrink-0 text-red-700" aria-hidden="true" />;
   }
-  return <Circle className="mt-0.5 h-4 w-4 shrink-0 text-stone-400" aria-hidden="true" />;
+  return <Circle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />;
 }
