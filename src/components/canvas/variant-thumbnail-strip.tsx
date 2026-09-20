@@ -157,7 +157,7 @@ export default function VariantThumbnailStrip({
                   aria-label={`Delete Variant ${letter} staged image`}
                   disabled={deleting}
                   onClick={() => onDeleteVariant(slot)}
-                  className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-70"
+                  className="absolute right-1 top-1 flex h-11 w-11 items-center justify-center rounded-full bg-black/60 text-white transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {deleting ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
