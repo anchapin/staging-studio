@@ -45,7 +45,7 @@ export default async function SettingsPage() {
         <h1 className="font-playfair text-3xl font-bold text-stone-800">
           Settings
         </h1>
-        <p className="mt-1 text-sm text-stone-600">
+        <p className="mt-1 text-sm leading-relaxed text-stone-600">
           Firm branding and lookbook page templates
         </p>
       </div>
