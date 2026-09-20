@@ -135,7 +135,7 @@ export default function BatchStagingPanel({
       aria-label="Batch region staging"
       className="no-print flex flex-col gap-3 rounded-md border border-stone-300 bg-stone-50 p-4"
     >
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <h4 className="text-sm font-semibold text-stone-800">
           Batch staging
           <span className="ml-2 rounded bg-stone-200 px-1.5 py-0.5 text-xs font-normal text-stone-600">
@@ -218,7 +218,7 @@ export default function BatchStagingPanel({
                 onChange={(event) => setThematicPrompt(event.target.value)}
                 rows={2}
                 placeholder="e.g. replace the seating with warm mid-century pieces"
-                className="mt-1 w-full rounded-md border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-500"
+                className="mt-1 w-full min-w-0 rounded-md border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-500"
               />
             </>
           ) : (
@@ -228,7 +228,7 @@ export default function BatchStagingPanel({
               </p>
               <ol className="mt-1 flex flex-col gap-2">
                 {selections.map((selection, index) => (
-                  <li key={selection.id} className="flex flex-col">
+                  <li key={selection.id} className="flex flex-col min-w-0">
                     <label
                       htmlFor={`batch-prompt-${selection.id}`}
                       className="flex items-center gap-1.5 text-xs font-medium text-stone-600"
@@ -255,7 +255,7 @@ export default function BatchStagingPanel({
                           ? `e.g. replace the ${entryLabel(selection, index)} with ...`
                           : `e.g. replace ${batchStepLabel(index).toLowerCase()} with ...`
                       }
-                      className="mt-0.5 w-full rounded-md border border-stone-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-stone-500"
+                      className="mt-0.5 w-full min-w-0 rounded-md border border-stone-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-stone-500"
                     />
                   </li>
                 ))}

@@ -12,9 +12,11 @@ interface Project {
 
 interface SidebarNavProps {
   projects: Project[];
+  /** Called when a nav link is clicked — used to close the mobile drawer */
+  onNavigate?: () => void;
 }
 
-export function SidebarNav({ projects }: SidebarNavProps) {
+export function SidebarNav({ projects, onNavigate }: SidebarNavProps) {
   const pathname = usePathname();
 
   return (
@@ -31,6 +33,7 @@ export function SidebarNav({ projects }: SidebarNavProps) {
                 <li key={project.id}>
                   <Link
                     href={`/projects/${project.id}`}
+                    onClick={onNavigate}
                     className={`block rounded-md px-3 py-2 text-sm ${
                       isActive
                         ? "text-white font-medium"
@@ -52,9 +55,10 @@ export function SidebarNav({ projects }: SidebarNavProps) {
         )}
       </nav>
 
-      <div className="absolute bottom-0 w-64 border-t border-stone-800 p-4">
+      <div className="bottom-0 w-64 border-t border-stone-800 p-4">
         <Link
           href="/settings"
+          onClick={onNavigate}
           className={`mb-1 block rounded-md px-3 py-2 text-sm font-medium hover:bg-stone-800 hover:text-white ${
             pathname === "/settings" ? "text-white" : "text-stone-400"
           }`}

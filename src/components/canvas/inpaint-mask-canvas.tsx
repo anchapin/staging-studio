@@ -1143,16 +1143,17 @@ export default function InpaintMaskCanvas({
         stop painting. Brush Size and Clear Mask follow in the tab order.
       </p>
 
-      <div className="flex items-center gap-4">
-        <div role="group" aria-label="Mask tool" className="flex items-center gap-2">
+      {/* Issue #317: toolbar wraps at md+ and buttons have min-height 44px for touch */}
+      <div className="flex flex-wrap items-center gap-4">
+        <div role="group" aria-label="Mask tool" className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             aria-pressed={activeTool === "brush"}
             onClick={() => setActiveTool("brush")}
             className={
               activeTool === "brush"
-                ? "px-3 py-1.5 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors"
-                : "px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors"
+                ? "px-3 py-2 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors md:min-h-[44px]"
+                : "px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors md:min-h-[44px]"
             }
           >
             Brush
@@ -1163,8 +1164,8 @@ export default function InpaintMaskCanvas({
             onClick={() => setActiveTool("fill")}
             className={
               activeTool === "fill"
-                ? "px-3 py-1.5 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors"
-                : "px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors"
+                ? "px-3 py-2 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors md:min-h-[44px]"
+                : "px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors md:min-h-[44px]"
             }
           >
             Fill Region
@@ -1182,8 +1183,8 @@ export default function InpaintMaskCanvas({
               onClick={() => setActiveTool("select")}
               className={
                 activeTool === "select"
-                  ? "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
-                  : "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                  ? "flex items-center gap-1.5 px-3 py-2 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors disabled:cursor-not-allowed disabled:opacity-60 md:min-h-[44px]"
+                  : "flex items-center gap-1.5 px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-60 md:min-h-[44px]"
               }
             >
               {segmenting ? (
@@ -1198,22 +1199,24 @@ export default function InpaintMaskCanvas({
           )}
         </div>
 
-        <label className="flex items-center gap-2 text-sm">
-          Brush Size:
+        {/* Brush size: touch-friendly at md+ with taller hit area */}
+        <label className="flex items-center gap-2 text-sm md:min-h-[44px] md:py-1">
+          <span className="whitespace-nowrap">Brush Size:</span>
           <input
             type="range"
             min={1}
             max={100}
             value={brushSize}
             onChange={(e) => setBrushSize(Number(e.target.value))}
-            className="w-32"
+            className="w-24 md:w-32"
+            aria-label="Brush size"
           />
           <span className="w-8 text-right">{brushSize}</span>
         </label>
 
         <button
           onClick={clearMask}
-          className="px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors"
+          className="px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors md:min-h-[44px]"
         >
           Clear Mask
         </button>

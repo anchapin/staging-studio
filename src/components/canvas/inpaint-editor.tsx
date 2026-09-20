@@ -1352,28 +1352,29 @@ export default function InpaintEditor({
        sized to the remaining viewport, fixed-width control panel RIGHT;
        both panes scroll internally so page-level scrolling dies at laptop
        size (AC-L1/L2). Below lg the same tabs stack in one column
-       (AC-L6). */
+       (AC-L6). At md (768px-1023px) the layout stacks vertically to
+       prevent horizontal overflow on tablet screens (issue #317). */
     <div
       className={`flex flex-col gap-6 ${
-        fullWidth ? "lg:min-h-0 lg:flex-1 lg:flex-row lg:gap-6" : ""
+        fullWidth ? "md:flex-col lg:min-h-0 lg:flex-1 lg:flex-row lg:gap-6" : ""
       }`}
     >
       {/* ---- LEFT PANE: room imagery (optional slot) + mask canvas ------ */}
       <div
         className={`flex min-w-0 flex-col gap-4 ${
-          fullWidth ? "lg:min-h-0 lg:flex-1" : ""
+          fullWidth ? "md:min-h-0 lg:min-h-0 lg:flex-1" : ""
         }`}
       >
         {secondaryPane && (
           <div
             className={`flex flex-col gap-6 ${
-              fullWidth ? "lg:max-h-[45%] lg:min-h-0 lg:overflow-y-auto" : ""
+              fullWidth ? "md:max-h-none md:overflow-visible lg:max-h-[45%] lg:min-h-0 lg:overflow-y-auto" : ""
             }`}
           >
             {secondaryPane}
           </div>
         )}
-        <h4 className="text-sm font-medium text-stone-700 mb-2">Source Image</h4>
+        <h4 className="mb-2 text-sm font-medium text-stone-700">Source Image</h4>
         <InpaintMaskCanvas
           overlayImageSrc={imageUrl}
           aspectRatio={aspectRatio}
@@ -1450,7 +1451,7 @@ export default function InpaintEditor({
       {/* ---- RIGHT PANE: fixed-width control panel ----------------------- */}
       <div
         className={`flex w-full flex-col gap-3 no-print ${
-          fullWidth ? "lg:min-h-0 lg:w-[380px] lg:shrink-0" : ""
+          fullWidth ? "md:w-full md:flex-col lg:min-h-0 lg:w-[380px] lg:shrink-0" : ""
         }`}
       >
         {/* AC-L2: batch progress pins to the panel top during a run, so
@@ -1473,7 +1474,7 @@ export default function InpaintEditor({
         )}
         <div
           className={`flex flex-col gap-4 ${
-            fullWidth ? "lg:min-h-0 lg:flex-1 lg:overflow-y-auto" : ""
+            fullWidth ? "md:min-h-0 md:flex-1 md:overflow-visible lg:min-h-0 lg:flex-1 lg:overflow-y-auto" : ""
           }`}
         >
           {sourceOptions.length > 1 && (
