@@ -47,7 +47,7 @@ import { computeMaskCanvasDimensions } from "@/lib/canvas-coords";
 import { fillHoles, closeRegion, MERGE_PROXIMITY_PX } from "@/lib/mask-postprocess";
 import { maskBounds, topmostLeftmostPoint } from "@/lib/vision-labels";
 import {
-  MAX_BATCH_REGIONS,
+  MAX_BATCH_OBJECTS,
   advanceBatchProgress,
   applyConceptSelectAll,
   applyConceptToggle,
@@ -834,7 +834,7 @@ export default function InpaintEditor({
       );
       if (toggled.rejected === "cap") {
         showError(
-          `Batch staging is limited to ${MAX_BATCH_REGIONS} regions — undo or clear one to add more.`
+          `Batch staging is limited to ${MAX_BATCH_OBJECTS} regions — undo or clear one to add more.`
         );
         return;
       }
@@ -874,7 +874,7 @@ export default function InpaintEditor({
   // limit logic and moves both state pieces in lockstep; each instance
   // this call actually selects emits its own selection_logged event (the
   // same shape a click toggle emits — the corpus wants every selection).
-  // When detection found more than MAX_BATCH_REGIONS, the best-ranked fit
+  // When detection found more than MAX_BATCH_OBJECTS, the best-ranked fit
   // is selected and a role=status notice names what was left out.
   const handleSelectAllDetected = useCallback(() => {
     if (isProcessing) return;
@@ -915,7 +915,7 @@ export default function InpaintEditor({
     }
     setSelectAllNotice(
       result.truncated
-        ? `Selected ${result.selections.length} of ${candidates.length} detected — batch staging is limited to ${MAX_BATCH_REGIONS} regions.`
+        ? `Selected ${result.selections.length} of ${candidates.length} detected — batch staging is limited to ${MAX_BATCH_OBJECTS} regions.`
         : null
     );
   }, [
@@ -1437,7 +1437,7 @@ export default function InpaintEditor({
       {batchSelections.length > 0 && (
         <BatchStagingPanel
           selections={batchSelections}
-          maxObjects={MAX_BATCH_REGIONS}
+          maxObjects={MAX_BATCH_OBJECTS}
           disabled={isProcessing || conceptLoading}
           processing={isProcessing}
           activeBatch={activeBatch}
@@ -1673,7 +1673,7 @@ export default function InpaintEditor({
                         isProcessing ||
                         conceptLoading ||
                         detectedCount === 0 ||
-                        selectionCount >= Math.min(detectedCount, MAX_BATCH_REGIONS)
+                        selectionCount >= Math.min(detectedCount, MAX_BATCH_OBJECTS)
                       }
                       className="px-2.5 py-1 text-xs rounded-md border border-stone-800 bg-white text-stone-800 hover:bg-stone-100 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                     >
@@ -1753,7 +1753,7 @@ export default function InpaintEditor({
               {batchSelections.length > 0 && (
                 <BatchStagingPanel
                   selections={batchSelections}
-                  maxObjects={MAX_BATCH_REGIONS}
+                  maxObjects={MAX_BATCH_OBJECTS}
                   disabled={isProcessing || conceptLoading}
                   processing={isProcessing}
                   activeBatch={activeBatch}

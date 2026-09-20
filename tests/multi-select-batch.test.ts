@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  MAX_BATCH_REGIONS,
+  MAX_BATCH_OBJECTS,
   advanceBatchProgress,
   batchProgressText,
   batchStepLabel,
@@ -39,9 +39,9 @@ function buffer(
   return { width, height, data };
 }
 
-describe("MAX_BATCH_REGIONS", () => {
+describe("MAX_BATCH_OBJECTS", () => {
   it("caps batches at five regions", () => {
-    expect(MAX_BATCH_REGIONS).toBe(5);
+    expect(MAX_BATCH_OBJECTS).toBe(5);
   });
 });
 
@@ -55,11 +55,11 @@ describe("reduceSelectionSet", () => {
 
   it("refuses adds beyond the cap without changing the set", () => {
     let state: BatchSelection[] = [];
-    for (let i = 0; i < MAX_BATCH_REGIONS; i++) {
+    for (let i = 0; i < MAX_BATCH_OBJECTS; i++) {
       state = reduceSelectionSet(state, { type: "add", selection: selection(`s${i}`, i * 100, 0) })
         .selections;
     }
-    expect(state).toHaveLength(MAX_BATCH_REGIONS);
+    expect(state).toHaveLength(MAX_BATCH_OBJECTS);
 
     const reduced = reduceSelectionSet(state, {
       type: "add",
