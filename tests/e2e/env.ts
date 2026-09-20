@@ -86,24 +86,6 @@ export function roomPhotoPublicUrl(storagePath: string): string {
 }
 
 /**
- * SAM 3.1 concept-tool switch FOR THE E2E BUILD ONLY (issue #231).
- *
- * The editor auto-fires a `furniture` detection against
- * `/api/segment/furnishings` the moment it opens, so with the tool
- * enabled EVERY editor-opening spec must register
- * `interceptFurnishingsDetection(page)` — the harness mocks the
- * `fal-ai/sam-3-1/image`-backed route at the browser network layer, which
- * is what lets the REAL UI path (auto-fire → concept chips → instance
- * toggles → batch dispatch) run hermetically with the flag ON.
- *
- * Kill-switch semantics are preserved: flipping this constant to `false`
- * compiles the tool out of the app under test exactly as before, and the
- * concept-flow spec in `concept-flow.spec.ts` then skips itself — flag-off
- * runs never exercise concept specs.
- */
-export const SAM_TOOL_ENABLED_IN_E2E_BUILD = true;
-
-/**
  * Environment for the Next.js build + server started by Playwright's
  * `webServer`. NEXT_PUBLIC_* values are inlined at build time, so the
  * mock Supabase URL must be set here, not in a shell.
@@ -118,8 +100,5 @@ export function nextEnv(): Record<string, string> {
     BROWSERLESS_API_KEY: "e2e-dummy-browserless-key",
     NEXT_PUBLIC_APP_URL: APP_URL,
     PREVIEW_TOKEN_SECRET: "e2e-preview-token-secret",
-    // Concept-tool switch for the app under test — see
-    // SAM_TOOL_ENABLED_IN_E2E_BUILD above.
-    NEXT_PUBLIC_SAM_TOOL_ENABLED: SAM_TOOL_ENABLED_IN_E2E_BUILD ? "true" : "false",
   };
 }
