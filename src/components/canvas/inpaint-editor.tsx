@@ -38,6 +38,7 @@ import {
   normalizeConceptInput,
 } from "@/lib/concept-chips";
 import { findInstanceAtPoint, instanceSeedPoint } from "@/lib/instance-hit-test";
+import { logSelectionEvent } from "@/app/actions/selection-log";
 import {
   maskGridFromProviderPixels,
   paintMaskPixels,
@@ -846,15 +847,24 @@ export default function InpaintEditor({
       }
       setSelectedInstanceIndices(toggled.selectedInstanceIndices);
       setBatchSelections(toggled.selections);
+      const selectionEvent = buildSelectionLoggedEvent({
+        roomId,
+        concept: displayedResult.concept,
+        instanceIndex: hit,
+        score: instance.score,
+      });
       console.log(
-        `${CONCEPT_EVENT_LOG_PREFIX} ${JSON.stringify(
-          buildSelectionLoggedEvent({
-            roomId,
-            concept: displayedResult.concept,
-            instanceIndex: hit,
-            score: instance.score,
-          })
-        )}`
+        `${CONCEPT_EVENT_LOG_PREFIX} ${JSON.stringify(selectionEvent)}`
+      );
+      // Durable write for training corpus (issue #238 / W3)
+      logSelectionEvent({
+        roomId,
+        concept: selectionEvent.concept,
+        instanceIndex: selectionEvent.instanceIndex,
+        score: selectionEvent.score ?? 0,
+        editedLabel: selectionEvent.editedLabel,
+      }).catch((err) =>
+        console.error("[selection-log] failed to persist:", err)
       );
     },
     [
@@ -902,15 +912,24 @@ export default function InpaintEditor({
     setBatchSelections(result.selections);
     for (const index of result.addedInstanceIndices) {
       const instance = decodedInstances[index];
+      const selectionEvent = buildSelectionLoggedEvent({
+        roomId,
+        concept: displayedResult.concept,
+        instanceIndex: index,
+        score: instance?.score ?? null,
+      });
       console.log(
-        `${CONCEPT_EVENT_LOG_PREFIX} ${JSON.stringify(
-          buildSelectionLoggedEvent({
-            roomId,
-            concept: displayedResult.concept,
-            instanceIndex: index,
-            score: instance?.score ?? null,
-          })
-        )}`
+        `${CONCEPT_EVENT_LOG_PREFIX} ${JSON.stringify(selectionEvent)}`
+      );
+      // Durable write for training corpus (issue #238 / W3)
+      logSelectionEvent({
+        roomId,
+        concept: selectionEvent.concept,
+        instanceIndex: selectionEvent.instanceIndex,
+        score: selectionEvent.score ?? 0,
+        editedLabel: selectionEvent.editedLabel,
+      }).catch((err) =>
+        console.error("[selection-log] failed to persist:", err)
       );
     }
     setSelectAllNotice(
