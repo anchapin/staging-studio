@@ -40,9 +40,9 @@ export function SidebarNav({ projects, onNavigate }: SidebarNavProps) {
                         : "text-muted-foreground"
                     } hover:bg-accent hover:text-accent-foreground`}
                   >
-                    <span className="font-medium">{project.clientName}</span>
+                    <span className="truncate font-medium" title={project.clientName}>{project.clientName}</span>
                     <br />
-                    <span className={`text-xs ${isActive ? "text-foreground/80" : "text-muted-foreground"}`}>
+                    <span className={`truncate block text-xs ${isActive ? "text-foreground/80" : "text-muted-foreground"}`} title={project.propertyAddress}>
                       {project.propertyAddress}
                     </span>
                   </Link>
