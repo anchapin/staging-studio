@@ -14,10 +14,7 @@ import type { SegmentCacheEntry } from "@/lib/segment-cache";
  *
  * WHY A REAL CALL AND NOT A PING
  * ------------------------------
- * The old per-click Select Object flow pre-warmed with a `warm: true`
- * ping because `fal-ai/sam` re-encoded the image inside every billed
- * call, so nothing about a detection was reusable. SAM 3.1 concept
- * selection (issue #227's route) flips that: ONE call per (image,
+ * SAM 3.1 concept selection (issue #227's route): ONE call per (image,
  * concept) returns EVERY instance, and clicks only hit-test client-side.
  * The `furniture` catch-all call is therefore fired the moment the
  * editor's image has loaded — it IS the prewarm, and its instances are
