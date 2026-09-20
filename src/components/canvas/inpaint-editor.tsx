@@ -1435,7 +1435,7 @@ export default function InpaintEditor({
         />
 
         <label className="flex items-center gap-2 text-sm text-stone-700">
-          Mask Expansion:
+          Expand selection:
           <input
             type="range"
             min={0}
@@ -1448,9 +1448,8 @@ export default function InpaintEditor({
           <span className="w-10 text-right">{maskExpansion}px</span>
         </label>
         <p id="mask-expansion-hint" className="text-xs text-gray-500">
-          Grows the mask outward before submitting so frames, bezels, and
-          mounts at the painted edge are replaced too. 0 keeps the mask
-          exactly as painted.
+          Grows the painted area so picture frames, bezels, and mounts are
+          included. 0 keeps the exact painted area.
         </p>
 
         {/* Issue #234: floor-shadow toggle — dilates the mask further downward than
@@ -1462,11 +1461,11 @@ export default function InpaintEditor({
             onChange={(e) => setIncludeFloorShadow(e.target.checked)}
             className="h-4 w-4 accent-stone-800"
           />
-          Include floor shadow
+          Add natural shadows under furniture
         </label>
         <p className="text-xs text-gray-500">
-          Extends the mask further downward so cast shadows on the floor are
-          swallowed by the regenerated region. Best for furniture on hard floors.
+          Extends the painted area downward to include floor shadows, so they
+          look natural with the new furniture. Best for hard floors.
         </p>
       </div>
 
@@ -1773,13 +1772,13 @@ export default function InpaintEditor({
                       {conceptSegments.failedReason === "service-unreachable" ? (
                         <>
                           <p role="status" className="text-xs font-medium text-amber-700">
-                            The detection service is unavailable — the automatic furniture
-                            finder can&apos;t reach its server right now.
+                            We couldn't reach the detection service. Try the Manual paint tab
+                            instead, or try again later.
                           </p>
                           <button
                             type="button"
                             onClick={() => setActiveTab("manual")}
-                            className="w-fit text-left text-xs font-medium text-blue-600 underline hover:text-blue-800"
+                            className="text-xs text-amber-700 underline hover:text-amber-900"
                           >
                             Paint the area manually instead
                           </button>
