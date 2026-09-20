@@ -778,6 +778,7 @@ export default function InpaintMaskCanvas({
   }, [includeFloorShadow, exportMask]);
 
   const clearMask = () => {
+    if (!window.confirm("Clear the entire mask? This cannot be undone.")) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
