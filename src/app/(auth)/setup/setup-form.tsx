@@ -79,7 +79,7 @@ export function SetupForm({ email }: { email: string }) {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-muted to-secondary px-4">
-      <div className="w-full max-w-lg space-y-8 rounded-xl bg-background p-8 shadow-xl">
+      <div className="w-full max-w-lg space-y-8 rounded-xl bg-card p-8 shadow-xl">
         <div className="text-center">
           <h1 className="font-cinzel text-3xl font-bold tracking-tight text-foreground">
             Welcome to StagingStudio

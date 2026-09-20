@@ -188,8 +188,8 @@ function LoginForm() {
               tabIndex={-1}
               className={`rounded-md p-3 text-sm ${
                 message.type === "error"
-                  ? "bg-red-50 text-red-700"
-                  : "bg-green-50 text-green-700"
+                  ? "bg-destructive/10 text-destructive"
+                  : "bg-green-500/10 text-green-600 dark:text-green-400"
               }`}
             >
               {message.text}
