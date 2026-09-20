@@ -156,7 +156,14 @@ export default function VariantThumbnailStrip({
                     type="button"
                     aria-label={`Delete Variant ${letter} staged image`}
                     disabled={deleting}
-                    onClick={() => onDeleteVariant(slot)}
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          "Delete this variant? This cannot be undone."
+                        )
+                      )
+                        onDeleteVariant(slot);
+                    }}
                     tabIndex={0}
                     className="absolute right-1 top-1 flex h-11 w-11 items-center justify-center rounded-full bg-black/60 text-white transition-colors hover:bg-red-600 focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-70"
                   >
