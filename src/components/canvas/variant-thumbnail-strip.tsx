@@ -1,8 +1,10 @@
 "use client";
 
 import Image from "next/image";
+import { useState } from "react";
 import { Check, ImageIcon, Loader2, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import type { StagedVariantPair } from "@/lib/staged-result";
 import type { VariantStripSelection } from "@/lib/variant-legibility";
 import type { VariantSlot } from "@/lib/inpaint-source";
@@ -71,6 +73,12 @@ export default function VariantThumbnailStrip({
   className,
 }: VariantThumbnailStripProps) {
   const trimmedName = roomName.trim();
+
+  // Confirm dialog state for delete variant
+  const [confirmDialog, setConfirmDialog] = useState<{
+    open: boolean;
+    slot: VariantSlot | null;
+  }>({ open: false, slot: null });
   return (
     <div
       role="group"
@@ -157,12 +165,7 @@ export default function VariantThumbnailStrip({
                     aria-label={`Delete Variant ${letter} staged image`}
                     disabled={deleting}
                     onClick={() => {
-                      if (
-                        window.confirm(
-                          "Delete this variant? This cannot be undone."
-                        )
-                      )
-                        onDeleteVariant(slot);
+                      setConfirmDialog({ open: true, slot });
                     }}
                     tabIndex={0}
                     className="absolute right-1 top-1 flex h-11 w-11 items-center justify-center rounded-full bg-black/60 text-white transition-colors hover:bg-red-600 focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-70"
@@ -179,6 +182,19 @@ export default function VariantThumbnailStrip({
           </div>
         );
       })}
+      <ConfirmDialog
+        open={confirmDialog.open}
+        onCancel={() => setConfirmDialog({ open: false, slot: null })}
+        onConfirm={() => {
+          if (confirmDialog.slot !== null && onDeleteVariant) {
+            onDeleteVariant(confirmDialog.slot);
+          }
+        }}
+        title="Delete this variant?"
+        message="This cannot be undone."
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+      />
     </div>
   );
 }
