@@ -101,7 +101,7 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
       <div>
         <label
           htmlFor="firmName"
-          className="block text-xs font-medium uppercase tracking-wide text-muted-foreground"
+          className="block text-sm font-medium text-foreground"
         >
           Firm Name
         </label>
@@ -111,7 +111,7 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
           value={firmName}
           onChange={(e) => setFirmName(e.target.value)}
           required
-          className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 shadow-sm focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500"
+          className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
           placeholder="Circle G Designs"
         />
       </div>
@@ -119,7 +119,7 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
       <div>
         <label
           htmlFor="ownerName"
-          className="block text-xs font-medium uppercase tracking-wide text-muted-foreground"
+          className="block text-sm font-medium text-foreground"
         >
           Owner Name
         </label>
@@ -129,7 +129,7 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
           value={ownerName}
           onChange={(e) => setOwnerName(e.target.value)}
           required
-          className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 shadow-sm focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500"
+          className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
           placeholder="Lauren Chapin"
         />
       </div>
@@ -137,19 +137,19 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
       <div>
         <label
           htmlFor="logo"
-          className="block text-xs font-medium uppercase tracking-wide text-muted-foreground"
+          className="block text-sm font-medium text-foreground"
         >
-          Firm Logo <span className="text-stone-400">(optional)</span>
+          Firm Logo <span className="text-muted-foreground">(optional)</span>
         </label>
         <input
           id="logo"
           type="file"
           accept="image/*"
           onChange={(e) => setLogoFile(e.target.files?.[0] || null)}
-          className="mt-1 block w-full text-sm text-stone-500 file:mr-4 file:cursor-pointer file:rounded-md file:border-0 file:bg-stone-100 file:px-4 file:py-2 file:text-sm file:font-medium file:text-stone-700 hover:file:bg-stone-200"
+          className="mt-1 block w-full text-sm text-muted-foreground file:mr-4 file:cursor-pointer file:rounded-md file:border-0 file:bg-secondary file:px-4 file:py-2 file:text-sm file:font-medium file:text-foreground hover:file:bg-muted"
         />
         {initial.logoUrl && (
-          <p className="mt-1 text-xs text-stone-500">
+          <p className="mt-1 text-xs text-muted-foreground">
             A logo is currently set — upload a new file to replace it.
           </p>
         )}
@@ -158,17 +158,17 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
       <div>
         <label
           htmlFor="psychologyPageContent"
-          className="block text-xs font-medium uppercase tracking-wide text-muted-foreground"
+          className="block text-sm font-medium text-foreground"
         >
           Psychology Page Content{" "}
-          <span className="text-stone-400">(lookbook page 2)</span>
+          <span className="text-muted-foreground">(lookbook page 2)</span>
         </label>
         <textarea
           id="psychologyPageContent"
           value={psychologyPageContent}
           onChange={(e) => setPsychologyPageContent(e.target.value)}
           rows={5}
-          className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 shadow-sm focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500"
+          className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
           placeholder="Describe your ideal buyer and the emotional journey you design..."
         />
       </div>
@@ -176,17 +176,17 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
       <div>
         <label
           htmlFor="signoffContent"
-          className="block text-xs font-medium uppercase tracking-wide text-muted-foreground"
+          className="block text-sm font-medium text-foreground"
         >
           Sign-off Content{" "}
-          <span className="text-stone-400">(final lookbook page)</span>
+          <span className="text-muted-foreground">(final lookbook page)</span>
         </label>
         <textarea
           id="signoffContent"
           value={signoffContent}
           onChange={(e) => setSignoffContent(e.target.value)}
           rows={5}
-          className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 shadow-sm focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500"
+          className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
           placeholder="Your closing message to the buyer..."
         />
       </div>
@@ -214,6 +214,7 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
       <Button
         type="submit"
         disabled={saving}
+
       >
         {saving ? "Saving..." : "Save Settings"}
       </Button>
