@@ -27,7 +27,6 @@ import StageEntireRoomPreset from "./stage-entire-room-preset";
 import BatchStagingPanel from "./batch-staging-panel";
 import { useConceptSegments } from "./use-segment-prewarm";
 import { SegmentCache, type SegmentCacheEntry } from "@/lib/segment-cache";
-import { SAM_TOOL_ENABLED } from "@/lib/sam-tool";
 import {
   buildConceptEmptyMessage,
   buildSelectionLoggedEvent,
@@ -510,7 +509,7 @@ export default function InpaintEditor({
   // instance, so there is nothing cheaper to warm with). Chip switches
   // reuse this machinery; the SegmentCache serves repeats without a fetch.
   const conceptSegments = useConceptSegments({
-    enabled: SAM_TOOL_ENABLED,
+    enabled: true,
     roomId,
     imageUrl: imageUrl || null,
     imageWidth: imageDims?.width ?? null,
@@ -544,7 +543,6 @@ export default function InpaintEditor({
   // that fallback (AC-3.2). Labeled results are written back into the
   // segment cache, so cache-served concepts restore labels instantly.
   useEffect(() => {
-    if (!SAM_TOOL_ENABLED) return;
     if (!roomId || !imageUrl || !imageDims) return;
     if (!displayedResult || !decodedInstances) return;
 
@@ -1310,12 +1308,9 @@ export default function InpaintEditor({
   const selectionCount = Math.max(batchSelections.length, selectedInstanceIndices.length);
 
   // Issue #252 D5: control-panel tab state — purely presentational, so
-  // switching never touches staging state (AC-L5). The default follows
-  // the SAM flag: Auto detect when the tool compiles in, Manual paint
-  // otherwise (the Detect tab is flag-gated away without it).
-  const [activeTab, setActiveTab] = useState<EditorTabId>(
-    SAM_TOOL_ENABLED ? "detect" : "manual"
-  );
+  // switching never touches staging state (AC-L5). The default is the
+  // Auto detect tab.
+  const [activeTab, setActiveTab] = useState<EditorTabId>("detect");
   const tabIdBase = useId();
   // AC-L4: tab availability is a pure function of the displayed base
   // image — Entire room only over the original photo. Derived in render
@@ -1335,16 +1330,14 @@ export default function InpaintEditor({
       // Un-run work badge (AC-L5): a painted-but-unapplied mask.
       badge: maskDataUrl ? true : undefined,
     },
-    ...(SAM_TOOL_ENABLED
-      ? [
-          {
-            id: "detect" as const,
-            label: "Auto detect",
-            // Un-run work badge: pending region selections.
-            badge: selectionCount > 0 ? selectionCount : undefined,
-          },
-        ]
-      : []),
+    ...[
+      {
+        id: "detect" as const,
+        label: "Auto detect",
+        // Un-run work badge: pending region selections.
+        badge: selectionCount > 0 ? selectionCount : undefined,
+      },
+    ],
   ];
 
   return (
@@ -1634,11 +1627,8 @@ export default function InpaintEditor({
               {/* Issue #228: concept chips + validated free text. Chips
                   enforce single-concept by construction; free text is
                   validated with isValidConceptName (the server schema's
-                  client mirror) BEFORE any billed call is built.
-                  Flag-gated with the tool itself (whole tab hides with the
-                  flag off — the default tab becomes Manual paint). */}
-              {SAM_TOOL_ENABLED && (
-                <div className="flex flex-col gap-2">
+                  client mirror) BEFORE any billed call is built. */}
+              <div className="flex flex-col gap-2">
                   <div
                     role="group"
                     aria-label="Detection concept"
@@ -1741,7 +1731,6 @@ export default function InpaintEditor({
                     </p>
                   )}
                 </div>
-              )}
 
               {/* Issue #203 panel, fed since #229 by the concept toggles:
                   appears once at least one detected instance has been
