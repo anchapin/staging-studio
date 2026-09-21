@@ -92,7 +92,7 @@ export interface PollOptions {
 
 const DEFAULT_INTERVAL_MS = 1000;
 const DEFAULT_MAX_INTERVAL_MS = 5000;
-const DEFAULT_MAX_ATTEMPTS = 30;
+const DEFAULT_MAX_ATTEMPTS = 60;
 const DEFAULT_MAX_WAIT_MS = 5 * 60_000;
 
 const defaultSleep = (ms: number, signal?: AbortSignal): Promise<void> =>

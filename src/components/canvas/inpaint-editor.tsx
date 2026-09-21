@@ -1469,11 +1469,6 @@ export default function InpaintEditor({
         </p>
       </div>
 
-      {/* Issue #203 panel, fed since #229 by the concept toggles: appears
-          once at least one detected instance has been toggled in. Thematic
-          runs go through the shared single-run launcher; per-object plans
-          execute sequentially with per-step progress and a retry
-          affordance. */}
       {/* ---- RIGHT PANE: fixed-width control panel ----------------------- */}
       <div
         className={`flex w-full flex-col gap-3 no-print ${
