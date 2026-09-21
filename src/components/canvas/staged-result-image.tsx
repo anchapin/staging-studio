@@ -30,6 +30,18 @@ interface StagedResultImageProps {
    * affects sizing.
    */
   largeImage?: boolean;
+  /**
+   * Issue #460: click handler to toggle between staged and original comparison.
+   * When provided, the image becomes clickable and shows a visual affordance.
+   */
+  onClickToggleComparison?: () => void;
+  /**
+   * Issue #460: the original (before) photo URL for comparison toggle.
+   * Required when onClickToggleComparison is provided.
+   */
+  originalImageUrl?: string | null;
+  /** Issue #460: whether the comparison is currently showing the original. */
+  showingOriginal?: boolean;
 }
 
 /**
@@ -43,7 +55,11 @@ export default function StagedResultImage({
   alt,
   label,
   largeImage = false,
+  onClickToggleComparison,
+  originalImageUrl,
+  showingOriginal = false,
 }: StagedResultImageProps) {
+  const isClickable = Boolean(onClickToggleComparison && originalImageUrl);
   /**
    * Natural pixel dimensions of the loaded photo (issue #188). The frame
    * adopts the photo's own aspect ratio so the FULL image stays visible —
@@ -75,14 +91,33 @@ export default function StagedResultImage({
   const frameHeight = largeImage ? "h-96" : "h-64";
   const imageSizes = largeImage ? FOCUSED_IMAGE_SIZES : GRID_IMAGE_SIZES;
 
+  // Issue #460: show the original photo when comparison is active
+  const displayImageUrl = showingOriginal && originalImageUrl ? originalImageUrl : afterImageUrl;
+  const displayAlt = showingOriginal ? `${alt} (original)` : alt;
+  const displayLabel = showingOriginal ? "Original" : label;
+
   return (
     <div
       className={`relative w-full overflow-hidden rounded-lg border border-stone-200 bg-stone-100 ${
         imageAspect ? "max-h-[70vh]" : frameHeight
-      }`}
+      } ${isClickable ? "cursor-pointer hover:ring-2 hover:ring-stone-400 transition-shadow" : ""}`}
       style={
         imageAspect
           ? { aspectRatio: `${imageAspect.width} / ${imageAspect.height}` }
+          : undefined
+      }
+      onClick={isClickable ? onClickToggleComparison : undefined}
+      role={isClickable ? "button" : undefined}
+      aria-label={isClickable ? "Click to compare with original" : undefined}
+      tabIndex={isClickable ? 0 : undefined}
+      onKeyDown={
+        isClickable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClickToggleComparison?.();
+              }
+            }
           : undefined
       }
     >
@@ -92,15 +127,20 @@ export default function StagedResultImage({
         off at the bottom.
       */}
       <Image
-        src={afterImageUrl}
-        alt={alt}
+        src={displayImageUrl}
+        alt={displayAlt}
         fill
         sizes={imageSizes}
         className="object-contain"
       />
       <div className="absolute left-3 top-3 rounded-md bg-black/60 px-2 py-1 text-xs font-medium text-white">
-        {label}
+        {displayLabel}
       </div>
+      {isClickable && (
+        <div className="absolute bottom-3 right-3 rounded-md bg-black/60 px-2 py-1 text-xs text-white">
+          {showingOriginal ? "Click for staged" : "Click for original"}
+        </div>
+      )}
     </div>
   );
 }

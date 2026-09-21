@@ -178,6 +178,10 @@ export default function ProjectDetailView({
   const [deletingSlotByRoom, setDeletingSlotByRoom] = useState<
     Record<string, VariantSlot | null>
   >({});
+  /** Issue #460: per-room toggle for staged result ↔ original comparison. */
+  const [showOriginalByRoom, setShowOriginalByRoom] = useState<
+    Record<string, boolean>
+  >({});
   const { toasts, showError, showSuccess, showInfo, dismissToast } = useToast();
 
   /**
@@ -455,6 +459,14 @@ export default function ProjectDetailView({
     []
   );
 
+  /** Issue #460: toggles staged result ↔ original comparison for a room. */
+  const handleToggleStagedComparison = useCallback((roomId: string) => {
+    setShowOriginalByRoom((prev) => ({
+      ...prev,
+      [roomId]: !prev[roomId],
+    }));
+  }, []);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -697,7 +709,6 @@ export default function ProjectDetailView({
                   source={focusedInputs.inpaintSource}
                   sourceOptions={listInpaintSources(focusedRoom)}
                   fullWidth
-                  originalImageUrl={focusedRoom.beforeImageUrl}
                   onSourceChange={(next) => handleInpaintSourceChange(focusedRoom.id, next)}
                   pendingRequestId={focusedInputs.pendingRequest?.id ?? null}
                   pendingSource={focusedInputs.pendingSource}
@@ -722,24 +733,7 @@ export default function ProjectDetailView({
                   }}
                   secondaryPane={
                     <>
-                      <VariantThumbnailStrip
-                        roomName={focusedRoom.name}
-                        originalUrl={focusedRoom.beforeImageUrl}
-                        pairs={focusedInputs.pairs}
-                        selection={resolveStripSelection(
-                          focusedRoom.selectedVariantIndex,
-                          focusedInputs.pairs
-                        )}
-                        onSelect={(selection) =>
-                          void handleStripSelect(focusedRoom, selection)
-                        }
-                        onDeleteVariant={(slot) =>
-                          void handleDeleteVariant(focusedRoom, slot)
-                        }
-                        deletingSlot={deletingSlotByRoom[focusedRoom.id] ?? null}
-                        touchUpCounts={touchUpCountsByRoom[focusedRoom.id] ?? null}
-                      />
-
+                      {/* Issue #460: textarea first — always visible above the fold */}
                       <section aria-label="Staging directives">
                         <label
                           htmlFor={`directives-${focusedRoom.id}`}
@@ -766,16 +760,42 @@ export default function ProjectDetailView({
                         </p>
                       </section>
 
+                      <VariantThumbnailStrip
+                        roomName={focusedRoom.name}
+                        originalUrl={focusedRoom.beforeImageUrl}
+                        pairs={focusedInputs.pairs}
+                        selection={resolveStripSelection(
+                          focusedRoom.selectedVariantIndex,
+                          focusedInputs.pairs
+                        )}
+                        onSelect={(selection) =>
+                          void handleStripSelect(focusedRoom, selection)
+                        }
+                        onDeleteVariant={(slot) =>
+                          void handleDeleteVariant(focusedRoom, slot)
+                        }
+                        deletingSlot={deletingSlotByRoom[focusedRoom.id] ?? null}
+                        touchUpCounts={touchUpCountsByRoom[focusedRoom.id] ?? null}
+                      />
+
                       {focusedInputs.staged && (
                         <section aria-label="Staged result">
                           <h3 className="text-sm font-semibold text-foreground mb-3">
                             Staged result
                           </h3>
+                          {/* Issue #460: click to toggle staged ↔ original comparison */}
                           <StagedResultImage
                             afterImageUrl={focusedInputs.staged.afterImageUrl}
                             alt={focusedInputs.staged.alt}
                             label={focusedInputs.staged.label}
                             largeImage
+                            originalImageUrl={focusedRoom.beforeImageUrl}
+                            onClickToggleComparison={() =>
+                              handleToggleStagedComparison(focusedRoom.id)
+                            }
+                            showingOriginal={
+                              showOriginalByRoom[focusedRoom.id] ?? false
+                            }
                           />
                         </section>
                       )}
