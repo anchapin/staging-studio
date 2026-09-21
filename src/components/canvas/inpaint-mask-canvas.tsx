@@ -172,6 +172,11 @@ interface InpaintMaskCanvasProps {
   onMaskCleared?: () => void;
   /** Issue #448: click a numbered badge to deselect that region. */
   onSelectionDeselect?: (id: string) => void;
+  /**
+   * Issue #454: the concept name being detected — shown in the empty-state
+   * badge while `segmenting` is true so users know detection is running.
+   */
+  detectingConcept?: string;
 }
 
 export default function InpaintMaskCanvas({
@@ -195,6 +200,7 @@ export default function InpaintMaskCanvas({
   selectionReset = null,
   onMaskCleared,
   onSelectionDeselect,
+  detectingConcept,
 }: InpaintMaskCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -1149,9 +1155,11 @@ export default function InpaintMaskCanvas({
               hasOverlay ? "" : "border border-white/30"
             }`}
           >
-            {activeTool === "select"
-              ? "Click a tinted object to toggle it in the mask"
-              : "Drag to paint over the object you want changed"}
+            {segmenting && detectingConcept
+              ? `Analyzing room for ${detectingConcept}…`
+              : activeTool === "select"
+                ? "Click a tinted object to toggle it in the mask"
+                : "Drag to paint over the object you want changed"}
           </span>
         </div>
       )}
