@@ -30,6 +30,7 @@ import {
 } from "@/lib/staged-result";
 
 import { AutoTextarea } from "./auto-textarea";
+import { LookbookNav } from "./lookbook-nav";
 
 type ChecklistRow = { item: string; category: string; priority: string };
 type RoomOverride = RoomCopyEditInput;
@@ -323,8 +324,13 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
       )}
 
       {mode === "preview" ? (
-        <div className="paper-preview">
-          <LookbookPreviewView project={project} />
+        <div>
+          <LookbookNav
+            rooms={project.rooms.map((r) => ({ id: r.id, name: r.name }))}
+          />
+          <div className="paper-preview">
+            <LookbookPreviewView project={project} />
+          </div>
         </div>
       ) : (
         <div className="space-y-6">
