@@ -2,22 +2,23 @@ import type { Metadata } from "next";
 import { Cinzel, Playfair_Display, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
+import ReviewPanel from "@/components/review-panel";
 
 const cinzel = Cinzel({
   subsets: ["latin"],
-  variable: "--font-cinzel",
+  variable: "--font-cinzel-google",
   display: "swap",
 });
 
 const playfair = Playfair_Display({
   subsets: ["latin"],
-  variable: "--font-playfair",
+  variable: "--font-playfair-google",
   display: "swap",
 });
 
 const plusJakarta = Plus_Jakarta_Sans({
   subsets: ["latin"],
-  variable: "--font-plus-jakarta",
+  variable: "--font-jakarta-google",
   display: "swap",
 });
 
@@ -37,7 +38,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={cn(cinzel.variable, playfair.variable, plusJakarta.variable, "font-sans")}>
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        {children}
+        <ReviewPanel />
+      </body>
     </html>
   );
 }
