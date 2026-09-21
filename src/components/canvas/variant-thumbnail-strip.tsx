@@ -9,8 +9,8 @@ import type { StagedVariantPair } from "@/lib/staged-result";
 import type { VariantStripSelection } from "@/lib/variant-legibility";
 import type { VariantSlot } from "@/lib/inpaint-source";
 
-/** Thumbnails render at a fixed 96px square. */
-const THUMBNAIL_SIZES = "96px";
+/** Thumbnails render at a fixed 208px square (issue #479 — 96px was too small to see detail). */
+const THUMBNAIL_SIZES = "208px";
 
 const VARIANT_LETTER: Record<VariantSlot, "A" | "B"> = { 0: "A", 1: "B" };
 
@@ -91,7 +91,7 @@ export default function VariantThumbnailStrip({
           aria-pressed={selection === "original"}
           onClick={() => onSelect("original")}
           className={cn(
-            "relative block h-24 w-24 overflow-hidden rounded-md border bg-muted transition-shadow",
+            "relative block h-52 w-52 overflow-hidden rounded-md border bg-muted transition-shadow",
             selection === "original"
               ? "border-foreground ring-2 ring-ring ring-offset-2"
               : "border-border hover:border-muted-foreground"
@@ -123,14 +123,14 @@ export default function VariantThumbnailStrip({
         const letter = VARIANT_LETTER[slot];
         const touchUps = touchUpCounts?.[slot] ?? 0;
         return (
-          <div key={slot} className="flex w-24 flex-col items-center gap-1">
-            <span className="relative block h-24 w-24">
+          <div key={slot} className="flex w-52 flex-col items-center gap-1">
+            <span className="relative block h-52 w-52">
               <button
                 type="button"
                 aria-pressed={selected}
                 onClick={() => onSelect(slot)}
                 className={cn(
-                  "relative block h-24 w-24 overflow-hidden rounded-md border bg-muted transition-shadow",
+                  "relative block h-52 w-52 overflow-hidden rounded-md border bg-muted transition-shadow",
                   selected
                     ? "border-foreground ring-2 ring-ring ring-offset-2"
                     : "border-border hover:border-muted-foreground"
