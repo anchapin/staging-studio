@@ -642,23 +642,28 @@ export default function ProjectDetailView({
                 it is height-capped with internal scroll so it can never
                 push the fixed-layout editor below the overflow-hidden clip
                 (issue #252 D5: page-level scrolling dies at laptop size). */}
-            <div className="mt-4 lg:min-h-0 lg:max-h-[45%] lg:overflow-y-auto">
-              <RoomCanvas
-                roomId={focusedRoom.id}
-                projectId={project.id}
-                imageUrl={focusedRoom.beforeImageUrl}
-                largeImage
-                onUploadComplete={(slot, publicUrl) => {
-                  applyRoomUpdate(
-                    focusedRoom.id,
-                    slot === 1
-                      ? { beforeImageUrl2: publicUrl }
-                      : { beforeImageUrl: publicUrl }
-                  );
-                  router.refresh();
-                }}
-              />
-            </div>
+            {/* Issue #450: hide RoomCanvas when InpaintEditor is active (the
+                canvas inside InpaintEditor shows the source image, so this
+                would be a duplicate). Collapse entirely to free vertical space. */}
+            {!focusedRoom.beforeImageUrl && (
+              <div className="mt-4 lg:min-h-0 lg:max-h-[45%] lg:overflow-y-auto">
+                <RoomCanvas
+                  roomId={focusedRoom.id}
+                  projectId={project.id}
+                  imageUrl={focusedRoom.beforeImageUrl}
+                  largeImage
+                  onUploadComplete={(slot, publicUrl) => {
+                    applyRoomUpdate(
+                      focusedRoom.id,
+                      slot === 1
+                        ? { beforeImageUrl2: publicUrl }
+                        : { beforeImageUrl: publicUrl }
+                    );
+                    router.refresh();
+                  }}
+                />
+              </div>
+            )}
 
             {focusedRoom.beforeImageUrl ? (
               <section
@@ -692,6 +697,7 @@ export default function ProjectDetailView({
                   source={focusedInputs.inpaintSource}
                   sourceOptions={listInpaintSources(focusedRoom)}
                   fullWidth
+                  originalImageUrl={focusedRoom.beforeImageUrl}
                   onSourceChange={(next) => handleInpaintSourceChange(focusedRoom.id, next)}
                   pendingRequestId={focusedInputs.pendingRequest?.id ?? null}
                   pendingSource={focusedInputs.pendingSource}

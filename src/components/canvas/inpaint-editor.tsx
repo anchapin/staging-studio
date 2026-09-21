@@ -101,6 +101,13 @@ interface InpaintEditorProps {
    * scrolling.
    */
   secondaryPane?: ReactNode;
+  /**
+   * Issue #450: the original before-photo URL for the before/after comparison
+   * toggle. When provided, a "Compare with Original" button appears above the
+   * mask canvas so users can switch between the staged result and the original
+   * room photo without leaving the editor.
+   */
+  originalImageUrl?: string | null;
 }
 
 /** Resolves when the image is loaded; rejects on a load error. */
@@ -416,6 +423,7 @@ export default function InpaintEditor({
   onActiveConceptLabelChange,
   fullWidth = false,
   secondaryPane,
+  originalImageUrl = null,
 }: InpaintEditorProps) {
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
   const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
@@ -426,6 +434,9 @@ export default function InpaintEditor({
   // Issue #234: when enabled, dilate further downward than upward so floor
   // shadows cast by objects are swallowed by the regenerated region.
   const [includeFloorShadow, setIncludeFloorShadow] = useState(false);
+  // Issue #450: before/after comparison toggle — shows the original photo
+  // instead of the current source so users can compare staged result vs. original.
+  const [showOriginal, setShowOriginal] = useState(false);
   const { toasts, showError, showSuccess, dismissToast } = useToast();
 
   // Concept-selection state (issue #228): the detection concept drives
@@ -1414,8 +1425,26 @@ export default function InpaintEditor({
           </div>
         )}
         <h4 className="mb-2 text-sm font-medium text-stone-700">Source Image</h4>
+        {/* Issue #450: before/after comparison toggle — hold to peek at the original. */}
+        {originalImageUrl && (
+          <button
+            type="button"
+            onMouseDown={() => setShowOriginal(true)}
+            onMouseUp={() => setShowOriginal(false)}
+            onMouseLeave={() => setShowOriginal(false)}
+            onTouchStart={() => setShowOriginal(true)}
+            onTouchEnd={() => setShowOriginal(false)}
+            className="mb-2 inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs text-stone-600 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-stone-500 active:bg-gray-100"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+              <line x1="12" y1="3" x2="12" y2="21"/>
+            </svg>
+            {showOriginal ? "Showing original" : "Compare with original"}
+          </button>
+        )}
         <InpaintMaskCanvas
-          overlayImageSrc={imageUrl}
+          overlayImageSrc={showOriginal && originalImageUrl ? originalImageUrl : imageUrl}
           aspectRatio={aspectRatio}
           naturalWidth={imageDims?.width ?? null}
           naturalHeight={imageDims?.height ?? null}
