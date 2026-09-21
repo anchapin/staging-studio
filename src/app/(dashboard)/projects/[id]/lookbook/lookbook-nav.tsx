@@ -25,7 +25,6 @@ export function LookbookNav({
 }: LookbookNavProps) {
   const [activeId, setActiveId] = useState<SectionId | null>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
-  const scrollContainerRef = useRef<HTMLElement | null>(null);
 
   const roomItems: NavItem[] = rooms.map((r) => ({
     id: `room-${r.id}` as SectionId,
@@ -40,12 +39,11 @@ export function LookbookNav({
   ];
 
   const scrollToSection = useCallback((id: SectionId) => {
-    const container = scrollContainerRef.current;
     const target = document.getElementById(`lookbook-${id}`);
-    if (!target || !container) return;
+    if (!target) return;
 
-    const targetTop = target.getBoundingClientRect().top + container.scrollTop;
-    container.scrollTo({
+    const targetTop = target.getBoundingClientRect().top + window.scrollY;
+    window.scrollTo({
       top: targetTop - 80,
       behavior: "smooth",
     });
@@ -53,11 +51,6 @@ export function LookbookNav({
   }, []);
 
   useEffect(() => {
-    scrollContainerRef.current = document.getElementById("main-content") as HTMLElement;
-
-    const container = scrollContainerRef.current;
-    if (!container) return;
-
     const sectionIds: SectionId[] = [
       "cover",
       "philosophy",
@@ -92,8 +85,7 @@ export function LookbookNav({
         }
       },
       {
-        root: container,
-        rootMargin: `-${offset}px 0px -${container.clientHeight - offset - 1}px 0px`,
+        rootMargin: `-${offset}px 0px -${window.innerHeight - offset - 1}px 0px`,
         threshold: 0,
       }
     );
