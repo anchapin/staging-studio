@@ -445,6 +445,16 @@ export default function ProjectDetailView({
     [project?.id, applyRoomUpdate, showError, showSuccess, router]
   );
 
+  const handleInpaintSourceChange = useCallback(
+    (roomId: string, next: InpaintSource) => {
+      setInpaintSourceByRoom((prev) => ({
+        ...prev,
+        [roomId]: next,
+      }));
+    },
+    []
+  );
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -524,7 +534,7 @@ export default function ProjectDetailView({
    * chosen source when it is a staged variant, or a resuming pending run
    * that edits one. Drives the "editing Variant X · n touch-ups"
    * indicator in the focused view.
-   */
+    */
   const focusedEditingSlot =
     focusedRoom && focusedInputs
         ? resolveActiveEditingSlot(
@@ -682,12 +692,7 @@ export default function ProjectDetailView({
                   source={focusedInputs.inpaintSource}
                   sourceOptions={listInpaintSources(focusedRoom)}
                   fullWidth
-                  onSourceChange={(next) =>
-                    setInpaintSourceByRoom((prev) => ({
-                      ...prev,
-                      [focusedRoom.id]: next,
-                    }))
-                  }
+                  onSourceChange={(next) => handleInpaintSourceChange(focusedRoom.id, next)}
                   pendingRequestId={focusedInputs.pendingRequest?.id ?? null}
                   pendingSource={focusedInputs.pendingSource}
                   onActiveConceptLabelChange={(label) => {
@@ -704,13 +709,11 @@ export default function ProjectDetailView({
                       return { ...prev, [focusedRoom.id]: buildPrefill(label) };
                     });
                   }}
-                  onInpaintComplete={(resultImageUrl, runSource) =>
-                    void persistInpaintResult(
-                      focusedRoom,
-                      resultImageUrl,
-                      runSource
-                    )
-                  }
+                  onInpaintComplete={async (resultImageUrl, runSource) => {
+                    await persistInpaintResult(focusedRoom, resultImageUrl, runSource);
+                    const slot = resolveInpaintTargetSlot(focusedRoom, runSource);
+                    handleInpaintSourceChange(focusedRoom.id, { kind: "variant", slot });
+                  }}
                   secondaryPane={
                     <>
                       <VariantThumbnailStrip
