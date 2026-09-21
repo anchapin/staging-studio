@@ -48,49 +48,56 @@ export function LookbookPreviewView({ project }: { project: PreviewProject }) {
 
   return (
     <div className="lookbook-preview">
-      <CoverPage project={projectData} user={project.user} />
+      <div id="lookbook-cover">
+        <CoverPage project={projectData} user={project.user} />
+      </div>
 
-      <PhilosophyPage project={projectData} user={project.user} />
+      <div id="lookbook-philosophy">
+        <PhilosophyPage project={projectData} user={project.user} />
+      </div>
 
       {project.rooms.map((room) => (
-        <RoomSpread
-          key={room.id}
-          room={{
+        <div key={room.id} id={`lookbook-room-${room.id}`}>
+          <RoomSpread
+            room={{
+              id: room.id,
+              name: room.name,
+              beforeImageUrl: room.beforeImageUrl,
+              afterImageUrl: room.afterImageUrl,
+              beforeImageUrl2: room.beforeImageUrl2,
+              afterImageUrl2: room.afterImageUrl2,
+              selectedVariantIndex: room.selectedVariantIndex,
+              observedChallenge: room.observedChallenge,
+              recommendation: room.recommendation,
+              buyerPsychology: room.buyerPsychology,
+              checklistItems: parseChecklistItems(room.checklistItems, {
+                roomId: room.id,
+              }),
+              project: projectData,
+              user: project.user,
+            }}
+            user={project.user}
+            project={projectData}
+          />
+        </div>
+      ))}
+
+      <div id="lookbook-closing">
+        <SignoffPage
+          user={project.user}
+          project={projectData}
+          rooms={project.rooms.map((room) => ({
             id: room.id,
             name: room.name,
             beforeImageUrl: room.beforeImageUrl,
             afterImageUrl: room.afterImageUrl,
             beforeImageUrl2: room.beforeImageUrl2,
             afterImageUrl2: room.afterImageUrl2,
-            selectedVariantIndex: room.selectedVariantIndex,
-            observedChallenge: room.observedChallenge,
-            recommendation: room.recommendation,
-            buyerPsychology: room.buyerPsychology,
-            checklistItems: parseChecklistItems(room.checklistItems, {
-              roomId: room.id,
-            }),
             project: projectData,
             user: project.user,
-          }}
-          user={project.user}
-          project={projectData}
+          }))}
         />
-      ))}
-
-      <SignoffPage
-        user={project.user}
-        project={projectData}
-        rooms={project.rooms.map((room) => ({
-          id: room.id,
-          name: room.name,
-          beforeImageUrl: room.beforeImageUrl,
-          afterImageUrl: room.afterImageUrl,
-          beforeImageUrl2: room.beforeImageUrl2,
-          afterImageUrl2: room.afterImageUrl2,
-          project: projectData,
-          user: project.user,
-        }))}
-      />
+      </div>
     </div>
   );
 }
