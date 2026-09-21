@@ -558,7 +558,7 @@ export default function ProjectDetailView({
     <div
       className={
         laptopFixedLayout
-          ? "flex min-h-screen flex-col bg-background lg:h-full lg:overflow-hidden"
+          ? "flex min-h-screen flex-col bg-background lg:h-full lg:overflow-auto"
           : "min-h-screen bg-background"
       }
     >
