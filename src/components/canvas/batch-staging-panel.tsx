@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Check, Circle, Loader2, X } from "lucide-react";
+import { Check, Circle, Loader2, Plus, X } from "lucide-react";
 import {
   batchProgressText,
   batchStepLabel,
@@ -16,6 +16,7 @@ import {
 import { buildPrefill } from "@/lib/prompt-prefill";
 import { resolveRegionLabel } from "@/lib/vision-labels";
 import { paletteCssColor } from "./inpaint-mask-canvas";
+import { getAestheticChips } from "@/lib/aesthetic-chips";
 
 /**
  * The per-object batch in flight or kept alive after a failure (for the
@@ -52,6 +53,11 @@ interface BatchStagingPanelProps {
    * the concept string is the fallback.
    */
   instanceLabels?: Array<string | null> | null;
+  /**
+   * The room's project `stagingAesthetic` (may be empty). Used to derive
+   * contextual starter chips for the thematic prompt textarea.
+   */
+  aesthetic?: string;
 }
 
 /**
@@ -74,10 +80,41 @@ export default function BatchStagingPanel({
   onRetryRemaining,
   onRemoveLast,
   instanceLabels,
+  aesthetic,
 }: BatchStagingPanelProps) {
   const [mode, setMode] = useState<BatchPromptMode>("thematic");
   const [thematicPrompt, setThematicPrompt] = useState("");
   const [promptsBySelection, setPromptsBySelection] = useState<Record<string, string>>({});
+  const thematicTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-resize the thematic textarea based on content
+  useEffect(() => {
+    const textarea = thematicTextareaRef.current;
+    if (textarea) {
+      textarea.style.height = "auto";
+      const newHeight = Math.min(Math.max(textarea.scrollHeight, 56), 140);
+      textarea.style.height = `${newHeight}px`;
+    }
+  }, [thematicPrompt]);
+
+  // Issue #442: append a starter chip phrase to the thematic prompt
+  const appendChip = (chip: string) => {
+    const textarea = thematicTextareaRef.current;
+    if (!textarea) return;
+    const cursorPos = textarea.selectionStart;
+    const textBefore = thematicPrompt.slice(0, cursorPos);
+    const textAfter = thematicPrompt.slice(cursorPos);
+    const separator = textBefore.length > 0 && !textBefore.endsWith(" ") ? " " : "";
+    const newValue = `${textBefore}${separator}${chip}${textAfter}`;
+    setThematicPrompt(newValue);
+    requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.selectionStart = textarea.selectionEnd =
+        (textBefore.length + separator.length + chip.length);
+    });
+  };
+
+  const aestheticChips = getAestheticChips(aesthetic ?? "");
 
   // Issue #230: per-object rows pre-fill with the selection's concept
   // label ("Replace the chair with ") — editable text, so a wrong
@@ -130,6 +167,16 @@ export default function BatchStagingPanel({
   };
 
   const runningText = activeBatch ? batchProgressText(activeBatch.progress) : null;
+
+  // Issue #440: show incremental region progress on the button
+  const runningStepIndex = activeBatch
+    ? activeBatch.progress.steps.findIndex((s) => s.status === "running")
+    : -1;
+  const totalSteps = activeBatch ? activeBatch.progress.steps.length : 0;
+  const buttonProgressText =
+    runningStepIndex >= 0
+      ? `Staging region ${runningStepIndex + 1} of ${totalSteps}...`
+      : null;
 
   return (
     <section
@@ -222,13 +269,27 @@ export default function BatchStagingPanel({
                   Theme (applied to all selected regions at once)
                 </label>
                 <textarea
+                  ref={thematicTextareaRef}
                   id="batch-thematic-prompt"
                   value={thematicPrompt}
                   onChange={(event) => setThematicPrompt(event.target.value)}
                   rows={2}
                   placeholder="e.g. replace the seating with warm mid-century pieces"
-                  className="mt-1 w-full rounded-md border border-input px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  className="mt-1 w-full min-h-[56px] max-h-[140px] resize-none rounded-md border border-input px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 />
+                <div className="mt-1.5 flex flex-wrap gap-1.5" role="group" aria-label="Style suggestions">
+                  {aestheticChips.map((chip) => (
+                    <button
+                      key={chip}
+                      type="button"
+                      onClick={() => appendChip(chip)}
+                      className="inline-flex items-center gap-1 rounded-full border border-input bg-background px-2.5 py-1 text-xs text-foreground transition-colors hover:border-stone-400 hover:bg-secondary"
+                    >
+                      <Plus className="h-2.5 w-2.5" aria-hidden="true" />
+                      {chip}
+                    </button>
+                  ))}
+                </div>
               </>
             ) : (
               <>
@@ -335,7 +396,7 @@ export default function BatchStagingPanel({
           {processing ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-              Staging...
+              {buttonProgressText ?? "Staging..."}
             </>
           ) : (
             "Run batch"
