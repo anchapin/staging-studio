@@ -342,14 +342,6 @@ export default function ProjectDetailView({
   const handleDeleteVariant = useCallback(
     async (room: Room, slot: VariantSlot) => {
       const letter = slot === 0 ? "A" : "B";
-      if (
-        !window.confirm(
-          `Delete Variant ${letter}'s staged image? You can stage this slot again later.`
-        )
-      ) {
-        return;
-      }
-
       setDeletingSlotByRoom((prev) => ({ ...prev, [room.id]: slot }));
       const previous = {
         afterImageUrl: room.afterImageUrl,
