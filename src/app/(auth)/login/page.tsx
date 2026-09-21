@@ -121,7 +121,12 @@ function LoginForm() {
         >
           <button
             type="button"
-            onClick={() => setMode("password")}
+            onClick={() => {
+              setMode("password");
+              setEmailError(null);
+              setPasswordError(null);
+              setMessage(null);
+            }}
             aria-pressed={mode === "password"}
             className={`flex-1 rounded-md py-2 text-sm font-medium transition-colors ${
               mode === "password"
@@ -133,7 +138,12 @@ function LoginForm() {
           </button>
           <button
             type="button"
-            onClick={() => setMode("magic")}
+            onClick={() => {
+              setMode("magic");
+              setEmailError(null);
+              setPasswordError(null);
+              setMessage(null);
+            }}
             aria-pressed={mode === "magic"}
             className={`flex-1 rounded-md py-2 text-sm font-medium transition-colors ${
               mode === "magic"
