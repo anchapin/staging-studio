@@ -47,6 +47,8 @@ interface BatchStagingPanelProps {
   /** Re-run only the unfinished steps of the failed batch. */
   onRetryRemaining: () => void;
   onRemoveLast: () => void;
+  /** Issue #448: remove a specific selection by id. */
+  onRemoveSelection: (id: string) => void;
   /**
    * Issue #252 D4: per-instance vision labels (parallel to the detection
    * response), or null while unlabeled. Feeds region labels and pre-fill;
@@ -79,6 +81,7 @@ export default function BatchStagingPanel({
   onRun,
   onRetryRemaining,
   onRemoveLast,
+  onRemoveSelection,
   instanceLabels,
   aesthetic,
 }: BatchStagingPanelProps) {
@@ -219,9 +222,18 @@ export default function BatchStagingPanel({
           {selections.map((selection, index) => (
             <li
               key={selection.id}
-              className="rounded-full border border-input bg-background px-2 py-0.5"
+              className="inline-flex items-center gap-1 rounded-full border border-input bg-background px-2 py-0.5"
             >
               {entryLabel(selection, index)}
+              <button
+                type="button"
+                onClick={() => onRemoveSelection(selection.id)}
+                disabled={disabled || processing}
+                aria-label={`Remove ${entryLabel(selection, index)} from batch`}
+                className="ml-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none"
+              >
+                <X className="h-2.5 w-2.5" aria-hidden="true" />
+              </button>
             </li>
           ))}
         </ol>
