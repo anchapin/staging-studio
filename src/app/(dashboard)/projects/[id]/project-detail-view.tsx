@@ -952,6 +952,8 @@ export default function ProjectDetailView({
                     const slot = resolveInpaintTargetSlot(focusedRoom, runSource);
                     handleInpaintSourceChange(focusedRoom.id, { kind: "variant", slot });
                   }}
+                  directivesValue={focusedInputs.roomDirectives}
+                  onDirectivesChange={(value) => editDirectives(focusedRoom.id, value)}
                   secondaryPane={
                     <>
                       {/* Issue #460: textarea first — always visible above the fold */}
