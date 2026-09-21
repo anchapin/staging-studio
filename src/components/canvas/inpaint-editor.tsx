@@ -1764,7 +1764,7 @@ export default function InpaintEditor({
                       {conceptSegments.failedReason === "service-unreachable" ? (
                         <>
                           <p role="status" className="text-xs font-medium text-amber-700">
-                            We couldn't reach the detection service. Try the Manual paint tab
+                            We could not reach the detection service. Try the Manual paint tab
                             instead, or try again later.
                           </p>
                           <button
