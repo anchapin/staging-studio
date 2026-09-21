@@ -755,9 +755,11 @@ export default function ProjectDetailView({
                           placeholder="e.g. Add a neutral linen sofa, warm wood coffee table, and layered lighting..."
                           className="w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring resize-none"
                         />
-                        <p className="mt-1 text-xs text-muted-foreground text-right">
-                          {focusedInputs.roomDirectives.length}/{MAX_DIRECTIVE_LENGTH}
-                        </p>
+                        {focusedInputs.roomDirectives.length > 0 && (
+                          <p className="mt-1 text-xs text-muted-foreground text-right">
+                            {focusedInputs.roomDirectives.length}/{MAX_DIRECTIVE_LENGTH}
+                          </p>
+                        )}
                       </section>
 
                       <VariantThumbnailStrip
