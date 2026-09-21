@@ -10,7 +10,7 @@ import EditorTabBar, {
   type EditorTabId,
 } from "./editor-tab-bar";
 import { useToast, ToastContainer } from "@/components/ui/toast";
-import { Loader2 } from "lucide-react";
+import { Info, Loader2 } from "lucide-react";
 import { useInpaintStatus } from "./use-inpaint-status";
 import {
   entireRoomTabVisible,
@@ -1471,12 +1471,18 @@ export default function InpaintEditor({
             onChange={(e) => setIncludeFloorShadow(e.target.checked)}
             className="h-4 w-4 accent-stone-800"
           />
-          Add natural shadows under furniture
+          Add natural floor shadows under new furniture
         </label>
-        <p className="text-xs text-gray-500">
-          Extends the painted area downward to include floor shadows, so they
-          look natural with the new furniture. Best for hard floors.
-        </p>
+        <div className="flex items-center gap-1">
+          <span
+            role="img"
+            aria-label="More info"
+            title="Extends the painted area downward to include floor shadows, so they look natural with the new furniture. Best for hard floors."
+            className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-200 text-gray-500 hover:bg-gray-300"
+          >
+            <Info className="h-3 w-3" />
+          </span>
+        </div>
       </div>
 
       {/* ---- RIGHT PANE: fixed-width control panel ----------------------- */}
