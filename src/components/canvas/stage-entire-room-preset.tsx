@@ -290,7 +290,7 @@ export default function StageEntireRoomPreset({
           {processing || detecting ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-              {detecting ? "Detecting furnishings..." : "Staging..."}
+              {detecting ? "Detecting furnishings..." : "Restaging furnishings..."}
             </>
           ) : (
             <>
