@@ -67,18 +67,15 @@ function LoginForm() {
     }
     setForgotPasswordLoading(true);
     setMessage(null);
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    // Always show a generic message to prevent email enumeration attacks.
+    // The backend still sends the email if the account exists.
+    await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/auth/callback`,
     });
-    if (error) {
-      setMessage({ type: "error", text: error.message });
-    } else {
-      setMessage({
-        type: "success",
-        text: "Password reset email sent! Check your inbox to set a new password.",
-      });
-      setPasswordFailed(false);
-    }
+    setMessage({
+      type: "success",
+      text: "If an account with that email exists, a password reset link has been sent.",
+    });
     setForgotPasswordLoading(false);
   };
 
