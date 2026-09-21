@@ -722,24 +722,6 @@ export default function ProjectDetailView({
                   }}
                   secondaryPane={
                     <>
-                      <VariantThumbnailStrip
-                        roomName={focusedRoom.name}
-                        originalUrl={focusedRoom.beforeImageUrl}
-                        pairs={focusedInputs.pairs}
-                        selection={resolveStripSelection(
-                          focusedRoom.selectedVariantIndex,
-                          focusedInputs.pairs
-                        )}
-                        onSelect={(selection) =>
-                          void handleStripSelect(focusedRoom, selection)
-                        }
-                        onDeleteVariant={(slot) =>
-                          void handleDeleteVariant(focusedRoom, slot)
-                        }
-                        deletingSlot={deletingSlotByRoom[focusedRoom.id] ?? null}
-                        touchUpCounts={touchUpCountsByRoom[focusedRoom.id] ?? null}
-                      />
-
                       <section aria-label="Staging directives">
                         <label
                           htmlFor={`directives-${focusedRoom.id}`}
@@ -765,6 +747,24 @@ export default function ProjectDetailView({
                           {focusedInputs.roomDirectives.length}/{MAX_DIRECTIVE_LENGTH}
                         </p>
                       </section>
+
+                      <VariantThumbnailStrip
+                        roomName={focusedRoom.name}
+                        originalUrl={focusedRoom.beforeImageUrl}
+                        pairs={focusedInputs.pairs}
+                        selection={resolveStripSelection(
+                          focusedRoom.selectedVariantIndex,
+                          focusedInputs.pairs
+                        )}
+                        onSelect={(selection) =>
+                          void handleStripSelect(focusedRoom, selection)
+                        }
+                        onDeleteVariant={(slot) =>
+                          void handleDeleteVariant(focusedRoom, slot)
+                        }
+                        deletingSlot={deletingSlotByRoom[focusedRoom.id] ?? null}
+                        touchUpCounts={touchUpCountsByRoom[focusedRoom.id] ?? null}
+                      />
 
                       {focusedInputs.staged && (
                         <section aria-label="Staged result">
