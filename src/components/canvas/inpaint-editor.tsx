@@ -1621,6 +1621,7 @@ export default function InpaintEditor({
                 <button
                   onClick={handleInpaint}
                   disabled={isProcessing || conceptLoading || !maskDataUrl}
+                  title={!maskDataUrl ? "Paint on the image to select the area you want to regenerate" : undefined}
                   className={`
                     flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium
                     transition-colors
