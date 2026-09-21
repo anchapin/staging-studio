@@ -44,7 +44,6 @@ export function LookbookNav({
     const target = document.getElementById(`lookbook-${id}`);
     if (!target || !container) return;
 
-    const containerTop = container.getBoundingClientRect().top + container.scrollTop;
     const targetTop = target.getBoundingClientRect().top + container.scrollTop;
     container.scrollTo({
       top: targetTop - 80,
