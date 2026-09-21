@@ -586,7 +586,7 @@ export default function ProjectDetailView({
       <main
         className={
           laptopFixedLayout
-            ? "flex min-h-0 flex-1 flex-col p-8 lg:overflow-hidden"
+            ? "flex min-h-0 flex-1 flex-col p-8"
             : "p-8"
         }
       >
