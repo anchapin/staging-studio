@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase";
 import { updateUserSettings } from "@/app/actions/settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useToast, ToastContainer } from "@/components/ui/toast";
 
 interface SettingsFormProps {
   email: string;
@@ -44,6 +45,7 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const errorRef = useRef<HTMLDivElement>(null);
+  const { toasts, showSuccess, dismissToast } = useToast();
 
   useEffect(() => {
     if (error) {
@@ -91,6 +93,7 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
 
     if (result.success) {
       setSaved(true);
+      showSuccess("Settings saved");
     } else {
       setError(result.error || "Failed to save settings");
     }
@@ -257,10 +260,11 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
       <Button
         type="submit"
         disabled={saving}
-
       >
         {saving ? "Saving..." : "Save Settings"}
       </Button>
+
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </form>
   );
 }
