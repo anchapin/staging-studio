@@ -1,6 +1,5 @@
 import { cache } from "react";
 import { notFound } from "next/navigation";
-import Link from "next/link";
 import type { Metadata } from "next";
 
 import { prisma } from "@/lib/prisma";
@@ -14,6 +13,7 @@ import {
   LookbookPreviewView,
   type PreviewProject,
 } from "./lookbook-preview-view";
+import { EditLookbookDropdown } from "@/components/lookbook/edit-lookbook-dropdown";
 
 interface LookbookPreviewPageProps {
   params: Promise<{ id: string }>;
@@ -198,12 +198,10 @@ export default async function LookbookPreviewPage({
     <div>
       {!token && (
         <div className="no-print flex justify-end p-4">
-          <Link
-            href={`/projects/${id}/lookbook`}
-            className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-100"
-          >
-            Edit Lookbook
-          </Link>
+          <EditLookbookDropdown
+            projectId={id}
+            firstRoomId={project.rooms[0]?.id ?? null}
+          />
         </div>
       )}
       <LookbookPreviewView project={previewProject} />
