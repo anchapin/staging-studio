@@ -26,6 +26,9 @@ function LoginForm() {
       return text ? { type: "error" as const, text } : null;
     }
   );
+  // Tracks whether the most recent password sign-in attempt produced a failure
+  // so we can surface the Magic Link hint.
+  const [passwordFailed, setPasswordFailed] = useState(false);
   const messageRef = useRef<HTMLDivElement>(null);
 
   const supabase = createClient();
@@ -48,8 +51,32 @@ function LoginForm() {
 
     if (error) {
       setMessage({ type: "error", text: error.message });
+      setPasswordFailed(true);
     } else {
       window.location.href = "/dashboard";
+    }
+    setLoading(false);
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim()) {
+      setEmailError("Email is required");
+      return;
+    }
+    setLoading(true);
+    setMessage(null);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/auth/callback`,
+    });
+    if (error) {
+      setMessage({ type: "error", text: error.message });
+    } else {
+      setMessage({
+        type: "success",
+        text: "Password reset email sent! Check your inbox to set a new password.",
+      });
+      setPasswordFailed(false);
     }
     setLoading(false);
   };
@@ -179,6 +206,14 @@ function LoginForm() {
                   {passwordError}
                 </p>
               )}
+              <button
+                type="button"
+                onClick={handleForgotPassword}
+                disabled={loading}
+                className="mt-2 text-sm text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+              >
+                Forgot password?
+              </button>
             </div>
           )}
 
@@ -195,6 +230,24 @@ function LoginForm() {
             >
               {message.text}
             </div>
+          )}
+
+          {passwordFailed && message?.type === "error" && mode === "password" && (
+            <p className="text-sm text-muted-foreground">
+              Don&apos;t have a password yet?{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  setMode("magic");
+                  setPasswordFailed(false);
+                  setMessage(null);
+                }}
+                className="underline-offset-2 hover:underline focus-visible:rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+              >
+                Switch to Magic Link
+              </button>{" "}
+              above to sign in via email.
+            </p>
           )}
 
           <Button
