@@ -1373,7 +1373,7 @@ export default function InpaintEditor({
             {secondaryPane}
           </div>
         )}
-        <h4 className="text-sm font-medium text-stone-700 mb-2">Source Image</h4>
+        <h4 className="mb-2 text-sm font-medium text-stone-700">Source Image</h4>
         <InpaintMaskCanvas
           overlayImageSrc={imageUrl}
           aspectRatio={aspectRatio}
