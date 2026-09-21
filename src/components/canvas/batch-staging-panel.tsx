@@ -134,197 +134,199 @@ export default function BatchStagingPanel({
   return (
     <section
       aria-label="Batch region staging"
-      className="no-print flex flex-col gap-3 rounded-md border border-input bg-card p-4"
+      className="no-print flex h-full flex-col gap-3 rounded-md border border-input bg-card p-4"
     >
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <h4 className="text-sm font-semibold text-foreground">
-          Batch staging
-          <span className="ml-2 rounded bg-secondary px-1.5 py-0.5 text-xs font-normal text-muted-foreground">
-            {selections.length} / {maxObjects} regions
-          </span>
-        </h4>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onRemoveLast}
-            disabled={disabled || selections.length === 0}
-            aria-label="Remove last selected region from batch"
-          >
-            Remove last
-          </Button>
-          {/* Issue #249: "Clear selection" moved beside the concept chips
-              (inpaint-editor) — the one global control, instead of a
-              duplicate button whose accessible name collided with it. */}
-        </div>
-      </div>
-
-      <p className="text-xs text-muted-foreground">
-        Selected regions come from toggling detected instances on the photo;
-        nearby instances fuse into one region. Batches are capped at {maxObjects}{" "}
-        regions — each one is a separate billed generation, and per-region
-        results are applied one at a time so they stack into the same
-        variant. Changing the selection rebuilds the mask.
-      </p>
-
-      <ol className="flex flex-wrap gap-1.5 text-xs text-foreground">
-        {selections.map((selection, index) => (
-          <li
-            key={selection.id}
-            className="rounded-full border border-input bg-background px-2 py-0.5"
-          >
-            {entryLabel(selection, index)}
-          </li>
-        ))}
-      </ol>
-
-      <fieldset disabled={disabled || processing} className="min-w-0">
-        <legend className="px-1 text-sm font-medium text-foreground">Prompts</legend>
-        <div className="mt-1 flex flex-col gap-1">
-          <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-foreground" title="Apply one style to all selected objects together">
-            <input
-              type="radio"
-              name="batch-prompt-mode"
-              value="thematic"
-              checked={mode === "thematic"}
-              onChange={() => setMode("thematic")}
-              className="h-4 w-4 accent-stone-800"
-            />
-            One theme for all regions
-          </label>
-          <span className="ml-6 text-xs text-muted-foreground">
-            Apply one style to all selected objects together
-          </span>
-          <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-foreground" title="Customize the style for each object individually">
-            <input
-              type="radio"
-              name="batch-prompt-mode"
-              value="per-object"
-              checked={mode === "per-object"}
-              onChange={() => setMode("per-object")}
-              className="h-4 w-4 accent-stone-800"
-            />
-            A separate prompt per region
-          </label>
-          <span className="ml-6 text-xs text-muted-foreground">
-            Customize the style for each object individually
-          </span>
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <h4 className="text-sm font-semibold text-foreground">
+            Batch staging
+            <span className="ml-2 rounded bg-secondary px-1.5 py-0.5 text-xs font-normal text-muted-foreground">
+              {selections.length} / {maxObjects} regions
+            </span>
+          </h4>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onRemoveLast}
+              disabled={disabled || selections.length === 0}
+              aria-label="Remove last selected region from batch"
+            >
+              Remove last
+            </Button>
+            {/* Issue #249: "Clear selection" moved beside the concept chips
+                (inpaint-editor) — the one global control, instead of a
+                duplicate button whose accessible name collided with it. */}
+          </div>
         </div>
 
-        <div className="mt-3">
-          {mode === "thematic" ? (
-            <>
-              <label
-                htmlFor="batch-thematic-prompt"
-                className="block text-sm font-medium text-foreground"
-              >
-                Theme (applied to all selected regions at once)
-              </label>
-              <textarea
-                id="batch-thematic-prompt"
-                value={thematicPrompt}
-                onChange={(event) => setThematicPrompt(event.target.value)}
-                rows={2}
-                placeholder="e.g. replace the seating with warm mid-century pieces"
-                className="mt-1 w-full rounded-md border border-input px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        <p className="text-xs text-muted-foreground">
+          Selected regions come from toggling detected instances on the photo;
+          nearby instances fuse into one region. Batches are capped at {maxObjects}{" "}
+          regions — each one is a separate billed generation, and per-region
+          results are applied one at a time so they stack into the same
+          variant. Changing the selection rebuilds the mask.
+        </p>
+
+        <ol className="flex flex-wrap gap-1.5 text-xs text-foreground">
+          {selections.map((selection, index) => (
+            <li
+              key={selection.id}
+              className="rounded-full border border-input bg-background px-2 py-0.5"
+            >
+              {entryLabel(selection, index)}
+            </li>
+          ))}
+        </ol>
+
+        <fieldset disabled={disabled || processing} className="min-w-0">
+          <legend className="px-1 text-sm font-medium text-foreground">Prompts</legend>
+          <div className="mt-1 flex flex-col gap-1">
+            <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-foreground" title="Apply one style to all selected objects together">
+              <input
+                type="radio"
+                name="batch-prompt-mode"
+                value="thematic"
+                checked={mode === "thematic"}
+                onChange={() => setMode("thematic")}
+                className="h-4 w-4 accent-stone-800"
               />
-            </>
-          ) : (
-            <>
-              <p className="text-sm font-medium text-foreground" id="batch-per-object-label">
-                One prompt per region (applied in order; results stack)
-              </p>
-              <ol className="mt-1 flex flex-col gap-2">
-                {selections.map((selection, index) => (
-                  <li key={selection.id} className="flex flex-col">
-                    <label
-                      htmlFor={`batch-prompt-${selection.id}`}
-                      className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
-                    >
-                      {/* Issue #252 D4 (AC-3.1): numbered chip matching the
-                          canvas badge, colored with the region's canvas tint
-                          (region i → palette[i]) — per-object mode only. */}
-                      <span
-                        aria-hidden="true"
-                        className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold text-white"
-                        style={{ backgroundColor: paletteCssColor(index) }}
-                      >
-                        {index + 1}
-                      </span>
-                      {entryLabel(selection, index)} prompt
-                    </label>
-                    <input
-                      id={`batch-prompt-${selection.id}`}
-                      type="text"
-                      value={orderedPrompts[index]}
-                      onChange={(event) => setPrompt(selection.id, event.target.value)}
-                      placeholder={
-                        entryLabel(selection, index)
-                          ? `e.g. replace the ${entryLabel(selection, index)} with ...`
-                          : `e.g. replace ${batchStepLabel(index).toLowerCase()} with ...`
-                      }
-                      className="mt-0.5 w-full rounded-md border border-input px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                    />
-                  </li>
-                ))}
-              </ol>
-            </>
-          )}
-        </div>
-      </fieldset>
+              One theme for all regions
+            </label>
+            <span className="ml-6 text-xs text-muted-foreground">
+              Apply one style to all selected objects together
+            </span>
+            <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-foreground" title="Customize the style for each object individually">
+              <input
+                type="radio"
+                name="batch-prompt-mode"
+                value="per-object"
+                checked={mode === "per-object"}
+                onChange={() => setMode("per-object")}
+                className="h-4 w-4 accent-stone-800"
+              />
+              A separate prompt per region
+            </label>
+            <span className="ml-6 text-xs text-muted-foreground">
+              Customize the style for each object individually
+            </span>
+          </div>
 
-      {activeBatch && (
-        <div className="rounded-md border border-input bg-background p-3">
-          <div className="flex items-center justify-between gap-2">
-            <h5 className="text-sm font-medium text-foreground">Batch progress</h5>
-            {runningText && (
-              <span role="status" className="text-xs text-muted-foreground">
-                Applying {runningText}
-              </span>
+          <div className="mt-3">
+            {mode === "thematic" ? (
+              <>
+                <label
+                  htmlFor="batch-thematic-prompt"
+                  className="block text-sm font-medium text-foreground"
+                >
+                  Theme (applied to all selected regions at once)
+                </label>
+                <textarea
+                  id="batch-thematic-prompt"
+                  value={thematicPrompt}
+                  onChange={(event) => setThematicPrompt(event.target.value)}
+                  rows={2}
+                  placeholder="e.g. replace the seating with warm mid-century pieces"
+                  className="mt-1 w-full rounded-md border border-input px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-medium text-foreground" id="batch-per-object-label">
+                  One prompt per region (applied in order; results stack)
+                </p>
+                <ol className="mt-1 flex flex-col gap-2">
+                  {selections.map((selection, index) => (
+                    <li key={selection.id} className="flex flex-col">
+                      <label
+                        htmlFor={`batch-prompt-${selection.id}`}
+                        className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
+                      >
+                        {/* Issue #252 D4 (AC-3.1): numbered chip matching the
+                            canvas badge, colored with the region's canvas tint
+                            (region i → palette[i]) — per-object mode only. */}
+                        <span
+                          aria-hidden="true"
+                          className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold text-white"
+                          style={{ backgroundColor: paletteCssColor(index) }}
+                        >
+                          {index + 1}
+                        </span>
+                        {entryLabel(selection, index)} prompt
+                      </label>
+                      <input
+                        id={`batch-prompt-${selection.id}`}
+                        type="text"
+                        value={orderedPrompts[index]}
+                        onChange={(event) => setPrompt(selection.id, event.target.value)}
+                        placeholder={
+                          entryLabel(selection, index)
+                            ? `e.g. replace the ${entryLabel(selection, index)} with ...`
+                            : `e.g. replace ${batchStepLabel(index).toLowerCase()} with ...`
+                        }
+                        className="mt-0.5 w-full rounded-md border border-input px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                      />
+                    </li>
+                  ))}
+                </ol>
+              </>
             )}
           </div>
-          <ol className="mt-2 flex flex-col gap-1.5">
-            {activeBatch.progress.steps.map((step, index) => (
-              <li key={step.selectionId} className="flex items-start gap-2 text-sm">
-                <StepStatusIcon status={step.status} />
-                <span className="min-w-0">
-                  <span className="font-medium text-foreground">{step.label}</span>
-                  <span className="ml-2 text-xs text-muted-foreground">
-                    {step.status === "pending" && "Waiting"}
-                    {step.status === "running" && "Applying..."}
-                    {step.status === "completed" && "Done"}
-                    {step.status === "failed" && "Failed"}
-                  </span>
-                  {step.status === "failed" && step.error && (
-                    <span className="block text-xs text-red-700">{step.error}</span>
-                  )}
-                </span>
-                <span className="sr-only">
-                  {batchStepLabel(index)} of {activeBatch.progress.steps.length}
-                </span>
-              </li>
-            ))}
-          </ol>
-          {hasFailedStep(activeBatch.progress) && !batchRunning && (
-            <div className="mt-3 flex flex-col gap-1.5">
-              <Button
-                onClick={onRetryRemaining}
-                disabled={processing}
-                className="w-fit"
-              >
-                Retry remaining ({remainingStepCount(activeBatch.progress)})
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                Completed objects keep their staged results — only the
-                unfinished objects run again, picking up from the last
-                completed result.
-              </p>
-            </div>
-          )}
-        </div>
-      )}
+        </fieldset>
 
-      <div className="flex items-center gap-3">
+        {activeBatch && (
+          <div className="rounded-md border border-input bg-background p-3">
+            <div className="flex items-center justify-between gap-2">
+              <h5 className="text-sm font-medium text-foreground">Batch progress</h5>
+              {runningText && (
+                <span role="status" className="text-xs text-muted-foreground">
+                  Applying {runningText}
+                </span>
+              )}
+            </div>
+            <ol className="mt-2 flex flex-col gap-1.5">
+              {activeBatch.progress.steps.map((step, index) => (
+                <li key={step.selectionId} className="flex items-start gap-2 text-sm">
+                  <StepStatusIcon status={step.status} />
+                  <span className="min-w-0">
+                    <span className="font-medium text-foreground">{step.label}</span>
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      {step.status === "pending" && "Waiting"}
+                      {step.status === "running" && "Applying..."}
+                      {step.status === "completed" && "Done"}
+                      {step.status === "failed" && "Failed"}
+                    </span>
+                    {step.status === "failed" && step.error && (
+                      <span className="block text-xs text-red-700">{step.error}</span>
+                    )}
+                  </span>
+                  <span className="sr-only">
+                    {batchStepLabel(index)} of {activeBatch.progress.steps.length}
+                  </span>
+                </li>
+              ))}
+            </ol>
+            {hasFailedStep(activeBatch.progress) && !batchRunning && (
+              <div className="mt-3 flex flex-col gap-1.5">
+                <Button
+                  onClick={onRetryRemaining}
+                  disabled={processing}
+                  className="w-fit"
+                >
+                  Retry remaining ({remainingStepCount(activeBatch.progress)})
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Completed objects keep their staged results — only the
+                  unfinished objects run again, picking up from the last
+                  completed result.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="flex shrink-0 items-center gap-3">
         <Button
           onClick={handleRun}
           disabled={!canRun}
