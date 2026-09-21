@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
+import ComparisonSlider from "./comparison-slider";
 
 /**
  * Matches RoomCanvas's grid-card sizing: half the two-column grid on
@@ -31,35 +32,65 @@ interface StagedResultImageProps {
    */
   largeImage?: boolean;
   /**
-   * Issue #460: click handler to toggle between staged and original comparison.
-   * When provided, the image becomes clickable and shows a visual affordance.
-   */
-  onClickToggleComparison?: () => void;
-  /**
-   * Issue #460: the original (before) photo URL for comparison toggle.
-   * Required when onClickToggleComparison is provided.
+   * Issue #497: the original (before) photo URL for comparison slider.
+   * When provided, renders a draggable before/after slider instead of a static image.
    */
   originalImageUrl?: string | null;
-  /** Issue #460: whether the comparison is currently showing the original. */
-  showingOriginal?: boolean;
 }
 
 /**
- * Renders a room's staged "after" image as a static image (issue #168) —
- * no draggable before/after slider. The frame mirrors `RoomCanvas` so the
- * before photo above and the staged result below read as one coherent
- * pair; the variant label is shown as a small badge over the image.
+ * Renders a room's staged "after" image as a static image (issue #168).
+ * When originalImageUrl is provided (issue #497), renders a draggable
+ * comparison slider showing before (original) on the left and after (staged)
+ * on the right. The frame mirrors `RoomCanvas` so the before photo above and
+ * the staged result below read as one coherent pair; the variant label is
+ * shown as a small badge over the image.
  */
 export default function StagedResultImage({
   afterImageUrl,
   alt,
   label,
   largeImage = false,
-  onClickToggleComparison,
   originalImageUrl,
-  showingOriginal = false,
 }: StagedResultImageProps) {
-  const isClickable = Boolean(onClickToggleComparison && originalImageUrl);
+  const hasComparison = Boolean(originalImageUrl);
+
+  if (hasComparison) {
+    return (
+      <ComparisonSlider
+        beforeImageUrl={originalImageUrl!}
+        afterImageUrl={afterImageUrl}
+        beforeAlt={`${alt} (original)`}
+        afterAlt={alt}
+        afterLabel={label}
+        largeImage={largeImage}
+      />
+    );
+  }
+
+  return (
+    <StaticStagedResultImage
+      afterImageUrl={afterImageUrl}
+      alt={alt}
+      label={label}
+      largeImage={largeImage}
+    />
+  );
+}
+
+interface StaticStagedResultImageProps {
+  afterImageUrl: string;
+  alt: string;
+  label: string;
+  largeImage?: boolean;
+}
+
+function StaticStagedResultImage({
+  afterImageUrl,
+  alt,
+  label,
+  largeImage = false,
+}: StaticStagedResultImageProps) {
   /**
    * Natural pixel dimensions of the loaded photo (issue #188). The frame
    * adopts the photo's own aspect ratio so the FULL image stays visible —
@@ -91,33 +122,14 @@ export default function StagedResultImage({
   const frameHeight = largeImage ? "h-96" : "h-64";
   const imageSizes = largeImage ? FOCUSED_IMAGE_SIZES : GRID_IMAGE_SIZES;
 
-  // Issue #460: show the original photo when comparison is active
-  const displayImageUrl = showingOriginal && originalImageUrl ? originalImageUrl : afterImageUrl;
-  const displayAlt = showingOriginal ? `${alt} (original)` : alt;
-  const displayLabel = showingOriginal ? "Original" : label;
-
   return (
     <div
       className={`relative w-full overflow-hidden rounded-lg border border-stone-200 bg-stone-100 ${
         imageAspect ? "max-h-[70vh]" : frameHeight
-      } ${isClickable ? "cursor-pointer hover:ring-2 hover:ring-stone-400 transition-shadow" : ""}`}
+      }`}
       style={
         imageAspect
           ? { aspectRatio: `${imageAspect.width} / ${imageAspect.height}` }
-          : undefined
-      }
-      onClick={isClickable ? onClickToggleComparison : undefined}
-      role={isClickable ? "button" : undefined}
-      aria-label={isClickable ? "Click to compare with original" : undefined}
-      tabIndex={isClickable ? 0 : undefined}
-      onKeyDown={
-        isClickable
-          ? (e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                onClickToggleComparison?.();
-              }
-            }
           : undefined
       }
     >
@@ -127,20 +139,15 @@ export default function StagedResultImage({
         off at the bottom.
       */}
       <Image
-        src={displayImageUrl}
-        alt={displayAlt}
+        src={afterImageUrl}
+        alt={alt}
         fill
         sizes={imageSizes}
         className="object-contain"
       />
       <div className="absolute left-3 top-3 rounded-md bg-black/60 px-2 py-1 text-xs font-medium text-white">
-        {displayLabel}
+        {label}
       </div>
-      {isClickable && (
-        <div className="absolute bottom-3 right-3 rounded-md bg-black/60 px-2 py-1 text-xs text-white">
-          {showingOriginal ? "Click for staged" : "Click for original"}
-        </div>
-      )}
     </div>
   );
 }
