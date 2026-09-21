@@ -197,8 +197,8 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
             htmlFor="psychologyPageContent"
             className="block text-sm font-medium text-foreground"
           >
-            Psychology Page Content{" "}
-            <span className="text-muted-foreground">(lookbook page 2)</span>
+            Philosophy Page{" "}
+            <span className="text-muted-foreground">(page 2)</span>
           </label>
           <p className="mt-0.5 text-xs text-muted-foreground">
             Add a paragraph describing your ideal buyer and the emotional journey
@@ -219,8 +219,7 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
             htmlFor="signoffContent"
             className="block text-sm font-medium text-foreground"
           >
-            Sign-off Content{" "}
-            <span className="text-muted-foreground">(final lookbook page)</span>
+            Closing Page
           </label>
           <p className="mt-0.5 text-xs text-muted-foreground">
             Add your closing message to the buyer — this appears as the final
