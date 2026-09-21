@@ -32,6 +32,7 @@ export async function GET(
           },
         },
         rooms: {
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
           select: {
             id: true,
             name: true,
@@ -48,6 +49,7 @@ export async function GET(
             recommendation: true,
             buyerPsychology: true,
             checklistItems: true,
+            sortOrder: true,
             inpaintRequests: {
               where: { status: { in: ["IN_QUEUE", "IN_PROGRESS"] } },
               orderBy: { createdAt: "desc" },

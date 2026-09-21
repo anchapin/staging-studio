@@ -64,6 +64,8 @@ model Room {
   buyerPsychology      String?
   checklistItems       Json?    // Array of { item, category, priority }
 
+  sortOrder           Int      @default(0) // for manual room reordering
+
   createdAt            DateTime @default(now())
 
   inpaintRequests InpaintRequest[]
