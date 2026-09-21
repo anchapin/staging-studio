@@ -59,6 +59,7 @@ export async function updateUserSettings(
         logoUrl: parsed.data.logoUrl,
         psychologyPageContent: parsed.data.psychologyPageContent,
         signoffContent: parsed.data.signoffContent,
+        darkMode: parsed.data.darkMode,
       },
     });
     revalidatePath("/settings");
