@@ -58,6 +58,18 @@ export default function NewProjectPage() {
     setSubmitting(true);
     setError(null);
 
+    if (!form.targetBuyer) {
+      setError("Please select a target buyer persona.");
+      setSubmitting(false);
+      return;
+    }
+
+    if (!form.stagingAesthetic) {
+      setError("Please select a staging aesthetic.");
+      setSubmitting(false);
+      return;
+    }
+
     const validRooms = rooms.filter((r) => r.trim() !== "");
 
     const response = await fetch("/api/projects", {
@@ -149,7 +161,6 @@ export default function NewProjectPage() {
           </label>
           <select
             id="targetBuyer"
-            required
             value={form.targetBuyer}
             onChange={(e) =>
               setForm({ ...form, targetBuyer: e.target.value })
@@ -174,7 +185,6 @@ export default function NewProjectPage() {
           </label>
           <select
             id="stagingAesthetic"
-            required
             value={form.stagingAesthetic}
             onChange={(e) =>
               setForm({ ...form, stagingAesthetic: e.target.value })
