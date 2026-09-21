@@ -63,6 +63,22 @@ describe("roomPatchSchema", () => {
     expect(result.success).toBe(false);
   });
 
+  it("accepts http://mock URLs for hermetic test environments (issue #413)", () => {
+    const result = roomPatchSchema.safeParse({
+      ...validBody,
+      afterImageUrl: "http://mock/storage/v1/object/public/rooms/after.jpg",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts http://mock:3000 URLs with port for hermetic test environments (issue #413)", () => {
+    const result = roomPatchSchema.safeParse({
+      ...validBody,
+      beforeImageUrl: "http://mock:3000/storage/v1/object/public/rooms/before.jpg",
+    });
+    expect(result.success).toBe(true);
+  });
+
   it("rejects selectedVariantIndex: -1 and non-integers", () => {
     expect(roomPatchSchema.safeParse({ ...validBody, selectedVariantIndex: -1 }).success).toBe(false);
     expect(roomPatchSchema.safeParse({ ...validBody, selectedVariantIndex: 1.5 }).success).toBe(false);
