@@ -145,17 +145,41 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
           >
             Firm Logo <span className="text-muted-foreground">(optional)</span>
           </label>
-          <input
-            id="logo"
-            type="file"
-            accept="image/*"
-            onChange={(e) => setLogoFile(e.target.files?.[0] || null)}
-            className="mt-1 block w-full text-sm text-muted-foreground file:mr-4 file:cursor-pointer file:rounded-md file:border-0 file:bg-secondary file:px-4 file:py-2 file:text-sm file:font-medium file:text-foreground hover:file:bg-muted"
-          />
-          {initial.logoUrl && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              A logo is currently set — upload a new file to replace it.
-            </p>
+          {initial.logoUrl ? (
+            <div className="mt-1 space-y-2">
+              <div className="flex items-center gap-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={initial.logoUrl}
+                  alt="Current firm logo"
+                  className="h-10 w-auto object-contain rounded border"
+                />
+                <label
+                  htmlFor="logo-replace"
+                  className="cursor-pointer rounded-md border border-ring bg-secondary px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted"
+                >
+                  Replace
+                </label>
+                <input
+                  id="logo-replace"
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => setLogoFile(e.target.files?.[0] || null)}
+                  className="sr-only"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Upload a new file to replace the current logo.
+              </p>
+            </div>
+          ) : (
+            <input
+              id="logo"
+              type="file"
+              accept="image/*"
+              onChange={(e) => setLogoFile(e.target.files?.[0] || null)}
+              className="mt-1 block w-full text-sm text-muted-foreground file:mr-4 file:cursor-pointer file:rounded-md file:border-0 file:bg-secondary file:px-4 file:py-2 file:text-sm file:font-medium file:text-foreground hover:file:bg-muted"
+            />
           )}
         </div>
       </fieldset>
