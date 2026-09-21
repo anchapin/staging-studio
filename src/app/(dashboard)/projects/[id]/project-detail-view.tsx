@@ -308,10 +308,6 @@ export default function ProjectDetailView({
   const [deletingSlotByRoom, setDeletingSlotByRoom] = useState<
     Record<string, VariantSlot | null>
   >({});
-  /** Issue #460: per-room toggle for staged result ↔ original comparison. */
-  const [showOriginalByRoom, setShowOriginalByRoom] = useState<
-    Record<string, boolean>
-  >({});
   const { toasts, showError, showSuccess, showInfo, dismissToast } = useToast();
 
   // Issue #493: drag-and-drop sensors
@@ -626,14 +622,6 @@ export default function ProjectDetailView({
     },
     []
   );
-
-  /** Issue #460: toggles staged result ↔ original comparison for a room. */
-  const handleToggleStagedComparison = useCallback((roomId: string) => {
-    setShowOriginalByRoom((prev) => ({
-      ...prev,
-      [roomId]: !prev[roomId],
-    }));
-  }, []);
 
   if (loading) {
     return (
@@ -962,19 +950,13 @@ export default function ProjectDetailView({
                           <h3 className="text-sm font-semibold text-foreground mb-3">
                             Staged result
                           </h3>
-                          {/* Issue #460: click to toggle staged ↔ original comparison */}
+                          {/* Issue #497: draggable before/after comparison slider */}
                           <StagedResultImage
                             afterImageUrl={focusedInputs.staged.afterImageUrl}
                             alt={focusedInputs.staged.alt}
                             label={focusedInputs.staged.label}
                             largeImage
                             originalImageUrl={focusedRoom.beforeImageUrl}
-                            onClickToggleComparison={() =>
-                              handleToggleStagedComparison(focusedRoom.id)
-                            }
-                            showingOriginal={
-                              showOriginalByRoom[focusedRoom.id] ?? false
-                            }
                           />
                         </section>
                       )}
