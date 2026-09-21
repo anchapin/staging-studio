@@ -172,7 +172,7 @@ function LoginForm() {
                 aria-invalid={!!passwordError}
                 aria-describedby={passwordError ? "password-error" : undefined}
                 error={!!passwordError}
-                placeholder="••••••••"
+                placeholder="Enter your password"
               />
               {passwordError && (
                 <p id="password-error" role="alert" className="mt-1 text-sm text-red-600">
