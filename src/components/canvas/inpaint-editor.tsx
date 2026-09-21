@@ -1593,30 +1593,11 @@ export default function InpaintEditor({
             hidden={effectiveTab !== "manual"}
           >
             <div className="flex flex-col gap-3">
-              {/* Manual-paint controls (AC-L7): the expansion slider plus
-                  the single-object run affordance. The brush / Fill Region
-                  / Select Regions toggles live in the canvas toolbar and
-                  stay beside the canvas on every tab, so painted work is
-                  always visible. */}
-              <label className="flex items-center gap-2 text-sm text-stone-700">
-                Mask Expansion:
-                <input
-                  type="range"
-                  min={0}
-                  max={MAX_MASK_EXPANSION_RADIUS}
-                  value={maskExpansion}
-                  onChange={(e) => setMaskExpansion(Number(e.target.value))}
-                  aria-describedby="mask-expansion-hint"
-                  className="w-32"
-                />
-                <span className="w-10 text-right">{maskExpansion}px</span>
-              </label>
-              <p id="mask-expansion-hint" className="text-xs text-gray-500">
-                Grows the mask outward before submitting so frames, bezels, and
-                mounts at the painted edge are replaced too. 0 keeps the mask
-                exactly as painted.
-              </p>
-
+              {/* Manual-paint controls (AC-L7): the single-object run affordance.
+                  The brush / Fill Region / Select Regions toggles live in the
+                  canvas toolbar and stay beside the canvas on every tab, so
+                  painted work is always visible. The "Expand selection" slider
+                  above controls mask expansion and is shared across all tabs. */}
               <div className="flex items-center gap-4">
                 <button
                   onClick={handleInpaint}
