@@ -101,6 +101,13 @@ interface InpaintEditorProps {
    * scrolling.
    */
   secondaryPane?: ReactNode;
+  /**
+   * Issue #507: callback to update staging directives from within the
+   * editor's inline textarea (kept in sync with the parent's copy).
+   */
+  onDirectivesChange?: (value: string) => void;
+  /** Current directives value for the inline textarea. */
+  directivesValue?: string;
 }
 
 /** Resolves when the image is loaded; rejects on a load error. */
@@ -416,6 +423,8 @@ export default function InpaintEditor({
   onActiveConceptLabelChange,
   fullWidth = false,
   secondaryPane,
+  onDirectivesChange,
+  directivesValue,
 }: InpaintEditorProps) {
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
   const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
@@ -1180,7 +1189,7 @@ export default function InpaintEditor({
 
   const handleInpaint = useCallback(async () => {
     if (!promptDirectives.trim()) {
-      showError("Please fill in the staging directives field below.");
+      showError("Please fill in the \"Staging directives\" textarea in the right panel.");
       return;
     }
 
@@ -1415,7 +1424,7 @@ export default function InpaintEditor({
         {secondaryPane && (
           <div
             className={`flex flex-col gap-6 ${
-              fullWidth ? "md:max-h-none md:overflow-visible lg:max-h-[45%] lg:min-h-0 lg:overflow-y-auto" : ""
+              fullWidth ? "md:max-h-none md:overflow-visible lg:max-h-[70%] lg:min-h-0 lg:overflow-y-auto" : ""
             }`}
           >
             {secondaryPane}
@@ -1599,6 +1608,25 @@ export default function InpaintEditor({
             hidden={effectiveTab !== "manual"}
           >
             <div className="flex flex-col gap-3">
+              {/* Issue #507: inline staging directives textarea — always visible
+                  in the right panel beside the Apply Inpainting button, so users
+                  can find it without scrolling the left pane. */}
+              <div>
+                <label
+                  htmlFor={`inpaint-directives-${roomId}`}
+                  className="mb-1 block text-sm font-medium text-stone-700"
+                >
+                  Staging directives (required)
+                </label>
+                <textarea
+                  id={`inpaint-directives-${roomId}`}
+                  value={directivesValue ?? promptDirectives}
+                  onChange={(e) => onDirectivesChange?.(e.target.value)}
+                  rows={3}
+                  placeholder="e.g., Modern coastal furniture, light neutrals, natural textures, minimal accessories..."
+                  className="w-full px-3 py-2 rounded-md border border-border text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+                />
+              </div>
               {/* Manual-paint controls (AC-L7): the single-object run affordance.
                   The brush / Fill Region / Select Regions toggles live in the
                   canvas toolbar and stay beside the canvas on every tab, so
