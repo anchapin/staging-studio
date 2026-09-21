@@ -141,7 +141,7 @@ export function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
   // stacking over new success toasts)
   const visibleToasts = toasts.slice(-3).reverse();
   return (
-    <div className="fixed top-4 right-4 z-50 max-w-sm w-full px-4">
+    <div className="fixed top-20 right-4 z-50 max-w-sm w-full px-4">
       <div className="max-h-[50vh] overflow-y-auto flex flex-col gap-2">
         {visibleToasts.map((toast) => (
           <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} />
