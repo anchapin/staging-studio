@@ -148,6 +148,7 @@ export default function GenerateCopyForm({
       <Button
         onClick={handleGenerate}
         disabled={isGenerating || !rawDirectives.trim()}
+        title={!rawDirectives.trim() ? "Enter staging directives above to enable copy generation" : undefined}
       >
         {isGenerating ? (
           <>
@@ -161,6 +162,11 @@ export default function GenerateCopyForm({
           </>
         )}
       </Button>
+      {!rawDirectives.trim() && !isGenerating && (
+        <p className="text-sm text-muted-foreground">
+          Enter staging directives above to enable copy generation
+        </p>
+      )}
 
       {copy && (
         <div className="mt-6 p-4 bg-card rounded-lg border border-stone-200 space-y-4">
