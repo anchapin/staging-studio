@@ -1683,24 +1683,31 @@ export default function InpaintEditor({
                         {chip}
                       </button>
                     ))}
-                    {/* Issue #249: bulk selection affordances. Select-all
+                    {/* Issue #249/#474: bulk selection affordances. Select-all
                         is a pure client-side walk over the decoded
                         instances (zero billed calls); it stops at the
-                        batch cap and says so. */}
-                    <button
-                      type="button"
-                      onClick={handleSelectAllDetected}
-                      disabled={
-                        isProcessing ||
-                        conceptLoading ||
-                        detectedCount === 0 ||
-                        selectionCount >= Math.min(detectedCount, MAX_BATCH_OBJECTS)
-                      }
-                      title={conceptLoading ? "Detection in progress — wait for results to select all" : undefined}
-                      className="px-2.5 py-1 text-xs rounded-md border border-stone-800 bg-white text-stone-800 hover:bg-stone-100 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      Select all detected
-                    </button>
+                        batch cap and says so. When detection is running,
+                        the button is replaced with a spinner so the
+                        disabled state is not confusing (issue #474). */}
+                    {conceptLoading ? (
+                      <span className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border border-stone-800 bg-white text-stone-600">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Detecting {requestedConcept}…
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleSelectAllDetected}
+                        disabled={
+                          isProcessing ||
+                          detectedCount === 0 ||
+                          selectionCount >= Math.min(detectedCount, MAX_BATCH_OBJECTS)
+                        }
+                        className="px-2.5 py-1 text-xs rounded-md border border-stone-800 bg-white text-stone-800 hover:bg-stone-100 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Select all detected
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={handleClearSelection}
