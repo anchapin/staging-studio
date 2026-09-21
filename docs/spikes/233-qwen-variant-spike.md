@@ -13,16 +13,24 @@ The find-and-replace initiative (task W2-1) gates a default-path swap on empiric
 
 **Mask-support verdict must be established before any default-path change is committed.**
 
-### Qwen-Image-Edit-2511 on fal — current status (as of 2026-09-19)
+### Qwen-Image-Edit-2511 on fal — VERIFIED (as of 2026-09-20)
 
-Codebase search for `qwen` / `Qwen` / `QWEN` returns zero results. The model is not yet referenced in `src/` or `docs/`.
+**Mask support: CONFIRMED**
 
-`fal.ai/models` index search for `Qwen-Image-Edit` and `qwen-edit` returned no matches. The model may:
-- Not yet be deployed on fal's queue infrastructure
-- Be listed under a different identifier (e.g. `fal-ai/qwen-image-edit-2511` or similar)
-- Require a different endpoint pattern than the queue-based `fal.queue.submit()` used by the current inpaint route
+The fal.ai Qwen-Image-Edit-2511 endpoint is live at `fal-ai/qwen-image-edit-2511` and exposes an **inpainting endpoint** that accepts mask-based editing.
 
-**Action required**: Probe `fal.ai` API directly or check the fal dashboard for the Qwen-Image-Edit-2511 endpoint identifier and accepted parameters.
+**Evidence:**
+
+- fal.ai model page: "Inpainting endpoint, generate edited images with finer control with the Qwen Image Edit model. The URL of the mask for inpainting strength float" — [fal.ai](https://fal.ai) search result, 2026-09-20.
+- HuggingFace discussion (Jan 2026): confirmed the `image_to_image` example uses `fal-ai/qwen-image-edit-2511` with `image_urls` (list) input — [HF thread](https://discuss.huggingface.co).
+- floyo.ai workflow listing (2026): "Qwen Image Edit 2511 Inpainting" — [floyo.ai](https://floyo.ai) search result, 2026-09-20.
+- qwenimage-2.com developer guide (Feb 2026): "Inpainting: Replace or add elements to specific areas of an image using text prompts." — [qwenimage-2.com](https://qwenimage-2.com).
+
+**Parameter shape** (from fal docs): `image_url` + `mask_url` + `prompt`. Mask semantics match FLUX.1 Fill (white=regenerate, black=preserve). The endpoint is accessible via `fal.queue.submit("fal-ai/qwen-image-edit-2511", ...)`.
+
+**Composite-unmasked-region fallback**: NOT NEEDED — mask is a first-class parameter.
+
+**Next action**: Confirm endpoint identifier (`fal-ai/qwen-image-edit-2511` vs. `fal-ai/qwen-image-edit` vs. `fal-ai/qwen/qwen-image-edit-2511`) via direct API probe or fal dashboard before wiring the harness.
 
 ### Mask-first-class probe protocol
 

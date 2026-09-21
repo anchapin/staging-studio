@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 const IMAGE_HOST_PATTERN = /(^|\.)supabase\.co$|(^|\.)fal\.ai$/;
-const LOCAL_HOST_PATTERN = /^127\.0\.0\.1$|^localhost$/;
+const LOCAL_HOST_PATTERN = /^(localhost|127\.0\.0\.1|mock)(:\d+)?$/i;
 
 const imageUrlSchema = z
   .string()
