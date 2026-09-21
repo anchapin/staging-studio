@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ChevronRight, GripVertical, PencilRuler } from "lucide-react";
@@ -45,8 +45,13 @@ import {
   deleteVariantAfterImage,
   getVariantTouchUpCounts,
   reorderRooms,
+  saveRoomMetadata,
   saveVariantSelection,
 } from "@/app/actions/room";
+import {
+  AutosaveController,
+  type AutosaveStatus,
+} from "@/lib/autosave-controller";
 import { projectFetchStateFromStatus } from "@/lib/project-fetch-state";
 import {
   buildInpaintResultPatch,
@@ -354,6 +359,57 @@ export default function ProjectDetailView({
       }
     },
     [project, showError]
+  );
+
+  /** Issue #496: per-room autosave controllers for staging directives. */
+  const directiveControllersRef = useRef(
+    new Map<string, AutosaveController<{ rawDirectives: string }>>()
+  );
+  /** Issue #496: directive save status per room for the "Saving…/Saved" indicator. */
+  const [directiveStatuses, setDirectiveStatuses] = useState<
+    Record<string, AutosaveStatus>
+  >({});
+
+  /**
+   * Issue #496: lazy factory for per-room directive autosave controllers.
+   * 2 s idle window, save via saveRoomMetadata, status fed to the UI.
+   */
+  const getDirectiveController = useCallback(
+    (roomId: string) => {
+      let controller = directiveControllersRef.current.get(roomId);
+      if (!controller) {
+        controller = new AutosaveController<{ rawDirectives: string }>({
+          save: async (payload) => {
+            const result = await saveRoomMetadata(roomId, payload);
+            return result.success;
+          },
+          idleMs: 2000,
+          onStatusChange: (status) => {
+            setDirectiveStatuses((prev) => ({ ...prev, [roomId]: status }));
+          },
+        });
+        directiveControllersRef.current.set(roomId, controller);
+      }
+      return controller;
+    },
+    []
+  );
+
+  /** Issue #496: fires on every keystroke — updates local state + schedules debounced save. */
+  const editDirectives = useCallback(
+    (roomId: string, value: string) => {
+      setDirectives((prev) => ({ ...prev, [roomId]: value }));
+      getDirectiveController(roomId).edit({ rawDirectives: value });
+    },
+    [getDirectiveController]
+  );
+
+  /** Issue #496: saves immediately on blur instead of waiting for the idle window. */
+  const blurDirectives = useCallback(
+    (roomId: string) => {
+      getDirectiveController(roomId).blur();
+    },
+    [getDirectiveController]
   );
 
   /**
@@ -900,21 +956,47 @@ export default function ProjectDetailView({
                     <>
                       {/* Issue #460: textarea first — always visible above the fold */}
                       <section aria-label="Staging directives">
-                        <label
-                          htmlFor={`directives-${focusedRoom.id}`}
-                          className="block text-sm font-medium text-foreground mb-1"
-                        >
-                          Staging directives (required)
-                        </label>
+                        <div className="flex items-center justify-between mb-1">
+                          <label
+                            htmlFor={`directives-${focusedRoom.id}`}
+                            className="block text-sm font-medium text-foreground"
+                          >
+                            Staging directives (required)
+                          </label>
+                          {/* Issue #496: Saving… / Saved / error indicator */}
+                          {(() => {
+                            const status = directiveStatuses[focusedRoom.id];
+                            if (status === "saving") {
+                              return (
+                                <span className="text-xs text-stone-500">
+                                  Saving…
+                                </span>
+                              );
+                            }
+                            if (status === "saved") {
+                              return (
+                                <span className="text-xs text-green-700">
+                                  Saved
+                                </span>
+                              );
+                            }
+                            if (status === "error") {
+                              return (
+                                <span className="text-xs text-red-700">
+                                  Save failed
+                                </span>
+                              );
+                            }
+                            return null;
+                          })()}
+                        </div>
                         <textarea
                           id={`directives-${focusedRoom.id}`}
                           value={focusedInputs.roomDirectives}
                           onChange={(e) =>
-                            setDirectives((prev) => ({
-                              ...prev,
-                              [focusedRoom.id]: e.target.value,
-                            }))
+                            editDirectives(focusedRoom.id, e.target.value)
                           }
+                          onBlur={() => blurDirectives(focusedRoom.id)}
                           maxLength={MAX_DIRECTIVE_LENGTH}
                           rows={3}
                           placeholder="e.g. Add a neutral linen sofa, warm wood coffee table, and layered lighting..."
