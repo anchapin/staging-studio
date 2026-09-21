@@ -16,6 +16,7 @@ function LoginForm() {
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [mode, setMode] = useState<"password" | "magic">("password");
   const [loading, setLoading] = useState(false);
+  const [forgotPasswordLoading, setForgotPasswordLoading] = useState(false);
   // A failed /auth/callback exchange lands back here with
   // ?error=auth_callback_failed — surface it in the same banner used for
   // client-side sign-in errors instead of a silent form (issue #91).
@@ -64,7 +65,7 @@ function LoginForm() {
       setEmailError("Email is required");
       return;
     }
-    setLoading(true);
+    setForgotPasswordLoading(true);
     setMessage(null);
     // Always show a generic message to prevent email enumeration attacks.
     // The backend still sends the email if the account exists.
@@ -75,8 +76,7 @@ function LoginForm() {
       type: "success",
       text: "If an account with that email exists, a password reset link has been sent.",
     });
-    setPasswordFailed(false);
-    setLoading(false);
+    setForgotPasswordLoading(false);
   };
 
   const handleMagicLink = async (e: React.FormEvent) => {
@@ -119,7 +119,12 @@ function LoginForm() {
         >
           <button
             type="button"
-            onClick={() => setMode("password")}
+            onClick={() => {
+              setMode("password");
+              setEmailError(null);
+              setPasswordError(null);
+              setMessage(null);
+            }}
             aria-pressed={mode === "password"}
             className={`flex-1 rounded-md py-2 text-sm font-medium transition-colors ${
               mode === "password"
@@ -131,7 +136,12 @@ function LoginForm() {
           </button>
           <button
             type="button"
-            onClick={() => setMode("magic")}
+            onClick={() => {
+              setMode("magic");
+              setEmailError(null);
+              setPasswordError(null);
+              setMessage(null);
+            }}
             aria-pressed={mode === "magic"}
             className={`flex-1 rounded-md py-2 text-sm font-medium transition-colors ${
               mode === "magic"
@@ -207,10 +217,10 @@ function LoginForm() {
               <button
                 type="button"
                 onClick={handleForgotPassword}
-                disabled={loading}
-                className="mt-2 text-sm text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+                disabled={forgotPasswordLoading}
+                className="mt-2 text-sm text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
               >
-                Forgot password?
+                {forgotPasswordLoading ? "Please wait..." : "Forgot password?"}
               </button>
             </div>
           )}
