@@ -10,7 +10,7 @@ import EditorTabBar, {
   type EditorTabId,
 } from "./editor-tab-bar";
 import { useToast, ToastContainer } from "@/components/ui/toast";
-import { Loader2 } from "lucide-react";
+import { Info, Loader2 } from "lucide-react";
 import { useInpaintStatus } from "./use-inpaint-status";
 import {
   entireRoomTabVisible,
@@ -1471,12 +1471,18 @@ export default function InpaintEditor({
             onChange={(e) => setIncludeFloorShadow(e.target.checked)}
             className="h-4 w-4 accent-stone-800"
           />
-          Add natural shadows under furniture
+          Add natural floor shadows under new furniture
         </label>
-        <p className="text-xs text-gray-500">
-          Extends the painted area downward to include floor shadows, so they
-          look natural with the new furniture. Best for hard floors.
-        </p>
+        <div className="flex items-center gap-1">
+          <span
+            role="img"
+            aria-label="More info"
+            title="Extends the painted area downward to include floor shadows, so they look natural with the new furniture. Best for hard floors."
+            className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-200 text-gray-500 hover:bg-gray-300"
+          >
+            <Info className="h-3 w-3" />
+          </span>
+        </div>
       </div>
 
       {/* ---- RIGHT PANE: fixed-width control panel ----------------------- */}
@@ -1593,30 +1599,11 @@ export default function InpaintEditor({
             hidden={effectiveTab !== "manual"}
           >
             <div className="flex flex-col gap-3">
-              {/* Manual-paint controls (AC-L7): the expansion slider plus
-                  the single-object run affordance. The brush / Fill Region
-                  / Select Regions toggles live in the canvas toolbar and
-                  stay beside the canvas on every tab, so painted work is
-                  always visible. */}
-              <label className="flex items-center gap-2 text-sm text-stone-700">
-                Mask Expansion:
-                <input
-                  type="range"
-                  min={0}
-                  max={MAX_MASK_EXPANSION_RADIUS}
-                  value={maskExpansion}
-                  onChange={(e) => setMaskExpansion(Number(e.target.value))}
-                  aria-describedby="mask-expansion-hint"
-                  className="w-32"
-                />
-                <span className="w-10 text-right">{maskExpansion}px</span>
-              </label>
-              <p id="mask-expansion-hint" className="text-xs text-gray-500">
-                Grows the mask outward before submitting so frames, bezels, and
-                mounts at the painted edge are replaced too. 0 keeps the mask
-                exactly as painted.
-              </p>
-
+              {/* Manual-paint controls (AC-L7): the single-object run affordance.
+                  The brush / Fill Region / Select Regions toggles live in the
+                  canvas toolbar and stay beside the canvas on every tab, so
+                  painted work is always visible. The "Expand selection" slider
+                  above controls mask expansion and is shared across all tabs. */}
               <div className="flex items-center gap-4">
                 <button
                   onClick={handleInpaint}
@@ -1683,24 +1670,31 @@ export default function InpaintEditor({
                         {chip}
                       </button>
                     ))}
-                    {/* Issue #249: bulk selection affordances. Select-all
+                    {/* Issue #249/#474: bulk selection affordances. Select-all
                         is a pure client-side walk over the decoded
                         instances (zero billed calls); it stops at the
-                        batch cap and says so. */}
-                    <button
-                      type="button"
-                      onClick={handleSelectAllDetected}
-                      disabled={
-                        isProcessing ||
-                        conceptLoading ||
-                        detectedCount === 0 ||
-                        selectionCount >= Math.min(detectedCount, MAX_BATCH_OBJECTS)
-                      }
-                      title={conceptLoading ? "Detection in progress — wait for results to select all" : undefined}
-                      className="px-2.5 py-1 text-xs rounded-md border border-stone-800 bg-white text-stone-800 hover:bg-stone-100 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      Select all detected
-                    </button>
+                        batch cap and says so. When detection is running,
+                        the button is replaced with a spinner so the
+                        disabled state is not confusing (issue #474). */}
+                    {conceptLoading ? (
+                      <span className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border border-stone-800 bg-white text-stone-600">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Detecting {requestedConcept}…
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleSelectAllDetected}
+                        disabled={
+                          isProcessing ||
+                          detectedCount === 0 ||
+                          selectionCount >= Math.min(detectedCount, MAX_BATCH_OBJECTS)
+                        }
+                        className="px-2.5 py-1 text-xs rounded-md border border-stone-800 bg-white text-stone-800 hover:bg-stone-100 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Select all detected
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={handleClearSelection}

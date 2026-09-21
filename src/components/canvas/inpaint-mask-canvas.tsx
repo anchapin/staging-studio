@@ -230,6 +230,7 @@ export default function InpaintMaskCanvas({
   const keyboardPaintingRef = useRef(false);
   const hintId = useId();
   const maskingHintId = useId();
+  const [showLegend, setShowLegend] = useState(false);
 
   // Canvas resolution follows the photo's aspect ratio (capped on the long
   // edge); without one, fall back to the plain width/height props.
@@ -1014,6 +1015,19 @@ export default function InpaintMaskCanvas({
     if (e.key === "p" || e.key === "P" || e.key === " " || e.key === "Enter") {
       e.preventDefault();
       toggleKeyboardPaint();
+      return;
+    }
+
+    if (e.key === "+" || e.key === "=") {
+      e.preventDefault();
+      setBrushSize((prev) => Math.min(prev + 2, 100));
+      return;
+    }
+
+    if (e.key === "-" || e.key === "_") {
+      e.preventDefault();
+      setBrushSize((prev) => Math.max(prev - 2, 1));
+      return;
     }
   };
 
@@ -1233,9 +1247,11 @@ export default function InpaintMaskCanvas({
       )}
 
       <p id={hintId} className="text-xs text-gray-500">
-        Keyboard painting: Tab to the canvas, move the brush with the arrow keys
-        (Shift + arrow for fine steps), press P, Space, or Enter to start or
-        stop painting, and Cmd/Ctrl+Z to undo. Brush Size and Clear Mask follow in the tab order.
+        Tab to the canvas to paint. Press <button
+          type="button"
+          onClick={() => setShowLegend(true)}
+          className="mx-0.5 rounded border border-gray-300 bg-white px-1 py-0.5 text-xs font-medium hover:bg-gray-50"
+        >?</button> for keyboard shortcuts.
       </p>
 
       {/* Issue #317: toolbar wraps at md+ and buttons have min-height 44px for touch */}
@@ -1322,7 +1338,49 @@ export default function InpaintMaskCanvas({
         >
           Undo {undoStack.length > 0 && `(${undoStack.length})`}
         </button>
+
+        <button
+          onClick={() => setShowLegend((prev) => !prev)}
+          title="Keyboard shortcuts"
+          aria-label={showLegend ? "Hide keyboard shortcuts" : "Show keyboard shortcuts"}
+          aria-expanded={showLegend}
+          className="px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors md:min-h-[44px]"
+        >
+          ?
+        </button>
       </div>
+
+      {showLegend && (
+        <div
+          role="region"
+          aria-label="Keyboard shortcuts"
+          className="rounded-md border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700"
+        >
+          <p className="mb-2 font-medium text-gray-900">Keyboard Shortcuts</p>
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-1">
+            <div className="flex items-center gap-2">
+              <dt className="font-mono text-gray-500">Arrow keys</dt>
+              <dd>Move brush</dd>
+            </div>
+            <div className="flex items-center gap-2">
+              <dt className="font-mono text-gray-500">Shift + Arrow</dt>
+              <dd>Fine movement</dd>
+            </div>
+            <div className="flex items-center gap-2">
+              <dt className="font-mono text-gray-500">P / Space / Enter</dt>
+              <dd>Start / stop painting</dd>
+            </div>
+            <div className="flex items-center gap-2">
+              <dt className="font-mono text-gray-500">Cmd / Ctrl + Z</dt>
+              <dd>Undo</dd>
+            </div>
+            <div className="flex items-center gap-2">
+              <dt className="font-mono text-gray-500">+ / -</dt>
+              <dd>Brush size</dd>
+            </div>
+          </dl>
+        </div>
+      )}
 
       <input type="hidden" value={maskDataUrl ?? ""} />
     </div>

@@ -54,6 +54,7 @@ export const roomPatchSchema = z
     afterImageUrl: imageUrlSchema,
     beforeImageUrl2: imageUrlSchema,
     afterImageUrl2: imageUrlSchema,
+    sortOrder: z.number().int().min(0),
   })
   .partial()
   .strict();

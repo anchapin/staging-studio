@@ -157,7 +157,7 @@ export function SetupForm({ email }: { email: string }) {
 
           <div>
             <label htmlFor="psychologyPageContent" className="block text-sm font-medium text-foreground">
-              Psychology Page Content <span className="text-muted-foreground">(lookbook page 2)</span>
+              Philosophy Page <span className="text-muted-foreground">(page 2)</span>
             </label>
             <textarea
               id="psychologyPageContent"
@@ -171,7 +171,7 @@ export function SetupForm({ email }: { email: string }) {
 
           <div>
             <label htmlFor="signoffContent" className="block text-sm font-medium text-foreground">
-              Sign-off Content <span className="text-muted-foreground">(final lookbook page)</span>
+              Closing Page
             </label>
             <textarea
               id="signoffContent"

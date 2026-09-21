@@ -19,6 +19,7 @@ model User {
   email                 String?   @unique
   psychologyPageContent String?   // Template for Page 2
   signoffContent        String?   // Template for final page
+  darkMode              Boolean   @default(false)
   createdAt             DateTime  @default(now())
 
   projects Project[]
@@ -62,6 +63,8 @@ model Room {
   recommendation       String?
   buyerPsychology      String?
   checklistItems       Json?    // Array of { item, category, priority }
+
+  sortOrder           Int      @default(0) // for manual room reordering
 
   createdAt            DateTime @default(now())
 
