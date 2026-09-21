@@ -170,6 +170,8 @@ interface InpaintMaskCanvasProps {
   /** Issue #203: the user pressed Clear Mask; lets the parent drop the
    * batch selection set so it cannot disagree with the now-empty grid. */
   onMaskCleared?: () => void;
+  /** Issue #448: click a numbered badge to deselect that region. */
+  onSelectionDeselect?: (id: string) => void;
 }
 
 export default function InpaintMaskCanvas({
@@ -192,6 +194,7 @@ export default function InpaintMaskCanvas({
   selectionMarkers,
   selectionReset = null,
   onMaskCleared,
+  onSelectionDeselect,
 }: InpaintMaskCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -1031,17 +1034,19 @@ export default function InpaintMaskCanvas({
     height: naturalHeight && naturalHeight > 0 ? naturalHeight : dims.height,
   };
   const selectionBadges = (selectionMarkers ?? []).map((marker) => (
-    <div
+    <button
       key={marker.id}
-      aria-hidden="true"
-      className="pointer-events-none absolute z-20 flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white bg-stone-900/85 text-[10px] font-semibold leading-none text-white shadow"
+      type="button"
+      aria-label={`Deselect region ${marker.index}`}
+      onClick={() => onSelectionDeselect?.(marker.id)}
+      className="absolute z-20 flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white bg-stone-900/85 text-[10px] font-semibold leading-none text-white shadow hover:bg-stone-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-400"
       style={{
         left: `${(marker.x / markerSpace.width) * 100}%`,
         top: `${(marker.y / markerSpace.height) * 100}%`,
       }}
     >
       {marker.index}
-    </div>
+    </button>
   ));
 
   // Brush cursor indicator is a DOM overlay, never canvas pixels, so the

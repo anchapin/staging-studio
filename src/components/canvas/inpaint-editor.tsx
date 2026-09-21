@@ -1330,6 +1330,13 @@ export default function InpaintEditor({
     );
   }, []);
 
+  // Issue #448: remove a specific selection by id
+  const handleRemoveSelection = useCallback((id: string) => {
+    setBatchSelections((previous) =>
+      reduceSelectionSet(previous, { type: "remove", id }).selections
+    );
+  }, []);
+
   const handleClearSelection = useCallback(() => {
     // Issue #249: the canvas's selected-instance tints follow the set —
     // a clear must empty BOTH pieces or solid-filled instances would
@@ -1431,6 +1438,7 @@ export default function InpaintEditor({
           fullWidth={fullWidth}
           selectionReset={selectionReset}
           onMaskCleared={handleMaskCleared}
+          onSelectionDeselect={handleRemoveSelection}
         />
 
         <label className="flex items-center gap-2 text-sm text-stone-700">
@@ -1786,6 +1794,7 @@ export default function InpaintEditor({
                   onRun={handleBatchRun}
                   onRetryRemaining={handleBatchRetry}
                   onRemoveLast={handleRemoveLastSelection}
+                  onRemoveSelection={handleRemoveSelection}
                   instanceLabels={instanceLabels}
                   aesthetic={aesthetic}
                 />
