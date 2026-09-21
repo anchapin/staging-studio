@@ -1787,6 +1787,7 @@ export default function InpaintEditor({
                   onRetryRemaining={handleBatchRetry}
                   onRemoveLast={handleRemoveLastSelection}
                   instanceLabels={instanceLabels}
+                  aesthetic={aesthetic}
                 />
               )}
             </div>
