@@ -4,9 +4,20 @@ Issue: [#240](https://github.com/anchapin/staging-studio/issues/240)
 
 ## Status
 
-**GATE NOT YET OPEN** — both prerequisites (#238, #237) are incomplete.
+**GATE NOT YET OPEN** — both prerequisites (#238, #237) are closed, but gate criteria remain unsatisfied.
 
 This spike documents current state. No implementation work is warranted until the gate criteria are satisfied.
+
+---
+
+## NOT IMPLEMENTED
+
+Issue #240 is **NOT IMPLEMENTED** and will not be implemented until both gate criteria are satisfied:
+
+1. [ ] #238 corpus has enough labeled selections (define N after first export review)
+2. [ ] #237 CLIP zero-shot measurably insufficient on real firm photos (documented mislabel rate)
+
+Both checkboxes above are **unchecked** in the issue body. The gate is closed.
 
 ---
 
@@ -100,12 +111,15 @@ Gate criterion for #237: need **empirical evidence** that CLIP zero-shot produce
 
 ---
 
-## Spike conclusion
+## Spike conclusion (updated after #237 and #238 close)
 
-**Gate is closed.** Neither #237 nor #238 is complete.
+**Gate remains closed.** Issues #237 and #238 are closed, but the gate criteria (the checkboxes in #240's issue body) are unchecked:
 
-- #238: No `SelectionLog` model, no event persistence, no corpus accumulation
-- #237: CLIP spike exists but no empirical measurement on firm photos demonstrating insufficiency
+- #238 closed 2026-09-20 — however, the SelectionLog acceptance criteria (unchecked: `[ ]` db:push clean, `[ ]` every toggle writes a row, `[ ]` corpus export script committed) are not reflected as checked. No corpus N has been defined.
+- #237 closed 2026-09-19 — however, CLIP zero-shot insufficiency on firm photos has not been empirically demonstrated. The acceptance criteria (unchecked: `[ ]` <3s on firm machines, `[ ]` WebGPU path verified, `[ ]` edits persist, `[ ]` zero new server deps) do not include a documented mislabel rate.
+
+**Gate criterion 1** (#238 corpus N): NOT MET — no documented threshold, no export run
+**Gate criterion 2** (#237 mislabel rate): NOT MET — no documented measurement on Circle G photos
 
 Recommend:
 1. Complete #238 first (SelectionLog persistence across real firm projects)
