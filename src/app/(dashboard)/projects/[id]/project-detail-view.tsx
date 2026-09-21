@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, PencilRuler } from "lucide-react";
+import { ArrowLeft, ChevronRight, PencilRuler } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 import { resolveFocusedRoom, resolveRoomLayoutMode } from "@/lib/focus-mode";
 import {
@@ -577,13 +577,22 @@ export default function ProjectDetailView({
       <header className="shrink-0 bg-background border-b border-border px-8 py-4">
         <div className="flex items-center justify-between">
           <div>
-            <Link
-              href="/dashboard"
-              className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              Back to Dashboard
-            </Link>
+            <nav aria-label="Breadcrumb" className="flex items-center gap-1 text-sm text-muted-foreground">
+              <Link
+                href="/projects"
+                className="hover:text-foreground"
+              >
+                Projects
+              </Link>
+              <ChevronRight className="w-4 h-4" aria-hidden="true" />
+              <span className="text-foreground">{project.propertyAddress}</span>
+              {focusedRoom && (
+                <>
+                  <ChevronRight className="w-4 h-4" aria-hidden="true" />
+                  <span className="text-foreground">{focusedRoom.name}</span>
+                </>
+              )}
+            </nav>
             <h1 className="font-playfair text-2xl font-bold text-foreground mt-1">
               {project.propertyAddress}
             </h1>
