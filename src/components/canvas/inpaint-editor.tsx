@@ -22,7 +22,6 @@ import {
   DEFAULT_MASK_EXPANSION_RADIUS,
   MAX_MASK_EXPANSION_RADIUS,
 } from "@/lib/mask-dilation";
-import HolisticSpikePanel from "./holistic-spike-panel";
 import StageEntireRoomPreset from "./stage-entire-room-preset";
 import BatchStagingPanel from "./batch-staging-panel";
 import { useConceptSegments } from "./use-segment-prewarm";
@@ -1573,24 +1572,6 @@ export default function InpaintEditor({
                 onError={showError}
               />
 
-              {/* Issue #190 spike entry — kept as protocol documentation;
-                  the polished one-click preset above (issue #191) does not
-                  depend on it. */}
-              <details className="no-print rounded-md border border-dashed border-stone-300 p-3 text-sm">
-                <summary className="cursor-pointer select-none text-stone-500">
-                  Holistic staging spike (#190) — internal testing only
-                </summary>
-                <div className="pt-3">
-                  <HolisticSpikePanel
-                    aesthetic={aesthetic}
-                    imageWidth={imageDims?.width ?? null}
-                    imageHeight={imageDims?.height ?? null}
-                    disabled={isProcessing || conceptLoading}
-                    onRun={handleHolisticRun}
-                    onError={showError}
-                  />
-                </div>
-              </details>
             </div>
           </div>
 
