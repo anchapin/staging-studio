@@ -999,7 +999,7 @@ export default function ProjectDetailView({
                           onBlur={() => blurDirectives(focusedRoom.id)}
                           maxLength={MAX_DIRECTIVE_LENGTH}
                           rows={3}
-                          placeholder="e.g. Add a neutral linen sofa, warm wood coffee table, and layered lighting..."
+                          placeholder="e.g., Modern coastal furniture, light neutrals, natural textures, minimal accessories..."
                           className="w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring resize-none"
                         />
                         {focusedInputs.roomDirectives.length > 0 && (
