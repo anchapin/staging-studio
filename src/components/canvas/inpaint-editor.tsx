@@ -1460,6 +1460,7 @@ export default function InpaintEditor({
           onInstanceToggle={handleInstanceToggle}
           segmentDisabled={isProcessing || conceptLoading}
           segmenting={conceptLoading}
+          detectingConcept={conceptLoading ? requestedConcept : undefined}
           instanceOverlays={instanceOverlays}
           selectionMarkers={selectionMarkers}
           expansionRadius={maskExpansion}
@@ -1721,6 +1722,7 @@ export default function InpaintEditor({
                         detectedCount === 0 ||
                         selectionCount >= Math.min(detectedCount, MAX_BATCH_OBJECTS)
                       }
+                      title={conceptLoading ? "Detection in progress — wait for results to select all" : undefined}
                       className="px-2.5 py-1 text-xs rounded-md border border-stone-800 bg-white text-stone-800 hover:bg-stone-100 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       Select all detected
@@ -1763,7 +1765,8 @@ export default function InpaintEditor({
                     </p>
                   )}
                   {conceptLoading && (
-                    <p role="status" className="text-xs text-stone-600">
+                    <p role="status" className="flex items-center gap-1.5 text-xs text-stone-600">
+                      <Loader2 className="h-3 w-3 animate-spin" />
                       Looking for {requestedConcept}…
                     </p>
                   )}
