@@ -406,3 +406,59 @@ export async function deleteVariantAfterImage(
     return failure(error instanceof Error ? error.message : "Unknown error");
   }
 }
+
+/**
+ * Server action: reorder rooms within a project by updating their sortOrder values.
+ *
+ * Purpose: powers drag-and-drop room reordering (issue #493). Accepts an array
+ * of room IDs in the new display order and assigns sequential sortOrder values.
+ *
+ * Contract: requires an authenticated session owning the project's rooms;
+ * ownership is enforced via the userId check on the project. Failures are
+ * caught and reported, never thrown.
+ *
+ * Side effects: needs `DATABASE_URL` and a valid Supabase session
+ * cookie; performs one Prisma `updateMany` per room; logs failures to
+ * `console.error`. No path revalidation (callers refresh locally).
+ *
+ * @param projectId ID of the project whose rooms are being reordered.
+ * @param roomIds Ordered array of room IDs representing the new sort order.
+ * @returns `{ success: true }` on write, or
+ *   `{ success: false, error }` when unauthenticated or the update fails.
+ */
+export async function reorderRooms(
+  projectId: string,
+  roomIds: string[]
+): Promise<{ success: boolean; error?: string }> {
+  if (!Array.isArray(roomIds) || roomIds.length === 0) {
+    return failure("roomIds must be a non-empty array");
+  }
+
+  const user = await getAuthedPrismaUser();
+  if (!user) {
+    return failure("Not authenticated");
+  }
+
+  const project = await prisma.project.findUnique({
+    where: { id: projectId, userId: user.id },
+    select: { id: true },
+  });
+  if (!project) {
+    return failure("Project not found");
+  }
+
+  try {
+    await Promise.all(
+      roomIds.map((roomId, index) =>
+        prisma.room.updateMany({
+          where: { id: roomId, projectId },
+          data: { sortOrder: index },
+        })
+      )
+    );
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to reorder rooms:", error);
+    return failure(error instanceof Error ? error.message : "Unknown error");
+  }
+}

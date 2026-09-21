@@ -27,10 +27,26 @@ describe("roomPatchSchema", () => {
   it("accepts the partial body persistInpaintResult sends for variant slot 1", () => {
     const result = roomPatchSchema.safeParse({
       beforeImageUrl2: "https://abc123.supabase.co/storage/v1/object/public/rooms/before.jpg",
-      afterImageUrl2: "https://v3.fal.ai/output/after.png",
+      afterImageUrl2: "https://v3.fal.ai/output/after2.png",
       selectedVariantIndex: 1,
     });
     expect(result.success).toBe(true);
+  });
+
+  it("accepts sortOrder for room reordering (issue #493)", () => {
+    const result = roomPatchSchema.safeParse({ sortOrder: 0 });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts sortOrder with various non-negative integers", () => {
+    expect(roomPatchSchema.safeParse({ sortOrder: 0 }).success).toBe(true);
+    expect(roomPatchSchema.safeParse({ sortOrder: 5 }).success).toBe(true);
+    expect(roomPatchSchema.safeParse({ sortOrder: 100 }).success).toBe(true);
+  });
+
+  it("rejects negative sortOrder", () => {
+    const result = roomPatchSchema.safeParse({ sortOrder: -1 });
+    expect(result.success).toBe(false);
   });
 
   it("permits an entirely empty body (the PATCH route guard must reject it before updateMany)", () => {

@@ -3,7 +3,23 @@
 import { useCallback, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ChevronRight, PencilRuler } from "lucide-react";
+import { ArrowLeft, ChevronRight, GripVertical, PencilRuler } from "lucide-react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { createClient } from "@/lib/supabase";
 import { resolveFocusedRoom, resolveRoomLayoutMode } from "@/lib/focus-mode";
 import {
@@ -28,6 +44,7 @@ import { useToast, ToastContainer } from "@/components/ui/toast";
 import {
   deleteVariantAfterImage,
   getVariantTouchUpCounts,
+  reorderRooms,
   saveVariantSelection,
 } from "@/app/actions/room";
 import { projectFetchStateFromStatus } from "@/lib/project-fetch-state";
@@ -55,6 +72,7 @@ interface Room {
   selectedVariantIndex: number | null;
   /** Saved AI directives (Generate Copy persists them); seeds the textarea. */
   rawDirectives?: string | null;
+  sortOrder?: number;
   inpaintRequests?: {
     id: string;
     variantSlot: number;
@@ -74,6 +92,118 @@ interface Project {
 interface VariantPair {
   before: string | null;
   after: string | null;
+}
+
+interface SortableRoomProps {
+  room: Room;
+  projectId: string;
+  touchUpCountsByRoom: Record<string, { 0: number; 1: number }>;
+  deletingSlotByRoom: Record<string, VariantSlot | null>;
+  onOpenEditor: (roomId: string) => void;
+  onApplyRoomUpdate: (roomId: string, patch: Partial<Room>) => void;
+  onHandleStripSelect: (room: Room, selection: VariantStripSelection) => void;
+  onHandleDeleteVariant: (room: Room, slot: VariantSlot) => void;
+  router: ReturnType<typeof useRouter>;
+  roomInputs: ReturnType<typeof roomEditorInputs>;
+}
+
+function SortableRoom({
+  room,
+  projectId,
+  touchUpCountsByRoom,
+  deletingSlotByRoom,
+  onOpenEditor,
+  onApplyRoomUpdate,
+  onHandleStripSelect,
+  onHandleDeleteVariant,
+  router,
+  roomInputs,
+}: SortableRoomProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: room.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 10 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="space-y-3"
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="cursor-grab text-muted-foreground hover:text-foreground touch-none"
+            {...attributes}
+            {...listeners}
+            aria-label="Drag to reorder room"
+          >
+            <GripVertical className="w-4 h-4" />
+          </button>
+          <h3 className="font-medium text-foreground">{room.name}</h3>
+        </div>
+        <button
+          type="button"
+          onClick={() => onOpenEditor(room.id)}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-secondary"
+        >
+          <PencilRuler className="w-4 h-4" aria-hidden="true" />
+          Edit staging
+        </button>
+      </div>
+
+      <RoomCanvas
+        roomId={room.id}
+        projectId={projectId}
+        imageUrl={room.beforeImageUrl}
+        onUploadComplete={(slot, publicUrl) => {
+          onApplyRoomUpdate(
+            room.id,
+            slot === 1
+              ? { beforeImageUrl2: publicUrl }
+              : { beforeImageUrl: publicUrl }
+          );
+          router.refresh();
+        }}
+      />
+
+      {roomInputs.staged && (
+        <StagedResultImage
+          afterImageUrl={roomInputs.staged.afterImageUrl}
+          alt={roomInputs.staged.alt}
+          label={roomInputs.staged.label}
+        />
+      )}
+
+      {room.beforeImageUrl && (
+        <VariantThumbnailStrip
+          roomName={room.name}
+          originalUrl={room.beforeImageUrl}
+          pairs={roomInputs.pairs}
+          selection={resolveStripSelection(
+            room.selectedVariantIndex,
+            roomInputs.pairs
+          )}
+          onSelect={(selection) => onHandleStripSelect(room, selection)}
+          onDeleteVariant={(slot) => onHandleDeleteVariant(room, slot)}
+          deletingSlot={deletingSlotByRoom[room.id] ?? null}
+          touchUpCounts={touchUpCountsByRoom[room.id] ?? null}
+        />
+      )}
+    </div>
+  );
 }
 
 function variantPairsOf(room: Room): [VariantPair, VariantPair] {
@@ -183,6 +313,52 @@ export default function ProjectDetailView({
     Record<string, boolean>
   >({});
   const { toasts, showError, showSuccess, showInfo, dismissToast } = useToast();
+
+  // Issue #493: drag-and-drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  // Issue #493: handle room reordering via drag-and-drop
+  const handleDragEnd = useCallback(
+    async (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id || !project) return;
+
+      const oldIndex = project.rooms.findIndex((r) => r.id === active.id);
+      const newIndex = project.rooms.findIndex((r) => r.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) return;
+
+      const reorderedRooms = [...project.rooms];
+      const [movedRoom] = reorderedRooms.splice(oldIndex, 1);
+      reorderedRooms.splice(newIndex, 0, movedRoom);
+
+      // Optimistic update
+      setProject((prev) =>
+        prev ? { ...prev, rooms: reorderedRooms } : prev
+      );
+
+      const roomIds = reorderedRooms.map((r) => r.id);
+      const result = await reorderRooms(project.id, roomIds);
+      if (!result.success) {
+        // Revert on failure
+        setProject((prev) =>
+          prev
+            ? { ...prev, rooms: project.rooms }
+            : prev
+        );
+        showError("Failed to save room order", true);
+      }
+    },
+    [project, showError]
+  );
 
   /**
    * Explicit refetch through GET /api/projects/[id] (issue #90 retry-state
@@ -862,74 +1038,42 @@ export default function ProjectDetailView({
                 </p>
               </div>
             ) : (
-              <div className="grid gap-8 md:grid-cols-2">
-                {project.rooms.map((room) => {
-                  const inputs = roomEditorInputs(
-                    room,
-                    directives,
-                    inpaintSourceByRoom
-                  );
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext
+                  items={project.rooms.map((r) => r.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  <div className="grid gap-8 md:grid-cols-2">
+                    {project.rooms.map((room) => {
+                      const inputs = roomEditorInputs(
+                        room,
+                        directives,
+                        inpaintSourceByRoom
+                      );
 
-                  return (
-                    <div key={room.id} className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <h3 className="font-medium text-foreground">{room.name}</h3>
-                        <button
-                          type="button"
-                          onClick={() => openEditor(room.id)}
-                          className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-secondary"
-                        >
-                          <PencilRuler className="w-4 h-4" aria-hidden="true" />
-                          Edit staging
-                        </button>
-                      </div>
-
-                      <RoomCanvas
-                        roomId={room.id}
-                        projectId={project.id}
-                        imageUrl={room.beforeImageUrl}
-                        onUploadComplete={(slot, publicUrl) => {
-                          applyRoomUpdate(
-                            room.id,
-                            slot === 1
-                              ? { beforeImageUrl2: publicUrl }
-                              : { beforeImageUrl: publicUrl }
-                          );
-                          router.refresh();
-                        }}
-                      />
-
-                      {inputs.staged && (
-                        <StagedResultImage
-                          afterImageUrl={inputs.staged.afterImageUrl}
-                          alt={inputs.staged.alt}
-                          label={inputs.staged.label}
+                      return (
+                        <SortableRoom
+                          key={room.id}
+                          room={room}
+                          projectId={project.id}
+                          touchUpCountsByRoom={touchUpCountsByRoom}
+                          deletingSlotByRoom={deletingSlotByRoom}
+                          onOpenEditor={openEditor}
+                          onApplyRoomUpdate={applyRoomUpdate}
+                          onHandleStripSelect={handleStripSelect}
+                          onHandleDeleteVariant={handleDeleteVariant}
+                          router={router}
+                          roomInputs={inputs}
                         />
-                      )}
-
-                      {room.beforeImageUrl && (
-                        <VariantThumbnailStrip
-                          roomName={room.name}
-                          originalUrl={room.beforeImageUrl}
-                          pairs={inputs.pairs}
-                          selection={resolveStripSelection(
-                            room.selectedVariantIndex,
-                            inputs.pairs
-                          )}
-                          onSelect={(selection) =>
-                            void handleStripSelect(room, selection)
-                          }
-                          onDeleteVariant={(slot) =>
-                            void handleDeleteVariant(room, slot)
-                          }
-                          deletingSlot={deletingSlotByRoom[room.id] ?? null}
-                          touchUpCounts={touchUpCountsByRoom[room.id] ?? null}
-                        />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+                      );
+                    })}
+                  </div>
+                </SortableContext>
+              </DndContext>
             )}
           </>
         )}
