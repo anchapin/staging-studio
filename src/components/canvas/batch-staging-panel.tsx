@@ -172,6 +172,7 @@ export default function BatchStagingPanel({
   const runningText = activeBatch ? batchProgressText(activeBatch.progress) : null;
 
   // Issue #440: show incremental region progress on the button
+  // Issue #455: thematic mode has no activeBatch (null), so derive progress from selections.length
   const runningStepIndex = activeBatch
     ? activeBatch.progress.steps.findIndex((s) => s.status === "running")
     : -1;
@@ -179,6 +180,8 @@ export default function BatchStagingPanel({
   const buttonProgressText =
     runningStepIndex >= 0
       ? `Staging region ${runningStepIndex + 1} of ${totalSteps}...`
+      : mode === "thematic" && processing
+      ? `Staging ${selections.length} regions...`
       : null;
 
   return (
