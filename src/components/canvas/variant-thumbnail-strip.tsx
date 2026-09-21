@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useState } from "react";
 import { Check, ImageIcon, Loader2, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import type { StagedVariantPair } from "@/lib/staged-result";
 import type { VariantStripSelection } from "@/lib/variant-legibility";
@@ -153,6 +154,11 @@ export default function VariantThumbnailStrip({
                   </span>
                 )}
                 {selected && <SelectedBadge />}
+                <span className="absolute left-1 top-1">
+                  <Badge variant={hasAfter ? "success" : "warning"} size="sm">
+                    {hasAfter ? "Staged" : "Not staged"}
+                  </Badge>
+                </span>
                 {touchUps > 0 && (
                   <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1 py-0.5 text-[10px] font-medium leading-none text-white">
                     {touchUps} touch-up{touchUps === 1 ? "" : "s"}
