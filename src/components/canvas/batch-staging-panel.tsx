@@ -168,6 +168,16 @@ export default function BatchStagingPanel({
 
   const runningText = activeBatch ? batchProgressText(activeBatch.progress) : null;
 
+  // Issue #440: show incremental region progress on the button
+  const runningStepIndex = activeBatch
+    ? activeBatch.progress.steps.findIndex((s) => s.status === "running")
+    : -1;
+  const totalSteps = activeBatch ? activeBatch.progress.steps.length : 0;
+  const buttonProgressText =
+    runningStepIndex >= 0
+      ? `Staging region ${runningStepIndex + 1} of ${totalSteps}...`
+      : null;
+
   return (
     <section
       aria-label="Batch region staging"
@@ -386,7 +396,7 @@ export default function BatchStagingPanel({
           {processing ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-              Staging...
+              {buttonProgressText ?? "Staging..."}
             </>
           ) : (
             "Run batch"
