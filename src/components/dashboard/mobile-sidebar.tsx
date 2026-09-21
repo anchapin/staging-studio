@@ -16,7 +16,8 @@ interface MobileSidebarProps {
 }
 
 /**
- * Mobile/tablet sidebar: off-canvas drawer at md, icon rail at sm.
+ * Mobile/tablet sidebar: off-canvas drawer visible on mobile/tablet,
+ * hidden at lg (1024px+) where the static desktop sidebar is always visible.
  * Extracted from DashboardLayout (issue #283) — the layout is a Server
  * Component and cannot use useState; the interactive drawer lives here.
  */
@@ -25,12 +26,12 @@ export function MobileSidebar({ projects }: MobileSidebarProps) {
 
   return (
     <>
-      {/* Toggle button: visible at md (768px+) to open sidebar drawer */}
+      {/* Toggle button: visible on mobile/tablet only (below lg) to open sidebar drawer */}
       <button
         type="button"
         onClick={() => setOpen(true)}
         aria-label="Open navigation menu"
-        className="fixed left-4 top-4 z-50 flex h-11 w-11 items-center justify-center rounded-md bg-sidebar text-sidebar-foreground shadow-md hover:bg-stone-700 md:flex lg:hidden"
+        className="fixed left-4 top-4 z-50 flex h-11 w-11 items-center justify-center rounded-md bg-sidebar text-sidebar-foreground shadow-md hover:bg-stone-700 lg:hidden"
       >
         <Menu className="h-5 w-5" />
       </button>
