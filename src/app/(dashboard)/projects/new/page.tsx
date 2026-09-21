@@ -20,6 +20,23 @@ const STAGING_AESTHETICS = [
   "Classic Elegant",
 ];
 
+const ROOM_TYPES = [
+  "Primary Bedroom",
+  "Secondary Bedroom",
+  "Living Room",
+  "Dining Room",
+  "Kitchen",
+  "Bathroom",
+  "Home Office",
+  "Guest Bedroom",
+  "Garage",
+  "Laundry Room",
+  "Basement",
+  "Attic",
+  "Entryway",
+  "Media Room",
+];
+
 export default function NewProjectPage() {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
@@ -200,15 +217,22 @@ export default function NewProjectPage() {
           <p className="mt-0.5 text-xs text-stone-500">
             Add each room you will be staging for this property.
           </p>
+          <datalist id="room-type-suggestions">
+            {/* eslint-disable jsx-a11y/control-has-associated-label -- datalist options are suggestions, not form controls */}
+            {ROOM_TYPES.map((type) => (
+              <option key={type} value={type} />
+            ))}
+          </datalist>
           <div className="mt-3 space-y-2">
             {rooms.map((room, index) => (
               <div key={index} className="flex items-center gap-2">
                 <input
                   id={`room-${index}`}
                   type="text"
+                  list="room-type-suggestions"
                   value={room}
                   onChange={(e) => handleRoomChange(index, e.target.value)}
-                  placeholder="e.g. Primary Bedroom"
+                  placeholder="e.g. Living Room"
                   aria-label={`Room ${index + 1}`}
                   className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-stone-900 placeholder:text-stone-400 focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500"
                 />
