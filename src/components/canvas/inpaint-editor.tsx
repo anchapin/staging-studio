@@ -1474,19 +1474,6 @@ export default function InpaintEditor({
           runs go through the shared single-run launcher; per-object plans
           execute sequentially with per-step progress and a retry
           affordance. */}
-      {batchSelections.length > 0 && (
-        <BatchStagingPanel
-          selections={batchSelections}
-          maxObjects={MAX_BATCH_OBJECTS}
-          disabled={isProcessing || conceptLoading}
-          processing={isProcessing}
-          activeBatch={activeBatch}
-          onRun={handleBatchRun}
-          onRetryRemaining={handleBatchRetry}
-          onRemoveLast={handleRemoveLastSelection}
-        />
-      )}
-
       {/* ---- RIGHT PANE: fixed-width control panel ----------------------- */}
       <div
         className={`flex w-full flex-col gap-3 no-print ${
