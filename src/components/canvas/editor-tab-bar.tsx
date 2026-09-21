@@ -78,7 +78,7 @@ export default function EditorTabBar({
             onClick={() => onSelectTab(tab.id)}
             className={`relative -mb-px flex items-center gap-1.5 rounded-t-md border border-b-0 px-3 py-2 text-sm font-medium transition-colors ${
               active
-                ? "border-border bg-background text-foreground"
+                ? "border-border border-b-2 border-b-foreground bg-background text-foreground"
                 : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
             }`}
           >
