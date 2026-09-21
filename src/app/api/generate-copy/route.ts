@@ -105,7 +105,13 @@ export async function POST(request: NextRequest) {
     const room = await prisma.room.findFirst({
       where: { id: roomId, project: { userId: user.id } },
       include: {
-        project: { select: { stagingAesthetic: true, targetBuyer: true } },
+        project: {
+          select: {
+            stagingAesthetic: true,
+            targetBuyer: true,
+            buyerDemographics: true,
+          },
+        },
       },
     });
     if (!room) {
@@ -139,6 +145,9 @@ export async function POST(request: NextRequest) {
         aesthetic: room.project.stagingAesthetic,
         targetBuyer: room.project.targetBuyer,
         rawDirectives: room.rawDirectives,
+        buyerDemographics: (
+          room.project.buyerDemographics as unknown as import("@/lib/prompts").BuyerDemographicsInput | undefined
+        ) ?? undefined,
       }),
     });
 
