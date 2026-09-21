@@ -16,6 +16,7 @@ describe("settingsSchema", () => {
     logoUrl: "",
     psychologyPageContent: "",
     signoffContent: "",
+    darkMode: false,
   };
 
   it("accepts the minimal payload with blank optional fields", () => {
@@ -113,5 +114,22 @@ describe("settingsSchema", () => {
     expect(
       settingsSchema.safeParse({ ...validBase, ownerName: long }).success
     ).toBe(false);
+  });
+
+  it("accepts darkMode as true or false", () => {
+    expect(
+      settingsSchema.safeParse({ ...validBase, darkMode: true }).success
+    ).toBe(true);
+    expect(
+      settingsSchema.safeParse({ ...validBase, darkMode: false }).success
+    ).toBe(true);
+  });
+
+  it("rejects darkMode when not a boolean", () => {
+    for (const darkMode of ["true", 1, null, undefined]) {
+      expect(
+        settingsSchema.safeParse({ ...validBase, darkMode }).success
+      ).toBe(false);
+    }
   });
 });

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getDashboardUserWithProjects } from "@/lib/dashboard-data";
 import { MobileSidebar } from "@/components/dashboard/mobile-sidebar";
+import { ThemeProvider } from "@/components/theme-provider";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +48,9 @@ export default async function DashboardLayout({
 
       {/* Main content */}
       <main id="main-content" tabIndex={-1} className="flex-1 overflow-auto">
-        {children}
+        <ThemeProvider darkMode={userRow?.darkMode ?? false}>
+          {children}
+        </ThemeProvider>
       </main>
     </div>
   );

@@ -26,6 +26,7 @@ import { createSupabaseRequestClient } from "@/lib/supabase";
 
 const dashboardUserSelect = {
   id: true,
+  darkMode: true,
   projects: {
     orderBy: { updatedAt: "desc" },
     select: {

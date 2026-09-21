@@ -19,6 +19,7 @@ model User {
   email                 String?   @unique
   psychologyPageContent String?   // Template for Page 2
   signoffContent        String?   // Template for final page
+  darkMode              Boolean   @default(false)
   createdAt             DateTime  @default(now())
 
   projects Project[]
