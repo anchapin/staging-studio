@@ -1,4 +1,3 @@
-import { TrendingUp, Clock, DollarSign } from "lucide-react";
 import type { ROIMetric } from "./types";
 import { ProposalFooter } from "./proposal-footer";
 
@@ -6,32 +5,29 @@ interface ROIMetricsDashboardProps {
   metrics?: ROIMetric[];
 }
 
-const ICONS = {
-  trending_up: TrendingUp,
-  clock: Clock,
-  dollar: DollarSign,
+const ICON_NAMES = {
+  trending_up: "trending_up",
+  clock: "schedule",
+  dollar: "paid",
 } as const;
 
 const DEFAULT_METRICS: ROIMetric[] = [
   {
     value: "+8–12%",
-    title: "Estimated Sales Price Premium",
-    description:
-      "Generates $480k–$720k equity over vacant baseline based on comparable staged properties in District 7.",
+    title: "Price Premium",
+    description: "Above As-Is Appraisal",
     icon: "trending_up",
   },
   {
     value: "24 Days",
-    title: "Faster Transaction Velocity",
-    description:
-      "62% fewer price adjustments in District 7. Staged homes sell faster with fewer listing price reductions.",
+    title: "Faster Sale Velocity",
+    description: "vs. 43 Day Market Average",
     icon: "clock",
   },
   {
-    value: "$45,000",
-    title: "Recommended Investment Tier",
-    description:
-      "Turnkey physical delivery across 4 zones — furniture placement, artwork, and finishing touches included.",
+    value: "$45K",
+    title: "Avg. Staging Premium",
+    description: "Per $1 Invested in Staging",
     icon: "dollar",
   },
 ];
@@ -46,7 +42,7 @@ export function ROIMetricsDashboard({
           {/* Section header */}
           <div className="text-center space-y-3">
             <p className="font-cinzel text-sm tracking-[0.3em] uppercase text-muted-foreground">
-              ROI Metrics Dashboard
+              Executive ROI Metrics
             </p>
             <h2 className="font-playfair text-4xl font-bold text-foreground">
               The Value of Staging
@@ -55,17 +51,39 @@ export function ROIMetricsDashboard({
           </div>
 
           {/* Metric cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {metrics.map((metric, index) => {
-              const Icon = ICONS[metric.icon];
+              const iconName = ICON_NAMES[metric.icon];
+              const isFirstCard = index === 0;
               return (
                 <div
                   key={index}
-                  className="group relative flex flex-col items-center text-center p-6 bg-white rounded-lg border border-border hover:border-primary transition-colors duration-200 cursor-default"
+                  className="group relative flex flex-col items-center text-center p-5 rounded-xl cursor-default"
+                  style={{
+                    background:
+                      "linear-gradient(to bottom, var(--color-surface-container), var(--color-surface-container-low))",
+                    borderWidth: "1px",
+                    borderStyle: "solid",
+                    borderColor: isFirstCard
+                      ? "color-mix(in oklch, var(--color-tertiary) 20%, transparent)"
+                      : "color-mix(in oklch, var(--color-secondary) 20%, transparent)",
+                  }}
                 >
                   {/* Icon */}
-                  <div className="w-12 h-12 rounded-full bg-primary/10 border border-primary/30 flex items-center justify-center mb-4 group-hover:bg-primary/20 group-hover:border-primary/50 transition-colors duration-200">
-                    <Icon className="w-6 h-6 text-primary" aria-hidden="true" />
+                  <div
+                    className="w-10 h-10 rounded-full flex items-center justify-center mb-3"
+                    style={{ backgroundColor: "color-mix(in oklch, var(--color-secondary) 10%, transparent)" }}
+                    aria-hidden="true"
+                  >
+                    <span
+                      className="material-symbols-outlined icon-md"
+                      style={{
+                        fontVariationSettings: "'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24",
+                        color: "var(--color-secondary)",
+                      }}
+                    >
+                      {iconName}
+                    </span>
                   </div>
 
                   {/* Value */}
@@ -73,13 +91,16 @@ export function ROIMetricsDashboard({
                     {metric.value}
                   </p>
 
-                  {/* Title */}
-                  <p className="font-cinzel text-xs tracking-widest uppercase text-muted-foreground mb-3">
+                  {/* Label */}
+                  <p className="font-jakarta text-sm text-muted-foreground mb-1">
                     {metric.title}
                   </p>
 
-                  {/* Description */}
-                  <p className="font-jakarta text-sm text-muted-foreground leading-relaxed">
+                  {/* Subtext */}
+                  <p
+                    className="font-jakarta text-xs"
+                    style={{ color: "var(--color-tertiary)" }}
+                  >
                     {metric.description}
                   </p>
                 </div>
