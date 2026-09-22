@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { StagingPackageCard } from "@/components/packages";
+import { STAGING_PACKAGES } from "@/lib/staging-packages-schema";
 
 const BUYER_PERSONAS = [
   "young professional couple",
@@ -321,6 +323,7 @@ export default function NewProjectPage() {
     clientName: "",
     targetBuyer: "",
     stagingAesthetic: "",
+    stagingPackage: "",
   });
 
   const [buyerDemographics, setBuyerDemographics] = useState<BuyerDemographics>(
@@ -505,6 +508,30 @@ export default function NewProjectPage() {
               </select>
             </div>
 
+            <fieldset>
+              <legend className="block text-sm font-medium text-stone-700">
+                Staging Package
+              </legend>
+              <p className="mt-0.5 text-xs text-stone-500">
+                Select a pricing tier for this project.
+              </p>
+              <div
+                className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+                role="radiogroup"
+                aria-label="Staging package selection"
+              >
+                {STAGING_PACKAGES.map((pkg) => (
+                  <StagingPackageCard
+                    key={pkg.id}
+                    pkg={pkg}
+                    selected={form.stagingPackage === pkg.id}
+                    onSelect={(id) => setForm({ ...form, stagingPackage: id })}
+                    selectable
+                  />
+                ))}
+              </div>
+            </fieldset>
+
             <div>
               <label
                 htmlFor="room-0"
@@ -555,17 +582,17 @@ export default function NewProjectPage() {
                 + Add another room
               </button>
             </div>
-          </div>
 
-          <div className="flex items-center gap-3 pt-6">
-            <button
-              type="button"
-              onClick={() => setCurrentStep(1)}
-              disabled={!canAdvance}
-              className="rounded-md bg-stone-800 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-700 disabled:opacity-50"
-            >
-              Next: Buyer Demographics
-            </button>
+            <div className="flex items-center gap-3 pt-6">
+              <button
+                type="button"
+                onClick={() => setCurrentStep(1)}
+                disabled={!canAdvance}
+                className="rounded-md bg-stone-800 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-700 disabled:opacity-50"
+              >
+                Next: Buyer Demographics
+              </button>
+            </div>
           </div>
         </div>
 

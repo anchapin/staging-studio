@@ -27,19 +27,20 @@ model User {
 
 // Project model: a single staging job for one property
 model Project {
-  id              String   @id @default(cuid())
-  userId          String
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  propertyAddress String
-  clientName      String
-  targetBuyer     String   // e.g. "young professional couple", "growing family"
+  id               String   @id @default(cuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  propertyAddress  String
+  clientName       String
+  targetBuyer      String   // e.g. "young professional couple", "growing family"
   stagingAesthetic String  // e.g. "Organic Modern Luxury", "Warm Transitional"
+  stagingPackage   String? // e.g. "essential", "premium", "turnkey"
   stagingDirectives String? // Issue #562: global project-wide AI staging directives
   // Buyer Demographics JSON: buyer profile for AI copywriting + ROI metrics (issue #563)
   // Shape: { buyerType, designPreferences[], budgetMin, budgetMax, mustHaveFeatures[], sellTimeline }
   buyerDemographics Json?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   rooms Room[]
 }
