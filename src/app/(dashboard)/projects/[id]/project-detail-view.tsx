@@ -1000,6 +1000,7 @@ export default function ProjectDetailView({
                 )}
                 <InpaintEditor
                   roomId={focusedRoom.id}
+                  roomName={focusedRoom.name}
                   imageUrl={focusedInputs.inpaintImageUrl ?? ""}
                   aesthetic={project.stagingAesthetic}
                   promptDirectives={focusedInputs.roomDirectives.trim()}
