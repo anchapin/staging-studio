@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ChevronRight, GripVertical, PencilRuler } from "lucide-react";
+import { ArrowLeft, ChevronRight, GripVertical, PencilRuler, Check, X, Plus } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -68,6 +68,15 @@ import {
 import { buildPrefill } from "@/lib/prompt-prefill";
 import { StagingPackageCard } from "@/components/packages";
 import { STAGING_PACKAGES } from "@/lib/staging-packages-schema";
+import BatchRoomUpload from "@/components/canvas/batch-room-upload";
+
+const STAGING_AESTHETICS = [
+  "Organic Modern Luxury",
+  "Warm Transitional",
+  "Coastal Minimal",
+  "Urban Industrial",
+  "Classic Elegant",
+];
 
 const MAX_DIRECTIVE_LENGTH = 2000;
 
@@ -110,6 +119,8 @@ interface SortableRoomProps {
   projectId: string;
   touchUpCountsByRoom: Record<string, { 0: number; 1: number }>;
   deletingSlotByRoom: Record<string, VariantSlot | null>;
+  isSelected: boolean;
+  onToggleSelect: (roomId: string) => void;
   onOpenEditor: (roomId: string) => void;
   onApplyRoomUpdate: (roomId: string, patch: Partial<Room>) => void;
   onHandleStripSelect: (room: Room, selection: VariantStripSelection) => void;
@@ -123,6 +134,8 @@ function SortableRoom({
   projectId,
   touchUpCountsByRoom,
   deletingSlotByRoom,
+  isSelected,
+  onToggleSelect,
   onOpenEditor,
   onApplyRoomUpdate,
   onHandleStripSelect,
@@ -150,10 +163,19 @@ function SortableRoom({
     <div
       ref={setNodeRef}
       style={style}
-      className="space-y-3"
+      className={`space-y-3 rounded-lg border-2 transition-colors ${
+        isSelected ? "border-primary bg-primary/5" : "border-transparent"
+      }`}
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => onToggleSelect(room.id)}
+            className="h-4 w-4 rounded border-input text-primary accent-primary"
+            aria-label={`Select ${room.name}`}
+          />
           <button
             type="button"
             className="cursor-grab text-muted-foreground hover:text-foreground touch-none"
@@ -189,6 +211,27 @@ function SortableRoom({
           router.refresh();
         }}
       />
+
+      {room.beforeImageUrl2 && (
+        <div className="border-t border-border pt-3 mt-3">
+          <p className="text-xs text-muted-foreground mb-2 font-medium">Variant B — before</p>
+          <RoomCanvas
+            roomId={room.id}
+            projectId={projectId}
+            imageUrl={room.beforeImageUrl2}
+            variantSlot={1}
+            onUploadComplete={(slot, publicUrl) => {
+              onApplyRoomUpdate(
+                room.id,
+                slot === 1
+                  ? { beforeImageUrl2: publicUrl }
+                  : { beforeImageUrl: publicUrl }
+              );
+              router.refresh();
+            }}
+          />
+        </div>
+      )}
 
       {roomInputs.staged && (
         <StagedResultImage
@@ -320,6 +363,9 @@ export default function ProjectDetailView({
     Record<string, VariantSlot | null>
   >({});
   const { toasts, showError, showSuccess, showInfo, dismissToast } = useToast();
+  const [selectedRoomIds, setSelectedRoomIds] = useState<Set<string>>(new Set());
+  const [showBatchUpload, setShowBatchUpload] = useState(false);
+  const [bulkAesthetic, setBulkAesthetic] = useState<string>("");
 
   // Issue #493: drag-and-drop sensors
   const sensors = useSensors(
@@ -1149,9 +1195,84 @@ export default function ProjectDetailView({
               </section>
             )}
 
-            <h2 className="font-playfair text-xl font-semibold text-foreground mb-6">Rooms</h2>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="font-playfair text-xl font-semibold text-foreground">Rooms</h2>
+              <button
+                type="button"
+                onClick={() => setShowBatchUpload((prev) => !prev)}
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/80"
+              >
+                <Plus className="h-4 w-4" aria-hidden="true" />
+                {showBatchUpload ? "Done adding" : "Add rooms"}
+              </button>
+            </div>
 
-            {project.rooms.length === 0 ? (
+            {showBatchUpload && (
+              <div className="mb-8 rounded-lg border border-border bg-card p-4">
+                <BatchRoomUpload
+                  projectId={project.id}
+                  onRoomsCreated={() => {
+                    router.refresh();
+                    setShowBatchUpload(false);
+                  }}
+                />
+              </div>
+            )}
+
+            {/* Bulk aesthetic toolbar */}
+            {selectedRoomIds.size > 0 && (
+              <div className="mb-4 flex items-center gap-3 rounded-lg border border-primary bg-primary/5 p-3">
+                <span className="text-sm font-medium text-foreground">
+                  {selectedRoomIds.size} room{selectedRoomIds.size !== 1 ? "s" : ""} selected
+                </span>
+                <select
+                  className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground"
+                  value={bulkAesthetic}
+                  onChange={(e) => setBulkAesthetic(e.target.value)}
+                  aria-label="Select aesthetic to apply"
+                >
+                  <option value="">Set aesthetic...</option>
+                  {STAGING_AESTHETICS.map((a) => (
+                    <option key={a} value={a}>{a}</option>
+                  ))}
+                </select>
+                {bulkAesthetic && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const result = await saveProjectMetadata(project.id, {
+                        stagingAesthetic: bulkAesthetic,
+                      });
+                      if (result.success) {
+                        setProject((prev) =>
+                          prev ? { ...prev, stagingAesthetic: bulkAesthetic } : prev
+                        );
+                        showSuccess(`Aesthetic set to "${bulkAesthetic}"`);
+                        setBulkAesthetic("");
+                        setSelectedRoomIds(new Set());
+                      } else {
+                        showError(result.error ?? "Failed to update aesthetic");
+                      }
+                    }}
+                    className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1 text-sm font-medium text-primary-foreground hover:bg-primary/80"
+                  >
+                    <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                    Apply to {selectedRoomIds.size} room{selectedRoomIds.size !== 1 ? "s" : ""}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSelectedRoomIds(new Set())}
+                  className="ml-auto inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-sm text-muted-foreground hover:bg-secondary"
+                  aria-label="Clear selection"
+                >
+                  <X className="h-3.5 w-3.5" aria-hidden="true" />
+                  Clear
+                </button>
+              </div>
+            )}
+
+            {project.rooms.length === 0 && !showBatchUpload ? (
               <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border p-12 text-center">
                 <svg
                   className="mb-3 h-12 w-12 text-muted-foreground"
@@ -1169,7 +1290,7 @@ export default function ProjectDetailView({
                 </svg>
                 <p className="font-medium text-foreground">No rooms yet</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Upload a room photo to begin staging
+                  Click &ldquo;Add rooms&rdquo; to batch upload room photos with AI-detected types
                 </p>
               </div>
             ) : (
@@ -1197,6 +1318,15 @@ export default function ProjectDetailView({
                           projectId={project.id}
                           touchUpCountsByRoom={touchUpCountsByRoom}
                           deletingSlotByRoom={deletingSlotByRoom}
+                          isSelected={selectedRoomIds.has(room.id)}
+                          onToggleSelect={(id) =>
+                            setSelectedRoomIds((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(id)) next.delete(id);
+                              else next.add(id);
+                              return next;
+                            })
+                          }
                           onOpenEditor={openEditor}
                           onApplyRoomUpdate={applyRoomUpdate}
                           onHandleStripSelect={handleStripSelect}
