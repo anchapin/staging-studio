@@ -12,6 +12,12 @@ interface ComparisonSliderProps {
   /** Visible label for the after image, e.g. "Variant B — staged". */
   afterLabel: string;
   largeImage?: boolean;
+  /**
+   * Issue #623: Report/lookbook mode.
+   * Enables hover-position mode (no drag needed on desktop), passive reveal animation,
+   * drag-to-compare tooltip, mobile progress bar, and hidden handle.
+   */
+  report?: boolean;
 }
 
 const GRID_IMAGE_SIZES =
@@ -27,8 +33,10 @@ export default function ComparisonSlider({
   afterAlt,
   afterLabel,
   largeImage = false,
+  report = false,
 }: ComparisonSliderProps) {
-  const [sliderPosition, setSliderPosition] = useState(50);
+  const [sliderPosition, setSliderPosition] = useState(0);
+  const [revealed, setRevealed] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [containerRect, setContainerRect] = useState<DOMRect | null>(null);
@@ -36,9 +44,32 @@ export default function ComparisonSlider({
     width: number;
     height: number;
   } | null>(null);
+  const [tooltipVisible, setTooltipVisible] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const hasRevealed = useRef(false);
 
   const imageSizes = largeImage ? FOCUSED_IMAGE_SIZES : GRID_IMAGE_SIZES;
+
+  // Issue #623: passive reveal animation — on first load animate 0 → 50% over 800ms
+  useEffect(() => {
+    if (!report || hasRevealed.current) return;
+    hasRevealed.current = true;
+
+    // Small delay to let the image render first
+    const animTimer = setTimeout(() => {
+      setRevealed(true);
+      setSliderPosition(50);
+      // Show tooltip briefly after animation completes
+      const tooltipTimer = setTimeout(() => {
+        setTooltipVisible(true);
+        const fadeTimer = setTimeout(() => setTooltipVisible(false), 2000);
+        return () => clearTimeout(fadeTimer);
+      }, 800);
+      return () => clearTimeout(tooltipTimer);
+    }, 100);
+
+    return () => clearTimeout(animTimer);
+  }, [report]);
 
   const updateRect = useCallback(() => {
     if (containerRef.current) {
@@ -107,6 +138,23 @@ export default function ComparisonSlider({
     []
   );
 
+  // Hover mode: track mouse position when hovering (report mode, desktop only)
+  const handleMouseMove = useCallback(
+    (e: MouseEvent) => {
+      if (!report || isDragging) return;
+      handleMove(e.clientX);
+    },
+    [report, isDragging, handleMove]
+  );
+
+  useEffect(() => {
+    if (!report) return;
+    const el = containerRef.current;
+    if (!el) return;
+    el.addEventListener("mousemove", handleMouseMove);
+    return () => el.removeEventListener("mousemove", handleMouseMove);
+  }, [report, handleMouseMove]);
+
   useEffect(() => {
     if (!isDragging) return;
 
@@ -135,6 +183,9 @@ export default function ComparisonSlider({
     };
   }, [isDragging, handleMove]);
 
+  // In report hover mode, show handle only when dragging
+  const showHandle = !report || isDragging;
+
   return (
     <div
       ref={containerRef}
@@ -150,9 +201,11 @@ export default function ComparisonSlider({
       aria-valuenow={sliderPosition}
       aria-valuemin={0}
       aria-valuemax={100}
-      onMouseDown={handleMouseDown}
+      onMouseDown={report ? undefined : handleMouseDown}
       onTouchStart={handleTouchStart}
       onKeyDown={handleKeyDown}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
     >
       {/* Before image (bottom layer) */}
       <div className="absolute inset-0">
@@ -169,7 +222,13 @@ export default function ComparisonSlider({
       {/* After image (top layer, clipped by slider position) */}
       <div
         className="absolute inset-0"
-        style={{ clipPath: `inset(0 ${100 - sliderPosition}% 0 0)` }}
+        style={{
+          clipPath: `inset(0 ${100 - sliderPosition}% 0 0)`,
+          // Issue #623: passive reveal animation — animate from 0% to 50%
+          transition: revealed
+            ? "clip-path 0s"
+            : "clip-path 800ms cubic-bezier(0.16, 1, 0.3, 1)",
+        }}
       >
         <Image
           src={afterImageUrl}
@@ -182,51 +241,96 @@ export default function ComparisonSlider({
       </div>
 
       {/* Slider handle — transparent 44px hit area wrapping the visual 28px handle */}
-      <div
-        className="absolute top-0 bottom-0 w-11 cursor-ew-resize z-10"
-        style={{ left: `${sliderPosition}%`, transform: "translateX(-50%)" }}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
-      >
-        {/* 1px visual line — Issue #645 */}
-        <div className="absolute inset-0 w-0.5 bg-secondary pointer-events-none" />
-        {/* Center circle handle — Issue #645 */}
+      {/* Issue #623: hidden in hover mode (report) unless actively dragging */}
+      {showHandle && (
         <div
-          className={`
-            absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2
-            w-7 h-7 rounded-full
-            bg-atelier-primary
-            flex items-center justify-center
-            transition-transform duration-150
-            ${isDragging ? "scale-105 cursor-grabbing" : isHovered ? "scale-110" : ""}
-            ${isHovered || isDragging ? "shadow-handle-hover" : ""}
-          `}
+          className="absolute top-0 bottom-0 w-11 cursor-ew-resize z-10"
+          style={{ left: `${sliderPosition}%`, transform: "translateX(-50%)" }}
+          onMouseDown={report ? undefined : handleMouseDown}
         >
-          {/* Drag indicator icon — 3 horizontal grip dots */}
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="white"
-            className="pointer-events-none"
+          {/* 1px visual line — Issue #645 */}
+          <div className="absolute inset-0 w-0.5 bg-secondary pointer-events-none" />
+          {/* Center circle handle — Issue #645 */}
+          <div
+            className={`
+              absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2
+              w-7 h-7 rounded-full
+              bg-atelier-primary
+              flex items-center justify-center
+              transition-transform duration-150
+              ${isDragging ? "scale-105 cursor-grabbing" : isHovered ? "scale-110" : ""}
+              ${isHovered || isDragging ? "shadow-handle-hover" : ""}
+            `}
           >
-            <circle cx="8" cy="6" r="1.5" />
-            <circle cx="16" cy="6" r="1.5" />
-            <circle cx="8" cy="12" r="1.5" />
-            <circle cx="16" cy="12" r="1.5" />
-            <circle cx="8" cy="18" r="1.5" />
-            <circle cx="16" cy="18" r="1.5" />
-          </svg>
+            {/* Drag indicator icon — 3 horizontal grip dots */}
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="white"
+              className="pointer-events-none"
+            >
+              <circle cx="8" cy="6" r="1.5" />
+              <circle cx="16" cy="6" r="1.5" />
+              <circle cx="8" cy="12" r="1.5" />
+              <circle cx="16" cy="12" r="1.5" />
+              <circle cx="8" cy="18" r="1.5" />
+              <circle cx="16" cy="18" r="1.5" />
+            </svg>
+          </div>
         </div>
+      )}
+
+      {/* Labels — Issue #644 / #623 */}
+      {/* Before pill: always visible, top-left */}
+      <div className="absolute left-3 top-3 pointer-events-none z-10">
+        <ComparisonPill variant="report">Before</ComparisonPill>
+      </div>
+      {/* After pill: always visible, top-right with terracotta dot prefix */}
+      <div className="absolute right-3 top-3 pointer-events-none z-10">
+        <ComparisonPill variant="after" showDot>
+          {afterLabel}
+        </ComparisonPill>
       </div>
 
-      {/* Labels — Issue #644: ComparisonPill styling */}
-      <div className="absolute left-3 top-3 pointer-events-none">
-        <ComparisonPill variant="studio">{afterLabel}</ComparisonPill>
-      </div>
-      <div className="absolute right-3 top-3 pointer-events-none">
-        <ComparisonPill variant="studio">Original</ComparisonPill>
-      </div>
+      {/* Issue #623: "drag to compare" tooltip — fades after initial reveal */}
+      {report && tooltipVisible && !isDragging && (
+        <div
+          className="absolute bottom-4 left-1/2 -translate-x-1/2 pointer-events-none z-20 animate-tooltip-fade"
+          aria-hidden="true"
+        >
+          <span className="inline-flex items-center gap-1.5 bg-stone-800/80 text-white text-xs font-jakarta px-3 py-1.5 rounded-full backdrop-blur-sm">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M5 9l-3 3 3 3" />
+              <path d="M9 5l3-3 3 3" />
+              <path d="M15 19l-3 3-3-3" />
+              <path d="M19 9l3 3-3 3" />
+              <line x1="2" y1="12" x2="22" y2="12" />
+              <line x1="12" y1="2" x2="12" y2="22" />
+            </svg>
+            drag to compare
+          </span>
+        </div>
+      )}
+
+      {/* Issue #623: Mobile progress bar — bottom of slider */}
+      {report && (
+        <div className="absolute bottom-0 left-0 right-0 h-1 bg-stone-200/50 z-10">
+          <div
+            className="h-full bg-secondary/70 transition-all duration-75"
+            style={{ width: `${sliderPosition}%` }}
+          />
+        </div>
+      )}
     </div>
   );
 }

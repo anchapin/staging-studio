@@ -19,10 +19,13 @@ export function ComparisonPill({
   variant = "studio",
   children,
   className,
+  showDot = false,
 }: {
   variant?: "studio" | "report" | "after";
   children: React.ReactNode;
   className?: string;
+  /** Render a terracotta dot prefix before the label (used for "After" pill in report context). */
+  showDot?: boolean;
 }) {
   const base =
     "inline-flex items-center gap-1.5 rounded-full px-3 py-1 label-sm font-semibold uppercase tracking-wider";
@@ -41,6 +44,12 @@ export function ComparisonPill({
         className
       )}
     >
+      {showDot && (
+        <span
+          className="inline-block w-1.5 h-1.5 rounded-full bg-secondary flex-shrink-0"
+          aria-hidden="true"
+        />
+      )}
       {children}
     </span>
   );
