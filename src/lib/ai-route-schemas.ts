@@ -255,3 +255,55 @@ export const visionLabelOutputSchema = z.object({
     )
     .max(VISION_LABEL_MAX_CROPS),
 });
+
+/**
+ * Zod schema for the inpaint pre-flight quality gate output (issue #600).
+ *
+ * One batched GPT-4o-mini evaluation run BEFORE `fal.queue.submit` to catch
+ * costly directive mistakes before they enter the fal.ai queue:
+ * - `specificity`: score 0–3 on how concrete vs generic the directives are
+ * - `architecture_risk`: noul — populated ONLY when directives ask to change
+ *   walls/flooring/windows/trim/doors/ceiling that the furnishings mask does
+ *   not cover (i.e. the masked region won't hide the architectural change)
+ * - `mentions_furnishings`: noul — populated ONLY when the directives describe
+ *   the thing the mask actually covers (positive signal that the mask aligns
+ *   with the stated intent)
+ * - `qualityWarnings`: distinct warning strings; advisory only, never blocks
+ *   submit; client deduplicates per-room on render
+ *
+ * Side effects: none (pure evaluation); the fal.ai inpaint call is gated
+ * separately by `assertFalConfigured()`/`FAL_KEY`.
+ */
+export const inpaintQualityGateSchema = z.object({
+  specificity: z.number().int().min(0).max(3),
+  architecture_risk: z.string().optional(),
+  mentions_furnishings: z.string().optional(),
+  qualityWarnings: z.array(z.string()),
+});
+
+/**
+ * Zod schema for the copy quality gate output (issue #600).
+ *
+ * One batched GPT-4o-mini evaluation run BETWEEN `generateObject` and
+ * `saveRoomCopy` to surface copy quality issues before they are persisted:
+ * - `specificity`: score 0–3 — concrete vs generic filler (cf.
+ *   `GENERIC_FILLER` in `lookbook-pillars.ts`)
+ * - `buyer_aligned`: noul — populated when copy doesn't speak to the target
+ *   buyer persona
+ * - `checklist_actionable`: noul — populated when checklist items are vague
+ *   or non-actionable
+ * - `aesthetic_consistent`: noul — populated when copy contradicts the
+ *   staging aesthetic
+ * - `qualityWarnings`: distinct warning strings; advisory only, never blocks
+ *   save; client deduplicates per-room on render
+ *
+ * Side effects: none (pure evaluation); the OpenAI call is gated by
+ * `assertOpenAIConfigured()`/`OPENAI_API_KEY`.
+ */
+export const copyQualityGateSchema = z.object({
+  specificity: z.number().int().min(0).max(3),
+  buyer_aligned: z.string().optional(),
+  checklist_actionable: z.string().optional(),
+  aesthetic_consistent: z.string().optional(),
+  qualityWarnings: z.array(z.string()),
+});
