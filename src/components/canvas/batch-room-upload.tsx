@@ -437,6 +437,9 @@ export default function BatchRoomUpload({
                 {/* File info */}
                 <div className="p-2">
                   <p className="truncate text-xs font-medium text-foreground">
+                    {(file.status === "uploading" || file.status === "detecting" || file.status === "creating") && (
+                      <span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-secondary stage-pulse" aria-hidden="true" />
+                    )}
                     {file.roomType}
                   </p>
                   <p className="truncate text-xs text-muted-foreground">
