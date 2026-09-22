@@ -2215,6 +2215,7 @@ export default function InpaintEditor({
               )}
             </div>
           </div>
+          </div>
         </CollapsibleSection>
 
         {/* Issue #561: Version History — collapsible panel at the bottom of the
