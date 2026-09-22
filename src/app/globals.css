@@ -445,6 +445,19 @@ button .material-symbols-outlined,
   }
 }
 
+/* Issue #617: collapsed inspector rail fade/slide-in (spec: rail expand
+   is an opacity/transform fade over 300ms). */
+@keyframes inspectorRailShow {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
 /* Issue #641: Stage Status Pulse Animation — subtle animated indicator showing
    that a room is in active AI staging processing. */
 @keyframes stage-pulse {
