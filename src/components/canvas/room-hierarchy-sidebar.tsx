@@ -3,8 +3,15 @@
 import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { ChevronDown, ChevronRight, Settings, FolderOpen, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, DoorOpen, FolderOpen, Plus, Settings } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import {
+  WORKBENCH_SIDEBAR_SURFACE_CLASSES,
+  resolveWorkbenchRoomItemState,
+  workbenchRoomIndicator,
+  workbenchRoomItemClasses,
+  workbenchSidebarWidthClass,
+} from "@/lib/workbench-layout";
 
 /**
  * Status for a room or camera variant in the hierarchy sidebar.
@@ -37,6 +44,21 @@ export interface HierarchyRoom {
   thumbnailUrl?: string | null;
   cameras: RoomCamera[];
   isActive: boolean;
+  /**
+   * Issue #620: count of completed staged variants — drives the "n Ready"
+   * list badge. Defaults to counting staged/ready cameras.
+   */
+  readyVariantCount?: number;
+  /**
+   * Issue #620: pending task label shown as the room's badge (e.g.
+   * "Declutter"). Only shown while the room is in the pending state.
+   */
+  pendingTaskLabel?: string | null;
+  /**
+   * Issue #620: whether the room has any photo at all — false renders the
+   * dimmed "Empty" state. Defaults to derived-from-cameras.
+   */
+  hasPhotos?: boolean;
 }
 
 /** Derive camera status from image URLs. */
@@ -128,9 +150,9 @@ export default function RoomHierarchySidebar({
 
   return (
     <aside
-      className={`relative flex flex-col border-r border-border bg-card transition-all duration-300 ease-in-out ${
-        isCollapsed ? "w-0 overflow-hidden" : "w-64"
-      }`}
+      className={`relative flex flex-col transition-all duration-300 ease-in-out ${workbenchSidebarWidthClass(
+        isCollapsed
+      )} ${WORKBENCH_SIDEBAR_SURFACE_CLASSES}`}
       aria-label="Room hierarchy sidebar"
       aria-hidden={isCollapsed}
     >
@@ -187,6 +209,27 @@ export default function RoomHierarchySidebar({
         <ul className="flex flex-col gap-0.5">
           {rooms.map((room) => {
             const isExpanded = expandedRooms.has(room.id);
+            // Issue #620: room-list item state (active / pending / ready /
+            // empty) drives the row's border, background, icon color, and
+            // status indicator. Explicit props win; cameras are the fallback.
+            const readyCount =
+              room.readyVariantCount ??
+              room.cameras.filter(
+                (c) => c.status === "staged" || c.status === "ready"
+              ).length;
+            const hasPhotos =
+              room.hasPhotos ?? room.cameras.some((c) => c.status !== "pending");
+            const itemState = resolveWorkbenchRoomItemState({
+              isActive: room.isActive,
+              hasPhotos,
+              readyVariantCount: readyCount,
+            });
+            const itemClasses = workbenchRoomItemClasses(itemState);
+            const indicator = workbenchRoomIndicator(
+              itemState,
+              readyCount,
+              room.pendingTaskLabel
+            );
             return (
               <li key={room.id}>
                 {/* Room header row */}
@@ -196,11 +239,7 @@ export default function RoomHierarchySidebar({
                     onSelectRoom(room.id);
                     toggleRoom(room.id);
                   }}
-                  className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
-                    room.isActive
-                      ? "border-l-2 border-secondary bg-card text-foreground font-medium"
-                      : "border-l-2 border-transparent text-muted-foreground hover:bg-accent hover:text-foreground"
-                  }`}
+                  className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm transition-colors ${itemClasses.container}`}
                   aria-expanded={isExpanded}
                   aria-controls={`room-cameras-${room.id}`}
                 >
@@ -217,22 +256,30 @@ export default function RoomHierarchySidebar({
                     />
                   )}
 
-                  {/* Status dot */}
-                  <span
-                    className={`h-2 w-2 flex-shrink-0 rounded-full ${
-                      room.isActive ? "bg-secondary" : "bg-muted-foreground/40"
-                    }`}
+                  {/* Room icon — terracotta when active, outline otherwise */}
+                  <DoorOpen
+                    className={`h-3.5 w-3.5 flex-shrink-0 ${itemClasses.icon}`}
                     aria-hidden="true"
                   />
 
                   {/* Room name */}
                   <span className="truncate flex-1">{room.name}</span>
 
-                  {/* Inline camera count summary when collapsed */}
-                  {!isExpanded && room.cameras.length > 0 && (
-                    <span className="text-xs text-muted-foreground">
-                      {room.cameras.length}
-                    </span>
+                  {/* Status indicator: dot when active, badge otherwise
+                      (Issue #620 room item states) */}
+                  {indicator.kind === "dot" ? (
+                    <span
+                      className="h-2 w-2 flex-shrink-0 rounded-full bg-secondary"
+                      aria-hidden="true"
+                    />
+                  ) : (
+                    <Badge
+                      variant="outline"
+                      size="sm"
+                      className="flex-shrink-0 text-[10px]"
+                    >
+                      {indicator.text}
+                    </Badge>
                   )}
                 </button>
 
