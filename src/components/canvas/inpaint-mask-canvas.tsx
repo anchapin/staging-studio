@@ -18,8 +18,8 @@ import {
 } from "@/lib/mask-dilation";
 import { fillHoles } from "@/lib/mask-postprocess";
 
-/** Tools for building the mask: freehand paint, flood-fill, or concept select. */
-export type MaskTool = "brush" | "fill" | "select";
+/** Tools for building the mask: freehand paint, flood-fill, concept select, or utility. */
+export type MaskTool = "brush" | "fill" | "select" | "pointer" | "eraser" | "lasso" | "eyedropper" | "pan";
 
 /**
  * Rank→color palette for instance overlays (issue #228). Six hues,
