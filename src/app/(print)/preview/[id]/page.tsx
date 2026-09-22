@@ -47,6 +47,7 @@ const getPreviewProject = cache(async (id: string) =>
       clientSignature: true,
       clientSignatureStatus: true,
       clientSignatureTimestamp: true,
+      buyerDemographics: true,
       user: {
         select: {
           firmName: true,
@@ -189,6 +190,7 @@ export default async function LookbookPreviewPage({
     clientSignatureTimestamp: project.clientSignatureTimestamp
       ? project.clientSignatureTimestamp.toISOString()
       : null,
+    buyerDemographics: (project.buyerDemographics as PreviewProject["buyerDemographics"]) ?? null,
     user: {
       firmName: project.user.firmName,
       ownerName: project.user.ownerName,

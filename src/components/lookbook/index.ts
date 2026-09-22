@@ -1,3 +1,4 @@
+export { BuyerPersonaPage } from "./buyer-persona-page";
 export { CoverPage } from "./cover-page";
 export { FurnitureProcurementTable } from "./furniture-procurement-table";
 export { MaterialSwatchChip } from "./material-swatch-chip";
@@ -15,4 +16,5 @@ export type {
   ProjectData,
   LookbookRoomData,
   ROIMetric,
+  BuyerDemographics,
 } from "./types";
