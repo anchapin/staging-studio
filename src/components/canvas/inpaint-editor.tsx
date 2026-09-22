@@ -63,6 +63,10 @@ import {
   type InstanceMaskGrid,
   type PerObjectBatchPlan,
 } from "@/lib/multi-select-batch";
+import VersionHistoryPanel, {
+  generateThumbnailFromUrl,
+} from "./version-history-panel";
+import { saveInpaintVersion } from "@/app/actions/inpaint-versions";
 
 interface InpaintEditorProps {
   roomId: string;
@@ -84,6 +88,11 @@ interface InpaintEditorProps {
   /** Source of the pending run, reconstructed from its persisted row. */
   pendingSource?: InpaintSource | null;
   onInpaintComplete?: (resultImageUrl: string, source: InpaintSource) => void;
+  /**
+   * Issue #561: the current "after" result URL for the variant slot being edited.
+   * Used to highlight the active version in the VersionHistoryPanel.
+   */
+  currentResultUrl?: string | null;
   /**
    * Issue #230: reports the active labeled concept selection — the label
    * when exactly one labeled selection is active, null otherwise. The
@@ -429,6 +438,7 @@ export default function InpaintEditor({
   secondaryPane,
   onDirectivesChange,
   directivesValue,
+  currentResultUrl,
 }: InpaintEditorProps) {
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
   const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
@@ -441,6 +451,10 @@ export default function InpaintEditor({
   const [includeFloorShadow, setIncludeFloorShadow] = useState(false);
   // Issue #460: comparison now via staged result image click in secondary pane
   const { toasts, showError, showSuccess, dismissToast } = useToast();
+
+  // Issue #561: tracks the active result URL for the version history panel.
+  // Updated on inpaint completion; also initialized from prop when provided.
+  const [activeResultUrl, setActiveResultUrl] = useState<string | null>(currentResultUrl ?? null);
 
   // Concept-selection state (issue #228): the detection concept drives
   // ONE billed call per (image, concept); clicks only toggle instances
@@ -792,7 +806,29 @@ export default function InpaintEditor({
   const { isProcessing, statusText, start } = useInpaintStatus({
     onCompleted: (resultImageUrl) => {
       batchOutcomeRef.current = { kind: "completed", url: resultImageUrl };
+      // Update the active result URL for the version history panel (issue #561)
+      setActiveResultUrl(resultImageUrl);
       onInpaintComplete?.(resultImageUrl, runSourceRef.current);
+      // Issue #561: save the completed version to the history. Thumbnail
+      // generation requires browser canvas, so run it here. Errors are
+      // non-fatal — the version row is best-effort.
+      if (typeof window !== "undefined" && resultImageUrl) {
+        void (async () => {
+          try {
+            const thumbnailDataUrl = await generateThumbnailFromUrl(resultImageUrl, 200);
+            await saveInpaintVersion({
+              roomId,
+              variantSlot,
+              resultUrl: resultImageUrl,
+              thumbnailDataUrl,
+              seed: undefined,
+              promptDirectives,
+            });
+          } catch (err) {
+            console.error("[inpaint-editor] failed to save inpaint version:", err);
+          }
+        })();
+      }
     },
     showSuccess: (message) => {
       if (!batchActiveRef.current) showSuccess(message);
@@ -1851,6 +1887,17 @@ export default function InpaintEditor({
             </div>
           </div>
         </div>
+
+        {/* Issue #561: Version History — collapsible panel at the bottom of the
+            right pane, showing thumbnails of previous inpaint results. */}
+        <VersionHistoryPanel
+          roomId={roomId}
+          variantSlot={variantSlot}
+          activeResultUrl={activeResultUrl}
+          onRestored={(resultUrl) => {
+            setActiveResultUrl(resultUrl);
+          }}
+        />
       </div>
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />

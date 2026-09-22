@@ -110,6 +110,7 @@ export async function POST(request: NextRequest) {
             stagingAesthetic: true,
             targetBuyer: true,
             stagingDirectives: true,
+            buyerDemographics: true,
           },
         },
       },
@@ -149,6 +150,9 @@ export async function POST(request: NextRequest) {
         targetBuyer: room.project.targetBuyer,
         rawDirectives: room.rawDirectives ?? "",
         globalDirectives: room.project.stagingDirectives ?? undefined,
+        buyerDemographics: (
+          room.project.buyerDemographics as unknown as import("@/lib/prompts").BuyerDemographicsInput | undefined
+        ) ?? undefined,
       }),
     });
 

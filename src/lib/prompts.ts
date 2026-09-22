@@ -1,3 +1,12 @@
+export interface BuyerDemographicsInput {
+  buyerType: string;
+  designPreferences: string[];
+  budgetMin: number;
+  budgetMax: number;
+  mustHaveFeatures: string[];
+  sellTimeline: string;
+}
+
 export interface CopyPromptInput {
   roomName: string;
   aesthetic: string;
@@ -6,6 +15,7 @@ export interface CopyPromptInput {
   rawDirectives: string;
   /** Issue #562: Global project-level directives applied to every room. */
   globalDirectives?: string;
+  buyerDemographics?: BuyerDemographicsInput;
 }
 
 export const NEGATIVE_PROMPT =
@@ -80,17 +90,79 @@ export function mergeDirectives(
  * Side effects: none (pure).
  */
 export function buildCopyPrompt(input: CopyPromptInput): string {
-  const { roomName, aesthetic, targetBuyer, rawDirectives, globalDirectives } = input;
+  const { roomName, aesthetic, targetBuyer, rawDirectives, globalDirectives, buyerDemographics } = input;
 
   // Issue #562: merge global + room directives
   const mergedDirectives = mergeDirectives(globalDirectives, rawDirectives);
+
+  let demographicsBlock = "";
+  if (buyerDemographics) {
+    const {
+      buyerType,
+      designPreferences,
+      budgetMin,
+      budgetMax,
+      mustHaveFeatures,
+      sellTimeline,
+    } = buyerDemographics;
+
+    const timelineLabel: Record<string, string> = {
+      under_30_days: "Under 30 days (urgent)",
+      "30_60_days": "30-60 days",
+      "60_90_days": "60-90 days",
+      over_90_days: "Over 90 days",
+    };
+
+    const buyerTypeLabel: Record<string, string> = {
+      young_professional: "Young Professional",
+      growing_family: "Growing Family",
+      downsizing_retiree: "Downsizing Retiree",
+      investor: "Investor",
+      luxury_buyer: "Luxury Buyer",
+      first_time_homebuyer: "First-Time Homebuyer",
+      serial_renovator: "Serial Renovator",
+    };
+
+    const featureLabel: Record<string, string> = {
+      home_office: "Home Office",
+      open_plan: "Open Plan Living",
+      outdoor_space: "Outdoor Space",
+      gourmet_kitchen: "Gourmet Kitchen",
+      master_suite: "Master Suite",
+      smart_home: "Smart Home Features",
+      energy_efficient: "Energy Efficiency",
+      multigenerational: "Multigenerational Living",
+      home_gym: "Home Gym",
+      pet_friendly: "Pet-Friendly Features",
+    };
+
+    const prefsLabel: Record<string, string> = {
+      contemporary: "Contemporary",
+      traditional: "Traditional",
+      minimalist: "Minimalist",
+      maximalist: "Maximalist",
+      coastal: "Coastal",
+      industrial: "Industrial",
+      midcentury_modern: "Mid-Century Modern",
+      scandinavian: "Scandinavian",
+      bohemian: "Bohemian",
+      transitional: "Transitional",
+    };
+
+    demographicsBlock = `
+- Buyer Type: ${buyerTypeLabel[buyerType] ?? buyerType}
+- Design Preferences: ${designPreferences.map((p) => prefsLabel[p] ?? p).join(", ")}
+- Budget Range: $${budgetMin}k - $${budgetMax}k
+- Must-Have Features: ${mustHaveFeatures.map((f) => featureLabel[f] ?? f).join(", ")}
+- Sell Timeline: ${timelineLabel[sellTimeline] ?? sellTimeline}`;
+  }
 
   return `You are a professional home staging copywriter for a staging company.
 
 Generate structured copywriting for a room with the following details:
 - Room: ${roomName}
 - Design Aesthetic: ${aesthetic}
-- Target Buyer: ${targetBuyer}
+- Target Buyer: ${targetBuyer}${demographicsBlock}
 - Staging Directives: ${mergedDirectives}
 
 Based on the room details and staging directives, generate:
