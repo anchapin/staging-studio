@@ -35,6 +35,9 @@ const getOwnedLookbookProject = cache(async (projectId: string) => {
       roiSalesPricePremium: true,
       roiTransactionVelocity: true,
       roiInvestmentTier: true,
+      clientSignature: true,
+      clientSignatureStatus: true,
+      clientSignatureTimestamp: true,
       user: {
         select: {
           firmName: true,
