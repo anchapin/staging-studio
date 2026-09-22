@@ -1,9 +1,13 @@
+import { generateObject } from "ai";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { fal } from "@/lib/fal";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
-import { inpaintRequestSchema } from "@/lib/ai-route-schemas";
+import {
+  inpaintRequestSchema,
+  inpaintQualityGateSchema,
+} from "@/lib/ai-route-schemas";
 import { classifyIntegrationError } from "@/lib/error-classify";
 import {
   DEFAULT_DAILY_INPAINT_LIMIT,
@@ -18,6 +22,7 @@ import {
   buildFalFillPayload,
   buildInpaintPrompt,
 } from "@/lib/prompts";
+import { aiModel, assertOpenAIConfigured } from "@/lib/ai";
 
 const INPAINT_ERROR_COPY = {
   auth: {
@@ -49,6 +54,10 @@ const inpaintSubmitSchema = inpaintRequestSchema.extend({
     .refine((value) => value === 0 || value === 1)
     .nullable()
     .optional(),
+  // Issue #600: mask coverage ratio computed client-side via
+  // `estimateMaskCoverage` — passed up so the quality gate can evaluate
+  // whether the mask aligns with the stated directive intent.
+  maskCoverageRatio: z.number().min(0).max(1).optional(),
 });
 
 type FalQueueSubmitFunction = (
@@ -121,7 +130,7 @@ export async function POST(request: NextRequest) {
 
     const room = await prisma.room.findFirst({
       where: { id: roomId, project: { userId: user.id } },
-      select: { id: true, afterImageUrl: true, afterImageUrl2: true },
+      select: { id: true, name: true, afterImageUrl: true, afterImageUrl2: true },
     });
     if (!room) {
       return NextResponse.json(
@@ -151,6 +160,43 @@ export async function POST(request: NextRequest) {
 
     const prompt = buildInpaintPrompt(aesthetic, promptDirectives);
 
+    // Issue #600: inpaint pre-flight quality gate — evaluate directive quality
+    // before spending fal.ai budget. Runs after quota check + validation, before
+    // fal.queue.submit. Advisory only; warnings ride along with the submission.
+    const qualityWarnings: string[] = [];
+    if (parsed.data.maskCoverageRatio !== undefined) {
+      assertOpenAIConfigured();
+      const { object: qg } = await generateObject({
+        model: aiModel,
+        schema: inpaintQualityGateSchema,
+        messages: [
+          {
+            role: "user",
+            content: [
+              `You are a staging quality auditor. Evaluate the inpaint directive for a room named "${room.name}".`,
+              "",
+              `Mask coverage ratio: ${(parsed.data.maskCoverageRatio * 100).toFixed(1)}% of the canvas is masked for regeneration.`,
+              "",
+              `Directives: "${promptDirectives}"`,
+              "",
+              "Evaluate:",
+              "1. specificity (0–3): 0=completely generic/vague, 3=highly specific and concrete",
+              "2. architecture_risk: if the directives mention changing walls, flooring, windows, trim, doors, or ceiling AND the mask does not cover those areas, explain the risk",
+              "3. mentions_furnishings: if the directives describe what the mask actually covers (the furnishings/objects being staged), note that the alignment is positive",
+              "",
+              "Return a JSON object with: specificity (number 0-3), architecture_risk (string only if risk exists), mentions_furnishings (string only if positive), qualityWarnings (array of distinct warning strings).",
+            ].join("\n"),
+          },
+        ],
+      });
+      if (qg.architecture_risk) {
+        qualityWarnings.push(qg.architecture_risk);
+      }
+      if (qg.qualityWarnings) {
+        qualityWarnings.push(...qg.qualityWarnings);
+      }
+    }
+
     // Fire-and-forget submit: returns as soon as the job is queued (~2s),
     // instead of holding the request open for the full generation.
     const falQueueSubmit = fal.queue.submit as FalQueueSubmitFunction;
@@ -179,7 +225,10 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    return NextResponse.json({ requestId: submission.request_id });
+    return NextResponse.json({
+      requestId: submission.request_id,
+      qualityWarnings,
+    });
   } catch (error) {
     console.error(
       JSON.stringify({ event: "inpaint_submit_failed", roomId: roomId ?? null }),
