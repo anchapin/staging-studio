@@ -47,8 +47,14 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { propertyAddress, clientName, targetBuyer, stagingAesthetic, rooms } =
-      body;
+    const {
+      propertyAddress,
+      clientName,
+      targetBuyer,
+      stagingAesthetic,
+      buyerDemographics,
+      rooms,
+    } = body;
 
     if (!propertyAddress || !clientName || !targetBuyer || !stagingAesthetic) {
       return NextResponse.json(
@@ -75,6 +81,7 @@ export async function POST(request: Request) {
         clientName,
         targetBuyer,
         stagingAesthetic,
+        buyerDemographics: buyerDemographics ?? undefined,
         rooms: {
           create: rooms.map((name: string) => ({ name })),
         },

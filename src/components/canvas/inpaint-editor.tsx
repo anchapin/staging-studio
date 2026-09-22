@@ -46,6 +46,7 @@ import { maskGridFromPixels } from "@/lib/mask-flood-fill";
 import { computeMaskCanvasDimensions } from "@/lib/canvas-coords";
 import { fillHoles, closeRegion, MERGE_PROXIMITY_PX } from "@/lib/mask-postprocess";
 import { maskBounds, topmostLeftmostPoint } from "@/lib/vision-labels";
+import { type DeclutterIntensity } from "@/lib/holistic-prompt";
 import {
   MAX_BATCH_OBJECTS,
   advanceBatchProgress,
@@ -64,13 +65,20 @@ import {
   type InstanceMaskGrid,
   type PerObjectBatchPlan,
 } from "@/lib/multi-select-batch";
+import VersionHistoryPanel, {
+  generateThumbnailFromUrl,
+} from "./version-history-panel";
+import { saveInpaintVersion } from "@/app/actions/inpaint-versions";
 
 interface InpaintEditorProps {
   roomId: string;
   /** The resolved source image the mask applies to (before photo or staged variant). */
   imageUrl: string;
   aesthetic: string;
+  /** Room-specific staging directives (displayed in textarea, merged with global for AI). */
   promptDirectives: string;
+  /** Issue #562: Global project-level directives merged with room directives for AI. */
+  globalDirectives?: string;
   /** The "after" slot this run's result will land in (resolved by the parent). */
   variantSlot: 0 | 1;
   /** Currently selected source; the parent owns this state (issue #170). */
@@ -82,6 +90,11 @@ interface InpaintEditorProps {
   /** Source of the pending run, reconstructed from its persisted row. */
   pendingSource?: InpaintSource | null;
   onInpaintComplete?: (resultImageUrl: string, source: InpaintSource) => void;
+  /**
+   * Issue #561: the current "after" result URL for the variant slot being edited.
+   * Used to highlight the active version in the VersionHistoryPanel.
+   */
+  currentResultUrl?: string | null;
   /**
    * Issue #230: reports the active labeled concept selection — the label
    * when exactly one labeled selection is active, null otherwise. The
@@ -414,6 +427,7 @@ export default function InpaintEditor({
   imageUrl,
   aesthetic,
   promptDirectives,
+  globalDirectives = "",
   variantSlot,
   source,
   sourceOptions,
@@ -426,6 +440,7 @@ export default function InpaintEditor({
   secondaryPane,
   onDirectivesChange,
   directivesValue,
+  currentResultUrl,
 }: InpaintEditorProps) {
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
   const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
@@ -439,6 +454,7 @@ export default function InpaintEditor({
   // Issue #460: comparison now via staged result image click in secondary pane
   const { toasts, showError, showSuccess, dismissToast } = useToast();
 
+<<<<<<< HEAD
   // Issue #560: Zen Mode state — hides all chrome for a distraction-free workspace.
   const [zenMode, setZenMode] = useState(false);
   // Issue #560: dark background toggle for eye comfort in Zen Mode.
@@ -447,6 +463,10 @@ export default function InpaintEditor({
   // Issue #560: lifted brush state — shared between InpaintMaskCanvas and ZenModeToolbar.
   const [zenBrushSize, setZenBrushSize] = useState(20);
   const [zenActiveTool, setZenActiveTool] = useState<MaskTool>("brush");
+
+  // Issue #561: tracks the active result URL for the version history panel.
+  // Updated on inpaint completion; also initialized from prop when provided.
+  const [activeResultUrl, setActiveResultUrl] = useState<string | null>(currentResultUrl ?? null);
 
   // Concept-selection state (issue #228): the detection concept drives
   // ONE billed call per (image, concept); clicks only toggle instances
@@ -798,7 +818,29 @@ export default function InpaintEditor({
   const { isProcessing, statusText, start } = useInpaintStatus({
     onCompleted: (resultImageUrl) => {
       batchOutcomeRef.current = { kind: "completed", url: resultImageUrl };
+      // Update the active result URL for the version history panel (issue #561)
+      setActiveResultUrl(resultImageUrl);
       onInpaintComplete?.(resultImageUrl, runSourceRef.current);
+      // Issue #561: save the completed version to the history. Thumbnail
+      // generation requires browser canvas, so run it here. Errors are
+      // non-fatal — the version row is best-effort.
+      if (typeof window !== "undefined" && resultImageUrl) {
+        void (async () => {
+          try {
+            const thumbnailDataUrl = await generateThumbnailFromUrl(resultImageUrl, 200);
+            await saveInpaintVersion({
+              roomId,
+              variantSlot,
+              resultUrl: resultImageUrl,
+              thumbnailDataUrl,
+              seed: undefined,
+              promptDirectives,
+            });
+          } catch (err) {
+            console.error("[inpaint-editor] failed to save inpaint version:", err);
+          }
+        })();
+      }
     },
     showSuccess: (message) => {
       if (!batchActiveRef.current) showSuccess(message);
@@ -1175,13 +1217,28 @@ export default function InpaintEditor({
   // for the strategy-generated ones. Batch steps pass `sourceUrl` (the
   // previous step's persisted result) so per-object results stack into the
   // same variant slot; omitted = the editor's current source image.
+  // Issue #562: globalDirectives are merged with room directives for AI prompts.
   const beginInpaintRun = useCallback(
     async (run: {
       maskUrl: string;
       promptDirectives: string;
       negativePrompt?: string;
       sourceUrl?: string;
+      globalDirectives?: string;
     }) => {
+      // Issue #562: merge global + room directives for AI
+      const mergedDirectives = (() => {
+        const global = (run.globalDirectives ?? globalDirectives ?? "").trim();
+        const room = run.promptDirectives.trim();
+        if (!global) return room;
+        if (!room) return global;
+        return `${global}\n\nRoom-specific: ${room}`;
+      })();
+
+      if (!mergedDirectives) {
+        showError("No staging directives available.");
+        return;
+      }
       if (!imageUrl) {
         showError("No image available to edit.");
         return;
@@ -1201,7 +1258,7 @@ export default function InpaintEditor({
           body: JSON.stringify({
             imageUrl: run.sourceUrl ?? imageUrl,
             maskUrl: run.maskUrl,
-            promptDirectives: run.promptDirectives,
+            promptDirectives: mergedDirectives,
             negativePrompt: run.negativePrompt,
             aesthetic,
             roomId,
@@ -1220,7 +1277,7 @@ export default function InpaintEditor({
         return startData.requestId as string;
       });
     },
-    [imageUrl, aesthetic, roomId, variantSlot, source, start, showError]
+    [imageUrl, aesthetic, roomId, variantSlot, source, start, showError, globalDirectives]
   );
 
   const handleInpaint = useCallback(async () => {
@@ -1234,8 +1291,8 @@ export default function InpaintEditor({
       return;
     }
 
-    await beginInpaintRun({ maskUrl: maskDataUrl, promptDirectives });
-  }, [maskDataUrl, promptDirectives, beginInpaintRun, showError]);
+    await beginInpaintRun({ maskUrl: maskDataUrl, promptDirectives, globalDirectives });
+  }, [maskDataUrl, promptDirectives, beginInpaintRun, showError, globalDirectives]);
 
   // Holistic spike entry (issue #190): the panel builds the full-room
   // mask + aesthetic-derived directives; this just forwards them into
@@ -1287,6 +1344,7 @@ export default function InpaintEditor({
             maskUrl: plan.steps[index].maskDataUrl,
             promptDirectives: plan.steps[index].promptDirectives,
             sourceUrl,
+            globalDirectives,
           });
 
           const outcome = batchOutcomeRef.current;
@@ -1323,7 +1381,7 @@ export default function InpaintEditor({
         batchActiveRef.current = false;
       }
     },
-    [beginInpaintRun, showSuccess]
+    [beginInpaintRun, showSuccess, globalDirectives]
   );
 
   // Issue #203: batch entry point from the panel. Builds the validated
@@ -1331,13 +1389,21 @@ export default function InpaintEditor({
   // thematic single run (union mask + one prompt through the shared
   // launcher) or kicks off the sequential per-object runner.
   const handleBatchRun = useCallback(
-    (input: { mode: BatchPromptMode; thematicPrompt: string; perObjectPrompts: string[] }) => {
+    (input: {
+      mode: BatchPromptMode;
+      thematicPrompt: string;
+      perObjectPrompts: string[];
+      declutterMode: boolean;
+      declutterIntensity: DeclutterIntensity;
+    }) => {
       const built = buildBatchPlan({
         selections: batchSelections,
         mode: input.mode,
         thematicPrompt: input.thematicPrompt,
         perObjectPrompts: input.perObjectPrompts,
         unionMaskDataUrl,
+        declutterMode: input.declutterMode,
+        declutterIntensity: input.declutterIntensity,
       });
       if (!built.ok) {
         showError(built.error);
@@ -1348,6 +1414,7 @@ export default function InpaintEditor({
         void beginInpaintRun({
           maskUrl: plan.maskDataUrl,
           promptDirectives: plan.promptDirectives,
+          globalDirectives,
         }).then(() => {
           // A thematic batch is one ordinary run — consume the selection
           // set only when it actually completed (outcome ref is set by
@@ -1362,7 +1429,7 @@ export default function InpaintEditor({
       }
       void runPerObjectBatch(plan);
     },
-    [batchSelections, unionMaskDataUrl, beginInpaintRun, runPerObjectBatch, showError]
+    [batchSelections, unionMaskDataUrl, beginInpaintRun, runPerObjectBatch, showError, globalDirectives]
   );
 
   const handleBatchRetry = useCallback(() => {
@@ -1889,6 +1956,17 @@ export default function InpaintEditor({
             </div>
           </div>
         </div>
+
+        {/* Issue #561: Version History — collapsible panel at the bottom of the
+            right pane, showing thumbnails of previous inpaint results. */}
+        <VersionHistoryPanel
+          roomId={roomId}
+          variantSlot={variantSlot}
+          activeResultUrl={activeResultUrl}
+          onRestored={(resultUrl) => {
+            setActiveResultUrl(resultUrl);
+          }}
+        />
       </div>
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />

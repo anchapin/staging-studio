@@ -2,7 +2,7 @@
 
 import { useRef, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Check, Circle, Loader2, Plus, X } from "lucide-react";
+import { Check, Circle, Loader2, Plus, Sparkles, X } from "lucide-react";
 import {
   batchProgressText,
   batchStepLabel,
@@ -17,6 +17,10 @@ import { buildPrefill } from "@/lib/prompt-prefill";
 import { resolveRegionLabel } from "@/lib/vision-labels";
 import { paletteCssColor } from "./inpaint-mask-canvas";
 import { getAestheticChips } from "@/lib/aesthetic-chips";
+import {
+  DECLUTTER_INTENSITY_LABELS,
+  type DeclutterIntensity,
+} from "@/lib/holistic-prompt";
 
 /**
  * The per-object batch in flight or kept alive after a failure (for the
@@ -43,6 +47,8 @@ interface BatchStagingPanelProps {
     mode: BatchPromptMode;
     thematicPrompt: string;
     perObjectPrompts: string[];
+    declutterMode: boolean;
+    declutterIntensity: DeclutterIntensity;
   }) => void;
   /** Re-run only the unfinished steps of the failed batch. */
   onRetryRemaining: () => void;
@@ -88,6 +94,8 @@ export default function BatchStagingPanel({
   const [mode, setMode] = useState<BatchPromptMode>("thematic");
   const [thematicPrompt, setThematicPrompt] = useState("");
   const [promptsBySelection, setPromptsBySelection] = useState<Record<string, string>>({});
+  const [declutterMode, setDeclutterMode] = useState(false);
+  const [declutterIntensity, setDeclutterIntensity] = useState<DeclutterIntensity>(3);
   const thematicTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Auto-resize the thematic textarea based on content
@@ -166,7 +174,7 @@ export default function BatchStagingPanel({
 
   const handleRun = () => {
     if (!canRun) return;
-    onRun({ mode, thematicPrompt, perObjectPrompts: orderedPrompts });
+    onRun({ mode, thematicPrompt, perObjectPrompts: orderedPrompts, declutterMode, declutterIntensity });
   };
 
   const runningText = activeBatch ? batchProgressText(activeBatch.progress) : null;
@@ -196,6 +204,22 @@ export default function BatchStagingPanel({
             <span className="ml-2 rounded bg-secondary px-1.5 py-0.5 text-xs font-normal text-muted-foreground">
               {selections.length} / {maxObjects} regions
             </span>
+            {/* Issue #559: Global Declutter Mode toggle */}
+            <button
+              type="button"
+              onClick={() => setDeclutterMode((prev) => !prev)}
+              disabled={disabled || processing}
+              aria-pressed={declutterMode}
+              aria-label={`Declutter mode: ${declutterMode ? "on" : "off"}. Toggle to add decluttering directives to the AI prompt.`}
+              className={`ml-2 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                declutterMode
+                  ? "border-orange-400 bg-orange-50 text-orange-700 dark:bg-orange-950 dark:text-orange-300"
+                  : "border-input bg-background text-muted-foreground hover:border-orange-400 hover:text-orange-600"
+              }`}
+            >
+              <Sparkles className="h-3 w-3" aria-hidden="true" />
+              Declutter
+            </button>
           </h4>
           <div className="flex items-center gap-2">
             <Button
@@ -273,6 +297,39 @@ export default function BatchStagingPanel({
               Customize the style for each object individually
             </span>
           </div>
+
+          {/* Issue #559: Declutter intensity slider — only visible when declutter mode is on */}
+          {declutterMode && (
+            <div className="mt-3 rounded-md border border-orange-200 bg-orange-50 p-3 dark:border-orange-800 dark:bg-orange-950">
+              <div className="flex items-center justify-between gap-2">
+                <label
+                  htmlFor="declutter-intensity"
+                  className="flex items-center gap-1.5 text-sm font-medium text-orange-800 dark:text-orange-200"
+                >
+                  <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                  Declutter intensity
+                </label>
+                <span className="text-sm font-semibold text-orange-700 dark:text-orange-300">
+                  {DECLUTTER_INTENSITY_LABELS[declutterIntensity]}
+                </span>
+              </div>
+              <input
+                id="declutter-intensity"
+                type="range"
+                min={1}
+                max={5}
+                step={1}
+                value={declutterIntensity}
+                onChange={(event) => setDeclutterIntensity(Number(event.target.value) as DeclutterIntensity)}
+                aria-label="Declutter intensity"
+                className="mt-2 w-full accent-orange-500"
+              />
+              <div className="mt-1 flex justify-between text-xs text-orange-600 dark:text-orange-400">
+                <span>Light</span>
+                <span>Full purge</span>
+              </div>
+            </div>
+          )}
 
           <div className="mt-3">
             {mode === "thematic" ? (
