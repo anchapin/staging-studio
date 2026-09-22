@@ -334,3 +334,20 @@
 .zen-mode-hidden {
   display: none !important;
 }
+
+/* Issue #641: Stage Status Pulse Animation — subtle animated indicator showing
+   that a room is in active AI staging processing. */
+@keyframes stage-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(0.85);
+  }
+}
+
+.stage-pulse {
+  animation: stage-pulse 1.8s ease-in-out infinite;
+}
