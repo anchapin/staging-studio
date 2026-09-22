@@ -6,11 +6,13 @@ import type { PreviewRoom } from "@/app/(print)/preview/[id]/lookbook-preview-vi
 interface LookbookNavProps {
   coverLabel?: string;
   philosophyLabel?: string;
+  swatchesLabel?: string;
   closingLabel?: string;
   rooms: Pick<PreviewRoom, "id" | "name">[];
+  hasSwatches?: boolean;
 }
 
-type SectionId = "cover" | "philosophy" | "closing" | `room-${string}`;
+type SectionId = "cover" | "philosophy" | "swatches" | "closing" | `room-${string}`;
 
 interface NavItem {
   id: SectionId;
@@ -20,8 +22,10 @@ interface NavItem {
 export function LookbookNav({
   coverLabel = "Cover",
   philosophyLabel = "Philosophy",
+  swatchesLabel = "Swatches",
   closingLabel = "Closing",
   rooms,
+  hasSwatches = false,
 }: LookbookNavProps) {
   const [activeId, setActiveId] = useState<SectionId | null>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
@@ -34,6 +38,7 @@ export function LookbookNav({
   const navItems: NavItem[] = [
     { id: "cover", label: coverLabel },
     { id: "philosophy", label: philosophyLabel },
+    ...(hasSwatches ? [{ id: "swatches" as SectionId, label: swatchesLabel }] : []),
     ...roomItems,
     { id: "closing", label: closingLabel },
   ];
@@ -54,6 +59,7 @@ export function LookbookNav({
     const sectionIds: SectionId[] = [
       "cover",
       "philosophy",
+      ...(hasSwatches ? (["swatches"] as SectionId[]) : []),
       ...rooms.map((r) => `room-${r.id}` as const),
       "closing",
     ];
@@ -95,7 +101,7 @@ export function LookbookNav({
     return () => {
       observerRef.current?.disconnect();
     };
-  }, [rooms]);
+  }, [rooms, hasSwatches]);
 
   return (
     <nav

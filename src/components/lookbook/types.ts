@@ -2,6 +2,16 @@ import type { ChecklistItem } from "@/lib/checklist-schema";
 
 export type { ChecklistItem };
 
+export interface MaterialSwatchData {
+  id: string;
+  name: string;
+  hexCode: string;
+  materialType: string;
+  useCase: string;
+  vendor?: string | null;
+  sku?: string | null;
+}
+
 export interface RoomData {
   id: string;
   name: string;

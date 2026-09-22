@@ -36,6 +36,9 @@ const getPreviewProject = cache(async (id: string) =>
     where: { id },
     include: {
       rooms: true,
+      materialSwatches: {
+        orderBy: { sortOrder: "asc" },
+      },
       user: {
         select: {
           firmName: true,
@@ -192,6 +195,15 @@ export default async function LookbookPreviewPage({
       buyerPsychology: room.buyerPsychology,
       // Already parsed/validated by parseChecklistItems in the view.
       checklistItems: room.checklistItems as PreviewProject["rooms"][number]["checklistItems"],
+    })),
+    materialSwatches: project.materialSwatches.map((s) => ({
+      id: s.id,
+      name: s.name,
+      hexCode: s.hexCode,
+      materialType: s.materialType,
+      useCase: s.useCase,
+      vendor: s.vendor,
+      sku: s.sku,
     })),
   };
 
