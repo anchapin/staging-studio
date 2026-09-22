@@ -91,6 +91,53 @@ export const generateCopyRequestSchema = z
   .strict();
 
 /**
+ * Zod schema for a click-to-segment point in the source image's natural
+ * pixel space (origin top-left). Coordinates must be finite and
+ * non-negative; upper bounds are enforced against the image dimensions by
+ * {@link segmentRequestSchema}'s cross-field refinement.
+ * Side effects: none (pure validation).
+ */
+export const segmentPointSchema = z.object({
+  x: z.number().finite().min(0),
+  y: z.number().finite().min(0),
+});
+
+/**
+ * Zod schema for the `POST /api/segment` request body (issue #183).
+ *
+ * Contract: `roomId` scopes the click to a room the caller owns (the
+ * route re-checks ownership server-side); `imageUrl`
+ * ({@link aiImageUrlSchema}) is the room photo fal will segment;
+ * `point` ({@link segmentPointSchema}) is the clicked point in the
+ * image's natural pixel space; `imageWidth`/`imageHeight` are the
+ * natural dimensions the client measured for the same image, and the
+ * point must fall within them. `.strict()` rejects unknown keys so
+ * stale clients fail loudly.
+ *
+ * `warm` (issue #202) marks an editor-open pre-warm ping: the route runs
+ * only the auth + room-ownership path and returns `{ warmed: true }`
+ * WITHOUT calling fal (zero provider cost). The body still validates as
+ * a full click — the probe point exercises the identical schema path a
+ * real click takes — but the point is never executed.
+ * Side effects: none (pure validation); the fal.ai SAM call happens in
+ * the route, gated by `assertFalConfigured()`/`FAL_KEY`.
+ */
+export const segmentRequestSchema = z
+  .object({
+    roomId: z.string().min(1),
+    imageUrl: aiImageUrlSchema,
+    point: segmentPointSchema,
+    imageWidth: z.number().int().positive().max(20_000),
+    imageHeight: z.number().int().positive().max(20_000),
+    warm: z.boolean().optional(),
+  })
+  .strict()
+  .refine(
+    (data) => data.point.x <= data.imageWidth && data.point.y <= data.imageHeight,
+    { message: "Point must fall within the image bounds" }
+  );
+
+/**
  * Zod schema for a SAM 3.1 detection concept (issue #227).
  *
  * Contract: a single lowercase word or short phrase — lowercase letters,
@@ -120,7 +167,8 @@ export const segmentConceptSchema = z
  * ({@link aiImageUrlSchema}) is the room photo fal will segment;
  * `concept` ({@link segmentConceptSchema}) is the optional detection
  * concept — omitted ⇒ the route's "furniture" default, keeping the
- * one-click preset path byte-equivalent.
+ * one-click preset path byte-equivalent. There is no point, image-size
+ * pair, or warm flag — detection is prompted by a concept, not a click.
  * `.strict()` rejects unknown keys so stale clients fail loudly.
  * Side effects: none (pure validation).
  */

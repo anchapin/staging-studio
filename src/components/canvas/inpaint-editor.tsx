@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef, useMemo, useId } from "react";
 import type { ReactNode } from "react";
-import InpaintMaskCanvas from "./inpaint-mask-canvas";
+import InpaintMaskCanvas, { type MaskTool } from "./inpaint-mask-canvas";
 import EditorTabBar, {
   editorTabId,
   editorTabPanelId,
@@ -10,8 +10,9 @@ import EditorTabBar, {
   type EditorTabId,
 } from "./editor-tab-bar";
 import { useToast, ToastContainer } from "@/components/ui/toast";
-import { Info, Loader2 } from "lucide-react";
+import { Info, Loader2, Maximize2, Minimize2 } from "lucide-react";
 import { useInpaintStatus } from "./use-inpaint-status";
+import ZenModeToolbar from "./zen-mode-toolbar";
 import {
   entireRoomTabVisible,
   inpaintSourceLabel,
@@ -452,6 +453,15 @@ export default function InpaintEditor({
   const [includeFloorShadow, setIncludeFloorShadow] = useState(false);
   // Issue #460: comparison now via staged result image click in secondary pane
   const { toasts, showError, showSuccess, dismissToast } = useToast();
+
+  // Issue #560: Zen Mode state — hides all chrome for a distraction-free workspace.
+  const [zenMode, setZenMode] = useState(false);
+  // Issue #560: dark background toggle for eye comfort in Zen Mode.
+  const [zenDarkBackground, setZenDarkBackground] = useState(false);
+
+  // Issue #560: lifted brush state — shared between InpaintMaskCanvas and ZenModeToolbar.
+  const [zenBrushSize, setZenBrushSize] = useState(20);
+  const [zenActiveTool, setZenActiveTool] = useState<MaskTool>("brush");
 
   // Issue #561: tracks the active result URL for the version history panel.
   // Updated on inpaint completion; also initialized from prop when provided.
@@ -1014,6 +1024,32 @@ export default function InpaintEditor({
 
   const aspectRatio = imageDims ? imageDims.width / imageDims.height : null;
 
+  // Issue #560: keyboard shortcuts for Zen Mode — Z toggles, Escape exits.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const isInput =
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable;
+
+      if (e.key === "z" || e.key === "Z") {
+        if (!isInput) {
+          e.preventDefault();
+          setZenMode((prev) => !prev);
+        }
+      }
+
+      if (e.key === "Escape" && zenMode) {
+        e.preventDefault();
+        setZenMode(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [zenMode]);
+
   // Resume an in-flight job (e.g. after a refresh): skip the submit and go
   // straight to polling the persisted requestId. The run's source comes from
   // the persisted row so completion persists with the original run's
@@ -1479,7 +1515,7 @@ export default function InpaintEditor({
     <div
       className={`flex flex-col gap-6 ${
         fullWidth ? "md:flex-col lg:min-h-0 lg:flex-1 lg:flex-row lg:gap-6" : ""
-      }`}
+      } ${zenMode ? "zen-mode-active zen-mode-vignette" : ""} ${zenDarkBackground && zenMode ? "zen-mode-dark" : ""}`}
     >
       {/* ---- LEFT PANE: room imagery (optional slot) + mask canvas ------ */}
       <div
@@ -1491,12 +1527,29 @@ export default function InpaintEditor({
           <div
             className={`flex flex-col gap-6 ${
               fullWidth ? "md:max-h-none md:overflow-visible lg:max-h-[70%] lg:min-h-0 lg:overflow-y-auto" : ""
-            }`}
+            } ${zenMode ? "zen-mode-hidden" : ""}`}
           >
             {secondaryPane}
           </div>
         )}
-        <h4 className="mb-2 text-sm font-medium text-stone-700">Source Image</h4>
+        {/* Issue #560: "Source Image" label hidden in Zen Mode */}
+        <div className={`flex items-center justify-between ${zenMode ? "zen-mode-hidden" : ""}`}>
+          <h4 className="mb-2 text-sm font-medium text-stone-700">Source Image</h4>
+          <button
+            type="button"
+            onClick={() => setZenMode((prev) => !prev)}
+            title={zenMode ? "Exit Zen Mode (Z)" : "Enter Zen Mode (Z)"}
+            aria-label={zenMode ? "Exit Zen Mode" : "Enter Zen Mode"}
+            className="flex items-center gap-1.5 rounded-md border border-stone-300 bg-white px-2.5 py-1.5 text-xs text-stone-600 shadow-sm transition-colors hover:bg-stone-50 hover:text-stone-900"
+          >
+            {zenMode ? (
+              <Minimize2 className="h-3.5 w-3.5" aria-hidden="true" />
+            ) : (
+              <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+            {zenMode ? "Exit Zen" : "Zen Mode"}
+          </button>
+        </div>
         {/* Issue #460: comparison now via staged result image click in secondary pane */}
         <InpaintMaskCanvas
           overlayImageSrc={imageUrl}
@@ -1517,54 +1570,60 @@ export default function InpaintEditor({
           selectionReset={selectionReset}
           onMaskCleared={handleMaskCleared}
           onSelectionDeselect={handleRemoveSelection}
+          zenMode={zenMode}
+          brushSize={zenMode ? zenBrushSize : undefined}
+          onBrushSizeChange={zenMode ? setZenBrushSize : undefined}
+          activeTool={zenMode ? zenActiveTool : undefined}
+          onActiveToolChange={zenMode ? setZenActiveTool : undefined}
         />
 
-        <label className="flex items-center gap-2 text-sm text-stone-700">
-          Expand selection:
-          <input
-            type="range"
-            min={0}
-            max={MAX_MASK_EXPANSION_RADIUS}
-            value={maskExpansion}
-            onChange={(e) => setMaskExpansion(Number(e.target.value))}
-            aria-describedby="mask-expansion-hint"
-            className="w-32"
-          />
-          <span className="w-10 text-right">{maskExpansion}px</span>
-        </label>
-        <p id="mask-expansion-hint" className="text-xs text-gray-500">
-          Grows the painted area so picture frames, bezels, and mounts are
-          included. 0 keeps the exact painted area.
-        </p>
+        {/* Issue #560: expand selection and floor shadow controls hidden in Zen Mode */}
+        <div className={zenMode ? "zen-mode-hidden" : ""}>
+          <label className="flex items-center gap-2 text-sm text-stone-700">
+            Expand selection:
+            <input
+              type="range"
+              min={0}
+              max={MAX_MASK_EXPANSION_RADIUS}
+              value={maskExpansion}
+              onChange={(e) => setMaskExpansion(Number(e.target.value))}
+              aria-describedby="mask-expansion-hint"
+              className="w-32"
+            />
+            <span className="w-10 text-right">{maskExpansion}px</span>
+          </label>
+          <p id="mask-expansion-hint" className="text-xs text-gray-500">
+            Grows the painted area so picture frames, bezels, and mounts are
+            included. 0 keeps the exact painted area.
+          </p>
 
-        {/* Issue #234: floor-shadow toggle — dilates the mask further downward than
-            upward so cast shadows on the floor are included in the regenerated region. */}
-        <label className="flex items-center gap-2 text-sm text-stone-700">
-          <input
-            type="checkbox"
-            checked={includeFloorShadow}
-            onChange={(e) => setIncludeFloorShadow(e.target.checked)}
-            className="h-4 w-4 accent-stone-800"
-          />
-          Add natural floor shadows under new furniture
-        </label>
-        <div className="flex items-center gap-1">
-          <span
-            role="img"
-            aria-label="More info"
-            title="Extends the painted area downward to include floor shadows, so they look natural with the new furniture. Best for hard floors."
-            className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-200 text-gray-500 hover:bg-gray-300"
-          >
-            <Info className="h-3 w-3" />
-          </span>
+          {/* Issue #234: floor-shadow toggle — dilates the mask further downward than
+              upward so cast shadows on the floor are included in the regenerated region. */}
+          <label className="flex items-center gap-2 text-sm text-stone-700">
+            <input
+              type="checkbox"
+              checked={includeFloorShadow}
+              onChange={(e) => setIncludeFloorShadow(e.target.checked)}
+              className="h-4 w-4 accent-stone-800"
+            />
+            Add natural floor shadows under new furniture
+          </label>
+          <div className="flex items-center gap-1">
+            <span
+              role="img"
+              aria-label="More info"
+              title="Extends the painted area downward to include floor shadows, so they look natural with the new furniture. Best for hard floors."
+              className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-200 text-gray-500 hover:bg-gray-300"
+            >
+              <Info className="h-3 w-3" />
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* ---- RIGHT PANE: fixed-width control panel ----------------------- */}
+      {/* Issue #560: right panel hidden in Zen Mode */}
       <div
-        className={`flex w-full flex-col gap-3 no-print ${
-          fullWidth ? "md:w-full md:flex-col lg:min-h-0 lg:w-[380px] lg:shrink-0" : ""
-        }`}
+        className={`flex w-full flex-col gap-3 no-print ${fullWidth ? "md:w-full md:flex-col lg:min-h-0 lg:w-[380px] lg:shrink-0" : ""} ${zenMode ? "zen-mode-hidden" : ""}`}
       >
         {/* AC-L2: batch progress pins to the panel top during a run, so
             it stays visible beside the canvas on every tab. The full
@@ -1910,6 +1969,63 @@ export default function InpaintEditor({
       </div>
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
+      {/* Issue #560: Zen Mode floating toolbar — shown only when Zen Mode is active */}
+      {zenMode && (
+        <ZenModeToolbar
+          darkBackground={zenDarkBackground}
+          onDarkBackgroundChange={setZenDarkBackground}
+        >
+          {/* Tool buttons */}
+          <div role="group" aria-label="Mask tool" className="flex items-center gap-1">
+            {(["brush", "fill", "select"] as const).map((tool) => (
+              <button
+                key={tool}
+                type="button"
+                aria-pressed={zenActiveTool === tool}
+                aria-label={tool === "brush" ? "Brush" : tool === "fill" ? "Fill Region" : "Select Regions"}
+                onClick={() => setZenActiveTool(tool)}
+                className={
+                  zenActiveTool === tool
+                    ? "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium bg-stone-800 text-white transition-colors"
+                    : "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium bg-stone-100 text-stone-600 transition-colors hover:bg-stone-200"
+                }
+              >
+                {tool === "brush" ? "Brush" : tool === "fill" ? "Fill" : "Select"}
+              </button>
+            ))}
+          </div>
+
+          {/* Brush size slider */}
+          <label className="flex items-center gap-2 text-xs text-stone-600">
+            <span>Size</span>
+            <input
+              type="range"
+              min={1}
+              max={100}
+              value={zenBrushSize}
+              onChange={(e) => setZenBrushSize(Number(e.target.value))}
+              className="w-20"
+              aria-label="Brush size"
+            />
+            <span className="w-5 text-right">{zenBrushSize}</span>
+          </label>
+
+          {/* Clear mask */}
+          <button
+            type="button"
+            onClick={() => {
+              setMaskDataUrl(null);
+              setBatchSelections([]);
+              setSelectedInstanceIndices([]);
+            }}
+            className="rounded-full px-3 py-1.5 text-xs text-stone-500 bg-stone-100 hover:bg-stone-200 transition-colors"
+            title="Clear mask"
+          >
+            Clear
+          </button>
+        </ZenModeToolbar>
+      )}
     </div>
   );
 }
