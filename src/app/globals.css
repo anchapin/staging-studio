@@ -311,6 +311,65 @@
   cursor: default;
 }
 
+/* Issue #639: Material Symbols icon system */
+.material-symbols-outlined {
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20;
+  font-size: 1em;
+  line-height: 1;
+  display: inline-block;
+  vertical-align: middle;
+  user-select: none;
+}
+
+/* Size variants */
+.material-symbols-outlined.icon-xs {
+  font-size: 16px;
+  font-variation-settings: "FILL" 0, "wght" 300, "GRAD" 0, "opsz" 16;
+}
+.material-symbols-outlined.icon-sm {
+  font-size: 18px;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20;
+}
+.material-symbols-outlined.icon-md {
+  font-size: 24px;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+}
+.material-symbols-outlined.icon-lg {
+  font-size: 32px;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 32;
+}
+.material-symbols-outlined.icon-xl {
+  font-size: 48px;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 48;
+}
+
+/* Filled variant (for active states) */
+.material-symbols-outlined.filled {
+  font-variation-settings: "FILL" 1, "wght" 400, "GRAD" 0, "opsz" 20;
+}
+
+/* Icon in buttons */
+button .material-symbols-outlined,
+.btn .material-symbols-outlined {
+  vertical-align: middle;
+  margin-right: 0.25em;
+}
+
+/* Icon-only buttons */
+.icon-only-button {
+  width: 2.5rem;
+  height: 2.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  transition: background-color 0.15s;
+}
+
+.icon-only-button:hover {
+  background-color: var(--accent);
+}
+
 /* Vignette overlay — subtle darkening at canvas edges */
 .zen-mode-vignette::after {
   content: "";
