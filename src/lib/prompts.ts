@@ -47,6 +47,25 @@ export interface FalFillPayloadInput {
    * re-scoped). Omitted ⇒ the single-object default {@link NEGATIVE_PROMPT}.
    */
   negativePrompt?: string;
+  /**
+   * Issue #558: AI guidance controls.
+   * `promptStrength` (0.1–1.0): how closely AI follows the text prompt.
+   * Defaults to 0.8.
+   */
+  promptStrength?: number;
+  /**
+   * Issue #558: feather edges of the mask for softer transitions (0–20).
+   * Defaults to 5.
+   */
+  maskBlur?: number;
+  /**
+   * Issue #558: reproducible seed for iteration (0–999999). Omit for random.
+   */
+  seed?: number;
+  /**
+   * Issue #558: when true, use a lower guidance value for higher variation.
+   */
+  creativeMode?: boolean;
 }
 
 // Type alias (not interface) so the payload stays assignable to the
@@ -58,6 +77,10 @@ export type FalFillPayload = {
   negative_prompt: string;
   guidance: number;
   num_inference_steps: number;
+  /** Issue #558: feather edges of the mask. */
+  mask_blur?: number;
+  /** Issue #558: reproducible seed. */
+  seed?: number;
 }
 
 /**
@@ -201,22 +224,46 @@ export function buildInpaintPrompt(
  * Builds the `input` payload for the fal.ai FLUX.1 Fill queue submit
  * (`fal.queue.submit("fal-ai/flux-fill", { input })`) in `api/inpaint`.
  *
- * Contract: `guidance` is pinned to 7.5 and `num_inference_steps` to 28;
+ * Contract: `guidance` defaults to 7.5 and `num_inference_steps` to 28;
  * `negative_prompt` is {@link NEGATIVE_PROMPT} unless the caller passes
  * `negativePrompt` (the holistic full-room path does); image/mask/prompt
- * fields pass through unchanged. The exact shape is pinned by
+ * fields pass through unchanged. When `promptStrength` is provided (issue #558),
+ * it overrides the default guidance (scaled to fal.ai's 1–10 range). When
+ * `creativeMode` is true, a lower guidance (~4.0) enables higher variation.
+ * `mask_blur` feathers mask edges for softer transitions. `seed` enables
+ * reproducible results when `lockSeed` is set. The exact shape is pinned by
  * `tests/prompts.test.ts` — changing it alters paid generation output.
  * Side effects: none (pure).
  */
 export function buildFalFillPayload(
   input: FalFillPayloadInput
 ): FalFillPayload {
-  return {
+  // Issue #558: compute effective guidance. Creative mode uses a lower
+  // guidance for more variation; otherwise use promptStrength (scaled from
+  // the 0.1–1.0 UI range to fal.ai's 1–10 scale), falling back to 7.5.
+  let guidance = 7.5;
+  if (input.creativeMode) {
+    guidance = 4.0;
+  } else if (input.promptStrength !== undefined) {
+    guidance = input.promptStrength * 10;
+  }
+
+  const payload: FalFillPayload = {
     image_url: input.imageUrl,
     mask_url: input.maskUrl,
     prompt: input.prompt,
     negative_prompt: input.negativePrompt ?? NEGATIVE_PROMPT,
-    guidance: 7.5,
+    guidance,
     num_inference_steps: 28,
   };
+
+  // Issue #558: optional AI guidance params
+  if (input.maskBlur !== undefined) {
+    payload.mask_blur = input.maskBlur;
+  }
+  if (input.seed !== undefined) {
+    payload.seed = input.seed;
+  }
+
+  return payload;
 }
