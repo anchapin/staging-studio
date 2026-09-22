@@ -34,6 +34,7 @@ export async function saveProjectMetadata(
     clientName?: string;
     targetBuyer?: string;
     stagingAesthetic?: string;
+    stagingPackage?: string;
     stagingDirectives?: string;
   }
 ): Promise<{ success: boolean; error?: string }> {

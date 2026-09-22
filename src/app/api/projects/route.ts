@@ -53,6 +53,7 @@ export async function POST(request: Request) {
       targetBuyer,
       stagingAesthetic,
       buyerDemographics,
+      stagingPackage,
       rooms,
     } = body;
 
@@ -81,6 +82,7 @@ export async function POST(request: Request) {
         clientName,
         targetBuyer,
         stagingAesthetic,
+        stagingPackage: stagingPackage ?? null,
         buyerDemographics: buyerDemographics ?? undefined,
         rooms: {
           create: rooms.map((name: string) => ({ name })),
