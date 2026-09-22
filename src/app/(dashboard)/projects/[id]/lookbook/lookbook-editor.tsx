@@ -229,6 +229,11 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
     clientName: project.clientName,
     targetBuyer: project.targetBuyer,
     stagingAesthetic: project.stagingAesthetic,
+    clientSignature: project.clientSignature,
+    clientSignatureStatus: project.clientSignatureStatus,
+    clientSignatureTimestamp: project.clientSignatureTimestamp
+      ? String(project.clientSignatureTimestamp)
+      : null,
   };
   const signoffRooms = project.rooms.map((room) => ({
     id: room.id,

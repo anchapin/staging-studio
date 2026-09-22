@@ -28,11 +28,65 @@ export interface UserData {
   signoffContent?: string | null;
 }
 
+export type BuyerType =
+  | "young_professional"
+  | "growing_family"
+  | "downsizing_retiree"
+  | "investor"
+  | "luxury_buyer"
+  | "first_time_homebuyer"
+  | "serial_renovator";
+
+export type DesignPreference =
+  | "contemporary"
+  | "traditional"
+  | "minimalist"
+  | "maximalist"
+  | "coastal"
+  | "industrial"
+  | "midcentury_modern"
+  | "scandinavian"
+  | "bohemian"
+  | "transitional";
+
+export type MustHaveFeature =
+  | "home_office"
+  | "open_plan"
+  | "outdoor_space"
+  | "gourmet_kitchen"
+  | "master_suite"
+  | "smart_home"
+  | "energy_efficient"
+  | "multigenerational"
+  | "home_gym"
+  | "pet_friendly";
+
+export type SellTimeline =
+  | "under_30_days"
+  | "30_60_days"
+  | "60_90_days"
+  | "over_90_days";
+
+export interface BuyerDemographics {
+  buyerType: BuyerType;
+  designPreferences: DesignPreference[];
+  budgetMin: number;
+  budgetMax: number;
+  mustHaveFeatures: MustHaveFeature[];
+  sellTimeline: SellTimeline;
+}
+
 export interface ProjectData {
   propertyAddress: string;
   clientName: string;
   targetBuyer: string;
   stagingAesthetic: string;
+  /** Client sign-off (issue #556) */
+  clientSignature?: string | null;
+  clientSignatureStatus?: string | null;
+  clientSignatureTimestamp?: string | null;
+  /** Project ID for API calls */
+  id?: string;
 }
 
 export interface LookbookRoomData extends RoomData {

@@ -33,6 +33,44 @@ import { FRAMING_CONTEXT, buildInpaintPrompt } from "./prompts";
 /** Which wording of the holistic directive template to use. */
 export type HolisticPromptVariantId = "thematic" | "architecture-first";
 
+/** Declutter intensity: 1 = light touch, 5 = full purge. */
+export type DeclutterIntensity = 1 | 2 | 3 | 4 | 5;
+
+/** Intensity label for display. */
+export const DECLUTTER_INTENSITY_LABELS: Record<DeclutterIntensity, string> = {
+  1: "Light",
+  2: "Moderate",
+  3: "Standard",
+  4: "Aggressive",
+  5: "Full purge",
+};
+
+/**
+ * Builds the declutter directive appended to prompts when Global Declutter Mode
+ * is active (issue #559).
+ *
+ * Intensity levels:
+ * 1 – Remove only obvious, bulky clutter (papers, boxes).
+ * 2 – Remove common clutter items from surfaces.
+ * 3 – Clear away clutter from surfaces and floors.
+ * 4 – Remove all clutter and non-essential items from every area.
+ * 5 – Full purge: leave only core furnishings and architecture.
+ */
+export function buildDeclutterDirective(intensity: DeclutterIntensity): string {
+  switch (intensity) {
+    case 1:
+      return "Remove only the most obvious clutter — papers, boxes, and similar bulky items — from surfaces.";
+    case 2:
+      return "Remove common clutter items from surfaces such as papers, bottles, and general debris.";
+    case 3:
+      return "Clear away clutter from surfaces and floors, leaving only essential furnishings and decor.";
+    case 4:
+      return "Remove all clutter, debris, and non-essential items from every surface and floor area.";
+    case 5:
+      return "Full purge: clear the entire space of all clutter, debris, and non-essential items — surfaces, floors, and any visible mess — leaving only core furnishings and architecture intact.";
+  }
+}
+
 /**
  * Negative prompt for holistic preset runs (issue #223 furnishings
  * scope): the single-object {@link NEGATIVE_PROMPT}'s architecture
@@ -52,6 +90,9 @@ export const HOLISTIC_NEGATIVE_PROMPT =
 /**
  * Builds the holistic staging directives for a project aesthetic.
  *
+ * When `declutterMode` is true, a declutter directive is appended using
+ * the selected `declutterIntensity` (issue #559).
+ *
  * Contract: pure string composition; the exact bytes are pinned by
  * `tests/holistic-prompt.test.ts`. The output is the `promptDirectives`
  * field of `POST /api/inpaint` — it must stay within the schema's
@@ -62,8 +103,10 @@ export const HOLISTIC_NEGATIVE_PROMPT =
 export function buildHolisticDirectives(input: {
   aesthetic: string;
   variant: HolisticPromptVariantId;
+  declutterMode?: boolean;
+  declutterIntensity?: DeclutterIntensity;
 }): string {
-  const { aesthetic, variant } = input;
+  const { aesthetic, variant, declutterMode = false, declutterIntensity = 3 } = input;
 
   const thematic =
     `Replace all furniture and decor with ${aesthetic} alternatives: sofa, ` +
@@ -72,10 +115,12 @@ export function buildHolisticDirectives(input: {
     "scaled to the room's architecture.";
 
   if (variant === "thematic") {
-    return thematic;
+    return declutterMode
+      ? `${thematic} ${buildDeclutterDirective(declutterIntensity)}`
+      : thematic;
   }
 
-  return (
+  const architectureFirst =
     `Replace all furniture and decor with ${aesthetic} alternatives: sofa, ` +
     "seating, tables, rugs, lighting, artwork, plants, and accessories fully " +
     "restaged to suit the space, and clear away clutter from surfaces. Keep " +
@@ -84,8 +129,11 @@ export function buildHolisticDirectives(input: {
     "and ceiling must remain exactly as photographed — do not repaint, " +
     "refinish, or alter any architecture; the result must read as the same " +
     "room, only restaged. Remove any television completely, including its " +
-    "bezel, stand, wall mount, and cords, and leave the wall behind it clean."
-  );
+    "bezel, stand, wall mount, and cords, and leave the wall behind it clean.";
+
+  return declutterMode
+    ? `${architectureFirst} ${buildDeclutterDirective(declutterIntensity)}`
+    : architectureFirst;
 }
 
 /**
