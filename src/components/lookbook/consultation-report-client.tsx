@@ -2,8 +2,11 @@
 
 import { useState } from "react";
 import { SignatureCanvas } from "./signature-canvas";
-import type { LookbookRoomData } from "./types";
+import { MaterialSwatchCard } from "./material-swatch-card";
+import { ConsultationFurnitureTable } from "./consultation-furniture-table";
+import type { LookbookRoomData, MaterialSwatchData } from "./types";
 import type { ProjectData } from "./types";
+import type { PreviewProcurementItem } from "@/app/(print)/preview/[id]/lookbook-preview-view";
 import {
   ENGAGEMENT_TIERS,
   formatEngagementPrice,
@@ -14,6 +17,8 @@ interface ConsultationReportClientProps {
   user: LookbookRoomData["user"];
   project: ProjectData;
   previewToken: string;
+  materialSwatches?: MaterialSwatchData[];
+  procurementItems?: PreviewProcurementItem[];
 }
 
 const APPROVAL_TEXT =
@@ -23,6 +28,8 @@ export function ConsultationReportClient({
   user,
   project,
   previewToken,
+  materialSwatches = [],
+  procurementItems = [],
 }: ConsultationReportClientProps) {
   const [signed, setSigned] = useState(false);
   const [selectedTier, setSelectedTier] = useState<string | null>(null);
@@ -99,6 +106,36 @@ export function ConsultationReportClient({
               />
             ))}
           </div>
+
+          {/* Material Swatch Cards (horizontal scroll) */}
+          {materialSwatches.length > 0 && (
+            <div className="space-y-4">
+              <h3 className="font-cinzel text-xs tracking-widest uppercase text-on-surface-variant">
+                Material Specifications
+              </h3>
+              <div className="flex gap-4 overflow-x-auto pb-2">
+                {materialSwatches.map((swatch) => (
+                  <MaterialSwatchCard key={swatch.id} swatch={swatch} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Furniture Procurement Table */}
+          {procurementItems.length > 0 && (
+            <div className="space-y-4">
+              <h3 className="font-cinzel text-xs tracking-widest uppercase text-on-surface-variant">
+                Furniture Procurement
+              </h3>
+              <ConsultationFurnitureTable items={procurementItems} />
+              {/* Procurement Note */}
+              <div className="bg-secondary/10 border-l-4 border-secondary rounded-r-lg p-4">
+                <p className="font-jakarta text-sm text-foreground leading-relaxed">
+                  All items sourced from vetted suppliers. Lead times account for shipping. Substitutions may be required based on availability.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Signature Section */}
           <div className="mt-8 p-6 bg-surface-container-low rounded-xl border border-outline-variant/40">
