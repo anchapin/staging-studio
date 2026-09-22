@@ -68,6 +68,7 @@ import {
 import VersionHistoryPanel, {
   generateThumbnailFromUrl,
 } from "./version-history-panel";
+import VersionHistoryPills from "./version-history-pills";
 import { saveInpaintVersion } from "@/app/actions/inpaint-versions";
 
 interface InpaintEditorProps {
@@ -2295,6 +2296,17 @@ export default function InpaintEditor({
           </button>
         </ZenModeToolbar>
       )}
+
+      {/* Issue #631: Version History Pills — floating bar at bottom-center of canvas
+          showing pass/version history with undo/redo controls. */}
+      <VersionHistoryPills
+        roomId={roomId}
+        variantSlot={variantSlot}
+        activeResultUrl={activeResultUrl}
+        onVersionChange={(resultUrl) => {
+          setActiveResultUrl(resultUrl);
+        }}
+      />
     </div>
   );
 }
