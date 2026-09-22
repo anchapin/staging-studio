@@ -454,7 +454,6 @@ export default function InpaintEditor({
   // Issue #460: comparison now via staged result image click in secondary pane
   const { toasts, showError, showSuccess, dismissToast } = useToast();
 
-<<<<<<< HEAD
   // Issue #560: Zen Mode state — hides all chrome for a distraction-free workspace.
   const [zenMode, setZenMode] = useState(false);
   // Issue #560: dark background toggle for eye comfort in Zen Mode.
