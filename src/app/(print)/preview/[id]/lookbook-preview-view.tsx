@@ -1,6 +1,11 @@
-import { CoverPage, PhilosophyPage, RoomSpread, SignoffPage } from "@/components/lookbook";
-import type { LookbookRoomData } from "@/components/lookbook";
-import type { ProjectData } from "@/components/lookbook";
+import {
+  CoverPage,
+  PhilosophyPage,
+  ROIMetricsDashboard,
+  RoomSpread,
+  SignoffPage,
+} from "@/components/lookbook";
+import type { LookbookRoomData, ProjectData, ROIMetric } from "@/components/lookbook";
 import { parseChecklistItems } from "@/lib/checklist-schema";
 
 export interface PreviewRoom {
@@ -23,6 +28,8 @@ export interface PreviewProject {
   clientName: string;
   targetBuyer: string;
   stagingAesthetic: string;
+  /** ROI metrics from project settings. Null means use the dashboard's defaults. */
+  roiMetrics: ROIMetric[] | null;
   /** Client sign-off (issue #556) */
   clientSignature?: string | null;
   clientSignatureStatus?: string | null;
@@ -89,6 +96,10 @@ export function LookbookPreviewView({ project, previewToken }: LookbookPreviewVi
 
       <div id="lookbook-philosophy">
         <PhilosophyPage project={projectData} user={project.user} />
+      </div>
+
+      <div id="lookbook-roi">
+        <ROIMetricsDashboard metrics={project.roiMetrics ?? undefined} />
       </div>
 
       {project.rooms.map((room) => (

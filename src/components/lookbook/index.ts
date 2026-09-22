@@ -1,5 +1,6 @@
 export { CoverPage } from "./cover-page";
 export { PhilosophyPage } from "./philosophy-page";
+export { ROIMetricsDashboard } from "./roi-metrics-dashboard";
 export { RoomSpread } from "./room-spread";
 export { SignoffPage } from "./signoff-page";
 export { SignoffPageClient } from "./signoff-page-client";
@@ -9,4 +10,5 @@ export type {
   UserData,
   ProjectData,
   LookbookRoomData,
+  ROIMetric,
 } from "./types";

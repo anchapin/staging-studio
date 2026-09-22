@@ -8,6 +8,7 @@ import { getAuthedPrismaUser } from "@/lib/api-auth";
 import type { PreviewProject } from "@/app/(print)/preview/[id]/lookbook-preview-view";
 
 import { LookbookEditor } from "./lookbook-editor";
+import type { ROIMetric } from "@/components/lookbook";
 
 interface LookbookPageProps {
   params: Promise<{ id: string }>;
@@ -25,8 +26,18 @@ const getOwnedLookbookProject = cache(async (projectId: string) => {
 
   return prisma.project.findUnique({
     where: { id: projectId, userId: user.id },
-    include: {
-      rooms: true,
+    select: {
+      id: true,
+      propertyAddress: true,
+      clientName: true,
+      targetBuyer: true,
+      stagingAesthetic: true,
+      roiSalesPricePremium: true,
+      roiTransactionVelocity: true,
+      roiInvestmentTier: true,
+      clientSignature: true,
+      clientSignatureStatus: true,
+      clientSignatureTimestamp: true,
       user: {
         select: {
           firmName: true,
@@ -36,6 +47,7 @@ const getOwnedLookbookProject = cache(async (projectId: string) => {
           signoffContent: true,
         },
       },
+      rooms: true,
     },
   });
 });
@@ -74,6 +86,7 @@ export default async function LookbookPage({ params }: LookbookPageProps) {
     clientName: project.clientName,
     targetBuyer: project.targetBuyer,
     stagingAesthetic: project.stagingAesthetic,
+    roiMetrics: buildROIMetrics(project),
     clientSignature: project.clientSignature,
     clientSignatureStatus: project.clientSignatureStatus,
     clientSignatureTimestamp: project.clientSignatureTimestamp
@@ -126,4 +139,49 @@ export default async function LookbookPage({ params }: LookbookPageProps) {
       <LookbookEditor project={previewProject} />
     </div>
   );
+}
+
+/** Build ROI metrics array from project fields, or null for defaults. */
+function buildROIMetrics(
+  project: Awaited<ReturnType<typeof getOwnedLookbookProject>>
+): ROIMetric[] | null {
+  if (!project) return null;
+  const { roiSalesPricePremium, roiTransactionVelocity, roiInvestmentTier } =
+    project;
+  if (!roiSalesPricePremium && !roiTransactionVelocity && !roiInvestmentTier)
+    return null;
+
+  const metrics: ROIMetric[] = [];
+
+  if (roiSalesPricePremium) {
+    metrics.push({
+      value: roiSalesPricePremium,
+      title: "Estimated Sales Price Premium",
+      description:
+        "Generates equity over vacant baseline based on comparable staged properties in the local market.",
+      icon: "trending_up",
+    });
+  }
+
+  if (roiTransactionVelocity) {
+    metrics.push({
+      value: roiTransactionVelocity,
+      title: "Faster Transaction Velocity",
+      description:
+        "Staged homes sell faster with fewer listing price reductions in your market area.",
+      icon: "clock",
+    });
+  }
+
+  if (roiInvestmentTier) {
+    metrics.push({
+      value: roiInvestmentTier,
+      title: "Recommended Investment Tier",
+      description:
+        "Turnkey physical delivery across all zones — furniture placement, artwork, and finishing touches included.",
+      icon: "dollar",
+    });
+  }
+
+  return metrics.length > 0 ? metrics : null;
 }

@@ -93,3 +93,15 @@ export interface LookbookRoomData extends RoomData {
   project: ProjectData;
   user: UserData;
 }
+
+/** ROI Metric card data (issue #552) */
+export interface ROIMetric {
+  /** Display value shown in large text, e.g. "+8–12%" */
+  value: string;
+  /** Short label below the value, e.g. "Estimated Sales Price Premium" */
+  title: string;
+  /** Contextual paragraph beneath the title */
+  description: string;
+  /** Lucide icon name */
+  icon: "trending_up" | "clock" | "dollar";
+}
