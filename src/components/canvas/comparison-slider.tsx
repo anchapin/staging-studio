@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import { ComparisonPill } from "./comparison-pill";
 
 interface ComparisonSliderProps {
   beforeImageUrl: string;
@@ -207,12 +208,12 @@ export default function ComparisonSlider({
         </div>
       </div>
 
-      {/* Labels */}
-      <div className="absolute left-3 top-3 rounded-md bg-black/60 px-2 py-1 text-xs font-medium text-white pointer-events-none">
-        {afterLabel}
+      {/* Labels — Issue #644: ComparisonPill styling */}
+      <div className="absolute left-3 top-3 pointer-events-none">
+        <ComparisonPill variant="studio">{afterLabel}</ComparisonPill>
       </div>
-      <div className="absolute right-3 top-3 rounded-md bg-black/60 px-2 py-1 text-xs font-medium text-white pointer-events-none">
-        Original
+      <div className="absolute right-3 top-3 pointer-events-none">
+        <ComparisonPill variant="studio">Original</ComparisonPill>
       </div>
     </div>
   );
