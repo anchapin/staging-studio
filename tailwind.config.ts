@@ -56,6 +56,8 @@ const config: Config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        /* Hairline divider token (Issue #640) */
+        "outline-variant": "hsl(var(--outline-variant))",
         /* Atelier Canvas palette (Issue #546) */
         atelier: {
           canvas: "#F8F6F2",
