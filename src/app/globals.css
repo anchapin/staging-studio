@@ -334,3 +334,12 @@
 .zen-mode-hidden {
   display: none !important;
 }
+
+/* Issue #645: Comparison slider handle */
+.shadow-handle {
+  box-shadow: 0 2px 8px rgba(196, 120, 71, 0.35);
+}
+
+.shadow-handle-hover {
+  box-shadow: 0 2px 8px rgba(196, 120, 71, 0.5);
+}
