@@ -62,7 +62,7 @@ export default function EditorTabBar({
       // reaches this handler because it bubbles from the focused button.
       tabIndex={-1}
       onKeyDown={handleKeyDown}
-      className="flex items-center gap-1 border-b border-stone-200"
+      className="flex items-center gap-1 border-b border-border"
     >
       {tabs.map((tab) => {
         const active = tab.id === activeTab;
@@ -78,8 +78,8 @@ export default function EditorTabBar({
             onClick={() => onSelectTab(tab.id)}
             className={`relative -mb-px flex items-center gap-1.5 rounded-t-md border border-b-0 px-3 py-2 text-sm font-medium transition-colors ${
               active
-                ? "border-stone-300 bg-white text-stone-900"
-                : "border-transparent text-stone-500 hover:bg-stone-100 hover:text-stone-700"
+                ? "border-border border-b-2 border-b-foreground bg-background font-bold text-foreground"
+                : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
             }`}
           >
             {tab.label}
@@ -88,8 +88,8 @@ export default function EditorTabBar({
                 aria-hidden="true"
                 className={`inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold leading-none ${
                   typeof tab.badge === "number"
-                    ? "bg-stone-800 text-white"
-                    : "h-2 w-2 min-w-0 bg-stone-800 p-0"
+                    ? "bg-foreground text-background"
+                    : "h-2 w-2 min-w-0 bg-foreground p-0"
                 }`}
               >
                 {typeof tab.badge === "number" ? tab.badge : null}

@@ -35,6 +35,7 @@ export default async function SettingsPage() {
       logoUrl: true,
       psychologyPageContent: true,
       signoffContent: true,
+      darkMode: true,
     },
   });
   if (!user) redirect("/setup");

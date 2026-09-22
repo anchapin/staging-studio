@@ -257,12 +257,12 @@ export default function StageEntireRoomPreset({
           </span>
         </h4>
         <p className="mt-1 text-xs text-stone-600">
-          Optional: detects furniture and decor and restages them with the
+          Detects furniture and decor and restages them to match the
           &ldquo;{plan.aesthetic}&rdquo; brief
           {plan.usingFallbackAesthetic
             ? " (no aesthetic set — using a neutral brief)"
             : ""}
-          ; walls, flooring, and windows stay as photographed. You can also
+          . Walls, flooring, and windows stay as photographed. You can also
           paint a mask on the photo below and apply inpainting directly —
           no shortcut needed.
         </p>
@@ -283,14 +283,14 @@ export default function StageEntireRoomPreset({
             transition-colors
             ${buttonDisabled
               ? "bg-stone-100 text-stone-400 cursor-not-allowed border border-stone-200"
-              : "border border-stone-300 bg-white text-stone-700 hover:bg-stone-50"
+              : "border border-stone-300 bg-white font-jakarta text-stone-700 hover:bg-stone-50"
             }
           `}
         >
           {processing || detecting ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-              {detecting ? "Detecting furnishings..." : "Staging..."}
+              {detecting ? "Detecting furnishings..." : "Restaging furnishings..."}
             </>
           ) : (
             <>

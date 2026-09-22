@@ -1,7 +1,32 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@config "../../tailwind.config.ts";
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius: var(--radius);
+  --font-cinzel: var(--font-cinzel-google);
+  --font-playfair: var(--font-playfair-google);
+  --font-jakarta: var(--font-jakarta-google);
+}
 
 @layer base {
   :root {
@@ -45,6 +70,29 @@
     --sidebar-accent-foreground: oklch(0.205 0 0);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
+
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+    --color-card: var(--card);
+    --color-card-foreground: var(--card-foreground);
+    --color-popover: var(--popover);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-primary: var(--primary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-secondary: var(--secondary);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-accent: var(--accent);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-destructive: var(--destructive);
+    --color-destructive-foreground: var(--destructive-foreground);
+    --color-border: var(--border);
+    --color-input: var(--input);
+    --color-ring: var(--ring);
+    --font-cinzel: var(--font-cinzel-google);
+    --font-playfair: var(--font-playfair-google);
+    --font-jakarta: var(--font-jakarta-google);
   }
   .theme {
     --font-heading: var(--font-sans);
@@ -145,6 +193,17 @@
   }
 }
 
+/* Respect prefers-reduced-motion (WCAG 2.1 SC 2.3.3) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* On-screen paper preview for /projects/[id]/lookbook (issue #250).
    Scoped to .paper-preview so the print route and Browserless capture
    are untouched: pages keep their internal flex/grid layouts but lose
@@ -166,4 +225,107 @@
   border: 1px solid var(--border, #e7e5e4);
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
   background: white;
+}
+
+/* Issue #549: Atelier Canvas spec Precision Inspector slider styling */
+/* Custom minimalist track: 2px height with neutral warm gray */
+/* Active fill track: 2px height in charred walnut #181716 */
+/* Thumb: 12px solid #181716 disc with inner 2px white core */
+.atelier-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 2px;
+  background: transparent;
+  outline: none;
+  cursor: pointer;
+}
+
+.atelier-slider::-webkit-slider-runnable-track {
+  height: 2px;
+  background: rgba(140, 130, 122, 0.25);
+  border-radius: 1px;
+}
+
+.atelier-slider::-moz-range-track {
+  height: 2px;
+  background: rgba(140, 130, 122, 0.25);
+  border-radius: 1px;
+}
+
+.atelier-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  background: #181716;
+  border-radius: 50%;
+  border: 2px solid white;
+  margin-top: -5px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: transform 0.1s ease;
+}
+
+.atelier-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  background: #181716;
+  border-radius: 50%;
+  border: 2px solid white;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: transform 0.1s ease;
+}
+
+.atelier-slider:hover::-webkit-slider-thumb {
+  transform: scale(1.17);
+}
+
+.atelier-slider:hover::-moz-range-thumb {
+  transform: scale(1.17);
+}
+
+.atelier-slider:focus {
+  outline: none;
+}
+
+.atelier-slider:focus::-webkit-slider-thumb {
+  box-shadow: 0 0 0 2px rgba(24, 23, 22, 0.2);
+}
+
+.atelier-slider:active::-webkit-slider-thumb {
+  transform: scale(1.17);
+}
+
+.atelier-slider:active::-moz-range-thumb {
+  transform: scale(1.17);
+}
+
+/* Issue #560: Zen Mode styles
+   Zen Mode hides all non-essential chrome and shows a full-viewport canvas
+   with a floating pill toolbar and subtle vignette. */
+.zen-mode-active {
+  cursor: default;
+}
+
+/* Vignette overlay — subtle darkening at canvas edges */
+.zen-mode-vignette::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 40;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 50%,
+    rgba(0, 0, 0, 0.18) 100%
+  );
+}
+
+/* Zen Mode dark background override for the inpaint canvas area */
+.zen-mode-dark {
+  background: #1c1917;
+}
+
+/* Zen Mode: hides all non-essential chrome when active */
+.zen-mode-hidden {
+  display: none !important;
 }

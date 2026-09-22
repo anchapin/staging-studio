@@ -7,7 +7,17 @@ interface SignoffPageProps {
   rooms: LookbookRoomData[];
 }
 
+/**
+ * Server-rendered sign-off page (issue #556).
+ *
+ * Renders the closing content and, if already signed, the client's signature
+ * with timestamp and a "Signed & Approved" badge.
+ *
+ * The interactive signing form (draw/type signature + approval checkbox) is
+ * handled by `SignoffPageClient`, which wraps this component on the preview page.
+ */
 export function SignoffPage({ user, project, rooms }: SignoffPageProps) {
+  const isSigned = project.clientSignatureStatus === "Signed" && project.clientSignature;
   const content = user.signoffContent || getDefaultSignoff(user, project);
 
   return (
@@ -15,11 +25,11 @@ export function SignoffPage({ user, project, rooms }: SignoffPageProps) {
       <div className="max-w-2xl text-center space-y-8">
         <div className="space-y-4">
           <p className="font-cinzel text-sm tracking-[0.3em] uppercase text-muted-foreground">
-            Thank You
+            {isSigned ? "Approved" : "Thank You"}
           </p>
 
           <h2 className="font-playfair text-4xl font-bold text-foreground">
-            Ready to Make Your Move
+            {isSigned ? "Staging Approved" : "Ready to Make Your Move"}
           </h2>
 
           <div className="w-24 h-0.5 bg-primary mx-auto" />
@@ -30,6 +40,45 @@ export function SignoffPage({ user, project, rooms }: SignoffPageProps) {
             {content}
           </div>
         </div>
+
+        {/* Signed signature display */}
+        {isSigned && project.clientSignature && (
+          <div className="pt-4 border-t border-border space-y-3">
+            <div className="flex justify-center">
+              <Image
+                src={project.clientSignature}
+                alt="Client signature"
+                width={200}
+                height={80}
+                className="object-contain max-h-20"
+                unoptimized={project.clientSignature.startsWith("data:")}
+              />
+            </div>
+            <div className="space-y-1">
+              <p className="font-playfair text-lg text-foreground">
+                {project.clientName}
+              </p>
+              {project.clientSignatureTimestamp && (
+                <p className="font-jakarta text-sm text-muted-foreground">
+                  Signed{" "}
+                  {new Date(project.clientSignatureTimestamp).toLocaleDateString("en-US", {
+                    year: "numeric",
+                    month: "long",
+                    day: "numeric",
+                  })}
+                </p>
+              )}
+            </div>
+            <div className="flex justify-center">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-green-50 border border-green-200 rounded-full text-xs font-jakarta text-green-700 font-medium">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                Signed & Approved
+              </span>
+            </div>
+          </div>
+        )}
 
         <div className="pt-8 space-y-4">
           {user.logoUrl && (

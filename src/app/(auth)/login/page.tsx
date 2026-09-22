@@ -5,14 +5,18 @@ import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import { resolveLoginErrorMessage } from "@/lib/login-error";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 function LoginForm() {
   const searchParams = useSearchParams();
   const errorParam = searchParams.get("error");
   const [email, setEmail] = useState("");
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [password, setPassword] = useState("");
+  const [passwordError, setPasswordError] = useState<string | null>(null);
   const [mode, setMode] = useState<"password" | "magic">("password");
   const [loading, setLoading] = useState(false);
+  const [forgotPasswordLoading, setForgotPasswordLoading] = useState(false);
   // A failed /auth/callback exchange lands back here with
   // ?error=auth_callback_failed — surface it in the same banner used for
   // client-side sign-in errors instead of a silent form (issue #91).
@@ -23,6 +27,9 @@ function LoginForm() {
       return text ? { type: "error" as const, text } : null;
     }
   );
+  // Tracks whether the most recent password sign-in attempt produced a failure
+  // so we can surface the Magic Link hint.
+  const [passwordFailed, setPasswordFailed] = useState(false);
   const messageRef = useRef<HTMLDivElement>(null);
 
   const supabase = createClient();
@@ -45,10 +52,31 @@ function LoginForm() {
 
     if (error) {
       setMessage({ type: "error", text: error.message });
+      setPasswordFailed(true);
     } else {
       window.location.href = "/dashboard";
     }
     setLoading(false);
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim()) {
+      setEmailError("Email is required");
+      return;
+    }
+    setForgotPasswordLoading(true);
+    setMessage(null);
+    // Always show a generic message to prevent email enumeration attacks.
+    // The backend still sends the email if the account exists.
+    await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/auth/callback`,
+    });
+    setMessage({
+      type: "success",
+      text: "If an account with that email exists, a password reset link has been sent.",
+    });
+    setForgotPasswordLoading(false);
   };
 
   const handleMagicLink = async (e: React.FormEvent) => {
@@ -91,7 +119,12 @@ function LoginForm() {
         >
           <button
             type="button"
-            onClick={() => setMode("password")}
+            onClick={() => {
+              setMode("password");
+              setEmailError(null);
+              setPasswordError(null);
+              setMessage(null);
+            }}
             aria-pressed={mode === "password"}
             className={`flex-1 rounded-md py-2 text-sm font-medium transition-colors ${
               mode === "password"
@@ -103,7 +136,12 @@ function LoginForm() {
           </button>
           <button
             type="button"
-            onClick={() => setMode("magic")}
+            onClick={() => {
+              setMode("magic");
+              setEmailError(null);
+              setPasswordError(null);
+              setMessage(null);
+            }}
             aria-pressed={mode === "magic"}
             className={`flex-1 rounded-md py-2 text-sm font-medium transition-colors ${
               mode === "magic"
@@ -120,15 +158,33 @@ function LoginForm() {
             <label htmlFor="email" className="block text-sm font-medium text-foreground">
               Email address
             </label>
-            <input
+            <Input
               id="email"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                if (emailError && e.target.value.trim()) setEmailError(null);
+              }}
+              onBlur={(e) => {
+                const value = e.target.value.trim();
+                if (!value) {
+                  setEmailError("Email is required");
+                } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+                  setEmailError("Please enter a valid email address");
+                }
+              }}
               required
-              className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+              aria-invalid={!!emailError}
+              aria-describedby={emailError ? "email-error" : undefined}
+              error={!!emailError}
               placeholder="you@example.com"
             />
+            {emailError && (
+              <p id="email-error" role="alert" className="mt-1 text-sm text-red-600">
+                {emailError}
+              </p>
+            )}
           </div>
 
           {mode === "password" && (
@@ -136,15 +192,36 @@ function LoginForm() {
               <label htmlFor="password" className="block text-sm font-medium text-foreground">
                 Password
               </label>
-              <input
+              <Input
                 id="password"
                 type="password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (passwordError && e.target.value) setPasswordError(null);
+                }}
+                onBlur={(e) => {
+                  if (!e.target.value) setPasswordError("Password is required");
+                }}
                 required
-                className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
-                placeholder="••••••••"
+                aria-invalid={!!passwordError}
+                aria-describedby={passwordError ? "password-error" : undefined}
+                error={!!passwordError}
+                placeholder="Enter your password"
               />
+              {passwordError && (
+                <p id="password-error" role="alert" className="mt-1 text-sm text-red-600">
+                  {passwordError}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={handleForgotPassword}
+                disabled={forgotPasswordLoading}
+                className="mt-2 text-sm text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
+              >
+                {forgotPasswordLoading ? "Please wait..." : "Forgot password?"}
+              </button>
             </div>
           )}
 
@@ -155,12 +232,30 @@ function LoginForm() {
               tabIndex={-1}
               className={`rounded-md p-3 text-sm ${
                 message.type === "error"
-                  ? "bg-red-50 text-red-700"
-                  : "bg-green-50 text-green-700"
+                  ? "bg-destructive/10 text-destructive"
+                  : "bg-green-500/10 text-green-600 dark:text-green-400"
               }`}
             >
               {message.text}
             </div>
+          )}
+
+          {passwordFailed && message?.type === "error" && mode === "password" && (
+            <p className="text-sm text-muted-foreground">
+              Don&apos;t have a password yet?{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  setMode("magic");
+                  setPasswordFailed(false);
+                  setMessage(null);
+                }}
+                className="underline-offset-2 hover:underline focus-visible:rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+              >
+                Switch to Magic Link
+              </button>{" "}
+              above to sign in via email.
+            </p>
           )}
 
           <Button
@@ -172,9 +267,6 @@ className="w-full"
           </Button>
         </form>
 
-        <p className="text-center text-xs text-muted-foreground">
-          For Circle G Designs — Lauren Chapin
-        </p>
       </div>
     </div>
   );

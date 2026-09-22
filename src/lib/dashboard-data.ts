@@ -26,6 +26,7 @@ import { createSupabaseRequestClient } from "@/lib/supabase";
 
 const dashboardUserSelect = {
   id: true,
+  darkMode: true,
   projects: {
     orderBy: { updatedAt: "desc" },
     select: {
@@ -85,6 +86,8 @@ const projectDetailSelect = {
   clientName: true,
   targetBuyer: true,
   stagingAesthetic: true,
+  stagingPackage: true,
+  stagingDirectives: true, // Issue #562: global project-level directives
   createdAt: true,
   user: {
     select: {

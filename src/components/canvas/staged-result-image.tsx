@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
+import ComparisonSlider from "./comparison-slider";
 
 /**
  * Matches RoomCanvas's grid-card sizing: half the two-column grid on
@@ -30,20 +31,66 @@ interface StagedResultImageProps {
    * affects sizing.
    */
   largeImage?: boolean;
+  /**
+   * Issue #497: the original (before) photo URL for comparison slider.
+   * When provided, renders a draggable before/after slider instead of a static image.
+   */
+  originalImageUrl?: string | null;
 }
 
 /**
- * Renders a room's staged "after" image as a static image (issue #168) —
- * no draggable before/after slider. The frame mirrors `RoomCanvas` so the
- * before photo above and the staged result below read as one coherent
- * pair; the variant label is shown as a small badge over the image.
+ * Renders a room's staged "after" image as a static image (issue #168).
+ * When originalImageUrl is provided (issue #497), renders a draggable
+ * comparison slider showing before (original) on the left and after (staged)
+ * on the right. The frame mirrors `RoomCanvas` so the before photo above and
+ * the staged result below read as one coherent pair; the variant label is
+ * shown as a small badge over the image.
  */
 export default function StagedResultImage({
   afterImageUrl,
   alt,
   label,
   largeImage = false,
+  originalImageUrl,
 }: StagedResultImageProps) {
+  const hasComparison = Boolean(originalImageUrl);
+
+  if (hasComparison) {
+    return (
+      <ComparisonSlider
+        beforeImageUrl={originalImageUrl!}
+        afterImageUrl={afterImageUrl}
+        beforeAlt={`${alt} (original)`}
+        afterAlt={alt}
+        afterLabel={label}
+        largeImage={largeImage}
+      />
+    );
+  }
+
+  return (
+    <StaticStagedResultImage
+      afterImageUrl={afterImageUrl}
+      alt={alt}
+      label={label}
+      largeImage={largeImage}
+    />
+  );
+}
+
+interface StaticStagedResultImageProps {
+  afterImageUrl: string;
+  alt: string;
+  label: string;
+  largeImage?: boolean;
+}
+
+function StaticStagedResultImage({
+  afterImageUrl,
+  alt,
+  label,
+  largeImage = false,
+}: StaticStagedResultImageProps) {
   /**
    * Natural pixel dimensions of the loaded photo (issue #188). The frame
    * adopts the photo's own aspect ratio so the FULL image stays visible —

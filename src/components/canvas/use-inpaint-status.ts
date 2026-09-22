@@ -14,6 +14,8 @@ const POLL_OPTIONS = {
   maxWaitMs: 5 * 60_000,
 };
 
+const MIN_PROCESSING_MS = 600;
+
 const fetchInpaintStatus: FetchInpaintStatus = async (requestId, signal) => {
   const response = await fetch(`/api/inpaint/${encodeURIComponent(requestId)}/status`, {
     signal,
@@ -56,6 +58,7 @@ export function useInpaintStatus(
   const controllerRef = useRef<AbortController | null>(null);
   const lastSubmitRef = useRef<StartInpaint | null>(null);
   const runRef = useRef<((submit: StartInpaint) => Promise<void>) | undefined>(undefined);
+  const processingStartRef = useRef<number | null>(null);
 
   useEffect(() => {
     return () => {
@@ -73,6 +76,7 @@ export function useInpaintStatus(
 
     setIsProcessing(true);
     setStatusText("Starting inpainting...");
+    processingStartRef.current = Date.now();
 
     try {
       const requestId = await submit(signal);
@@ -84,6 +88,13 @@ export function useInpaintStatus(
         signal,
         onProgress: (status) => setStatusText(`Processing: ${status}`),
       });
+      if (signal.aborted) return;
+
+      const elapsed = Date.now() - (processingStartRef.current ?? 0);
+      const remaining = MIN_PROCESSING_MS - elapsed;
+      if (remaining > 0) {
+        await new Promise((resolve) => setTimeout(resolve, remaining));
+      }
       if (signal.aborted) return;
 
       callbacksRef.current.showSuccess("Inpainting completed successfully!");

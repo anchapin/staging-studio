@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase";
 import { updateUserSettings } from "@/app/actions/settings";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { useToast, ToastContainer } from "@/components/ui/toast";
 
 interface SettingsFormProps {
   email: string;
@@ -13,6 +15,7 @@ interface SettingsFormProps {
     logoUrl: string | null;
     psychologyPageContent: string | null;
     signoffContent: string | null;
+    darkMode: boolean;
   };
 }
 
@@ -39,10 +42,12 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
   const [signoffContent, setSignoffContent] = useState(
     initial.signoffContent ?? ""
   );
+  const [darkMode, setDarkMode] = useState(initial.darkMode);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const errorRef = useRef<HTMLDivElement>(null);
+  const { toasts, showSuccess, dismissToast } = useToast();
 
   useEffect(() => {
     if (error) {
@@ -86,10 +91,12 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
       logoUrl,
       psychologyPageContent,
       signoffContent,
+      darkMode,
     });
 
     if (result.success) {
       setSaved(true);
+      showSuccess("Settings saved");
     } else {
       setError(result.error || "Failed to save settings");
     }
@@ -97,106 +104,180 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="max-w-md space-y-6">
-      <div>
-        <label
-          htmlFor="firmName"
-          className="block text-sm font-medium text-foreground"
-        >
-          Firm Name
-        </label>
-        <input
-          id="firmName"
-          type="text"
-          value={firmName}
-          onChange={(e) => setFirmName(e.target.value)}
-          required
-          className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
-          placeholder="Circle G Designs"
-        />
-      </div>
+    <form onSubmit={handleSubmit} className="max-w-md space-y-8">
+      <fieldset className="rounded-md border p-4 space-y-4">
+        <legend className="text-lg font-semibold text-foreground px-1">
+          Firm Branding
+        </legend>
 
-      <div>
-        <label
-          htmlFor="ownerName"
-          className="block text-sm font-medium text-foreground"
-        >
-          Owner Name
-        </label>
-        <input
-          id="ownerName"
-          type="text"
-          value={ownerName}
-          onChange={(e) => setOwnerName(e.target.value)}
-          required
-          className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
-          placeholder="Lauren Chapin"
-        />
-      </div>
+        <div>
+          <label
+            htmlFor="firmName"
+            className="block text-sm font-medium text-foreground"
+          >
+            Firm Name
+          </label>
+          <Input
+            id="firmName"
+            type="text"
+            value={firmName}
+            onChange={(e) => setFirmName(e.target.value)}
+            required
+            placeholder="Circle G Designs"
+          />
+        </div>
 
-      <div>
-        <label
-          htmlFor="logo"
-          className="block text-sm font-medium text-foreground"
-        >
-          Firm Logo <span className="text-muted-foreground">(optional)</span>
-        </label>
-        <input
-          id="logo"
-          type="file"
-          accept="image/*"
-          onChange={(e) => setLogoFile(e.target.files?.[0] || null)}
-          className="mt-1 block w-full text-sm text-muted-foreground file:mr-4 file:cursor-pointer file:rounded-md file:border-0 file:bg-secondary file:px-4 file:py-2 file:text-sm file:font-medium file:text-foreground hover:file:bg-muted"
-        />
-        {initial.logoUrl && (
-          <p className="mt-1 text-xs text-muted-foreground">
-            A logo is currently set — upload a new file to replace it.
+        <div>
+          <label
+            htmlFor="ownerName"
+            className="block text-sm font-medium text-foreground"
+          >
+            Owner Name
+          </label>
+          <Input
+            id="ownerName"
+            type="text"
+            value={ownerName}
+            onChange={(e) => setOwnerName(e.target.value)}
+            required
+            placeholder="Lauren Chapin"
+          />
+        </div>
+
+        <div>
+          <label
+            htmlFor="logo"
+            className="block text-sm font-medium text-foreground"
+          >
+            Firm Logo <span className="text-muted-foreground">(optional)</span>
+          </label>
+          {initial.logoUrl ? (
+            <div className="mt-1 space-y-2">
+              <div className="flex items-center gap-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={initial.logoUrl}
+                  alt="Current firm logo"
+                  className="h-10 w-auto object-contain rounded border"
+                />
+                <label
+                  htmlFor="logo-replace"
+                  className="cursor-pointer rounded-md border border-ring bg-secondary px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted"
+                >
+                  Replace
+                </label>
+                <input
+                  id="logo-replace"
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => setLogoFile(e.target.files?.[0] || null)}
+                  className="sr-only"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Upload a new file to replace the current logo.
+              </p>
+            </div>
+          ) : (
+            <input
+              id="logo"
+              type="file"
+              accept="image/*"
+              onChange={(e) => setLogoFile(e.target.files?.[0] || null)}
+              className="mt-1 block w-full text-sm text-muted-foreground file:mr-4 file:cursor-pointer file:rounded-md file:border-0 file:bg-secondary file:px-4 file:py-2 file:text-sm file:font-medium file:text-foreground hover:file:bg-muted"
+            />
+          )}
+        </div>
+      </fieldset>
+
+      <fieldset className="rounded-md border p-4 space-y-4">
+        <legend className="text-lg font-semibold text-foreground px-1">
+          Lookbook Templates
+        </legend>
+
+        <div>
+          <label
+            htmlFor="psychologyPageContent"
+            className="block text-sm font-medium text-foreground"
+          >
+            Philosophy Page{" "}
+            <span className="text-muted-foreground">(page 2)</span>
+          </label>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Add a paragraph describing your ideal buyer and the emotional journey
+            you design for them.
           </p>
-        )}
-      </div>
+          <textarea
+            id="psychologyPageContent"
+            value={psychologyPageContent}
+            onChange={(e) => setPsychologyPageContent(e.target.value)}
+            rows={5}
+            className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+            placeholder="Describe your ideal buyer and the emotional journey you design..."
+          />
+        </div>
 
-      <div>
-        <label
-          htmlFor="psychologyPageContent"
-          className="block text-sm font-medium text-foreground"
-        >
-          Psychology Page Content{" "}
-          <span className="text-muted-foreground">(lookbook page 2)</span>
-        </label>
-        <textarea
-          id="psychologyPageContent"
-          value={psychologyPageContent}
-          onChange={(e) => setPsychologyPageContent(e.target.value)}
-          rows={5}
-          className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
-          placeholder="Describe your ideal buyer and the emotional journey you design..."
-        />
-      </div>
+        <div>
+          <label
+            htmlFor="signoffContent"
+            className="block text-sm font-medium text-foreground"
+          >
+            Closing Page
+          </label>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Add your closing message to the buyer — this appears as the final
+            page of every lookbook.
+          </p>
+          <textarea
+            id="signoffContent"
+            value={signoffContent}
+            onChange={(e) => setSignoffContent(e.target.value)}
+            rows={5}
+            className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+            placeholder="Your closing message to the buyer..."
+          />
+        </div>
+      </fieldset>
 
-      <div>
-        <label
-          htmlFor="signoffContent"
-          className="block text-sm font-medium text-foreground"
-        >
-          Sign-off Content{" "}
-          <span className="text-muted-foreground">(final lookbook page)</span>
-        </label>
-        <textarea
-          id="signoffContent"
-          value={signoffContent}
-          onChange={(e) => setSignoffContent(e.target.value)}
-          rows={5}
-          className="mt-1 block w-full rounded-md border border-input px-3 py-2 shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
-          placeholder="Your closing message to the buyer..."
-        />
-      </div>
+      <fieldset className="rounded-md border p-4 space-y-4">
+        <legend className="text-lg font-semibold text-foreground px-1">
+          Preferences
+        </legend>
+
+        <div className="flex items-center justify-between">
+          <div>
+            <span className="block text-sm font-medium text-foreground">
+              Dark Mode
+            </span>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Switch between light and dark themes
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={darkMode}
+            aria-label="Dark mode toggle"
+            onClick={() => setDarkMode(!darkMode)}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${
+              darkMode ? "bg-primary" : "bg-muted"
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 translate-x-1 rounded-full bg-background shadow transition-transform ${
+                darkMode ? "translate-x-6" : "translate-x-1"
+              }`}
+            />
+          </button>
+        </div>
+      </fieldset>
 
       {error && (
         <div
           ref={errorRef}
           role="alert"
           tabIndex={-1}
-          className="rounded-md bg-red-50 p-3 text-sm text-red-700"
+          className="rounded-md bg-destructive/10 p-3 text-sm text-destructive"
         >
           {error}
         </div>
@@ -214,10 +295,11 @@ export default function SettingsForm({ email, initial }: SettingsFormProps) {
       <Button
         type="submit"
         disabled={saving}
-
       >
         {saving ? "Saving..." : "Save Settings"}
       </Button>
+
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </form>
   );
 }

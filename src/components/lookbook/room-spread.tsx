@@ -110,8 +110,8 @@ export function RoomSpread({ room, project }: RoomSpreadProps) {
           {pillars.map((pillar, index) => (
             <div key={index} className="space-y-3">
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-                  <span className="font-cinzel text-sm text-primary">
+                <div className="w-10 h-10 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center">
+                  <span className="font-cinzel text-base font-bold text-primary">
                     {index + 1}
                   </span>
                 </div>

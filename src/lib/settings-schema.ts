@@ -77,6 +77,7 @@ export const settingsSchema = z
     logoUrl: logoUrlSchema,
     psychologyPageContent: optionalTextSchema,
     signoffContent: optionalTextSchema,
+    darkMode: z.boolean(),
   })
   .strict();
 

@@ -29,22 +29,22 @@ const badgeVariants = cva(
     variants: {
       variant: {
         default:
-          "border border-transparent bg-secondary text-secondary-foreground shadow-sm",
+          "border border-transparent bg-secondary text-secondary-foreground shadow-sm dark:bg-secondary/80 dark:text-secondary-foreground",
         success:
-          "border border-transparent bg-success/10 text-success",
+          "border border-transparent bg-success/10 text-success dark:bg-success/20 dark:text-success/90",
         warning:
-          "border border-transparent bg-warning/10 text-warning",
+          "border border-transparent bg-warning/10 text-warning dark:bg-warning/20 dark:text-warning/90",
         destructive:
-          "border border-transparent bg-destructive/10 text-destructive",
+          "border border-transparent bg-destructive/10 text-destructive dark:bg-destructive/20 dark:text-destructive/90",
         outline:
-          "border border-border bg-transparent text-foreground",
+          "border border-border bg-transparent text-foreground dark:border-input dark:bg-transparent dark:text-foreground",
         secondary:
-          "border border-transparent bg-muted text-muted-foreground",
+          "border border-transparent bg-muted text-muted-foreground dark:bg-muted/80 dark:text-muted-foreground",
       },
       size: {
-        default: "h-5 px-2 py-0.5 text-xs",
-        sm: "h-4 px-1.5 py-0 text-[10px]",
-        lg: "h-6 px-2.5 py-1 text-sm",
+        default: "min-h-11 min-w-11 h-5 px-2 py-0.5 text-xs",
+        sm: "min-h-11 min-w-11 h-4 px-1.5 py-0 text-[10px]",
+        lg: "min-h-11 min-w-11 h-6 px-2.5 py-1 text-sm",
       },
     },
     defaultVariants: {

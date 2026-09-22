@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
 import { getDashboardUserWithProjects } from "@/lib/dashboard-data";
-import { SidebarNav } from "@/components/dashboard/sidebar-nav";
+import { MobileSidebar } from "@/components/dashboard/mobile-sidebar";
+import { ThemeProvider } from "@/components/theme-provider";
 
 export const dynamic = "force-dynamic";
 
@@ -40,42 +40,17 @@ export default async function DashboardLayout({
         Skip to main content
       </a>
 
-      {/* Sidebar */}
-      <aside className="no-print w-64 flex-shrink-0 overflow-y-auto bg-sidebar text-sidebar-foreground">
-        <div className="flex h-16 items-center border-b border-border px-6">
-          <p className="font-cinzel text-lg font-bold tracking-wide">
-            Circle G Designs
-          </p>
-        </div>
+      {/* Desktop sidebar: static, no JS needed */}
+      <aside className="no-print hidden w-64 flex-shrink-0 overflow-y-auto bg-sidebar text-sidebar-foreground md:hidden lg:flex" />
 
-        <div className="p-4">
-          <Link
-            href="/projects/new"
-            className="mb-3 flex items-center gap-2 rounded-md bg-background px-3 py-2 text-sm font-medium text-foreground hover:bg-muted"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="h-4 w-4"
-            >
-              <path d="M5 12h14" />
-              <path d="M12 5v14" />
-            </svg>
-            New Project
-          </Link>
-        </div>
-
-<SidebarNav projects={userRow?.projects ?? []} />
-      </aside>
+      {/* Mobile/tablet sidebar: interactive client component */}
+      <MobileSidebar projects={userRow?.projects ?? []} />
 
       {/* Main content */}
       <main id="main-content" tabIndex={-1} className="flex-1 overflow-auto">
-        {children}
+        <ThemeProvider darkMode={userRow?.darkMode ?? false}>
+          {children}
+        </ThemeProvider>
       </main>
     </div>
   );

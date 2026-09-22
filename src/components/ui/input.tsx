@@ -32,7 +32,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
         className={cn(
           // Base styles — design token driven
           "flex h-9 w-full rounded-md border bg-background px-3 py-1 text-sm",
-          "text-foreground placeholder:text-muted-foreground",
+          "text-foreground placeholder:opacity-60",
           "transition-colors duration-150 ease-out",
           // Border & ring — error state overrides focus state
           error

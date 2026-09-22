@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { X, RefreshCw } from "lucide-react";
 
 export interface Toast {
@@ -10,6 +10,8 @@ export interface Toast {
   retryable?: boolean;
   onRetry?: () => void;
   retryLabel?: string;
+  /** The selector of the element that triggered this toast, for focus return */
+  triggerSelector?: string;
 }
 
 interface ToastItemProps {
@@ -19,32 +21,54 @@ interface ToastItemProps {
 
 function ToastItem({ toast, onDismiss }: ToastItemProps) {
   const [isVisible, setIsVisible] = useState(false);
+  const dismissButtonRef = useRef<HTMLButtonElement>(null);
+
+  /** Restore focus to the trigger element that opened the toast */
+  const returnFocusToTrigger = useCallback(() => {
+    if (toast.triggerSelector) {
+      const triggerEl = document.querySelector<HTMLElement>(toast.triggerSelector);
+      triggerEl?.focus();
+    }
+  }, [toast.triggerSelector]);
 
   useEffect(() => {
     setIsVisible(true);
+    // Non-error toasts auto-dismiss at 4s; errors persist until manually dismissed
+    const timeout = toast.type === "error" ? 8000 : 4000;
     const timer = setTimeout(() => {
       setIsVisible(false);
-      setTimeout(() => onDismiss(toast.id), 300);
-    }, 8000);
+      setTimeout(() => {
+        onDismiss(toast.id);
+        returnFocusToTrigger();
+      }, 300);
+    }, timeout);
     return () => clearTimeout(timer);
-  }, [toast.id, onDismiss]);
+  }, [toast.id, toast.type, onDismiss, returnFocusToTrigger]);
 
-  const bgColor = {
-    success: "bg-green-50 border-green-200",
-    error: "bg-red-50 border-red-200",
-    info: "bg-blue-50 border-blue-200",
-  }[toast.type];
+  const handleDismiss = () => {
+    setIsVisible(false);
+    setTimeout(() => {
+      onDismiss(toast.id);
+      returnFocusToTrigger();
+    }, 300);
+  };
 
-  const textColor = {
-    success: "text-green-800",
-    error: "text-red-800",
-    info: "text-blue-800",
-  }[toast.type];
-
-  const iconColor = {
-    success: "text-green-500",
-    error: "text-red-500",
-    info: "text-blue-500",
+  const colorMap = {
+    success: {
+      bg: "bg-success/10 border-success/20",
+      text: "text-success",
+      icon: "text-success",
+    },
+    error: {
+      bg: "bg-destructive/10 border-destructive/20",
+      text: "text-destructive",
+      icon: "text-destructive",
+    },
+    info: {
+      bg: "bg-info/10 border-info/20",
+      text: "text-info",
+      icon: "text-info",
+    },
   }[toast.type];
 
   return (
@@ -53,23 +77,23 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
       aria-live={toast.type === "error" ? "assertive" : "polite"}
       className={`
         flex items-center gap-3 px-4 py-3 rounded-lg border shadow-lg
-        ${bgColor} ${textColor}
+        ${colorMap.bg} ${colorMap.text}
         transition-all duration-300 ease-out
         ${isVisible ? "translate-x-0 opacity-100" : "translate-x-full opacity-0"}
       `}
     >
       {toast.type === "success" && (
-        <svg className={`w-5 h-5 ${iconColor}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <svg className={`w-5 h-5 ${colorMap.icon}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
         </svg>
       )}
       {toast.type === "error" && (
-        <svg className={`w-5 h-5 ${iconColor}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <svg className={`w-5 h-5 ${colorMap.icon}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
         </svg>
       )}
       {toast.type === "info" && (
-        <svg className={`w-5 h-5 ${iconColor}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <svg className={`w-5 h-5 ${colorMap.icon}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
       )}
@@ -87,7 +111,7 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
             flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium
             bg-white border border-gray-200 shadow-sm
             hover:bg-gray-50 transition-colors
-            ${iconColor}
+            ${colorMap.icon}
           `}
         >
           <RefreshCw className="w-3.5 h-3.5" />
@@ -96,10 +120,8 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
       )}
 
       <button
-        onClick={() => {
-          setIsVisible(false);
-          setTimeout(() => onDismiss(toast.id), 300);
-        }}
+        ref={dismissButtonRef}
+        onClick={handleDismiss}
         aria-label="Dismiss notification"
         className="p-1 rounded hover:bg-black/5 transition-colors"
       >
@@ -115,11 +137,16 @@ interface ToastContainerProps {
 }
 
 export function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
+  // Cap at 3 most recent toasts, newest on top (issue #396: stale error toasts
+  // stacking over new success toasts)
+  const visibleToasts = toasts.slice(-3).reverse();
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm">
-      {toasts.map((toast) => (
-        <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} />
-      ))}
+    <div className="fixed top-20 right-4 z-50 max-w-sm w-full px-4">
+      <div className="max-h-[50vh] overflow-y-auto flex flex-col gap-2">
+        {visibleToasts.map((toast) => (
+          <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -141,17 +168,18 @@ export function useToast() {
     message: string,
     retryable = false,
     onRetry?: () => void,
-    retryLabel?: string
+    retryLabel?: string,
+    triggerSelector?: string
   ) => {
-    return addToast({ type: "error", message, retryable, onRetry, retryLabel });
+    return addToast({ type: "error", message, retryable, onRetry, retryLabel, triggerSelector });
   };
 
-  const showSuccess = (message: string) => {
-    return addToast({ type: "success", message });
+  const showSuccess = (message: string, triggerSelector?: string) => {
+    return addToast({ type: "success", message, triggerSelector });
   };
 
-  const showInfo = (message: string) => {
-    return addToast({ type: "info", message });
+  const showInfo = (message: string, triggerSelector?: string) => {
+    return addToast({ type: "info", message, triggerSelector });
   };
 
   return {

@@ -1,6 +1,5 @@
 import { cache } from "react";
 import { notFound } from "next/navigation";
-import Link from "next/link";
 import type { Metadata } from "next";
 
 import { prisma } from "@/lib/prisma";
@@ -14,6 +13,8 @@ import {
   LookbookPreviewView,
   type PreviewProject,
 } from "./lookbook-preview-view";
+import { EditLookbookDropdown } from "@/components/lookbook/edit-lookbook-dropdown";
+import type { ROIMetric } from "@/components/lookbook";
 
 interface LookbookPreviewPageProps {
   params: Promise<{ id: string }>;
@@ -34,8 +35,18 @@ const getPreviewAccess = cache(resolvePreviewAccessRequest);
 const getPreviewProject = cache(async (id: string) =>
   prisma.project.findUnique({
     where: { id },
-    include: {
-      rooms: true,
+    select: {
+      id: true,
+      propertyAddress: true,
+      clientName: true,
+      targetBuyer: true,
+      stagingAesthetic: true,
+      roiSalesPricePremium: true,
+      roiTransactionVelocity: true,
+      roiInvestmentTier: true,
+      clientSignature: true,
+      clientSignatureStatus: true,
+      clientSignatureTimestamp: true,
       user: {
         select: {
           firmName: true,
@@ -45,6 +56,11 @@ const getPreviewProject = cache(async (id: string) =>
           signoffContent: true,
         },
       },
+      rooms: true,
+      materialSwatches: {
+        orderBy: { sortOrder: "asc" },
+      },
+      procurementItems: true,
     },
   })
 );
@@ -167,6 +183,12 @@ export default async function LookbookPreviewPage({
     clientName: project.clientName,
     targetBuyer: project.targetBuyer,
     stagingAesthetic: project.stagingAesthetic,
+    roiMetrics: buildROIMetrics(project),
+    clientSignature: project.clientSignature,
+    clientSignatureStatus: project.clientSignatureStatus,
+    clientSignatureTimestamp: project.clientSignatureTimestamp
+      ? project.clientSignatureTimestamp.toISOString()
+      : null,
     user: {
       firmName: project.user.firmName,
       ownerName: project.user.ownerName,
@@ -188,6 +210,16 @@ export default async function LookbookPreviewPage({
       // Already parsed/validated by parseChecklistItems in the view.
       checklistItems: room.checklistItems as PreviewProject["rooms"][number]["checklistItems"],
     })),
+    materialSwatches: project.materialSwatches,
+    procurementItems: project.procurementItems.map((item) => ({
+      id: item.id,
+      item: item.item,
+      category: item.category,
+      vendor: item.vendor,
+      sku: item.sku,
+      estCost: item.estCost,
+      status: item.status,
+    })),
   };
 
   // Session-origin access (no token) is the owning firm browsing their
@@ -198,15 +230,62 @@ export default async function LookbookPreviewPage({
     <div>
       {!token && (
         <div className="no-print flex justify-end p-4">
-          <Link
-            href={`/projects/${id}/lookbook`}
-            className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-100"
-          >
-            Edit Lookbook
-          </Link>
+          <EditLookbookDropdown
+            projectId={id}
+            firstRoomId={project.rooms[0]?.id ?? null}
+          />
         </div>
       )}
-      <LookbookPreviewView project={previewProject} />
+      <LookbookPreviewView project={previewProject} previewToken={token ?? undefined} />
     </div>
   );
+}
+
+/**
+ * Build ROI metrics array from project fields.
+ * Returns null when no ROI fields are set — the dashboard component
+ * renders its built-in defaults in that case.
+ */
+function buildROIMetrics(
+  project: Awaited<ReturnType<typeof getPreviewProject>>
+): ROIMetric[] | null {
+  if (!project) return null;
+  const { roiSalesPricePremium, roiTransactionVelocity, roiInvestmentTier } =
+    project;
+  if (!roiSalesPricePremium && !roiTransactionVelocity && !roiInvestmentTier)
+    return null;
+
+  const metrics: ROIMetric[] = [];
+
+  if (roiSalesPricePremium) {
+    metrics.push({
+      value: roiSalesPricePremium,
+      title: "Estimated Sales Price Premium",
+      description:
+        "Generates equity over vacant baseline based on comparable staged properties in the local market.",
+      icon: "trending_up",
+    });
+  }
+
+  if (roiTransactionVelocity) {
+    metrics.push({
+      value: roiTransactionVelocity,
+      title: "Faster Transaction Velocity",
+      description:
+        "Staged homes sell faster with fewer listing price reductions in your market area.",
+      icon: "clock",
+    });
+  }
+
+  if (roiInvestmentTier) {
+    metrics.push({
+      value: roiInvestmentTier,
+      title: "Recommended Investment Tier",
+      description:
+        "Turnkey physical delivery across all zones — furniture placement, artwork, and finishing touches included.",
+      icon: "dollar",
+    });
+  }
+
+  return metrics.length > 0 ? metrics : null;
 }

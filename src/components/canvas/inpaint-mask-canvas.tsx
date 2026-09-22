@@ -17,10 +17,23 @@ import {
   dilateMaskGridDirectional,
 } from "@/lib/mask-dilation";
 import { fillHoles } from "@/lib/mask-postprocess";
-import { SAM_TOOL_ENABLED } from "@/lib/sam-tool";
 
 /** Tools for building the mask: freehand paint, flood-fill, or concept select. */
-type MaskTool = "brush" | "fill" | "select";
+export type MaskTool = "brush" | "fill" | "select";
+
+/**
+ * Issue #549: Atelier Canvas spec mask overlay colors.
+ * Electric emerald for mask overlay on canvas, with laser-rim 1px solid border
+ * for visibility over mixed fabrics and warm woodwork.
+ */
+export const MASK_OVERLAY_EMERALD = "rgba(0, 245, 160, 0.35)";
+export const MASK_OVERLAY_AMBER = "rgba(255, 184, 0, 0.38)";
+
+/**
+ * Issue #549: Laser-rim border for mask visibility.
+ * 1px solid border ensuring the mask overlay is visible over varied surfaces.
+ */
+export const MASK_LASER_RIM_BORDER = "1px solid rgba(0, 245, 160, 0.8)";
 
 /**
  * Rank→color palette for instance overlays (issue #228). Six hues,
@@ -106,8 +119,16 @@ interface InpaintMaskCanvasProps {
   width?: number;
   height?: number;
   brushSize?: number;
+  /** Issue #560: callback to notify parent of brush size changes (Zen Mode). */
+  onBrushSizeChange?: (size: number) => void;
   initialMaskDataUrl?: string | null;
   onMaskChange?: (maskDataUrl: string | null) => void;
+  /** Issue #560: external active tool state (Zen Mode). */
+  activeTool?: MaskTool;
+  /** Issue #560: callback when active tool changes (Zen Mode). */
+  onActiveToolChange?: (tool: MaskTool) => void;
+  /** Issue #560: when true, hides the toolbar and non-essential chrome. */
+  zenMode?: boolean;
   /** Natural aspect ratio (width / height) of the source photo; sizes the mask canvas to match it. */
   aspectRatio?: number | null;
   /** Natural pixel width of the uploaded photo; exported masks are scaled to match. */
@@ -171,12 +192,39 @@ interface InpaintMaskCanvasProps {
   /** Issue #203: the user pressed Clear Mask; lets the parent drop the
    * batch selection set so it cannot disagree with the now-empty grid. */
   onMaskCleared?: () => void;
+  /** Issue #448: click a numbered badge to deselect that region. */
+  onSelectionDeselect?: (id: string) => void;
+  /**
+   * Issue #454: the concept name being detected — shown in the empty-state
+   * badge while `segmenting` is true so users know detection is running.
+   */
+  detectingConcept?: string;
+  /**
+   * Issue #548: number of undo steps available in the canvas (exposed from
+   * internal undo stack for the FloatingCanvasToolbar and QuickToolRail).
+   */
+  undoCount?: number;
+  /**
+   * Issue #548: callback to trigger an undo operation from an external toolbar.
+   */
+  onUndo?: () => void;
+  /**
+   * Issue #548: called whenever the undo stack size changes so external
+   * controls (FloatingCanvasToolbar, QuickToolRail) can display the count.
+   */
+  onUndoCountChange?: (count: number) => void;
+  /**
+   * Issue #548: callback ref that exposes the canvas's internal handleUndo
+   * to the parent editor so external toolbars can trigger canvas-native undo.
+   */
+  undoRef?: React.MutableRefObject<(() => void) | null>;
 }
 
 export default function InpaintMaskCanvas({
   width = 512,
   height = 512,
-  brushSize: initialBrushSize = 20,
+  brushSize: externalBrushSize,
+  onBrushSizeChange,
   initialMaskDataUrl,
   onMaskChange,
   aspectRatio,
@@ -193,17 +241,35 @@ export default function InpaintMaskCanvas({
   selectionMarkers,
   selectionReset = null,
   onMaskCleared,
+  onSelectionDeselect,
+  detectingConcept,
+  activeTool: externalActiveTool,
+  onActiveToolChange,
+  zenMode = false,
+  undoCount = 0,
+  onUndo,
+  onUndoCountChange,
+  undoRef,
 }: InpaintMaskCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
-  const [brushSize, setBrushSize] = useState(initialBrushSize);
+
+  // Issue #560: external brush size takes priority (Zen Mode lifts state to parent).
+  const [internalBrushSize, setInternalBrushSize] = useState(externalBrushSize ?? 20);
+  const brushSize = externalBrushSize ?? internalBrushSize;
+
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(initialMaskDataUrl ?? null);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
 
-  // Masking-guidance state: which tool is active, whether anything has been
-  // painted yet (drives the empty-state hint), and whether the exported mask
-  // is suspiciously tiny (drives the low-coverage warning).
-  const [activeTool, setActiveTool] = useState<MaskTool>("brush");
+  // Issue #378: undo history stack for mask operations. Each entry is a
+  // snapshot of the canvas content before a painting operation (brush stroke,
+  // fill, or clear). Undo pops the stack to restore a previous state.
+  const [undoStack, setUndoStack] = useState<string[]>([]);
+
+  // Issue #560: external active tool takes priority (Zen Mode lifts state to parent).
+  const [internalActiveTool, setInternalActiveTool] = useState<MaskTool>("brush");
+  const activeTool = externalActiveTool ?? internalActiveTool;
+
   const [hasPainted, setHasPainted] = useState(false);
   const [lowCoverage, setLowCoverage] = useState(false);
 
@@ -217,6 +283,7 @@ export default function InpaintMaskCanvas({
   const keyboardPaintingRef = useRef(false);
   const hintId = useId();
   const maskingHintId = useId();
+  const [showLegend, setShowLegend] = useState(false);
 
   // Canvas resolution follows the photo's aspect ratio (capped on the long
   // edge); without one, fall back to the plain width/height props.
@@ -576,6 +643,77 @@ export default function InpaintMaskCanvas({
     ctx.fill();
   };
 
+  // Issue #378: capture the current canvas content as a data URL for the undo
+  // stack. Called before any destructive operation (stroke, fill, clear).
+  const captureUndoState = useCallback((): string | null => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    return canvas.toDataURL("image/png");
+  }, []);
+
+  // Issue #378: restore a previously captured undo state back onto the canvas.
+  const restoreUndoState = useCallback((dataUrl: string) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return false;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return false;
+    const img = new Image();
+    img.onload = () => {
+      ctx.fillStyle = "black";
+      ctx.fillRect(0, 0, dims.width, dims.height);
+      ctx.drawImage(img, 0, 0, dims.width, dims.height);
+    };
+    img.src = dataUrl;
+    return true;
+  }, [dims.width, dims.height]);
+
+  // Issue #378: pop the most recent undo state and restore it. Called both
+  // from the explicit Undo button and from the Cmd/Ctrl+Z keyboard shortcut.
+  const handleUndo = useCallback(() => {
+    if (undoStack.length === 0) return;
+    const previousState = undoStack[undoStack.length - 1];
+    if (!previousState) return;
+    if (restoreUndoState(previousState)) {
+      setUndoStack((prev) => prev.slice(0, -1));
+      // After restore, re-export to notify parent and update coverage warning
+      // Use a microtask to ensure canvas is painted before exporting
+      queueMicrotask(() => {
+        const currentDataUrl = canvasRef.current?.toDataURL("image/png") ?? null;
+        setMaskDataUrl(currentDataUrl);
+        onMaskChange?.(currentDataUrl);
+        // Update hasPainted based on whether there's any content
+        const canvas = canvasRef.current;
+        if (canvas) {
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            let hasContent = false;
+            for (let i = 0; i < data.length; i += 4) {
+              if (data[i] > 0 || data[i + 1] > 0 || data[i + 2] > 0) {
+                hasContent = true;
+                break;
+              }
+            }
+            setHasPainted(hasContent);
+          }
+        }
+      });
+    }
+  }, [undoStack, restoreUndoState, onMaskChange]);
+
+  // Issue #548: report undo stack size to parent so FloatingCanvasToolbar
+  // and QuickToolRail can display the current undo count.
+  useEffect(() => {
+    onUndoCountChange?.(undoStack.length);
+  }, [undoStack.length, onUndoCountChange]);
+
+  // Issue #548: expose handleUndo to parent via callback ref so external
+  // toolbars can trigger canvas-native undo.
+  useEffect(() => {
+    if (undoRef) undoRef.current = handleUndo;
+  }, [handleUndo, undoRef]);
+
   // Fill Region tool: flood-fills the unpainted region connected to the
   // click/cursor point with painted pixels. Designed for cover-the-object
   // semantics — draw a continuous outline around the object, then fill its
@@ -622,11 +760,21 @@ export default function InpaintMaskCanvas({
       return;
     }
     if (activeTool === "fill") {
+      // Issue #378: capture undo state before fill
+      const undoState = captureUndoState();
+      if (undoState !== null) {
+        setUndoStack((prev) => [...prev, undoState]);
+      }
       if (performFill(point)) {
         setHasPainted(true);
         exportMask();
       }
       return;
+    }
+    // Issue #378: capture undo state before brush stroke begins
+    const undoState = captureUndoState();
+    if (undoState !== null) {
+      setUndoStack((prev) => [...prev, undoState]);
     }
     setIsDrawing(true);
     lastPointRef.current = point;
@@ -779,6 +927,11 @@ export default function InpaintMaskCanvas({
   }, [includeFloorShadow, exportMask]);
 
   const clearMask = () => {
+    // Issue #378: capture undo state before clearing so it can be undone
+    const undoState = captureUndoState();
+    if (undoState !== null) {
+      setUndoStack((prev) => [...prev, undoState]);
+    }
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -905,6 +1058,13 @@ export default function InpaintMaskCanvas({
   };
 
   const handleCanvasKeyDown = (e: React.KeyboardEvent<HTMLCanvasElement>) => {
+    // Issue #378: Cmd/Ctrl+Z for undo
+    if ((e.metaKey || e.ctrlKey) && e.key === "z") {
+      e.preventDefault();
+      handleUndo();
+      return;
+    }
+
     const delta = ARROW_DELTAS[e.key];
     if (delta) {
       e.preventDefault();
@@ -920,6 +1080,29 @@ export default function InpaintMaskCanvas({
     if (e.key === "p" || e.key === "P" || e.key === " " || e.key === "Enter") {
       e.preventDefault();
       toggleKeyboardPaint();
+      return;
+    }
+
+    if (e.key === "+" || e.key === "=") {
+      e.preventDefault();
+      const next = Math.min(internalBrushSize + 2, 100);
+      if (onBrushSizeChange) {
+        onBrushSizeChange(next);
+      } else {
+        setInternalBrushSize(next);
+      }
+      return;
+    }
+
+    if (e.key === "-" || e.key === "_") {
+      e.preventDefault();
+      const next = Math.max(internalBrushSize - 2, 1);
+      if (onBrushSizeChange) {
+        onBrushSizeChange(next);
+      } else {
+        setInternalBrushSize(next);
+      }
+      return;
     }
   };
 
@@ -946,27 +1129,31 @@ export default function InpaintMaskCanvas({
     height: naturalHeight && naturalHeight > 0 ? naturalHeight : dims.height,
   };
   const selectionBadges = (selectionMarkers ?? []).map((marker) => (
-    <div
+    <button
       key={marker.id}
-      aria-hidden="true"
-      className="pointer-events-none absolute z-20 flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white bg-stone-900/85 text-[10px] font-semibold leading-none text-white shadow"
+      type="button"
+      aria-label={`Deselect region ${marker.index}`}
+      onClick={() => onSelectionDeselect?.(marker.id)}
+      className="absolute z-20 flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white bg-stone-900/85 text-[10px] font-semibold leading-none text-white shadow hover:bg-stone-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-400"
       style={{
         left: `${(marker.x / markerSpace.width) * 100}%`,
         top: `${(marker.y / markerSpace.height) * 100}%`,
       }}
     >
       {marker.index}
-    </div>
+    </button>
   ));
 
   // Brush cursor indicator is a DOM overlay, never canvas pixels, so the
   // exported mask stays clean. Positioned/sized as percentages of the canvas
   // box so it matches the display size in both overlay and standalone modes.
+  // Issue #549: Uses electric emerald mask overlay color with laser-rim border
+  // for visibility over mixed fabrics and warm woodwork.
   const cursorIndicator =
     isCanvasFocused && cursor ? (
       <div
         aria-hidden="true"
-        className={`pointer-events-none absolute z-10 rounded-full border-2 border-white ${
+        className={`pointer-events-none absolute z-10 rounded-full ${
           isKeyboardPainting ? "bg-white/40" : ""
         }`}
         style={{
@@ -975,7 +1162,9 @@ export default function InpaintMaskCanvas({
           width: `${(brushSize / dims.width) * 100}%`,
           height: `${(brushSize / dims.height) * 100}%`,
           transform: "translate(-50%, -50%)",
-          boxShadow: "0 0 0 1px rgba(0, 0, 0, 0.6)",
+          backgroundColor: isKeyboardPainting ? undefined : MASK_OVERLAY_EMERALD,
+          border: MASK_LASER_RIM_BORDER,
+          boxShadow: "0 0 0 1px rgba(0, 0, 0, 0.4)",
         }}
       />
     ) : null;
@@ -1059,9 +1248,11 @@ export default function InpaintMaskCanvas({
               hasOverlay ? "" : "border border-white/30"
             }`}
           >
-            {activeTool === "select"
-              ? "Click a tinted object to toggle it in the mask"
-              : "Drag to paint over the object you want changed"}
+            {segmenting && detectingConcept
+              ? `Analyzing room for ${detectingConcept}…`
+              : activeTool === "select"
+                ? "Click a tinted object to toggle it in the mask"
+                : "Drag to paint over the object you want changed"}
           </span>
         </div>
       )}
@@ -1123,10 +1314,7 @@ export default function InpaintMaskCanvas({
         regenerated, everything else is preserved. A thin outline won&apos;t
         change the interior, so cover the whole object (or draw an outline and
         use Fill Region on its inside).
-        {/* Select Objects is flag-gated (SAM_TOOL_ENABLED): the sentence
-            disappears with the tool if the kill switch is flipped off. */}
-        {SAM_TOOL_ENABLED &&
-          " Select Regions detects every instance of the chosen concept in one call — pick a concept chip above, then click outlined instances to add them to the mask (outlines turn solid fills when selected). Nearby instances fuse into one region. Re-clicks and re-toggles are free."}
+        {" Select Regions detects every instance of the chosen concept in one call — pick a concept chip above, then click outlined instances to add them to the mask (outlines turn solid fills when selected). Nearby instances fuse into one region. Re-clicks and re-toggles are free."}
       </p>
 
       {lowCoverage && (
@@ -1137,22 +1325,37 @@ export default function InpaintMaskCanvas({
         </p>
       )}
 
-      <p id={hintId} className="text-xs text-gray-500">
-        Keyboard painting: Tab to the canvas, move the brush with the arrow keys
-        (Shift + arrow for fine steps), and press P, Space, or Enter to start or
-        stop painting. Brush Size and Clear Mask follow in the tab order.
-      </p>
+      {/* Issue #560: hint and legend hidden in Zen Mode */}
+      {!zenMode && (
+        <p id={hintId} className="text-xs text-gray-500">
+          Tab to the canvas to paint. Press <button
+            type="button"
+            onClick={() => setShowLegend(true)}
+            className="mx-0.5 rounded border border-gray-300 bg-white px-1 py-0.5 text-xs font-medium hover:bg-gray-50"
+          >?</button> for keyboard shortcuts.
+        </p>
+      )}
 
-      <div className="flex items-center gap-4">
-        <div role="group" aria-label="Mask tool" className="flex items-center gap-2">
+      {/* Issue #317: toolbar wraps at md+ and buttons have min-height 44px for touch.
+          Issue #560: toolbar hidden in Zen Mode (ZenModeToolbar takes over). */}
+      {/* Issue #549: glassmorphic dock with translucent warm backdrop */}
+      {!zenMode && (
+      <div className="flex flex-wrap items-center gap-4 rounded-lg border border-stone-200/50 bg-white/80 px-4 py-3 backdrop-blur-md shadow-sm">
+        <div role="group" aria-label="Mask tool" className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             aria-pressed={activeTool === "brush"}
-            onClick={() => setActiveTool("brush")}
+            onClick={() => {
+              if (onActiveToolChange) {
+                onActiveToolChange("brush");
+              } else {
+                setInternalActiveTool("brush");
+              }
+            }}
             className={
               activeTool === "brush"
-                ? "px-3 py-1.5 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors"
-                : "px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors"
+                ? "relative px-3 py-2 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors md:min-h-[44px] after:absolute after:bottom-0 after:left-1/2 after:-translate-x-1/2 after:h-[2px] after:w-8 after:bg-[#C47847]"
+                : "px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors md:min-h-[44px]"
             }
           >
             Brush
@@ -1160,30 +1363,41 @@ export default function InpaintMaskCanvas({
           <button
             type="button"
             aria-pressed={activeTool === "fill"}
-            onClick={() => setActiveTool("fill")}
+            onClick={() => {
+              if (onActiveToolChange) {
+                onActiveToolChange("fill");
+              } else {
+                setInternalActiveTool("fill");
+              }
+            }}
             className={
               activeTool === "fill"
-                ? "px-3 py-1.5 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors"
-                : "px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors"
+                ? "relative px-3 py-2 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors md:min-h-[44px] after:absolute after:bottom-0 after:left-1/2 after:-translate-x-1/2 after:h-[2px] after:w-8 after:bg-[#C47847]"
+                : "px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors md:min-h-[44px]"
             }
           >
             Fill Region
           </button>
-          {/* Issue #228: the old per-click Select Object tool became the
-              concept-driven Select Objects tool. The spinner below is THE
-              processing indicator — visible on the tool itself while a
-              concept detection runs, not just in the editor's status line. */}
-          {SAM_TOOL_ENABLED && (
+          {/* Issue #228: the Select Objects tool runs SAM 3.1 concept
+              detection. The spinner below is THE processing indicator —
+              visible on the tool itself while a concept detection runs,
+              not just in the editor's status line. */}
             <button
               type="button"
               aria-pressed={activeTool === "select"}
               aria-busy={segmenting}
               disabled={segmentDisabled}
-              onClick={() => setActiveTool("select")}
+              onClick={() => {
+                if (onActiveToolChange) {
+                  onActiveToolChange("select");
+                } else {
+                  setInternalActiveTool("select");
+                }
+              }}
               className={
                 activeTool === "select"
-                  ? "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
-                  : "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                  ? "relative flex items-center gap-1.5 px-3 py-2 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors disabled:cursor-not-allowed disabled:opacity-60 md:min-h-[44px] after:absolute after:bottom-0 after:left-1/2 after:-translate-x-1/2 after:h-[2px] after:w-8 after:bg-[#C47847]"
+                  : "flex items-center gap-1.5 px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-60 md:min-h-[44px]"
               }
             >
               {segmenting ? (
@@ -1195,29 +1409,98 @@ export default function InpaintMaskCanvas({
                 "Select Regions"
               )}
             </button>
-          )}
         </div>
 
-        <label className="flex items-center gap-2 text-sm">
-          Brush Size:
-          <input
-            type="range"
-            min={1}
-            max={100}
-            value={brushSize}
-            onChange={(e) => setBrushSize(Number(e.target.value))}
-            className="w-32"
-          />
-          <span className="w-8 text-right">{brushSize}</span>
+        {/* Issue #549: Precision Inspector slider styling */}
+        <label className="flex items-center gap-2 text-sm text-stone-700 md:min-h-[44px] md:py-1">
+          <span className="whitespace-nowrap">Brush Size:</span>
+          <div className="relative">
+            <input
+              type="range"
+              min={1}
+              max={100}
+              value={brushSize}
+              onChange={(e) => {
+                const next = Number(e.target.value);
+                if (onBrushSizeChange) {
+                  onBrushSizeChange(next);
+                } else {
+                  setInternalBrushSize(next);
+                }
+              }}
+              className="atelier-slider w-24 md:w-32"
+              aria-label="Brush size"
+            />
+          </div>
+          <span className="w-8 text-right tabular-nums font-medium">{brushSize}</span>
         </label>
 
         <button
           onClick={clearMask}
-          className="px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors"
+          className="px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors md:min-h-[44px]"
         >
           Clear Mask
         </button>
+
+        <button
+          onClick={onUndo ?? handleUndo}
+          disabled={(onUndo ? undoCount === 0 : undoStack.length === 0)}
+          title="Undo (Cmd/Ctrl+Z)"
+          className="px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-50 md:min-h-[44px]"
+        >
+          Undo{" "}
+          {onUndo
+            ? undoCount > 0
+              ? `(${undoCount})`
+              : ""
+            : undoStack.length > 0
+              ? `(${undoStack.length})`
+              : ""}
+        </button>
+
+        <button
+          onClick={() => setShowLegend((prev) => !prev)}
+          title="Keyboard shortcuts"
+          aria-label={showLegend ? "Hide keyboard shortcuts" : "Show keyboard shortcuts"}
+          aria-expanded={showLegend}
+          className="px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors md:min-h-[44px]"
+        >
+          ?
+        </button>
       </div>
+      )}
+
+      {!zenMode && showLegend && (
+        <div
+          role="region"
+          aria-label="Keyboard shortcuts"
+          className="rounded-md border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700"
+        >
+          <p className="mb-2 font-medium text-gray-900">Keyboard Shortcuts</p>
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-1">
+            <div className="flex items-center gap-2">
+              <dt className="font-mono text-gray-500">Arrow keys</dt>
+              <dd>Move brush</dd>
+            </div>
+            <div className="flex items-center gap-2">
+              <dt className="font-mono text-gray-500">Shift + Arrow</dt>
+              <dd>Fine movement</dd>
+            </div>
+            <div className="flex items-center gap-2">
+              <dt className="font-mono text-gray-500">P / Space / Enter</dt>
+              <dd>Start / stop painting</dd>
+            </div>
+            <div className="flex items-center gap-2">
+              <dt className="font-mono text-gray-500">Cmd / Ctrl + Z</dt>
+              <dd>Undo</dd>
+            </div>
+            <div className="flex items-center gap-2">
+              <dt className="font-mono text-gray-500">+ / -</dt>
+              <dd>Brush size</dd>
+            </div>
+          </dl>
+        </div>
+      )}
 
       <input type="hidden" value={maskDataUrl ?? ""} />
     </div>

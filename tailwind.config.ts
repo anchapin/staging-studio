@@ -11,6 +11,8 @@ const config: Config = {
         cinzel: ["var(--font-cinzel)", "serif"],
         playfair: ["var(--font-playfair)", "serif"],
         jakarta: ["var(--font-plus-jakarta)", "sans-serif"],
+        jetbrains: ["var(--font-jetbrains)", "monospace"],
+        mono: ["var(--font-jetbrains)", "monospace"],
       },
       colors: {
         border: "hsl(var(--border))",

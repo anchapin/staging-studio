@@ -27,10 +27,26 @@ describe("roomPatchSchema", () => {
   it("accepts the partial body persistInpaintResult sends for variant slot 1", () => {
     const result = roomPatchSchema.safeParse({
       beforeImageUrl2: "https://abc123.supabase.co/storage/v1/object/public/rooms/before.jpg",
-      afterImageUrl2: "https://v3.fal.ai/output/after.png",
+      afterImageUrl2: "https://v3.fal.ai/output/after2.png",
       selectedVariantIndex: 1,
     });
     expect(result.success).toBe(true);
+  });
+
+  it("accepts sortOrder for room reordering (issue #493)", () => {
+    const result = roomPatchSchema.safeParse({ sortOrder: 0 });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts sortOrder with various non-negative integers", () => {
+    expect(roomPatchSchema.safeParse({ sortOrder: 0 }).success).toBe(true);
+    expect(roomPatchSchema.safeParse({ sortOrder: 5 }).success).toBe(true);
+    expect(roomPatchSchema.safeParse({ sortOrder: 100 }).success).toBe(true);
+  });
+
+  it("rejects negative sortOrder", () => {
+    const result = roomPatchSchema.safeParse({ sortOrder: -1 });
+    expect(result.success).toBe(false);
   });
 
   it("permits an entirely empty body (the PATCH route guard must reject it before updateMany)", () => {
@@ -61,6 +77,22 @@ describe("roomPatchSchema", () => {
   it("rejects selectedVariantIndex: 2", () => {
     const result = roomPatchSchema.safeParse({ ...validBody, selectedVariantIndex: 2 });
     expect(result.success).toBe(false);
+  });
+
+  it("accepts http://mock URLs for hermetic test environments (issue #413)", () => {
+    const result = roomPatchSchema.safeParse({
+      ...validBody,
+      afterImageUrl: "http://mock/storage/v1/object/public/rooms/after.jpg",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts http://mock:3000 URLs with port for hermetic test environments (issue #413)", () => {
+    const result = roomPatchSchema.safeParse({
+      ...validBody,
+      beforeImageUrl: "http://mock:3000/storage/v1/object/public/rooms/before.jpg",
+    });
+    expect(result.success).toBe(true);
   });
 
   it("rejects selectedVariantIndex: -1 and non-integers", () => {
