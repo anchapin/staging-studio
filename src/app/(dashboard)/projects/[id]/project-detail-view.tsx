@@ -40,6 +40,7 @@ import VariantThumbnailStrip from "@/components/canvas/variant-thumbnail-strip";
 import GenerateCopyForm, {
   type GeneratedCopy,
 } from "@/components/canvas/generate-copy-form";
+import { Badge } from "@/components/ui/badge";
 import { useToast, ToastContainer } from "@/components/ui/toast";
 import {
   deleteVariantAfterImage,
@@ -91,6 +92,7 @@ interface Project {
   clientName: string;
   targetBuyer: string;
   stagingAesthetic: string;
+  stagingDirectives?: string | null; // Issue #562: global project-level directives
   rooms: Room[];
 }
 
@@ -923,6 +925,7 @@ export default function ProjectDetailView({
                   imageUrl={focusedInputs.inpaintImageUrl ?? ""}
                   aesthetic={project.stagingAesthetic}
                   promptDirectives={focusedInputs.roomDirectives.trim()}
+                  globalDirectives={project.stagingDirectives ?? ""}
                   variantSlot={resolveInpaintTargetSlot(
                     focusedRoom,
                     focusedInputs.inpaintSource
@@ -959,12 +962,22 @@ export default function ProjectDetailView({
                       {/* Issue #460: textarea first — always visible above the fold */}
                       <section aria-label="Staging directives">
                         <div className="flex items-center justify-between mb-1">
-                          <label
-                            htmlFor={`directives-${focusedRoom.id}`}
-                            className="block text-sm font-medium text-foreground"
-                          >
-                            Staging directives (required)
-                          </label>
+                          <div className="flex items-center gap-2">
+                            <label
+                              htmlFor={`directives-${focusedRoom.id}`}
+                              className="block text-sm font-medium text-foreground"
+                            >
+                              Staging directives (required)
+                            </label>
+                            {/* Issue #562: directive source indicator */}
+                            {project.stagingDirectives?.trim() && focusedInputs.roomDirectives.trim() ? (
+                              <Badge variant="secondary" size="sm">Global + Room</Badge>
+                            ) : project.stagingDirectives?.trim() ? (
+                              <Badge variant="outline" size="sm">Global</Badge>
+                            ) : focusedInputs.roomDirectives.trim() ? (
+                              <Badge variant="secondary" size="sm">Room</Badge>
+                            ) : null}
+                          </div>
                           {/* Issue #496: Saving… / Saved / error indicator */}
                           {(() => {
                             const status = directiveStatuses[focusedRoom.id];

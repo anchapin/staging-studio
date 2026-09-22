@@ -34,6 +34,7 @@ model Project {
   clientName      String
   targetBuyer     String   // e.g. "young professional couple", "growing family"
   stagingAesthetic String  // e.g. "Organic Modern Luxury", "Warm Transitional"
+  stagingDirectives String? // Issue #562: global project-wide AI staging directives
   // Buyer Demographics JSON: buyer profile for AI copywriting + ROI metrics (issue #563)
   // Shape: { buyerType, designPreferences[], budgetMin, budgetMax, mustHaveFeatures[], sellTimeline }
   buyerDemographics Json?
