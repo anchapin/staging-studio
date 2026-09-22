@@ -1,6 +1,7 @@
 import Image from "next/image";
 import { parseChecklistItems } from "@/lib/checklist-schema";
 import { extractPillars } from "@/lib/lookbook-pillars";
+import { ProposalFooter } from "./proposal-footer";
 import {
   resolveStagedResultDisplay,
   type StagedVariantPair,
@@ -149,6 +150,8 @@ export function RoomSpread({ room, project }: RoomSpreadProps) {
           </div>
         </div>
       )}
+
+      <ProposalFooter />
     </div>
   );
 }
