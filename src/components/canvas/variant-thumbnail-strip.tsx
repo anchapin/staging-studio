@@ -84,9 +84,9 @@ export default function VariantThumbnailStrip({
     <div
       role="group"
       aria-label="Room variants"
-      className={cn("flex items-start gap-3", className)}
+      className={cn("flex snap-x snap-mandatory items-start gap-3 overflow-x-auto pb-2", className)}
     >
-      <div className="flex w-24 flex-col items-center gap-1">
+      <div className="flex w-20 sm:w-24 shrink-0 snap-start flex-col items-center gap-1">
         <button
           type="button"
           aria-pressed={selection === "original"}
@@ -124,7 +124,7 @@ export default function VariantThumbnailStrip({
         const letter = VARIANT_LETTER[slot];
         const touchUps = touchUpCounts?.[slot] ?? 0;
         return (
-          <div key={slot} className="flex w-52 flex-col items-center gap-1">
+          <div key={slot} className="flex w-44 sm:w-52 shrink-0 snap-start flex-col items-center gap-1">
             <span className="relative block h-52 w-52">
               <button
                 type="button"
