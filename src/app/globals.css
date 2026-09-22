@@ -29,6 +29,7 @@
   --color-canvas: #F8F6F2;
   --color-taupe: #8C827A;
   --color-cream: #fff8f8;
+  --color-outline-variant: var(--outline-variant);
   --radius: var(--radius);
   --font-cinzel: var(--font-cinzel-google);
   --font-playfair: var(--font-playfair-google);
@@ -98,6 +99,9 @@
     /* Atelier Canvas inpaint mask overlay (Issue #546) */
     --inpaint-mask-overlay: rgba(0, 245, 160, 0.35);
     --inpaint-laser-rim: rgba(0, 245, 160, 0.8);
+
+    /* Hairline divider token (Issue #640) */
+    --outline-variant: #8C827A;
   }
   .theme {
     --font-heading: var(--font-sans);
@@ -142,6 +146,8 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+    /* Hairline divider token (Issue #640) */
+    --outline-variant: oklch(0.65 0.02 70);
   }
   * {
     @apply border-border outline-ring/50;
