@@ -817,7 +817,7 @@ export default function InpaintEditor({
               variantSlot,
               resultUrl: resultImageUrl,
               thumbnailDataUrl,
-              seed: null,
+              seed: undefined,
               promptDirectives,
             });
           } catch (err) {

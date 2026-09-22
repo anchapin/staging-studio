@@ -32,29 +32,6 @@ interface VersionHistoryPanelProps {
   onRestored?: (resultUrl: string) => void;
 }
 
-function generateThumbnail(dataUrl: string, maxSize = 200): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const img = new window.Image();
-    img.onload = () => {
-      const scale = Math.min(maxSize / img.width, maxSize / img.height);
-      const w = Math.round(img.width * scale);
-      const h = Math.round(img.height * scale);
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        reject(new Error("Canvas context unavailable"));
-        return;
-      }
-      ctx.drawImage(img, 0, 0, w, h);
-      resolve(canvas.toDataURL("image/jpeg", 0.7));
-    };
-    img.onerror = () => reject(new Error("Image load failed"));
-    img.src = dataUrl;
-  });
-}
-
 function formatRelativeTime(date: Date): string {
   const now = Date.now();
   const diff = now - new Date(date).getTime();
@@ -222,19 +199,28 @@ export default function VersionHistoryPanel({
 
       {/* Preview modal */}
       {previewUrl && previewVersion && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Version preview"
+        <button
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 cursor-default"
+          aria-label="Close version preview"
           onClick={() => {
             setPreviewUrl(null);
             setPreviewVersion(null);
           }}
         >
+          {/* eslint-disable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */}
           <div
-            className="relative flex max-w-lg flex-col gap-4 rounded-lg bg-white p-4 shadow-xl"
+            className="relative flex max-w-lg flex-col gap-4 rounded-lg bg-white p-4 shadow-xl cursor-pointer"
             onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setPreviewUrl(null);
+                setPreviewVersion(null);
+              }
+            }}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Version preview"
+            tabIndex={0}
           >
             {/* Modal header */}
             <div className="flex items-start justify-between gap-2">
@@ -295,7 +281,7 @@ export default function VersionHistoryPanel({
               </button>
             </div>
           </div>
-        </div>
+        </button>
       )}
     </>
   );
