@@ -56,3 +56,48 @@ export async function saveProjectMetadata(
     };
   }
 }
+
+/**
+ * Server action: saves the client digital sign-off signature (issue #556).
+ *
+ * Purpose: records the client's drawn/typed signature and approval timestamp
+ * on the project record. The signature PNG data URL is stored and the
+ * status is set to "Signed".
+ *
+ * Contract: requires an authenticated session; ownership is enforced by the
+ * Prisma `where` filter (`id: projectId, userId: user.id`).
+ *
+ * @param projectId ID of the project to sign off.
+ * @param signatureDataUrl PNG data URL of the signature canvas.
+ * @returns `{ success: true }` on write, or
+ *   `{ success: false, error }` when unauthenticated or the save fails.
+ */
+export async function saveProjectSignature(
+  projectId: string,
+  signatureDataUrl: string
+): Promise<{ success: boolean; error?: string }> {
+  const user = await getAuthedPrismaUser();
+  if (!user) {
+    return { success: false, error: "Not authenticated" };
+  }
+
+  try {
+    await prisma.project.update({
+      where: { id: projectId, userId: user.id },
+      data: {
+        clientSignature: signatureDataUrl,
+        clientSignatureStatus: "Signed",
+        clientSignatureTimestamp: new Date(),
+      },
+    });
+    revalidatePath(`/projects/${projectId}`);
+    revalidatePath(`/projects/${projectId}/lookbook`);
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to save project signature:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}

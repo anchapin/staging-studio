@@ -167,6 +167,11 @@ export default async function LookbookPreviewPage({
     clientName: project.clientName,
     targetBuyer: project.targetBuyer,
     stagingAesthetic: project.stagingAesthetic,
+    clientSignature: project.clientSignature,
+    clientSignatureStatus: project.clientSignatureStatus,
+    clientSignatureTimestamp: project.clientSignatureTimestamp
+      ? project.clientSignatureTimestamp.toISOString()
+      : null,
     user: {
       firmName: project.user.firmName,
       ownerName: project.user.ownerName,
@@ -204,7 +209,7 @@ export default async function LookbookPreviewPage({
           />
         </div>
       )}
-      <LookbookPreviewView project={previewProject} />
+      <LookbookPreviewView project={previewProject} previewToken={token ?? undefined} />
     </div>
   );
 }
