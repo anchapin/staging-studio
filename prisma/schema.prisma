@@ -34,6 +34,12 @@ model Project {
   clientName      String
   targetBuyer     String   // e.g. "young professional couple", "growing family"
   stagingAesthetic String  // e.g. "Organic Modern Luxury", "Warm Transitional"
+
+  // ROI Metrics Dashboard (issue #552)
+  roiSalesPricePremium   String? // e.g. "+8–12%"
+  roiTransactionVelocity  String? // e.g. "24 Days"
+  roiInvestmentTier      String? // e.g. "$45,000"
+
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
