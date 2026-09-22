@@ -41,7 +41,7 @@ export default function BrushParameterFlyout({
       {/* Brush Radius */}
       <div className="mb-3">
         <div className="flex justify-between items-center mb-1">
-          <label className="text-xs text-stone-500 dark:text-stone-400 font-jakarta">Radius</label>
+          <span className="text-xs text-stone-500 dark:text-stone-400 font-jakarta">Radius</span>
           <span className="text-xs font-mono text-stone-600 dark:text-stone-300 font-jetbrains">
             {brushRadius}px
           </span>
@@ -65,7 +65,7 @@ export default function BrushParameterFlyout({
       {/* Edge Softness */}
       <div className="mb-3">
         <div className="flex justify-between items-center mb-1">
-          <label className="text-xs text-stone-500 dark:text-stone-400 font-jakarta">Edge Softness</label>
+          <span className="text-xs text-stone-500 dark:text-stone-400 font-jakarta">Edge Softness</span>
           <span className="text-xs font-mono text-stone-600 dark:text-stone-300 font-jetbrains">
             {edgeSoftness}px
           </span>
@@ -89,7 +89,7 @@ export default function BrushParameterFlyout({
       {/* Mask Opacity */}
       <div className="mb-3">
         <div className="flex justify-between items-center mb-1">
-          <label className="text-xs text-stone-500 dark:text-stone-400 font-jakarta">Mask Opacity</label>
+          <span className="text-xs text-stone-500 dark:text-stone-400 font-jakarta">Mask Opacity</span>
           <span className="text-xs font-mono text-stone-600 dark:text-stone-300 font-jetbrains">
             {Math.round(maskOpacity * 100)}%
           </span>

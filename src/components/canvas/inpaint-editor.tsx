@@ -479,7 +479,7 @@ export default function InpaintEditor({
   const [edgeSoftness, setEdgeSoftness] = useState(5);
   const [maskOpacity, setMaskOpacity] = useState(0.8);
   const [zoomLevel, setZoomLevel] = useState(1.0);
-  const [showBrushFlyout, setShowBrushFlyout] = useState(false);
+
 
   // Issue #561: tracks the active result URL for the version history panel.
   // Updated on inpaint completion; also initialized from prop when provided.
@@ -2183,7 +2183,7 @@ export default function InpaintEditor({
           activeTool={activeMaskTool}
           onToolChange={(tool) => {
             setActiveMaskTool(tool);
-            if (tool === "brush") setShowBrushFlyout(true);
+
           }}
         />
       )}
@@ -2194,10 +2194,10 @@ export default function InpaintEditor({
           brushRadius={brushRadius}
           edgeSoftness={edgeSoftness}
           maskOpacity={maskOpacity}
-          onBrushRadiusChange={(v) => { setBrushRadius(v); setShowBrushFlyout(true); }}
-          onEdgeSoftnessChange={(v) => { setEdgeSoftness(v); setShowBrushFlyout(true); }}
-          onMaskOpacityChange={(v) => { setMaskOpacity(v); setShowBrushFlyout(true); }}
-          onClose={() => setShowBrushFlyout(false)}
+          onBrushRadiusChange={setBrushRadius}
+          onEdgeSoftnessChange={setEdgeSoftness}
+          onMaskOpacityChange={setMaskOpacity}
+          onClose={() => {}}
         />
       )}
 
