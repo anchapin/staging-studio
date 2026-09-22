@@ -70,6 +70,18 @@ const config: Config = {
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
       },
+      boxShadow: {
+        // Warm shadow tokens — warm-toned rgba(48, 40, 34, ...) gives shadows a linen/terracotta tint
+        "warm-sm": "0 1px 3px rgba(48, 40, 34, 0.08), 0 1px 2px rgba(48, 40, 34, 0.06)",
+        "warm-md": "0 4px 12px rgba(48, 40, 34, 0.10), 0 2px 4px rgba(48, 40, 34, 0.06)",
+        "warm-lg": "0 8px 24px rgba(48, 40, 34, 0.12), 0 4px 8px rgba(48, 40, 34, 0.08)",
+        "warm-xl": "0 16px 48px rgba(48, 40, 34, 0.14), 0 8px 16px rgba(48, 40, 34, 0.08)",
+        "warm-2xl": "0 24px 64px rgba(48, 40, 34, 0.16), 0 12px 24px rgba(48, 40, 34, 0.10)",
+        // Glassmorphic containers (tool rail, bottom dock)
+        glass: "0 4px 16px rgba(48, 40, 34, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.4)",
+        // Canvas comparison slider handle
+        handle: "0 2px 8px rgba(48, 40, 34, 0.20), 0 1px 2px rgba(48, 40, 34, 0.12)",
+      },
     },
   },
   plugins: [],
