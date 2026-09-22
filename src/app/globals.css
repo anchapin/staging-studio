@@ -30,6 +30,12 @@
   --color-taupe: #8C827A;
   --color-cream: #fff8f8;
   --color-outline-variant: var(--outline-variant);
+  /* Issue #621: moodboard selector tokens */
+  /* Fixed tone — Atelier terracotta #C47847, stable across light/dark modes */
+  --color-secondary-fixed: #C47847;
+  /* Surface container utilities (values defined in :root, Issue #624) */
+  --color-surface-container: var(--color-surface-container);
+  --color-surface-container-low: var(--color-surface-container-low);
   --radius: var(--radius);
   --font-cinzel: var(--font-cinzel-google);
   --font-playfair: var(--font-playfair-google);
