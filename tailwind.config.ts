@@ -56,6 +56,14 @@ const config: Config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        /* Atelier Canvas palette (Issue #546) */
+        atelier: {
+          canvas: "#F8F6F2",
+          primary: "#181716",
+          secondary: "#C47847",
+          taupe: "#8C827A",
+          cream: "#fff8f8",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",
