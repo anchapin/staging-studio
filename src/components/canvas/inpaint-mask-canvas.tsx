@@ -160,6 +160,8 @@ interface InpaintMaskCanvasProps {
   onInstanceToggle?: (point: CanvasPoint) => void;
   /** True while segmenting (or inpainting) runs; select clicks are ignored. */
   segmentDisabled?: boolean;
+  /** Issue #641: true while an inpaint request is in flight — shows a pulsing ring around the canvas. */
+  processing?: boolean;
   /**
    * True while a concept detection is in flight (issue #228, formerly the
    * per-click SAM request): shows a spinner + "Selecting..." on the
@@ -223,6 +225,7 @@ export default function InpaintMaskCanvas({
   fullWidth = false,
   onInstanceToggle,
   segmentDisabled = false,
+  processing = false,
   segmenting = false,
   instanceOverlays,
   expansionRadius = DEFAULT_MASK_EXPANSION_RADIUS,
@@ -1534,6 +1537,10 @@ export default function InpaintMaskCanvas({
             loading="lazy"
             decoding="async"
           />
+          {/* Issue #641: pulsing ring around canvas border when inpaint request is processing */}
+          {processing && (
+            <div className="absolute inset-0 rounded-lg border-2 border-secondary/50 stage-pulse pointer-events-none" aria-hidden="true" />
+          )}
           {canvasElement}
         </div>
       ) : (

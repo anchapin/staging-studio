@@ -1722,6 +1722,7 @@ export default function InpaintEditor({
           onMaskChange={setMaskDataUrl}
           onInstanceToggle={handleInstanceToggle}
           segmentDisabled={isProcessing || conceptLoading}
+          processing={isProcessing}
           segmenting={conceptLoading}
           detectingConcept={conceptLoading ? requestedConcept : undefined}
           instanceOverlays={instanceOverlays}
