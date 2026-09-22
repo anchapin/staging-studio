@@ -1,4 +1,5 @@
 export { BuyerPersonaPage } from "./buyer-persona-page";
+export { ConsultationReportClient } from "./consultation-report-client";
 export { CoverPage } from "./cover-page";
 export { FurnitureProcurementTable } from "./furniture-procurement-table";
 export { InvestmentSummaryPage } from "./investment-summary-page";

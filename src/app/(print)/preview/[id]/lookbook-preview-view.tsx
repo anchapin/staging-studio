@@ -1,5 +1,6 @@
 import {
   BuyerPersonaPage,
+  ConsultationReportClient,
   CoverPage,
   FurnitureProcurementTable,
   InvestmentSummaryPage,
@@ -135,6 +136,15 @@ export function LookbookPreviewView({ project, previewToken }: LookbookPreviewVi
         <InvestmentSummaryPage
           stagingPackageId={project.stagingPackage}
           roomCount={project.rooms.length}
+        />
+      </div>
+
+      {/* Client Consultation Report with tier selection and signature (issue #626) */}
+      <div id="lookbook-consultation">
+        <ConsultationReportClient
+          user={project.user}
+          project={projectData}
+          previewToken={previewToken ?? ""}
         />
       </div>
 
