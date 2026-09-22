@@ -2168,3 +2168,4 @@ export default function InpaintEditor({
     </div>
   );
 }
+
