@@ -2,8 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ChevronLeft,
-  ChevronRight,
   MoreHorizontal,
   Undo2,
   Redo2,
@@ -53,7 +51,6 @@ export default function VersionHistoryPills({
   variantSlot,
   activeResultUrl,
   onVersionChange,
-  onNewVersion,
 }: VersionHistoryPillsProps) {
   const [versions, setVersions] = useState<InpaintVersion[]>([]);
   const [isLoading, setIsLoading] = useState(false);
