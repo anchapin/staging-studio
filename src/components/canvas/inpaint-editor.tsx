@@ -10,7 +10,7 @@ import EditorTabBar, {
   type EditorTabId,
 } from "./editor-tab-bar";
 import { useToast, ToastContainer } from "@/components/ui/toast";
-import { ChevronDown, ChevronUp, Info, Loader2, Maximize2, Minimize2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Expand, Home, Info, Loader2, Maximize2, Minimize2 } from "lucide-react";
 import { useInpaintStatus } from "./use-inpaint-status";
 import ZenModeToolbar from "./zen-mode-toolbar";
 import {
@@ -122,6 +122,10 @@ interface InpaintEditorProps {
   onDirectivesChange?: (value: string) => void;
   /** Current directives value for the inline textarea. */
   directivesValue?: string;
+  /** Issue #638: Project name for Focus Canvas Mode breadcrumb. */
+  projectName?: string;
+  /** Issue #638: Room name for Focus Canvas Mode breadcrumb. */
+  roomName?: string;
 }
 
 /** Resolves when the image is loaded; rejects on a load error. */
@@ -526,6 +530,8 @@ export default function InpaintEditor({
   onDirectivesChange,
   directivesValue,
   currentResultUrl,
+  projectName,
+  roomName,
 }: InpaintEditorProps) {
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
   const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
@@ -550,6 +556,9 @@ export default function InpaintEditor({
   const [zenMode, setZenMode] = useState(false);
   // Issue #560: dark background toggle for eye comfort in Zen Mode.
   const [zenDarkBackground, setZenDarkBackground] = useState(false);
+
+  // Issue #638: Focus Canvas Mode state — collapses header and inspector simultaneously.
+  const [focusMode, setFocusMode] = useState(false);
 
   // Issue #588: Collapsible workspace panels — persist collapsed state in localStorage.
   const brushPanel = useCollapsiblePanel("inpaint-editor:brushPanel", false);
@@ -1122,6 +1131,7 @@ export default function InpaintEditor({
   const aspectRatio = imageDims ? imageDims.width / imageDims.height : null;
 
   // Issue #560: keyboard shortcuts for Zen Mode — Z toggles, Escape exits.
+  // Issue #638: keyboard shortcut for Focus Canvas Mode — F toggles, Escape exits.
   // Issue #588: backtick (`) toggles all collapsible panels.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1138,9 +1148,18 @@ export default function InpaintEditor({
         }
       }
 
-      if (e.key === "Escape" && zenMode) {
+      // Issue #638: F toggles Focus Canvas Mode
+      if (e.key === "f" || e.key === "F") {
+        if (!isInput) {
+          e.preventDefault();
+          setFocusMode((prev) => !prev);
+        }
+      }
+
+      if (e.key === "Escape" && (zenMode || focusMode)) {
         e.preventDefault();
         setZenMode(false);
+        setFocusMode(false);
       }
 
       // Issue #588: backtick toggles all workspace panels
@@ -1162,7 +1181,7 @@ export default function InpaintEditor({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [zenMode, brushPanel, promptPanel, variantPanel]);
+  }, [zenMode, focusMode, brushPanel, promptPanel, variantPanel]);
 
   // Resume an in-flight job (e.g. after a refresh): skip the submit and go
   // straight to polling the persisted requestId. The run's source comes from
@@ -1668,8 +1687,35 @@ export default function InpaintEditor({
     <div
       className={`flex flex-col gap-6 ${
         fullWidth ? "md:flex-col lg:min-h-0 lg:flex-1 lg:flex-row lg:gap-6" : ""
-      } ${zenMode ? "zen-mode-active zen-mode-vignette" : ""} ${zenDarkBackground && zenMode ? "zen-mode-dark" : ""}`}
+      } ${zenMode ? "zen-mode-active zen-mode-vignette" : ""} ${focusMode ? "zen-mode-active zen-mode-vignette" : ""} ${zenDarkBackground && zenMode ? "zen-mode-dark" : ""}`}
     >
+      {/* Issue #638: Floating restore pill — shown at top-center when Focus Canvas Mode is active */}
+      {focusMode && (
+        <div
+          className="fixed top-3 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full border border-outline-variant/50 bg-surface-container-lowest/95 px-4 py-2 shadow-warm-lg transition-all duration-200 max-w-md"
+          style={{ opacity: 0, animation: "focusPillShow 200ms ease-out forwards" }}
+        >
+          <div className="flex items-center gap-2">
+            <Home className="h-4 w-4 text-secondary" aria-hidden="true" />
+            <span className="font-jakarta text-sm text-secondary">
+              {projectName && roomName
+                ? `${projectName} > ${roomName}`
+                : projectName || roomName || "Project"}
+            </span>
+          </div>
+          <div className="h-4 w-px bg-outline-variant/50" aria-hidden="true" />
+          <button
+            type="button"
+            onClick={() => setFocusMode(false)}
+            title="Restore Layout"
+            aria-label="Restore Layout"
+            className="flex items-center gap-1.5 font-jakarta text-sm text-secondary hover:text-primary label-sm"
+          >
+            Restore Layout
+            <Expand className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </div>
+      )}
       {/* ---- LEFT PANE: room imagery (optional slot) + mask canvas ------ */}
       <div
         className={`flex min-w-0 flex-col gap-4 ${
@@ -1682,7 +1728,7 @@ export default function InpaintEditor({
             title="Room Details"
             isCollapsed={promptPanel.isCollapsed}
             onToggle={promptPanel.toggle}
-            className={zenMode ? "zen-mode-hidden" : ""}
+            className={zenMode || focusMode ? "zen-mode-hidden" : ""}
           >
             <div
               className={`flex flex-col gap-6 ${
@@ -1694,23 +1740,42 @@ export default function InpaintEditor({
           </CollapsibleSection>
         )}
         {/* Issue #560: "Source Image" label hidden in Zen Mode */}
+        {/* Issue #638: sticky header hidden in Focus Canvas Mode */}
         {/* Issue #547/#546: sticky header per Atelier Canvas spec with Atelier Canvas colors */}
-        <div className={`sticky top-0 z-20 flex items-center justify-between bg-atelier-canvas ${zenMode ? "zen-mode-hidden" : ""}`}>
+        <div className={`sticky top-0 z-20 flex items-center justify-between bg-atelier-canvas ${zenMode || focusMode ? "zen-mode-hidden" : ""}`}>
           <h4 className="mb-2 font-jakarta text-sm font-medium text-atelier-primary">Source Image</h4>
-          <button
-            type="button"
-            onClick={() => setZenMode((prev) => !prev)}
-            title={zenMode ? "Exit Zen Mode (Z)" : "Enter Zen Mode (Z)"}
-            aria-label={zenMode ? "Exit Zen Mode" : "Enter Zen Mode"}
-            className="flex items-center gap-1.5 rounded-md border border-atelier-taupe/40 bg-white px-2.5 py-1.5 text-xs text-atelier-taupe shadow-sm transition-colors hover:bg-atelier-canvas hover:text-atelier-primary"
-          >
-            {zenMode ? (
-              <Minimize2 className="h-3.5 w-3.5" aria-hidden="true" />
-            ) : (
-              <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
-            )}
-            {zenMode ? "Exit Zen" : "Zen Mode"}
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Issue #638: Focus Canvas button */}
+            <button
+              type="button"
+              onClick={() => setFocusMode((prev) => !prev)}
+              title={focusMode ? "Exit Focus Canvas (F)" : "Enter Focus Canvas (F)"}
+              aria-label={focusMode ? "Exit Focus Canvas" : "Enter Focus Canvas"}
+              className="flex items-center gap-1.5 rounded-md border border-atelier-taupe/40 bg-white px-2.5 py-1.5 text-xs text-atelier-taupe shadow-sm transition-colors hover:bg-atelier-canvas hover:text-atelier-primary"
+            >
+              {focusMode ? (
+                <Minimize2 className="h-3.5 w-3.5" aria-hidden="true" />
+              ) : (
+                <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+              {focusMode ? "Exit Focus" : "Focus Canvas"}
+            </button>
+            {/* Issue #560: Zen Mode button */}
+            <button
+              type="button"
+              onClick={() => setZenMode((prev) => !prev)}
+              title={zenMode ? "Exit Zen Mode (Z)" : "Enter Zen Mode (Z)"}
+              aria-label={zenMode ? "Exit Zen Mode" : "Enter Zen Mode"}
+              className="flex items-center gap-1.5 rounded-md border border-atelier-taupe/40 bg-white px-2.5 py-1.5 text-xs text-atelier-taupe shadow-sm transition-colors hover:bg-atelier-canvas hover:text-atelier-primary"
+            >
+              {zenMode ? (
+                <Minimize2 className="h-3.5 w-3.5" aria-hidden="true" />
+              ) : (
+                <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+              {zenMode ? "Exit Zen" : "Zen Mode"}
+            </button>
+          </div>
         </div>
         {/* Issue #460: comparison now via staged result image click in secondary pane */}
         <InpaintMaskCanvas
@@ -1741,7 +1806,8 @@ export default function InpaintEditor({
         />
 
         {/* Issue #560: expand selection and floor shadow controls hidden in Zen Mode */}
-        <div className={zenMode ? "zen-mode-hidden" : ""}>
+        {/* Issue #638: hidden in Focus Canvas Mode */}
+        <div className={zenMode || focusMode ? "zen-mode-hidden" : ""}>
           <label className="flex items-center gap-2 font-jakarta text-sm text-atelier-primary">
             Expand selection:
             <input
@@ -1785,8 +1851,9 @@ export default function InpaintEditor({
       </div>
 
       {/* Issue #560: right panel hidden in Zen Mode */}
+      {/* Issue #638: right panel hidden in Focus Canvas Mode */}
       <div
-        className={`flex w-full flex-col gap-3 no-print ${fullWidth ? "md:w-full md:flex-col lg:min-h-0 lg:w-[380px] lg:shrink-0" : ""} ${zenMode ? "zen-mode-hidden" : ""}`}
+        className={`flex w-full flex-col gap-3 no-print ${fullWidth ? "md:w-full md:flex-col lg:min-h-0 lg:w-[380px] lg:shrink-0" : ""} ${zenMode || focusMode ? "zen-mode-hidden" : ""}`}
       >
         {/* AC-L2: batch progress pins to the panel top during a run, so
             it stays visible beside the canvas on every tab. The full

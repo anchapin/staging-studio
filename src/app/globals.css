@@ -419,6 +419,18 @@ button .material-symbols-outlined,
   display: none !important;
 }
 
+/* Issue #638: Focus Canvas Mode floating restore pill animation */
+@keyframes focusPillShow {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
 /* Issue #641: Stage Status Pulse Animation — subtle animated indicator showing
    that a room is in active AI staging processing. */
 @keyframes stage-pulse {
