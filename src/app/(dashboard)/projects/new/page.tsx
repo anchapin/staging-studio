@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { StagingPackageCard } from "@/components/packages";
 import { STAGING_PACKAGES } from "@/lib/staging-packages-schema";
+import { STAGING_AESTHETICS } from "@/lib/staging-aesthetics";
 
 const BUYER_PERSONAS = [
   "young professional couple",
@@ -13,14 +14,6 @@ const BUYER_PERSONAS = [
   "luxury investor",
   "first-time homebuyer",
   "serial renovator",
-];
-
-const STAGING_AESTHETICS = [
-  "Organic Modern Luxury",
-  "Warm Transitional",
-  "Coastal Minimal",
-  "Urban Industrial",
-  "Classic Elegant",
 ];
 
 const ROOM_TYPES = [

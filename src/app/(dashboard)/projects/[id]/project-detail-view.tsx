@@ -68,15 +68,9 @@ import {
 import { buildPrefill } from "@/lib/prompt-prefill";
 import { StagingPackageCard } from "@/components/packages";
 import { STAGING_PACKAGES } from "@/lib/staging-packages-schema";
+import { STAGING_AESTHETICS } from "@/lib/staging-aesthetics";
 import BatchRoomUpload from "@/components/canvas/batch-room-upload";
-
-const STAGING_AESTHETICS = [
-  "Organic Modern Luxury",
-  "Warm Transitional",
-  "Coastal Minimal",
-  "Urban Industrial",
-  "Classic Elegant",
-];
+import GlobalStagingDirectivesBar from "@/components/canvas/global-staging-directives-bar";
 
 const MAX_DIRECTIVE_LENGTH = 2000;
 
@@ -366,6 +360,18 @@ export default function ProjectDetailView({
   const [selectedRoomIds, setSelectedRoomIds] = useState<Set<string>>(new Set());
   const [showBatchUpload, setShowBatchUpload] = useState(false);
   const [bulkAesthetic, setBulkAesthetic] = useState<string>("");
+
+  // Issue #636: Global Staging Directives Bar state
+  const [globalAesthetic, setGlobalAesthetic] = useState<string>("");
+  const [lockedElements, setLockedElements] = useState<string[]>([
+    "Archival Molding",
+    "Hardwood Floors",
+    "Exposed Brick",
+  ]);
+  const [realismValue, setRealismValue] = useState(82);
+  // gpuActive and renderingCount are derived from the project's rooms with
+  // in-flight inpaint requests. For now, default to idle/no rendering.
+  const [gpuActive] = useState(false);
 
   // Issue #493: drag-and-drop sensors
   const sensors = useSensors(
@@ -1294,6 +1300,50 @@ export default function ProjectDetailView({
                 </p>
               </div>
             ) : (
+              <>
+                {/* Issue #636: Global Staging Directives Bar — shown above the room grid */}
+                <GlobalStagingDirectivesBar
+                  aesthetic={globalAesthetic}
+                  onAestheticChange={(aesthetic) => {
+                    setGlobalAesthetic(aesthetic);
+                    // Issue #636: propagate aesthetic to project-level stagingAesthetic
+                    if (project && aesthetic) {
+                      void saveProjectMetadata(project.id, { stagingAesthetic: aesthetic }).then((result) => {
+                        if (result.success) {
+                          setProject((prev) =>
+                            prev ? { ...prev, stagingAesthetic: aesthetic } : prev
+                          );
+                        }
+                      });
+                    }
+                  }}
+                  lockedElements={lockedElements}
+                  onAddLock={(element) =>
+                    setLockedElements((prev) =>
+                      prev.includes(element) ? prev : [...prev, element]
+                    )
+                  }
+                  onRemoveLock={(element) =>
+                    setLockedElements((prev) => prev.filter((e) => e !== element))
+                  }
+                  realismValue={realismValue}
+                  onRealismChange={setRealismValue}
+                  roomCount={project.rooms.length}
+                  renderingCount={0}
+                  gpuActive={gpuActive}
+                  onStartBatch={() => {
+                    // TODO #636: open batch staging for selected rooms or all rooms
+                    showInfo("Batch rendering not yet connected — coming soon");
+                  }}
+                  onAutoRegenerateAll={() => {
+                    // TODO #636: trigger regeneration of all room variants
+                    showInfo("Auto-regenerate not yet implemented — coming soon");
+                  }}
+                  onExportBatch={() => {
+                    // TODO #636: export all room variants as a batch PDF
+                    showInfo("Batch export not yet implemented — coming soon");
+                  }}
+                />
               <DndContext
                 sensors={sensors}
                 collisionDetection={closestCenter}
@@ -1339,6 +1389,7 @@ export default function ProjectDetailView({
                   </div>
                 </SortableContext>
               </DndContext>
+              </>
             )}
           </>
         )}
