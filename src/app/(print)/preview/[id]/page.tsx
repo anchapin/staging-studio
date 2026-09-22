@@ -60,6 +60,7 @@ const getPreviewProject = cache(async (id: string) =>
       materialSwatches: {
         orderBy: { sortOrder: "asc" },
       },
+      procurementItems: true,
     },
   })
 );
@@ -210,6 +211,15 @@ export default async function LookbookPreviewPage({
       checklistItems: room.checklistItems as PreviewProject["rooms"][number]["checklistItems"],
     })),
     materialSwatches: project.materialSwatches,
+    procurementItems: project.procurementItems.map((item) => ({
+      id: item.id,
+      item: item.item,
+      category: item.category,
+      vendor: item.vendor,
+      sku: item.sku,
+      estCost: item.estCost,
+      status: item.status,
+    })),
   };
 
   // Session-origin access (no token) is the owning firm browsing their

@@ -1,4 +1,5 @@
 export { CoverPage } from "./cover-page";
+export { FurnitureProcurementTable } from "./furniture-procurement-table";
 export { MaterialSwatchChip } from "./material-swatch-chip";
 export { MaterialSwatchPage } from "./material-swatch-page";
 export { PhilosophyPage } from "./philosophy-page";
