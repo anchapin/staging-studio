@@ -81,6 +81,15 @@ export function EditLookbookDropdown({
           </li>
           <li role="menuitem">
             <Link
+              href={`${baseHref}#lookbook-swatches`}
+              className="block px-4 py-2 text-sm text-stone-700 hover:bg-stone-100"
+              onClick={() => setOpen(false)}
+            >
+              Edit Swatches
+            </Link>
+          </li>
+          <li role="menuitem">
+            <Link
               href={`${baseHref}#lookbook-closing`}
               className="block px-4 py-2 text-sm text-stone-700 hover:bg-stone-100"
               onClick={() => setOpen(false)}

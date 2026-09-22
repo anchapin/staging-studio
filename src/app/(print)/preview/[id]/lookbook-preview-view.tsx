@@ -5,7 +5,7 @@ import {
   RoomSpread,
   SignoffPage,
 } from "@/components/lookbook";
-import type { LookbookRoomData, ProjectData, ROIMetric } from "@/components/lookbook";
+import type { LookbookRoomData, MaterialSwatchData, ProjectData, ROIMetric } from "@/components/lookbook";
 import { parseChecklistItems } from "@/lib/checklist-schema";
 
 export interface PreviewRoom {
@@ -42,6 +42,7 @@ export interface PreviewProject {
     signoffContent: string | null;
   };
   rooms: PreviewRoom[];
+  materialSwatches: MaterialSwatchData[];
 }
 
 interface LookbookPreviewViewProps {

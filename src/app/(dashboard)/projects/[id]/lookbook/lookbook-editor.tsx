@@ -15,8 +15,10 @@ import {
   CoverPage,
   PhilosophyPage,
   SignoffPage,
+  type MaterialSwatchData,
   type ProjectData,
 } from "@/components/lookbook";
+import { MaterialSwatchEditor } from "./material-swatch-editor";
 import { saveRoomCopyEdits } from "@/app/actions/room";
 import {
   AutosaveController,
@@ -332,6 +334,7 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
         <div>
           <LookbookNav
             rooms={project.rooms.map((r) => ({ id: r.id, name: r.name }))}
+            hasSwatches={project.materialSwatches.length > 0}
           />
           <div className="paper-preview">
             <LookbookPreviewView project={project} />
@@ -367,6 +370,14 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
               onBlur={() => blurRoom(room.id)}
             />
           ))}
+
+          {/* Material Swatches editor */}
+          <div id="lookbook-swatches">
+            <MaterialSwatchEditor
+              projectId={project.id}
+              swatches={project.materialSwatches as MaterialSwatchData[]}
+            />
+          </div>
 
           <div className="paper-preview">
             <SignoffPage

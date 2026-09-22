@@ -57,6 +57,9 @@ const getPreviewProject = cache(async (id: string) =>
         },
       },
       rooms: true,
+      materialSwatches: {
+        orderBy: { sortOrder: "asc" },
+      },
     },
   })
 );
@@ -206,6 +209,7 @@ export default async function LookbookPreviewPage({
       // Already parsed/validated by parseChecklistItems in the view.
       checklistItems: room.checklistItems as PreviewProject["rooms"][number]["checklistItems"],
     })),
+    materialSwatches: project.materialSwatches,
   };
 
   // Session-origin access (no token) is the owning firm browsing their
