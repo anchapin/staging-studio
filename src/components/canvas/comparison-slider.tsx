@@ -156,11 +156,13 @@ export default function ComparisonSlider({
         />
       </div>
 
-      {/* Slider handle */}
+      {/* Slider handle — transparent 44px hit area wrapping a 1px visual line */}
       <div
-        className="absolute top-0 bottom-0 w-1 bg-white shadow-lg cursor-ew-resize z-10"
+        className="absolute top-0 bottom-0 w-11 cursor-ew-resize z-10"
         style={{ left: `${sliderPosition}%`, transform: "translateX(-50%)" }}
       >
+        {/* 1px visual line */}
+        <div className="absolute inset-0 w-1 bg-white shadow-lg" />
         {/* Center circle handle */}
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white shadow-lg flex items-center justify-center">
           <div className="flex items-center gap-0.5">
