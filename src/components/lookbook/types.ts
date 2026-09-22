@@ -81,7 +81,12 @@ export interface ProjectData {
   clientName: string;
   targetBuyer: string;
   stagingAesthetic: string;
-  buyerDemographics?: BuyerDemographics | null;
+  /** Client sign-off (issue #556) */
+  clientSignature?: string | null;
+  clientSignatureStatus?: string | null;
+  clientSignatureTimestamp?: string | null;
+  /** Project ID for API calls */
+  id?: string;
 }
 
 export interface LookbookRoomData extends RoomData {

@@ -74,6 +74,11 @@ export default async function LookbookPage({ params }: LookbookPageProps) {
     clientName: project.clientName,
     targetBuyer: project.targetBuyer,
     stagingAesthetic: project.stagingAesthetic,
+    clientSignature: project.clientSignature,
+    clientSignatureStatus: project.clientSignatureStatus,
+    clientSignatureTimestamp: project.clientSignatureTimestamp
+      ? project.clientSignatureTimestamp.toISOString()
+      : null,
     user: {
       firmName: project.user.firmName,
       ownerName: project.user.ownerName,

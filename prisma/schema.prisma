@@ -42,6 +42,11 @@ model Project {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
+  // Client digital sign-off (issue #556)
+  clientSignature          String?   // PNG data URL of the signature
+  clientSignatureStatus    String?   // "Pending" | "Signed"
+  clientSignatureTimestamp  DateTime? // ISO 8601 timestamp of when signed
+
   rooms Room[]
 }
 
