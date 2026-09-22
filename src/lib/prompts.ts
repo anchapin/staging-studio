@@ -1,8 +1,21 @@
+export interface BuyerDemographicsInput {
+  buyerType: string;
+  designPreferences: string[];
+  budgetMin: number;
+  budgetMax: number;
+  mustHaveFeatures: string[];
+  sellTimeline: string;
+}
+
 export interface CopyPromptInput {
   roomName: string;
   aesthetic: string;
   targetBuyer: string;
+  /** Room-specific directives (override or supplement global directives). */
   rawDirectives: string;
+  /** Issue #562: Global project-level directives applied to every room. */
+  globalDirectives?: string;
+  buyerDemographics?: BuyerDemographicsInput;
 }
 
 export const NEGATIVE_PROMPT =
@@ -34,6 +47,25 @@ export interface FalFillPayloadInput {
    * re-scoped). Omitted ⇒ the single-object default {@link NEGATIVE_PROMPT}.
    */
   negativePrompt?: string;
+  /**
+   * Issue #558: AI guidance controls.
+   * `promptStrength` (0.1–1.0): how closely AI follows the text prompt.
+   * Defaults to 0.8.
+   */
+  promptStrength?: number;
+  /**
+   * Issue #558: feather edges of the mask for softer transitions (0–20).
+   * Defaults to 5.
+   */
+  maskBlur?: number;
+  /**
+   * Issue #558: reproducible seed for iteration (0–999999). Omit for random.
+   */
+  seed?: number;
+  /**
+   * Issue #558: when true, use a lower guidance value for higher variation.
+   */
+  creativeMode?: boolean;
 }
 
 // Type alias (not interface) so the payload stays assignable to the
@@ -45,6 +77,30 @@ export type FalFillPayload = {
   negative_prompt: string;
   guidance: number;
   num_inference_steps: number;
+  /** Issue #558: feather edges of the mask. */
+  mask_blur?: number;
+  /** Issue #558: reproducible seed. */
+  seed?: number;
+}
+
+/**
+ * Issue #562: Merges global project directives with room-specific directives.
+ * Room directives take precedence; global directives fill in gaps.
+ * Empty global directives → returns room directives verbatim.
+ * Both empty → returns "Per room requirements".
+ */
+export function mergeDirectives(
+  globalDirectives: string | null | undefined,
+  roomDirectives: string | null | undefined
+): string {
+  const global = (globalDirectives ?? "").trim();
+  const room = (roomDirectives ?? "").trim();
+
+  if (!global && !room) return "";
+  if (!global) return room;
+  if (!room) return global;
+  // Both present: room builds on global (global first, room supplements)
+  return `${global}\n\nRoom-specific: ${room}`;
 }
 
 /**
@@ -57,15 +113,80 @@ export type FalFillPayload = {
  * Side effects: none (pure).
  */
 export function buildCopyPrompt(input: CopyPromptInput): string {
-  const { roomName, aesthetic, targetBuyer, rawDirectives } = input;
+  const { roomName, aesthetic, targetBuyer, rawDirectives, globalDirectives, buyerDemographics } = input;
+
+  // Issue #562: merge global + room directives
+  const mergedDirectives = mergeDirectives(globalDirectives, rawDirectives);
+
+  let demographicsBlock = "";
+  if (buyerDemographics) {
+    const {
+      buyerType,
+      designPreferences,
+      budgetMin,
+      budgetMax,
+      mustHaveFeatures,
+      sellTimeline,
+    } = buyerDemographics;
+
+    const timelineLabel: Record<string, string> = {
+      under_30_days: "Under 30 days (urgent)",
+      "30_60_days": "30-60 days",
+      "60_90_days": "60-90 days",
+      over_90_days: "Over 90 days",
+    };
+
+    const buyerTypeLabel: Record<string, string> = {
+      young_professional: "Young Professional",
+      growing_family: "Growing Family",
+      downsizing_retiree: "Downsizing Retiree",
+      investor: "Investor",
+      luxury_buyer: "Luxury Buyer",
+      first_time_homebuyer: "First-Time Homebuyer",
+      serial_renovator: "Serial Renovator",
+    };
+
+    const featureLabel: Record<string, string> = {
+      home_office: "Home Office",
+      open_plan: "Open Plan Living",
+      outdoor_space: "Outdoor Space",
+      gourmet_kitchen: "Gourmet Kitchen",
+      master_suite: "Master Suite",
+      smart_home: "Smart Home Features",
+      energy_efficient: "Energy Efficiency",
+      multigenerational: "Multigenerational Living",
+      home_gym: "Home Gym",
+      pet_friendly: "Pet-Friendly Features",
+    };
+
+    const prefsLabel: Record<string, string> = {
+      contemporary: "Contemporary",
+      traditional: "Traditional",
+      minimalist: "Minimalist",
+      maximalist: "Maximalist",
+      coastal: "Coastal",
+      industrial: "Industrial",
+      midcentury_modern: "Mid-Century Modern",
+      scandinavian: "Scandinavian",
+      bohemian: "Bohemian",
+      transitional: "Transitional",
+    };
+
+    demographicsBlock = `
+- Buyer Type: ${buyerTypeLabel[buyerType] ?? buyerType}
+- Design Preferences: ${designPreferences.map((p) => prefsLabel[p] ?? p).join(", ")}
+- Budget Range: $${budgetMin}k - $${budgetMax}k
+- Must-Have Features: ${mustHaveFeatures.map((f) => featureLabel[f] ?? f).join(", ")}
+- Sell Timeline: ${timelineLabel[sellTimeline] ?? sellTimeline}`;
+  }
 
   return `You are a professional home staging copywriter for a staging company.
 
 Generate structured copywriting for a room with the following details:
 - Room: ${roomName}
 - Design Aesthetic: ${aesthetic}
-- Target Buyer: ${targetBuyer}
-- Staging Directives: ${rawDirectives}
+- Target Buyer: ${targetBuyer}${demographicsBlock}
+- Staging Directives: ${mergedDirectives}
 
 Based on the room details and staging directives, generate:
 1. **observedChallenge**: Describe the key staging challenge or opportunity observed in this room
@@ -103,22 +224,46 @@ export function buildInpaintPrompt(
  * Builds the `input` payload for the fal.ai FLUX.1 Fill queue submit
  * (`fal.queue.submit("fal-ai/flux-fill", { input })`) in `api/inpaint`.
  *
- * Contract: `guidance` is pinned to 7.5 and `num_inference_steps` to 28;
+ * Contract: `guidance` defaults to 7.5 and `num_inference_steps` to 28;
  * `negative_prompt` is {@link NEGATIVE_PROMPT} unless the caller passes
  * `negativePrompt` (the holistic full-room path does); image/mask/prompt
- * fields pass through unchanged. The exact shape is pinned by
+ * fields pass through unchanged. When `promptStrength` is provided (issue #558),
+ * it overrides the default guidance (scaled to fal.ai's 1–10 range). When
+ * `creativeMode` is true, a lower guidance (~4.0) enables higher variation.
+ * `mask_blur` feathers mask edges for softer transitions. `seed` enables
+ * reproducible results when `lockSeed` is set. The exact shape is pinned by
  * `tests/prompts.test.ts` — changing it alters paid generation output.
  * Side effects: none (pure).
  */
 export function buildFalFillPayload(
   input: FalFillPayloadInput
 ): FalFillPayload {
-  return {
+  // Issue #558: compute effective guidance. Creative mode uses a lower
+  // guidance for more variation; otherwise use promptStrength (scaled from
+  // the 0.1–1.0 UI range to fal.ai's 1–10 scale), falling back to 7.5.
+  let guidance = 7.5;
+  if (input.creativeMode) {
+    guidance = 4.0;
+  } else if (input.promptStrength !== undefined) {
+    guidance = input.promptStrength * 10;
+  }
+
+  const payload: FalFillPayload = {
     image_url: input.imageUrl,
     mask_url: input.maskUrl,
     prompt: input.prompt,
     negative_prompt: input.negativePrompt ?? NEGATIVE_PROMPT,
-    guidance: 7.5,
+    guidance,
     num_inference_steps: 28,
   };
+
+  // Issue #558: optional AI guidance params
+  if (input.maskBlur !== undefined) {
+    payload.mask_blur = input.maskBlur;
+  }
+  if (input.seed !== undefined) {
+    payload.seed = input.seed;
+  }
+
+  return payload;
 }

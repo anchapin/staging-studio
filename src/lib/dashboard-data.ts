@@ -86,6 +86,7 @@ const projectDetailSelect = {
   clientName: true,
   targetBuyer: true,
   stagingAesthetic: true,
+  stagingDirectives: true, // Issue #562: global project-level directives
   createdAt: true,
   user: {
     select: {

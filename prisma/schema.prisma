@@ -34,6 +34,10 @@ model Project {
   clientName      String
   targetBuyer     String   // e.g. "young professional couple", "growing family"
   stagingAesthetic String  // e.g. "Organic Modern Luxury", "Warm Transitional"
+  stagingDirectives String? // Issue #562: global project-wide AI staging directives
+  // Buyer Demographics JSON: buyer profile for AI copywriting + ROI metrics (issue #563)
+  // Shape: { buyerType, designPreferences[], budgetMin, budgetMax, mustHaveFeatures[], sellTimeline }
+  buyerDemographics Json?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -74,6 +78,7 @@ model Room {
   createdAt            DateTime @default(now())
 
   inpaintRequests InpaintRequest[]
+  inpaintVersions InpaintVersion[]
   selectionLogs  SelectionLog[]
 
   @@index([projectId])
@@ -97,6 +102,24 @@ model InpaintRequest {
   updatedAt   DateTime @updatedAt
 
   @@index([roomId])
+}
+
+// InpaintVersion model: version history for inpaint results (issue #561).
+// Tracks each completed inpaint run per variant slot so users can preview,
+// restore, and compare previous versions. Thumbnails are stored in Supabase
+// Storage; full images use the resultUrl (persisted in staging-images).
+model InpaintVersion {
+  id             String   @id @default(cuid())
+  roomId         String
+  room           Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  variantSlot    Int      // 0 or 1 — which "after" variant slot this version belongs to
+  resultUrl      String   // URL of the full-resolution image (from staging-images)
+  thumbnailUrl   String?  // URL of the low-res thumbnail in Supabase Storage
+  seed           String?  // fal.ai seed used for this run (for regeneration)
+  promptDirectives String? // The staging directives used for this run
+  createdAt      DateTime @default(now())
+
+  @@index([roomId, variantSlot, createdAt])
 }
 
 // VisionLabel model: caches GPT-4o-mini vision labels for detected instances

@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef, useMemo, useId } from "react";
 import type { ReactNode } from "react";
-import InpaintMaskCanvas from "./inpaint-mask-canvas";
+import InpaintMaskCanvas, { type MaskTool } from "./inpaint-mask-canvas";
 import EditorTabBar, {
   editorTabId,
   editorTabPanelId,
@@ -10,8 +10,9 @@ import EditorTabBar, {
   type EditorTabId,
 } from "./editor-tab-bar";
 import { useToast, ToastContainer } from "@/components/ui/toast";
-import { Info, Loader2 } from "lucide-react";
+import { Info, Loader2, Maximize2, Minimize2 } from "lucide-react";
 import { useInpaintStatus } from "./use-inpaint-status";
+import ZenModeToolbar from "./zen-mode-toolbar";
 import {
   entireRoomTabVisible,
   inpaintSourceLabel,
@@ -45,6 +46,7 @@ import { maskGridFromPixels } from "@/lib/mask-flood-fill";
 import { computeMaskCanvasDimensions } from "@/lib/canvas-coords";
 import { fillHoles, closeRegion, MERGE_PROXIMITY_PX } from "@/lib/mask-postprocess";
 import { maskBounds, topmostLeftmostPoint } from "@/lib/vision-labels";
+import { type DeclutterIntensity } from "@/lib/holistic-prompt";
 import {
   MAX_BATCH_OBJECTS,
   advanceBatchProgress,
@@ -63,13 +65,20 @@ import {
   type InstanceMaskGrid,
   type PerObjectBatchPlan,
 } from "@/lib/multi-select-batch";
+import VersionHistoryPanel, {
+  generateThumbnailFromUrl,
+} from "./version-history-panel";
+import { saveInpaintVersion } from "@/app/actions/inpaint-versions";
 
 interface InpaintEditorProps {
   roomId: string;
   /** The resolved source image the mask applies to (before photo or staged variant). */
   imageUrl: string;
   aesthetic: string;
+  /** Room-specific staging directives (displayed in textarea, merged with global for AI). */
   promptDirectives: string;
+  /** Issue #562: Global project-level directives merged with room directives for AI. */
+  globalDirectives?: string;
   /** The "after" slot this run's result will land in (resolved by the parent). */
   variantSlot: 0 | 1;
   /** Currently selected source; the parent owns this state (issue #170). */
@@ -81,6 +90,11 @@ interface InpaintEditorProps {
   /** Source of the pending run, reconstructed from its persisted row. */
   pendingSource?: InpaintSource | null;
   onInpaintComplete?: (resultImageUrl: string, source: InpaintSource) => void;
+  /**
+   * Issue #561: the current "after" result URL for the variant slot being edited.
+   * Used to highlight the active version in the VersionHistoryPanel.
+   */
+  currentResultUrl?: string | null;
   /**
    * Issue #230: reports the active labeled concept selection — the label
    * when exactly one labeled selection is active, null otherwise. The
@@ -413,6 +427,7 @@ export default function InpaintEditor({
   imageUrl,
   aesthetic,
   promptDirectives,
+  globalDirectives = "",
   variantSlot,
   source,
   sourceOptions,
@@ -425,6 +440,7 @@ export default function InpaintEditor({
   secondaryPane,
   onDirectivesChange,
   directivesValue,
+  currentResultUrl,
 }: InpaintEditorProps) {
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
   const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
@@ -435,8 +451,28 @@ export default function InpaintEditor({
   // Issue #234: when enabled, dilate further downward than upward so floor
   // shadows cast by objects are swallowed by the regenerated region.
   const [includeFloorShadow, setIncludeFloorShadow] = useState(false);
+
+  // Issue #558: AI guidance controls for inpaint runs
+  const [promptStrength, setPromptStrength] = useState(0.8);
+  const [maskBlur, setMaskBlur] = useState(5);
+  const [seed, setSeed] = useState<number | undefined>(undefined);
+  const [creativeMode, setCreativeMode] = useState(false);
+  const [lockSeed, setLockSeed] = useState(false);
   // Issue #460: comparison now via staged result image click in secondary pane
   const { toasts, showError, showSuccess, dismissToast } = useToast();
+
+  // Issue #560: Zen Mode state — hides all chrome for a distraction-free workspace.
+  const [zenMode, setZenMode] = useState(false);
+  // Issue #560: dark background toggle for eye comfort in Zen Mode.
+  const [zenDarkBackground, setZenDarkBackground] = useState(false);
+
+  // Issue #560: lifted brush state — shared between InpaintMaskCanvas and ZenModeToolbar.
+  const [zenBrushSize, setZenBrushSize] = useState(20);
+  const [zenActiveTool, setZenActiveTool] = useState<MaskTool>("brush");
+
+  // Issue #561: tracks the active result URL for the version history panel.
+  // Updated on inpaint completion; also initialized from prop when provided.
+  const [activeResultUrl, setActiveResultUrl] = useState<string | null>(currentResultUrl ?? null);
 
   // Concept-selection state (issue #228): the detection concept drives
   // ONE billed call per (image, concept); clicks only toggle instances
@@ -788,7 +824,29 @@ export default function InpaintEditor({
   const { isProcessing, statusText, start } = useInpaintStatus({
     onCompleted: (resultImageUrl) => {
       batchOutcomeRef.current = { kind: "completed", url: resultImageUrl };
+      // Update the active result URL for the version history panel (issue #561)
+      setActiveResultUrl(resultImageUrl);
       onInpaintComplete?.(resultImageUrl, runSourceRef.current);
+      // Issue #561: save the completed version to the history. Thumbnail
+      // generation requires browser canvas, so run it here. Errors are
+      // non-fatal — the version row is best-effort.
+      if (typeof window !== "undefined" && resultImageUrl) {
+        void (async () => {
+          try {
+            const thumbnailDataUrl = await generateThumbnailFromUrl(resultImageUrl, 200);
+            await saveInpaintVersion({
+              roomId,
+              variantSlot,
+              resultUrl: resultImageUrl,
+              thumbnailDataUrl,
+              seed: undefined,
+              promptDirectives,
+            });
+          } catch (err) {
+            console.error("[inpaint-editor] failed to save inpaint version:", err);
+          }
+        })();
+      }
     },
     showSuccess: (message) => {
       if (!batchActiveRef.current) showSuccess(message);
@@ -973,6 +1031,32 @@ export default function InpaintEditor({
 
   const aspectRatio = imageDims ? imageDims.width / imageDims.height : null;
 
+  // Issue #560: keyboard shortcuts for Zen Mode — Z toggles, Escape exits.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const isInput =
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable;
+
+      if (e.key === "z" || e.key === "Z") {
+        if (!isInput) {
+          e.preventDefault();
+          setZenMode((prev) => !prev);
+        }
+      }
+
+      if (e.key === "Escape" && zenMode) {
+        e.preventDefault();
+        setZenMode(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [zenMode]);
+
   // Resume an in-flight job (e.g. after a refresh): skip the submit and go
   // straight to polling the persisted requestId. The run's source comes from
   // the persisted row so completion persists with the original run's
@@ -1139,13 +1223,34 @@ export default function InpaintEditor({
   // for the strategy-generated ones. Batch steps pass `sourceUrl` (the
   // previous step's persisted result) so per-object results stack into the
   // same variant slot; omitted = the editor's current source image.
+  // Issue #562: globalDirectives are merged with room directives for AI prompts.
   const beginInpaintRun = useCallback(
     async (run: {
       maskUrl: string;
       promptDirectives: string;
       negativePrompt?: string;
       sourceUrl?: string;
+      globalDirectives?: string;
+      // Issue #558: AI guidance
+      promptStrength?: number;
+      maskBlur?: number;
+      seed?: number;
+      creativeMode?: boolean;
+      lockSeed?: boolean;
     }) => {
+      // Issue #562: merge global + room directives for AI
+      const mergedDirectives = (() => {
+        const global = (run.globalDirectives ?? globalDirectives ?? "").trim();
+        const room = run.promptDirectives.trim();
+        if (!global) return room;
+        if (!room) return global;
+        return `${global}\n\nRoom-specific: ${room}`;
+      })();
+
+      if (!mergedDirectives) {
+        showError("No staging directives available.");
+        return;
+      }
       if (!imageUrl) {
         showError("No image available to edit.");
         return;
@@ -1158,6 +1263,9 @@ export default function InpaintEditor({
       batchOutcomeRef.current = null;
       batchFailureRef.current = null;
 
+      // Issue #558: resolve effective seed — use explicit seed only when lockSeed is true
+      const effectiveSeed = run.lockSeed ? run.seed : undefined;
+
       await start(async (signal) => {
         const startResponse = await fetch("/api/inpaint", {
           method: "POST",
@@ -1165,12 +1273,17 @@ export default function InpaintEditor({
           body: JSON.stringify({
             imageUrl: run.sourceUrl ?? imageUrl,
             maskUrl: run.maskUrl,
-            promptDirectives: run.promptDirectives,
+            promptDirectives: mergedDirectives,
             negativePrompt: run.negativePrompt,
             aesthetic,
             roomId,
             variantSlot,
             sourceSlot: source.kind === "variant" ? source.slot : null,
+            // Issue #558: AI guidance params
+            promptStrength: run.promptStrength,
+            maskBlur: run.maskBlur,
+            seed: effectiveSeed,
+            creativeMode: run.creativeMode,
           }),
           signal,
         });
@@ -1184,12 +1297,12 @@ export default function InpaintEditor({
         return startData.requestId as string;
       });
     },
-    [imageUrl, aesthetic, roomId, variantSlot, source, start, showError]
+    [imageUrl, aesthetic, roomId, variantSlot, source, start, showError, globalDirectives]
   );
 
   const handleInpaint = useCallback(async () => {
     if (!promptDirectives.trim()) {
-      showError("Please fill in the \"Staging directives\" textarea in the right panel.");
+      showError("Please fill in the \u201cStaging directives\u201d textarea in the right panel.");
       return;
     }
 
@@ -1198,8 +1311,17 @@ export default function InpaintEditor({
       return;
     }
 
-    await beginInpaintRun({ maskUrl: maskDataUrl, promptDirectives });
-  }, [maskDataUrl, promptDirectives, beginInpaintRun, showError]);
+    await beginInpaintRun({
+      maskUrl: maskDataUrl,
+      promptDirectives,
+      globalDirectives,
+      promptStrength,
+      maskBlur,
+      seed,
+      creativeMode,
+      lockSeed,
+    });
+  }, [maskDataUrl, promptDirectives, beginInpaintRun, showError, globalDirectives, promptStrength, maskBlur, seed, creativeMode, lockSeed]);
 
   // Holistic spike entry (issue #190): the panel builds the full-room
   // mask + aesthetic-derived directives; this just forwards them into
@@ -1211,9 +1333,15 @@ export default function InpaintEditor({
         maskUrl: run.maskDataUrl,
         promptDirectives: run.promptDirectives,
         negativePrompt: run.negativePrompt,
+        // Issue #558: pass AI guidance settings
+        promptStrength,
+        maskBlur,
+        seed,
+        creativeMode,
+        lockSeed,
       });
     },
-    [beginInpaintRun]
+    [beginInpaintRun, promptStrength, maskBlur, seed, creativeMode, lockSeed]
   );
 
   // Issue #203: sequential per-object batch runner. Steps run ONE AT A
@@ -1251,6 +1379,12 @@ export default function InpaintEditor({
             maskUrl: plan.steps[index].maskDataUrl,
             promptDirectives: plan.steps[index].promptDirectives,
             sourceUrl,
+            globalDirectives,
+            promptStrength,
+            maskBlur,
+            seed,
+            creativeMode,
+            lockSeed,
           });
 
           const outcome = batchOutcomeRef.current;
@@ -1287,7 +1421,7 @@ export default function InpaintEditor({
         batchActiveRef.current = false;
       }
     },
-    [beginInpaintRun, showSuccess]
+    [beginInpaintRun, showSuccess, globalDirectives, promptStrength, maskBlur, seed, creativeMode, lockSeed]
   );
 
   // Issue #203: batch entry point from the panel. Builds the validated
@@ -1295,13 +1429,21 @@ export default function InpaintEditor({
   // thematic single run (union mask + one prompt through the shared
   // launcher) or kicks off the sequential per-object runner.
   const handleBatchRun = useCallback(
-    (input: { mode: BatchPromptMode; thematicPrompt: string; perObjectPrompts: string[] }) => {
+    (input: {
+      mode: BatchPromptMode;
+      thematicPrompt: string;
+      perObjectPrompts: string[];
+      declutterMode: boolean;
+      declutterIntensity: DeclutterIntensity;
+    }) => {
       const built = buildBatchPlan({
         selections: batchSelections,
         mode: input.mode,
         thematicPrompt: input.thematicPrompt,
         perObjectPrompts: input.perObjectPrompts,
         unionMaskDataUrl,
+        declutterMode: input.declutterMode,
+        declutterIntensity: input.declutterIntensity,
       });
       if (!built.ok) {
         showError(built.error);
@@ -1312,6 +1454,12 @@ export default function InpaintEditor({
         void beginInpaintRun({
           maskUrl: plan.maskDataUrl,
           promptDirectives: plan.promptDirectives,
+          globalDirectives,
+          promptStrength,
+          maskBlur,
+          seed,
+          creativeMode,
+          lockSeed,
         }).then(() => {
           // A thematic batch is one ordinary run — consume the selection
           // set only when it actually completed (outcome ref is set by
@@ -1326,7 +1474,7 @@ export default function InpaintEditor({
       }
       void runPerObjectBatch(plan);
     },
-    [batchSelections, unionMaskDataUrl, beginInpaintRun, runPerObjectBatch, showError]
+    [batchSelections, unionMaskDataUrl, beginInpaintRun, runPerObjectBatch, showError, globalDirectives, promptStrength, maskBlur, seed, creativeMode, lockSeed]
   );
 
   const handleBatchRetry = useCallback(() => {
@@ -1413,7 +1561,7 @@ export default function InpaintEditor({
     <div
       className={`flex flex-col gap-6 ${
         fullWidth ? "md:flex-col lg:min-h-0 lg:flex-1 lg:flex-row lg:gap-6" : ""
-      }`}
+      } ${zenMode ? "zen-mode-active zen-mode-vignette" : ""} ${zenDarkBackground && zenMode ? "zen-mode-dark" : ""}`}
     >
       {/* ---- LEFT PANE: room imagery (optional slot) + mask canvas ------ */}
       <div
@@ -1425,12 +1573,29 @@ export default function InpaintEditor({
           <div
             className={`flex flex-col gap-6 ${
               fullWidth ? "md:max-h-none md:overflow-visible lg:max-h-[70%] lg:min-h-0 lg:overflow-y-auto" : ""
-            }`}
+            } ${zenMode ? "zen-mode-hidden" : ""}`}
           >
             {secondaryPane}
           </div>
         )}
-        <h4 className="mb-2 text-sm font-medium text-stone-700">Source Image</h4>
+        {/* Issue #560: "Source Image" label hidden in Zen Mode */}
+        <div className={`flex items-center justify-between ${zenMode ? "zen-mode-hidden" : ""}`}>
+          <h4 className="mb-2 text-sm font-medium text-stone-700">Source Image</h4>
+          <button
+            type="button"
+            onClick={() => setZenMode((prev) => !prev)}
+            title={zenMode ? "Exit Zen Mode (Z)" : "Enter Zen Mode (Z)"}
+            aria-label={zenMode ? "Exit Zen Mode" : "Enter Zen Mode"}
+            className="flex items-center gap-1.5 rounded-md border border-stone-300 bg-white px-2.5 py-1.5 text-xs text-stone-600 shadow-sm transition-colors hover:bg-stone-50 hover:text-stone-900"
+          >
+            {zenMode ? (
+              <Minimize2 className="h-3.5 w-3.5" aria-hidden="true" />
+            ) : (
+              <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+            {zenMode ? "Exit Zen" : "Zen Mode"}
+          </button>
+        </div>
         {/* Issue #460: comparison now via staged result image click in secondary pane */}
         <InpaintMaskCanvas
           overlayImageSrc={imageUrl}
@@ -1451,54 +1616,60 @@ export default function InpaintEditor({
           selectionReset={selectionReset}
           onMaskCleared={handleMaskCleared}
           onSelectionDeselect={handleRemoveSelection}
+          zenMode={zenMode}
+          brushSize={zenMode ? zenBrushSize : undefined}
+          onBrushSizeChange={zenMode ? setZenBrushSize : undefined}
+          activeTool={zenMode ? zenActiveTool : undefined}
+          onActiveToolChange={zenMode ? setZenActiveTool : undefined}
         />
 
-        <label className="flex items-center gap-2 text-sm text-stone-700">
-          Expand selection:
-          <input
-            type="range"
-            min={0}
-            max={MAX_MASK_EXPANSION_RADIUS}
-            value={maskExpansion}
-            onChange={(e) => setMaskExpansion(Number(e.target.value))}
-            aria-describedby="mask-expansion-hint"
-            className="w-32"
-          />
-          <span className="w-10 text-right">{maskExpansion}px</span>
-        </label>
-        <p id="mask-expansion-hint" className="text-xs text-gray-500">
-          Grows the painted area so picture frames, bezels, and mounts are
-          included. 0 keeps the exact painted area.
-        </p>
+        {/* Issue #560: expand selection and floor shadow controls hidden in Zen Mode */}
+        <div className={zenMode ? "zen-mode-hidden" : ""}>
+          <label className="flex items-center gap-2 text-sm text-stone-700">
+            Expand selection:
+            <input
+              type="range"
+              min={0}
+              max={MAX_MASK_EXPANSION_RADIUS}
+              value={maskExpansion}
+              onChange={(e) => setMaskExpansion(Number(e.target.value))}
+              aria-describedby="mask-expansion-hint"
+              className="w-32"
+            />
+            <span className="w-10 text-right">{maskExpansion}px</span>
+          </label>
+          <p id="mask-expansion-hint" className="text-xs text-gray-500">
+            Grows the painted area so picture frames, bezels, and mounts are
+            included. 0 keeps the exact painted area.
+          </p>
 
-        {/* Issue #234: floor-shadow toggle — dilates the mask further downward than
-            upward so cast shadows on the floor are included in the regenerated region. */}
-        <label className="flex items-center gap-2 text-sm text-stone-700">
-          <input
-            type="checkbox"
-            checked={includeFloorShadow}
-            onChange={(e) => setIncludeFloorShadow(e.target.checked)}
-            className="h-4 w-4 accent-stone-800"
-          />
-          Add natural floor shadows under new furniture
-        </label>
-        <div className="flex items-center gap-1">
-          <span
-            role="img"
-            aria-label="More info"
-            title="Extends the painted area downward to include floor shadows, so they look natural with the new furniture. Best for hard floors."
-            className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-200 text-gray-500 hover:bg-gray-300"
-          >
-            <Info className="h-3 w-3" />
-          </span>
+          {/* Issue #234: floor-shadow toggle — dilates the mask further downward than
+              upward so cast shadows on the floor are included in the regenerated region. */}
+          <label className="flex items-center gap-2 text-sm text-stone-700">
+            <input
+              type="checkbox"
+              checked={includeFloorShadow}
+              onChange={(e) => setIncludeFloorShadow(e.target.checked)}
+              className="h-4 w-4 accent-stone-800"
+            />
+            Add natural floor shadows under new furniture
+          </label>
+          <div className="flex items-center gap-1">
+            <span
+              role="img"
+              aria-label="More info"
+              title="Extends the painted area downward to include floor shadows, so they look natural with the new furniture. Best for hard floors."
+              className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-200 text-gray-500 hover:bg-gray-300"
+            >
+              <Info className="h-3 w-3" />
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* ---- RIGHT PANE: fixed-width control panel ----------------------- */}
+      {/* Issue #560: right panel hidden in Zen Mode */}
       <div
-        className={`flex w-full flex-col gap-3 no-print ${
-          fullWidth ? "md:w-full md:flex-col lg:min-h-0 lg:w-[380px] lg:shrink-0" : ""
-        }`}
+        className={`flex w-full flex-col gap-3 no-print ${fullWidth ? "md:w-full md:flex-col lg:min-h-0 lg:w-[380px] lg:shrink-0" : ""} ${zenMode ? "zen-mode-hidden" : ""}`}
       >
         {/* AC-L2: batch progress pins to the panel top during a run, so
             it stays visible beside the canvas on every tab. The full
@@ -1660,6 +1831,99 @@ export default function InpaintEditor({
                   <span aria-live="polite" className="text-sm text-stone-600">{statusText}</span>
                 )}
               </div>
+
+              {/* Issue #558: AI Guidance controls — sliders for fine-tuning the inpaint run */}
+              <details className="rounded-md border border-stone-200">
+                <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50 select-none">
+                  AI Guidance
+                </summary>
+                <div className="flex flex-col gap-3 px-3 pb-3 pt-1">
+
+                  {/* Prompt Strength: how closely AI follows the text prompt */}
+                  <label className="flex items-center gap-2 text-sm text-stone-700">
+                    <span className="shrink-0">Prompt Strength</span>
+                    <input
+                      type="range"
+                      min={0.1}
+                      max={1.0}
+                      step={0.05}
+                      value={promptStrength}
+                      onChange={(e) => setPromptStrength(Number(e.target.value))}
+                      aria-label="Prompt Strength"
+                      className="w-28"
+                    />
+                    <span className="w-10 text-right tabular-nums">{promptStrength.toFixed(2)}</span>
+                  </label>
+
+                  {/* Mask Blur: feather edges of the mask */}
+                  <label className="flex items-center gap-2 text-sm text-stone-700">
+                    <span className="shrink-0">Mask Blur</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={20}
+                      step={1}
+                      value={maskBlur}
+                      onChange={(e) => setMaskBlur(Number(e.target.value))}
+                      aria-label="Mask Blur"
+                      className="w-28"
+                    />
+                    <span className="w-10 text-right tabular-nums">{maskBlur}px</span>
+                  </label>
+
+                  {/* Seed: reproducible results */}
+                  <div className="flex items-center gap-2 text-sm text-stone-700">
+                    <label htmlFor={`inpaint-seed-${roomId}`} className="shrink-0">Seed</label>
+                    <input
+                      id={`inpaint-seed-${roomId}`}
+                      type="number"
+                      min={0}
+                      max={999999}
+                      step={1}
+                      value={seed ?? ""}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSeed(val === "" ? undefined : Number(val));
+                      }}
+                      placeholder="Random"
+                      aria-label="Seed for reproducible results"
+                      className="w-28 rounded-md border border-gray-300 px-2 py-1 text-xs tabular-nums focus:outline-none focus:ring-2 focus:ring-stone-500"
+                    />
+                    <label htmlFor={`inpaint-lockseed-${roomId}`} className="flex items-center gap-1 text-xs text-stone-600">
+                      <input
+                        id={`inpaint-lockseed-${roomId}`}
+                        type="checkbox"
+                        checked={lockSeed}
+                        onChange={(e) => setLockSeed(e.target.checked)}
+                        className="h-3.5 w-3.5 accent-stone-800"
+                      />
+                      Lock Seed
+                    </label>
+                  </div>
+
+                  {/* Creative Mode: higher variation */}
+                  <div className="flex items-center gap-2 text-sm text-stone-700">
+                    <span className="shrink-0">Creative Mode</span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={creativeMode}
+                      aria-label="Creative Mode"
+                      onClick={() => setCreativeMode((v) => !v)}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-stone-500 focus:ring-offset-1 ${
+                        creativeMode ? "bg-stone-800" : "bg-gray-300"
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                          creativeMode ? "translate-x-5" : "translate-x-1"
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                </div>
+              </details>
             </div>
           </div>
 
@@ -1830,9 +2094,77 @@ export default function InpaintEditor({
             </div>
           </div>
         </div>
+
+        {/* Issue #561: Version History — collapsible panel at the bottom of the
+            right pane, showing thumbnails of previous inpaint results. */}
+        <VersionHistoryPanel
+          roomId={roomId}
+          variantSlot={variantSlot}
+          activeResultUrl={activeResultUrl}
+          onRestored={(resultUrl) => {
+            setActiveResultUrl(resultUrl);
+          }}
+        />
       </div>
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
+      {/* Issue #560: Zen Mode floating toolbar — shown only when Zen Mode is active */}
+      {zenMode && (
+        <ZenModeToolbar
+          darkBackground={zenDarkBackground}
+          onDarkBackgroundChange={setZenDarkBackground}
+        >
+          {/* Tool buttons */}
+          <div role="group" aria-label="Mask tool" className="flex items-center gap-1">
+            {(["brush", "fill", "select"] as const).map((tool) => (
+              <button
+                key={tool}
+                type="button"
+                aria-pressed={zenActiveTool === tool}
+                aria-label={tool === "brush" ? "Brush" : tool === "fill" ? "Fill Region" : "Select Regions"}
+                onClick={() => setZenActiveTool(tool)}
+                className={
+                  zenActiveTool === tool
+                    ? "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium bg-stone-800 text-white transition-colors"
+                    : "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium bg-stone-100 text-stone-600 transition-colors hover:bg-stone-200"
+                }
+              >
+                {tool === "brush" ? "Brush" : tool === "fill" ? "Fill" : "Select"}
+              </button>
+            ))}
+          </div>
+
+          {/* Brush size slider */}
+          <label className="flex items-center gap-2 text-xs text-stone-600">
+            <span>Size</span>
+            <input
+              type="range"
+              min={1}
+              max={100}
+              value={zenBrushSize}
+              onChange={(e) => setZenBrushSize(Number(e.target.value))}
+              className="w-20"
+              aria-label="Brush size"
+            />
+            <span className="w-5 text-right">{zenBrushSize}</span>
+          </label>
+
+          {/* Clear mask */}
+          <button
+            type="button"
+            onClick={() => {
+              setMaskDataUrl(null);
+              setBatchSelections([]);
+              setSelectedInstanceIndices([]);
+            }}
+            className="rounded-full px-3 py-1.5 text-xs text-stone-500 bg-stone-100 hover:bg-stone-200 transition-colors"
+            title="Clear mask"
+          >
+            Clear
+          </button>
+        </ZenModeToolbar>
+      )}
     </div>
   );
 }
