@@ -1,4 +1,5 @@
 import type { BuyerDemographics, LookbookRoomData } from "./types";
+import { ProposalFooter } from "./proposal-footer";
 
 interface BuyerPersonaPageProps {
   buyerDemographics: BuyerDemographics;
@@ -65,96 +66,100 @@ export function BuyerPersonaPage({
     buyerDemographics;
 
   return (
-    <div className="lookbook-page min-h-screen flex flex-col items-center justify-center bg-stone-50 p-12">
-      <div className="max-w-4xl w-full space-y-8">
-        {/* Section header */}
-        <div className="text-center space-y-3">
-          <p className="font-cinzel text-sm tracking-[0.3em] uppercase text-muted-foreground">
-            Buyer Persona Summary
-          </p>
-          <h2 className="font-playfair text-4xl font-bold text-foreground">
-            Meet the Buyer
-          </h2>
-          <div className="w-24 h-0.5 bg-primary mx-auto" />
-        </div>
+    <div className="lookbook-page min-h-screen flex flex-col items-center justify-between bg-stone-50 p-12">
+      <div className="flex-1 flex flex-col items-center justify-center">
+        <div className="max-w-4xl w-full space-y-8">
+          {/* Section header */}
+          <div className="text-center space-y-3">
+            <p className="font-cinzel text-sm tracking-[0.3em] uppercase text-muted-foreground">
+              Buyer Persona Summary
+            </p>
+            <h2 className="font-playfair text-4xl font-bold text-foreground">
+              Meet the Buyer
+            </h2>
+            <div className="w-24 h-0.5 bg-primary mx-auto" />
+          </div>
 
-        {/* Primary buyer profile card */}
-        <div className="bg-white rounded-lg border border-border p-8 text-center">
-          <p className="font-cinzel text-xs tracking-widest uppercase text-muted-foreground mb-3">
-            Primary Buyer Profile
-          </p>
-          <p className="font-playfair text-3xl font-bold text-foreground">
-            {BUYER_TYPE_LABELS[buyerType] ?? buyerType}
-          </p>
-          <p className="font-jakarta text-muted-foreground mt-2">
-            {project.targetBuyer}
-          </p>
-        </div>
+          {/* Primary buyer profile card */}
+          <div className="bg-white rounded-lg border border-border p-8 text-center">
+            <p className="font-cinzel text-xs tracking-widest uppercase text-muted-foreground mb-3">
+              Primary Buyer Profile
+            </p>
+            <p className="font-playfair text-3xl font-bold text-foreground">
+              {BUYER_TYPE_LABELS[buyerType] ?? buyerType}
+            </p>
+            <p className="font-jakarta text-muted-foreground mt-2">
+              {project.targetBuyer}
+            </p>
+          </div>
 
-        {/* Two-column grid: design preferences + sell timeline */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          {/* Design Preferences */}
+          {/* Two-column grid: design preferences + sell timeline */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            {/* Design Preferences */}
+            <div className="bg-white rounded-lg border border-border p-6">
+              <p className="font-cinzel text-xs tracking-widest uppercase text-muted-foreground mb-4">
+                Design Preferences
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {designPreferences.map((pref) => (
+                  <span
+                    key={pref}
+                    className="inline-flex items-center rounded-full bg-primary/10 px-3 py-1 text-sm font-jakarta text-primary border border-primary/20"
+                  >
+                    {DESIGN_PREFERENCE_LABELS[pref] ?? pref}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Sell Timeline */}
+            <div className="bg-white rounded-lg border border-border p-6">
+              <p className="font-cinzel text-xs tracking-widest uppercase text-muted-foreground mb-4">
+                Timeline to Sell
+              </p>
+              <p className="font-playfair text-2xl font-bold text-foreground">
+                {SELL_TIMELINE_LABELS[sellTimeline] ?? sellTimeline}
+              </p>
+            </div>
+          </div>
+
+          {/* Budget Range */}
           <div className="bg-white rounded-lg border border-border p-6">
             <p className="font-cinzel text-xs tracking-widest uppercase text-muted-foreground mb-4">
-              Design Preferences
+              Budget Range
             </p>
-            <div className="flex flex-wrap gap-2">
-              {designPreferences.map((pref) => (
-                <span
-                  key={pref}
-                  className="inline-flex items-center rounded-full bg-primary/10 px-3 py-1 text-sm font-jakarta text-primary border border-primary/20"
-                >
-                  {DESIGN_PREFERENCE_LABELS[pref] ?? pref}
-                </span>
+            <p className="font-playfair text-3xl font-bold text-foreground">
+              {formatBudget(budgetMin, budgetMax)}
+            </p>
+          </div>
+
+          {/* Must-Have Features */}
+          <div className="bg-white rounded-lg border border-border p-6">
+            <p className="font-cinzel text-xs tracking-widest uppercase text-muted-foreground mb-4">
+              Must-Have Features
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {mustHaveFeatures.map((feature) => (
+                <div key={feature} className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-primary flex-shrink-0" />
+                  <span className="font-jakarta text-sm text-foreground">
+                    {MUST_HAVE_FEATURE_LABELS[feature] ?? feature}
+                  </span>
+                </div>
               ))}
             </div>
           </div>
 
-          {/* Sell Timeline */}
-          <div className="bg-white rounded-lg border border-border p-6">
-            <p className="font-cinzel text-xs tracking-widest uppercase text-muted-foreground mb-4">
-              Timeline to Sell
-            </p>
-            <p className="font-playfair text-2xl font-bold text-foreground">
-              {SELL_TIMELINE_LABELS[sellTimeline] ?? sellTimeline}
+          {/* Footer */}
+          <div className="text-center pt-4">
+            <p className="font-cinzel text-xs tracking-widest text-muted-foreground">
+              {user.firmName}
             </p>
           </div>
-        </div>
-
-        {/* Budget Range */}
-        <div className="bg-white rounded-lg border border-border p-6">
-          <p className="font-cinzel text-xs tracking-widest uppercase text-muted-foreground mb-4">
-            Budget Range
-          </p>
-          <p className="font-playfair text-3xl font-bold text-foreground">
-            {formatBudget(budgetMin, budgetMax)}
-          </p>
-        </div>
-
-        {/* Must-Have Features */}
-        <div className="bg-white rounded-lg border border-border p-6">
-          <p className="font-cinzel text-xs tracking-widest uppercase text-muted-foreground mb-4">
-            Must-Have Features
-          </p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {mustHaveFeatures.map((feature) => (
-              <div key={feature} className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-primary flex-shrink-0" />
-                <span className="font-jakarta text-sm text-foreground">
-                  {MUST_HAVE_FEATURE_LABELS[feature] ?? feature}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="text-center pt-4">
-          <p className="font-cinzel text-xs tracking-widest text-muted-foreground">
-            {user.firmName}
-          </p>
         </div>
       </div>
+
+      <ProposalFooter />
     </div>
   );
 }

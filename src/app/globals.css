@@ -173,11 +173,6 @@
     page-break-inside: avoid;
   }
 
-  @page {
-    size: letter portrait;
-    margin: 0mm;
-  }
-
   /* Hide navigation in print */
   nav,
   .no-print {
@@ -195,6 +190,30 @@
 
   .lookbook-page:last-child {
     page-break-after: auto;
+  }
+
+  /* Issue #643: Proposal Footer — inline footer hidden in PDF (content
+     comes from @page bottom-center). Show on screen only. */
+  .proposal-footer {
+    display: none;
+  }
+
+  /* PDF page footer via @page rule (issue #643: Browserless/print capture). */
+  @page {
+    size: letter portrait;
+    margin: 0mm;
+    @bottom-center {
+      content: "Atelier\u{2009}Canvas  \00A9\u{2009}2026\u{2009}Circle\u{2009}G\u{2009}Designs\u{2009}\u00B7\u{2009}Staging\u{2009}Studio  \u{2009}\u{2009}\u{2009}\u{2009}\u{2009}Policy\u{2009}\u00B7\u{2009}Privacy\u{2009}\u00B7\u{2009}Terms";
+      font-family: var(--font-jakarta), sans-serif;
+      font-size: 6pt;
+      color: #8C827A;
+    }
+    @bottom-center:before {
+      content: "";
+      display: block;
+      border-top: 0.5pt solid #8C827A;
+      margin-bottom: 2pt;
+    }
   }
 }
 

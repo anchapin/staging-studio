@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { ProposalFooter } from "./proposal-footer";
 
 export interface ProcurementItemDisplay {
   id?: string;
@@ -377,6 +378,8 @@ export function FurnitureProcurementTable({
           )}
         </div>
       </div>
+
+      <ProposalFooter />
     </div>
   );
 }
