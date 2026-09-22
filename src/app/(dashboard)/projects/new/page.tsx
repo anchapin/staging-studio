@@ -508,90 +508,91 @@ export default function NewProjectPage() {
               </select>
             </div>
 
-        <fieldset>
-          <legend className="block text-sm font-medium text-stone-700">
-            Staging Package
-          </legend>
-          <p className="mt-0.5 text-xs text-stone-500">
-            Select a pricing tier for this project.
-          </p>
-          <div
-            className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
-            role="radiogroup"
-            aria-label="Staging package selection"
-          >
-            {STAGING_PACKAGES.map((pkg) => (
-              <StagingPackageCard
-                key={pkg.id}
-                pkg={pkg}
-                selected={form.stagingPackage === pkg.id}
-                onSelect={(id) => setForm({ ...form, stagingPackage: id })}
-                selectable
-              />
-            ))}
-          </div>
-        </fieldset>
-
-        <div>
-          <label
-            htmlFor="room-0"
-            className="block text-sm font-medium text-stone-700"
-          >
-            Rooms
-          </label>
-          <p className="mt-0.5 text-xs text-stone-500">
-            Add each room you will be staging for this property.
-          </p>
-          <datalist id="room-type-suggestions">
-            {/* eslint-disable jsx-a11y/control-has-associated-label -- datalist options are suggestions, not form controls */}
-            {ROOM_TYPES.map((type) => (
-              <option key={type} value={type} />
-            ))}
-          </datalist>
-          <div className="mt-3 space-y-2">
-            {rooms.map((room, index) => (
-              <div key={index} className="flex items-center gap-2">
-                <input
-                  id={`room-${index}`}
-                  type="text"
-                  list="room-type-suggestions"
-                  value={room}
-                  onChange={(e) => handleRoomChange(index, e.target.value)}
-                  placeholder="e.g. Living Room"
-                  aria-label={`Room ${index + 1}`}
-                  className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-stone-900 placeholder:text-stone-400 focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500"
-                />
-                {rooms.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => removeRoom(index)}
-                    aria-label={`Remove Room ${index + 1}`}
-                    className="rounded-md px-2 py-1.5 text-sm text-stone-500 hover:bg-stone-100 hover:text-stone-700"
-                  >
-                    Remove
-                  </button>
-                )}
+            <fieldset>
+              <legend className="block text-sm font-medium text-stone-700">
+                Staging Package
+              </legend>
+              <p className="mt-0.5 text-xs text-stone-500">
+                Select a pricing tier for this project.
+              </p>
+              <div
+                className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+                role="radiogroup"
+                aria-label="Staging package selection"
+              >
+                {STAGING_PACKAGES.map((pkg) => (
+                  <StagingPackageCard
+                    key={pkg.id}
+                    pkg={pkg}
+                    selected={form.stagingPackage === pkg.id}
+                    onSelect={(id) => setForm({ ...form, stagingPackage: id })}
+                    selectable
+                  />
+                ))}
               </div>
-            ))}
-          </div>
-          <button
-            type="button"
-            onClick={addRoom}
-            className="mt-3 rounded-md border border-dashed border-stone-400 px-3 py-1.5 text-sm text-stone-600 hover:border-stone-500 hover:text-stone-700"
-          >
-            + Add another room
-          </button>
-        </div>
+            </fieldset>
 
-          <div className="flex items-center gap-3 pt-6">
-            <button
-              type="button"
-              onClick={() => setCurrentStep(1)}
-              disabled={!canAdvance}
-              className="rounded-md bg-stone-800 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-700 disabled:opacity-50"
-            >
-              Next: Buyer Demographics
-            </button>
+            <div>
+              <label
+                htmlFor="room-0"
+                className="block text-sm font-medium text-stone-700"
+              >
+                Rooms
+              </label>
+              <p className="mt-0.5 text-xs text-stone-500">
+                Add each room you will be staging for this property.
+              </p>
+              <datalist id="room-type-suggestions">
+                {/* eslint-disable jsx-a11y/control-has-associated-label -- datalist options are suggestions, not form controls */}
+                {ROOM_TYPES.map((type) => (
+                  <option key={type} value={type} />
+                ))}
+              </datalist>
+              <div className="mt-3 space-y-2">
+                {rooms.map((room, index) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <input
+                      id={`room-${index}`}
+                      type="text"
+                      list="room-type-suggestions"
+                      value={room}
+                      onChange={(e) => handleRoomChange(index, e.target.value)}
+                      placeholder="e.g. Living Room"
+                      aria-label={`Room ${index + 1}`}
+                      className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-stone-900 placeholder:text-stone-400 focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500"
+                    />
+                    {rooms.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeRoom(index)}
+                        aria-label={`Remove Room ${index + 1}`}
+                        className="rounded-md px-2 py-1.5 text-sm text-stone-500 hover:bg-stone-100 hover:text-stone-700"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={addRoom}
+                className="mt-3 rounded-md border border-dashed border-stone-400 px-3 py-1.5 text-sm text-stone-600 hover:border-stone-500 hover:text-stone-700"
+              >
+                + Add another room
+              </button>
+            </div>
+
+            <div className="flex items-center gap-3 pt-6">
+              <button
+                type="button"
+                onClick={() => setCurrentStep(1)}
+                disabled={!canAdvance}
+                className="rounded-md bg-stone-800 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-700 disabled:opacity-50"
+              >
+                Next: Buyer Demographics
+              </button>
+            </div>
           </div>
         </div>
 
