@@ -28,6 +28,10 @@
 import { isMaskedPixel } from "./mask-coverage";
 import { dilateMaskGrid } from "./mask-dilation";
 import { MERGE_PROXIMITY_PX } from "./mask-postprocess";
+import {
+  buildDeclutterDirective,
+  type DeclutterIntensity,
+} from "./holistic-prompt";
 
 /**
  * Batch size cap. Each region is a separate billed FLUX.1 Fill generation,
@@ -578,6 +582,10 @@ export interface BuildBatchPlanInput {
   perObjectPrompts: string[];
   /** Pre-composed union mask; required for (and only for) thematic runs. */
   unionMaskDataUrl: string | null;
+  /** Issue #559: Global Declutter Mode. */
+  declutterMode?: boolean;
+  /** Issue #559: Declutter intensity (1-5). Only used when declutterMode is true. */
+  declutterIntensity?: DeclutterIntensity;
 }
 
 export type BatchPlanResult =
@@ -613,6 +621,11 @@ function promptError(prompt: string, label: string): string | null {
  * Side effects: none (pure).
  */
 export function buildBatchPlan(input: BuildBatchPlanInput): BatchPlanResult {
+  const {
+    declutterMode = false,
+    declutterIntensity = 3,
+  } = input;
+
   if (input.selections.length === 0) {
     return { ok: false, error: "Select at least one region before running a batch." };
   }
@@ -626,12 +639,16 @@ export function buildBatchPlan(input: BuildBatchPlanInput): BatchPlanResult {
     }
     const error = promptError(input.thematicPrompt, "Thematic prompt");
     if (error) return { ok: false, error };
+    const baseDirectives = input.thematicPrompt.trim();
+    const finalDirectives = declutterMode
+      ? `${baseDirectives} ${buildDeclutterDirective(declutterIntensity)}`
+      : baseDirectives;
     return {
       ok: true,
       plan: {
         kind: "thematic",
         maskDataUrl: input.unionMaskDataUrl,
-        promptDirectives: input.thematicPrompt.trim(),
+        promptDirectives: finalDirectives,
       },
     };
   }
@@ -645,11 +662,15 @@ export function buildBatchPlan(input: BuildBatchPlanInput): BatchPlanResult {
     const label = batchStepLabel(i);
     const error = promptError(input.perObjectPrompts[i], label);
     if (error) return { ok: false, error };
+    const baseDirectives = input.perObjectPrompts[i].trim();
+    const finalDirectives = declutterMode
+      ? `${baseDirectives} ${buildDeclutterDirective(declutterIntensity)}`
+      : baseDirectives;
     steps.push({
       selectionId: input.selections[i].id,
       label,
       maskDataUrl: input.selections[i].maskDataUrl,
-      promptDirectives: input.perObjectPrompts[i].trim(),
+      promptDirectives: finalDirectives,
     });
   }
   return { ok: true, plan: { kind: "per-object", steps } };

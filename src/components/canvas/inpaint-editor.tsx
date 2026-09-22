@@ -45,6 +45,7 @@ import { maskGridFromPixels } from "@/lib/mask-flood-fill";
 import { computeMaskCanvasDimensions } from "@/lib/canvas-coords";
 import { fillHoles, closeRegion, MERGE_PROXIMITY_PX } from "@/lib/mask-postprocess";
 import { maskBounds, topmostLeftmostPoint } from "@/lib/vision-labels";
+import { type DeclutterIntensity } from "@/lib/holistic-prompt";
 import {
   MAX_BATCH_OBJECTS,
   advanceBatchProgress,
@@ -1351,13 +1352,21 @@ export default function InpaintEditor({
   // thematic single run (union mask + one prompt through the shared
   // launcher) or kicks off the sequential per-object runner.
   const handleBatchRun = useCallback(
-    (input: { mode: BatchPromptMode; thematicPrompt: string; perObjectPrompts: string[] }) => {
+    (input: {
+      mode: BatchPromptMode;
+      thematicPrompt: string;
+      perObjectPrompts: string[];
+      declutterMode: boolean;
+      declutterIntensity: DeclutterIntensity;
+    }) => {
       const built = buildBatchPlan({
         selections: batchSelections,
         mode: input.mode,
         thematicPrompt: input.thematicPrompt,
         perObjectPrompts: input.perObjectPrompts,
         unionMaskDataUrl,
+        declutterMode: input.declutterMode,
+        declutterIntensity: input.declutterIntensity,
       });
       if (!built.ok) {
         showError(built.error);
