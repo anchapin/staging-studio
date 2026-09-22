@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Cinzel, Playfair_Display, Plus_Jakarta_Sans } from "next/font/google";
+import { Cinzel, Playfair_Display, Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import ReviewPanel from "@/components/review-panel";
@@ -22,6 +22,12 @@ const plusJakarta = Plus_Jakarta_Sans({
   display: "swap",
 });
 
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-jetbrains-google",
+  display: "swap",
+});
+
 export const metadata: Metadata = {
   title: {
     default: "StagingStudio — AI-Assisted Home Staging Lookbooks",
@@ -37,7 +43,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={cn(cinzel.variable, playfair.variable, plusJakarta.variable, "font-sans")}>
+      <html lang="en" className={cn(cinzel.variable, playfair.variable, plusJakarta.variable, jetbrainsMono.variable, "font-sans")}>
       <body className="antialiased">
         {children}
         <ReviewPanel />

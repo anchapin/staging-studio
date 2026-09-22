@@ -287,7 +287,7 @@ export default function RoomCanvas({
       ) : (
         <button
           onClick={() => fileInputRef.current?.click()}
-          className={`w-full ${frameHeight} flex flex-col items-center justify-center gap-3 text-stone-500 hover:text-stone-700 hover:bg-stone-200/50 transition-colors`}
+          className={`w-full ${frameHeight} flex flex-col items-center justify-center gap-3 font-playfair text-stone-500 hover:text-stone-700 hover:bg-stone-200/50 transition-colors`}
           disabled={isUploading}
         >
           {isUploading ? (

@@ -1580,7 +1580,7 @@ export default function InpaintEditor({
         )}
         {/* Issue #560: "Source Image" label hidden in Zen Mode */}
         <div className={`flex items-center justify-between ${zenMode ? "zen-mode-hidden" : ""}`}>
-          <h4 className="mb-2 text-sm font-medium text-stone-700">Source Image</h4>
+          <h4 className="mb-2 font-jakarta text-sm font-medium text-stone-700">Source Image</h4>
           <button
             type="button"
             onClick={() => setZenMode((prev) => !prev)}
@@ -1625,7 +1625,7 @@ export default function InpaintEditor({
 
         {/* Issue #560: expand selection and floor shadow controls hidden in Zen Mode */}
         <div className={zenMode ? "zen-mode-hidden" : ""}>
-          <label className="flex items-center gap-2 text-sm text-stone-700">
+          <label className="flex items-center gap-2 font-jakarta text-sm text-stone-700">
             Expand selection:
             <input
               type="range"
@@ -1645,7 +1645,7 @@ export default function InpaintEditor({
 
           {/* Issue #234: floor-shadow toggle — dilates the mask further downward than
               upward so cast shadows on the floor are included in the regenerated region. */}
-          <label className="flex items-center gap-2 text-sm text-stone-700">
+          <label className="flex items-center gap-2 font-jakarta text-sm text-stone-700">
             <input
               type="checkbox"
               checked={includeFloorShadow}
@@ -1696,14 +1696,14 @@ export default function InpaintEditor({
         >
           {sourceOptions.length > 1 && (
             <fieldset className="shrink-0 rounded-md border border-stone-200 p-3">
-              <legend className="px-1 text-sm font-medium text-stone-700">
+              <legend className="px-1 font-jakarta text-sm font-medium text-stone-700">
                 Edit from
               </legend>
               <div className="flex flex-wrap gap-x-4 gap-y-2">
                 {sourceOptions.map((option) => (
                   <label
                     key={inpaintSourceLabel(option)}
-                    className="inline-flex cursor-pointer items-center gap-2 text-sm text-stone-700"
+                    className="inline-flex cursor-pointer items-center gap-2 font-jakarta text-sm text-stone-700"
                   >
                     <input
                       type="radio"
@@ -1785,7 +1785,7 @@ export default function InpaintEditor({
               <div>
                 <label
                   htmlFor={`inpaint-directives-${roomId}`}
-                  className="mb-1 block text-sm font-medium text-stone-700"
+                  className="mb-1 font-jakarta block text-sm font-medium text-stone-700"
                 >
                   Staging directives (required)
                 </label>
@@ -1945,7 +1945,7 @@ export default function InpaintEditor({
                     aria-busy={conceptLoading}
                     className="flex flex-wrap items-center gap-2"
                   >
-                    <span className="text-sm font-medium text-stone-700">Concept:</span>
+                    <span className="font-jakarta text-sm font-medium text-stone-700">Concept:</span>
                     {CONCEPT_CHIPS.map((chip) => (
                       <button
                         key={chip}
@@ -1956,7 +1956,7 @@ export default function InpaintEditor({
                         className={
                           requestedConcept === chip
                             ? "px-2.5 py-1 text-xs rounded-full border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors"
-                            : "px-2.5 py-1 text-xs rounded-full border border-gray-300 bg-white text-stone-700 hover:bg-gray-50 transition-colors"
+                            : "px-2.5 py-1 font-jakarta text-xs rounded-full border border-gray-300 bg-white text-stone-700 hover:bg-gray-50 transition-colors"
                         }
                       >
                         {chip}
@@ -1991,7 +1991,7 @@ export default function InpaintEditor({
                       type="button"
                       onClick={handleClearSelection}
                       disabled={isProcessing || selectionCount === 0}
-                      className="px-2.5 py-1 text-xs rounded-md border border-gray-300 bg-white text-stone-700 hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                      className="px-2.5 py-1 font-jakarta text-xs rounded-md border border-gray-300 bg-white text-stone-700 hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       Clear selection
                     </button>
@@ -2168,3 +2168,4 @@ export default function InpaintEditor({
     </div>
   );
 }
+
