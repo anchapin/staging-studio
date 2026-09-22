@@ -68,9 +68,18 @@ const config: Config = {
         },
       },
       borderRadius: {
-        lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 4px)",
+        // Base scale (matching Stitch spec)
+        none: "0px",
+        xs: "0.125rem", // 2px — very subtle, hairline dividers
+        sm: "0.25rem", // 4px — tight, small elements
+        md: "0.375rem", // 6px — inputs, small buttons
+        lg: "0.5rem", // 8px — cards, panels
+        xl: "0.75rem", // 12px — modals, large cards
+        "2xl": "1rem", // 16px — inspector panel, drawers
+        "3xl": "1.5rem", // 24px — large containers
+        // Pill / full radius
+        pill: "0.75rem", // NOT 9999px — the Stitch spec uses 12px (0.75rem) for pill shapes
+        full: "9999px", // True full circle for avatars
       },
     },
   },
