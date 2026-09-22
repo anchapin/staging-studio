@@ -1634,9 +1634,9 @@ export default function InpaintEditor({
               value={maskExpansion}
               onChange={(e) => setMaskExpansion(Number(e.target.value))}
               aria-describedby="mask-expansion-hint"
-              className="w-32"
+              className="atelier-slider w-32"
             />
-            <span className="w-10 text-right">{maskExpansion}px</span>
+            <span className="w-10 text-right tabular-nums font-medium">{maskExpansion}px</span>
           </label>
           <p id="mask-expansion-hint" className="text-xs text-gray-500">
             Grows the painted area so picture frames, bezels, and mounts are

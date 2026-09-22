@@ -22,6 +22,20 @@ import { fillHoles } from "@/lib/mask-postprocess";
 export type MaskTool = "brush" | "fill" | "select";
 
 /**
+ * Issue #549: Atelier Canvas spec mask overlay colors.
+ * Electric emerald for mask overlay on canvas, with laser-rim 1px solid border
+ * for visibility over mixed fabrics and warm woodwork.
+ */
+export const MASK_OVERLAY_EMERALD = "rgba(0, 245, 160, 0.35)";
+export const MASK_OVERLAY_AMBER = "rgba(255, 184, 0, 0.38)";
+
+/**
+ * Issue #549: Laser-rim border for mask visibility.
+ * 1px solid border ensuring the mask overlay is visible over varied surfaces.
+ */
+export const MASK_LASER_RIM_BORDER = "1px solid rgba(0, 245, 160, 0.8)";
+
+/**
  * Rank→color palette for instance overlays (issue #228). Six hues,
  * cycled by score rank, so adjacent instances stay distinguishable. RGB
  * tuples feed `paintMaskPixels` directly (issue #248). Exported since
@@ -1098,11 +1112,13 @@ export default function InpaintMaskCanvas({
   // Brush cursor indicator is a DOM overlay, never canvas pixels, so the
   // exported mask stays clean. Positioned/sized as percentages of the canvas
   // box so it matches the display size in both overlay and standalone modes.
+  // Issue #549: Uses electric emerald mask overlay color with laser-rim border
+  // for visibility over mixed fabrics and warm woodwork.
   const cursorIndicator =
     isCanvasFocused && cursor ? (
       <div
         aria-hidden="true"
-        className={`pointer-events-none absolute z-10 rounded-full border-2 border-white ${
+        className={`pointer-events-none absolute z-10 rounded-full ${
           isKeyboardPainting ? "bg-white/40" : ""
         }`}
         style={{
@@ -1111,7 +1127,9 @@ export default function InpaintMaskCanvas({
           width: `${(brushSize / dims.width) * 100}%`,
           height: `${(brushSize / dims.height) * 100}%`,
           transform: "translate(-50%, -50%)",
-          boxShadow: "0 0 0 1px rgba(0, 0, 0, 0.6)",
+          backgroundColor: isKeyboardPainting ? undefined : MASK_OVERLAY_EMERALD,
+          border: MASK_LASER_RIM_BORDER,
+          boxShadow: "0 0 0 1px rgba(0, 0, 0, 0.4)",
         }}
       />
     ) : null;
@@ -1285,8 +1303,9 @@ export default function InpaintMaskCanvas({
 
       {/* Issue #317: toolbar wraps at md+ and buttons have min-height 44px for touch.
           Issue #560: toolbar hidden in Zen Mode (ZenModeToolbar takes over). */}
+      {/* Issue #549: glassmorphic dock with translucent warm backdrop */}
       {!zenMode && (
-      <div className="flex flex-wrap items-center gap-4">
+      <div className="flex flex-wrap items-center gap-4 rounded-lg border border-stone-200/50 bg-white/80 px-4 py-3 backdrop-blur-md shadow-sm">
         <div role="group" aria-label="Mask tool" className="flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -1300,7 +1319,7 @@ export default function InpaintMaskCanvas({
             }}
             className={
               activeTool === "brush"
-                ? "px-3 py-2 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors md:min-h-[44px]"
+                ? "relative px-3 py-2 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors md:min-h-[44px] after:absolute after:bottom-0 after:left-1/2 after:-translate-x-1/2 after:h-[2px] after:w-8 after:bg-[#C47847]"
                 : "px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors md:min-h-[44px]"
             }
           >
@@ -1318,7 +1337,7 @@ export default function InpaintMaskCanvas({
             }}
             className={
               activeTool === "fill"
-                ? "px-3 py-2 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors md:min-h-[44px]"
+                ? "relative px-3 py-2 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors md:min-h-[44px] after:absolute after:bottom-0 after:left-1/2 after:-translate-x-1/2 after:h-[2px] after:w-8 after:bg-[#C47847]"
                 : "px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors md:min-h-[44px]"
             }
           >
@@ -1342,7 +1361,7 @@ export default function InpaintMaskCanvas({
               }}
               className={
                 activeTool === "select"
-                  ? "flex items-center gap-1.5 px-3 py-2 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors disabled:cursor-not-allowed disabled:opacity-60 md:min-h-[44px]"
+                  ? "relative flex items-center gap-1.5 px-3 py-2 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors disabled:cursor-not-allowed disabled:opacity-60 md:min-h-[44px] after:absolute after:bottom-0 after:left-1/2 after:-translate-x-1/2 after:h-[2px] after:w-8 after:bg-[#C47847]"
                   : "flex items-center gap-1.5 px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-60 md:min-h-[44px]"
               }
             >
@@ -1357,26 +1376,28 @@ export default function InpaintMaskCanvas({
             </button>
         </div>
 
-        {/* Brush size: touch-friendly at md+ with taller hit area */}
-        <label className="flex items-center gap-2 text-sm md:min-h-[44px] md:py-1">
+        {/* Issue #549: Precision Inspector slider styling */}
+        <label className="flex items-center gap-2 text-sm text-stone-700 md:min-h-[44px] md:py-1">
           <span className="whitespace-nowrap">Brush Size:</span>
-          <input
-            type="range"
-            min={1}
-            max={100}
-            value={brushSize}
-            onChange={(e) => {
-              const next = Number(e.target.value);
-              if (onBrushSizeChange) {
-                onBrushSizeChange(next);
-              } else {
-                setInternalBrushSize(next);
-              }
-            }}
-            className="w-24 md:w-32"
-            aria-label="Brush size"
-          />
-          <span className="w-8 text-right">{brushSize}</span>
+          <div className="relative">
+            <input
+              type="range"
+              min={1}
+              max={100}
+              value={brushSize}
+              onChange={(e) => {
+                const next = Number(e.target.value);
+                if (onBrushSizeChange) {
+                  onBrushSizeChange(next);
+                } else {
+                  setInternalBrushSize(next);
+                }
+              }}
+              className="atelier-slider w-24 md:w-32"
+              aria-label="Brush size"
+            />
+          </div>
+          <span className="w-8 text-right tabular-nums font-medium">{brushSize}</span>
         </label>
 
         <button
