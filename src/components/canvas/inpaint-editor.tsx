@@ -10,7 +10,7 @@ import EditorTabBar, {
   type EditorTabId,
 } from "./editor-tab-bar";
 import { useToast, ToastContainer } from "@/components/ui/toast";
-import { Info, Loader2, Maximize2, Minimize2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Info, Loader2, Maximize2, Minimize2 } from "lucide-react";
 import { useInpaintStatus } from "./use-inpaint-status";
 import ZenModeToolbar from "./zen-mode-toolbar";
 import {
@@ -422,6 +422,91 @@ async function decodeConceptInstances(
   );
 }
 
+// -------------------------------------------------------------------------
+// Issue #588: Collapsible workspace panels — localStorage-persisted state
+// -------------------------------------------------------------------------
+
+/** Persists collapsed state in localStorage so it survives page reloads. */
+function useCollapsiblePanel(storageKey: string, defaultCollapsed = false) {
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    if (typeof window === "undefined") return defaultCollapsed;
+    try {
+      const stored = localStorage.getItem(storageKey);
+      return stored !== null ? JSON.parse(stored) : defaultCollapsed;
+    } catch {
+      return defaultCollapsed;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(isCollapsed));
+    } catch {
+      // localStorage may be unavailable (private browsing, quota exceeded)
+    }
+  }, [storageKey, isCollapsed]);
+
+  const toggle = useCallback(() => setIsCollapsed((prev: boolean) => !prev), []);
+
+  return { isCollapsed, setIsCollapsed, toggle };
+}
+
+/** Panel header label for issue #588 collapsible panels. */
+const PANEL_LABELS = {
+  brushPanel: "Brush Tools",
+  promptPanel: "Prompts & Suggestions",
+  variantPanel: "Layers & Variants",
+} as const;
+
+interface CollapsibleSectionProps {
+  id: keyof typeof PANEL_LABELS;
+  title?: string;
+  isCollapsed: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+  /** Additional className for the outer wrapper */
+  className?: string;
+}
+
+/**
+ * Collapsible section wrapper (issue #588).
+ * Renders a clickable header with chevron indicator and collapsible content.
+ */
+function CollapsibleSection({
+  id,
+  title,
+  isCollapsed,
+  onToggle,
+  children,
+  className = "",
+}: CollapsibleSectionProps) {
+  const label = title ?? PANEL_LABELS[id];
+  return (
+    <div className={`rounded-md border border-atelier-taupe/30 ${className}`}>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm font-medium text-atelier-primary hover:bg-atelier-canvas transition-colors"
+        aria-expanded={!isCollapsed}
+        aria-controls={`collapsible-panel-${id}`}
+        title={`${isCollapsed ? "Show" : "Hide"} ${label}`}
+      >
+        <span>{label}</span>
+        {isCollapsed ? (
+          <ChevronDown className="h-4 w-4 text-atelier-taupe" aria-hidden="true" />
+        ) : (
+          <ChevronUp className="h-4 w-4 text-atelier-taupe" aria-hidden="true" />
+        )}
+      </button>
+      {!isCollapsed && (
+        <div id={`collapsible-panel-${id}`} className="px-3 pb-3 pt-1">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function InpaintEditor({
   roomId,
   imageUrl,
@@ -465,6 +550,11 @@ export default function InpaintEditor({
   const [zenMode, setZenMode] = useState(false);
   // Issue #560: dark background toggle for eye comfort in Zen Mode.
   const [zenDarkBackground, setZenDarkBackground] = useState(false);
+
+  // Issue #588: Collapsible workspace panels — persist collapsed state in localStorage.
+  const brushPanel = useCollapsiblePanel("inpaint-editor:brushPanel", false);
+  const promptPanel = useCollapsiblePanel("inpaint-editor:promptPanel", false);
+  const variantPanel = useCollapsiblePanel("inpaint-editor:variantPanel", false);
 
   // Issue #560: lifted brush state — shared between InpaintMaskCanvas and ZenModeToolbar.
   const [zenBrushSize, setZenBrushSize] = useState(20);
@@ -1032,6 +1122,7 @@ export default function InpaintEditor({
   const aspectRatio = imageDims ? imageDims.width / imageDims.height : null;
 
   // Issue #560: keyboard shortcuts for Zen Mode — Z toggles, Escape exits.
+  // Issue #588: backtick (`) toggles all collapsible panels.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
@@ -1051,11 +1142,27 @@ export default function InpaintEditor({
         e.preventDefault();
         setZenMode(false);
       }
+
+      // Issue #588: backtick toggles all workspace panels
+      if (e.key === "`" && !isInput) {
+        e.preventDefault();
+        const allCollapsed =
+          brushPanel.isCollapsed && promptPanel.isCollapsed && variantPanel.isCollapsed;
+        if (allCollapsed) {
+          brushPanel.setIsCollapsed(false);
+          promptPanel.setIsCollapsed(false);
+          variantPanel.setIsCollapsed(false);
+        } else {
+          brushPanel.setIsCollapsed(true);
+          promptPanel.setIsCollapsed(true);
+          variantPanel.setIsCollapsed(true);
+        }
+      }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [zenMode]);
+  }, [zenMode, brushPanel, promptPanel, variantPanel]);
 
   // Resume an in-flight job (e.g. after a refresh): skip the submit and go
   // straight to polling the persisted requestId. The run's source comes from
@@ -1570,13 +1677,21 @@ export default function InpaintEditor({
         }`}
       >
         {secondaryPane && (
-          <div
-            className={`flex flex-col gap-6 ${
-              fullWidth ? "md:max-h-none md:overflow-visible lg:max-h-[70%] lg:min-h-0 lg:overflow-y-auto" : ""
-            } ${zenMode ? "zen-mode-hidden" : ""}`}
+          <CollapsibleSection
+            id="promptPanel"
+            title="Room Details"
+            isCollapsed={promptPanel.isCollapsed}
+            onToggle={promptPanel.toggle}
+            className={zenMode ? "zen-mode-hidden" : ""}
           >
-            {secondaryPane}
-          </div>
+            <div
+              className={`flex flex-col gap-6 ${
+                fullWidth ? "md:max-h-none md:overflow-visible lg:max-h-[70%] lg:min-h-0 lg:overflow-y-auto" : ""
+              }`}
+            >
+              {secondaryPane}
+            </div>
+          </CollapsibleSection>
         )}
         {/* Issue #560: "Source Image" label hidden in Zen Mode */}
         {/* Issue #547/#546: sticky header per Atelier Canvas spec with Atelier Canvas colors */}
@@ -1690,12 +1805,18 @@ export default function InpaintEditor({
               "Batch staging in progress…"}
           </div>
         )}
-        <div
-          className={`flex flex-col gap-4 ${
-            fullWidth ? "md:min-h-0 md:flex-1 md:overflow-visible lg:min-h-0 lg:flex-1 lg:overflow-y-auto" : ""
-          }`}
+        <CollapsibleSection
+          id="brushPanel"
+          title="Editor Controls"
+          isCollapsed={brushPanel.isCollapsed}
+          onToggle={brushPanel.toggle}
         >
-          {sourceOptions.length > 1 && (
+          <div
+            className={`flex flex-col gap-4 ${
+              fullWidth ? "md:min-h-0 md:flex-1 md:overflow-visible lg:min-h-0 lg:flex-1 lg:overflow-y-auto" : ""
+            }`}
+          >
+            {sourceOptions.length > 1 && (
             <fieldset className="shrink-0 rounded-md border border-atelier-taupe/30 p-3">
               <legend className="px-1 font-jakarta text-sm font-medium text-atelier-primary">
                 Edit from
@@ -2094,18 +2215,26 @@ export default function InpaintEditor({
               )}
             </div>
           </div>
-        </div>
+          </div>
+        </CollapsibleSection>
 
         {/* Issue #561: Version History — collapsible panel at the bottom of the
             right pane, showing thumbnails of previous inpaint results. */}
-        <VersionHistoryPanel
-          roomId={roomId}
-          variantSlot={variantSlot}
-          activeResultUrl={activeResultUrl}
-          onRestored={(resultUrl) => {
-            setActiveResultUrl(resultUrl);
-          }}
-        />
+        <CollapsibleSection
+          id="variantPanel"
+          title="Version History"
+          isCollapsed={variantPanel.isCollapsed}
+          onToggle={variantPanel.toggle}
+        >
+          <VersionHistoryPanel
+            roomId={roomId}
+            variantSlot={variantSlot}
+            activeResultUrl={activeResultUrl}
+            onRestored={(resultUrl) => {
+              setActiveResultUrl(resultUrl);
+            }}
+          />
+        </CollapsibleSection>
       </div>
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
