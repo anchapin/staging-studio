@@ -19,7 +19,7 @@ import {
 import { fillHoles } from "@/lib/mask-postprocess";
 
 /** Tools for building the mask: freehand paint, flood-fill, or concept select. */
-type MaskTool = "brush" | "fill" | "select";
+export type MaskTool = "brush" | "fill" | "select";
 
 /**
  * Rank→color palette for instance overlays (issue #228). Six hues,
@@ -105,8 +105,16 @@ interface InpaintMaskCanvasProps {
   width?: number;
   height?: number;
   brushSize?: number;
+  /** Issue #560: callback to notify parent of brush size changes (Zen Mode). */
+  onBrushSizeChange?: (size: number) => void;
   initialMaskDataUrl?: string | null;
   onMaskChange?: (maskDataUrl: string | null) => void;
+  /** Issue #560: external active tool state (Zen Mode). */
+  activeTool?: MaskTool;
+  /** Issue #560: callback when active tool changes (Zen Mode). */
+  onActiveToolChange?: (tool: MaskTool) => void;
+  /** Issue #560: when true, hides the toolbar and non-essential chrome. */
+  zenMode?: boolean;
   /** Natural aspect ratio (width / height) of the source photo; sizes the mask canvas to match it. */
   aspectRatio?: number | null;
   /** Natural pixel width of the uploaded photo; exported masks are scaled to match. */
@@ -182,7 +190,8 @@ interface InpaintMaskCanvasProps {
 export default function InpaintMaskCanvas({
   width = 512,
   height = 512,
-  brushSize: initialBrushSize = 20,
+  brushSize: externalBrushSize,
+  onBrushSizeChange,
   initialMaskDataUrl,
   onMaskChange,
   aspectRatio,
@@ -201,10 +210,17 @@ export default function InpaintMaskCanvas({
   onMaskCleared,
   onSelectionDeselect,
   detectingConcept,
+  activeTool: externalActiveTool,
+  onActiveToolChange,
+  zenMode = false,
 }: InpaintMaskCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
-  const [brushSize, setBrushSize] = useState(initialBrushSize);
+
+  // Issue #560: external brush size takes priority (Zen Mode lifts state to parent).
+  const [internalBrushSize, setInternalBrushSize] = useState(externalBrushSize ?? 20);
+  const brushSize = externalBrushSize ?? internalBrushSize;
+
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(initialMaskDataUrl ?? null);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -213,10 +229,10 @@ export default function InpaintMaskCanvas({
   // fill, or clear). Undo pops the stack to restore a previous state.
   const [undoStack, setUndoStack] = useState<string[]>([]);
 
-  // Masking-guidance state: which tool is active, whether anything has been
-  // painted yet (drives the empty-state hint), and whether the exported mask
-  // is suspiciously tiny (drives the low-coverage warning).
-  const [activeTool, setActiveTool] = useState<MaskTool>("brush");
+  // Issue #560: external active tool takes priority (Zen Mode lifts state to parent).
+  const [internalActiveTool, setInternalActiveTool] = useState<MaskTool>("brush");
+  const activeTool = externalActiveTool ?? internalActiveTool;
+
   const [hasPainted, setHasPainted] = useState(false);
   const [lowCoverage, setLowCoverage] = useState(false);
 
@@ -1020,13 +1036,23 @@ export default function InpaintMaskCanvas({
 
     if (e.key === "+" || e.key === "=") {
       e.preventDefault();
-      setBrushSize((prev) => Math.min(prev + 2, 100));
+      const next = Math.min(internalBrushSize + 2, 100);
+      if (onBrushSizeChange) {
+        onBrushSizeChange(next);
+      } else {
+        setInternalBrushSize(next);
+      }
       return;
     }
 
     if (e.key === "-" || e.key === "_") {
       e.preventDefault();
-      setBrushSize((prev) => Math.max(prev - 2, 1));
+      const next = Math.max(internalBrushSize - 2, 1);
+      if (onBrushSizeChange) {
+        onBrushSizeChange(next);
+      } else {
+        setInternalBrushSize(next);
+      }
       return;
     }
   };
@@ -1246,21 +1272,32 @@ export default function InpaintMaskCanvas({
         </p>
       )}
 
-      <p id={hintId} className="text-xs text-gray-500">
-        Tab to the canvas to paint. Press <button
-          type="button"
-          onClick={() => setShowLegend(true)}
-          className="mx-0.5 rounded border border-gray-300 bg-white px-1 py-0.5 text-xs font-medium hover:bg-gray-50"
-        >?</button> for keyboard shortcuts.
-      </p>
+      {/* Issue #560: hint and legend hidden in Zen Mode */}
+      {!zenMode && (
+        <p id={hintId} className="text-xs text-gray-500">
+          Tab to the canvas to paint. Press <button
+            type="button"
+            onClick={() => setShowLegend(true)}
+            className="mx-0.5 rounded border border-gray-300 bg-white px-1 py-0.5 text-xs font-medium hover:bg-gray-50"
+          >?</button> for keyboard shortcuts.
+        </p>
+      )}
 
-      {/* Issue #317: toolbar wraps at md+ and buttons have min-height 44px for touch */}
+      {/* Issue #317: toolbar wraps at md+ and buttons have min-height 44px for touch.
+          Issue #560: toolbar hidden in Zen Mode (ZenModeToolbar takes over). */}
+      {!zenMode && (
       <div className="flex flex-wrap items-center gap-4">
         <div role="group" aria-label="Mask tool" className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             aria-pressed={activeTool === "brush"}
-            onClick={() => setActiveTool("brush")}
+            onClick={() => {
+              if (onActiveToolChange) {
+                onActiveToolChange("brush");
+              } else {
+                setInternalActiveTool("brush");
+              }
+            }}
             className={
               activeTool === "brush"
                 ? "px-3 py-2 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors md:min-h-[44px]"
@@ -1272,7 +1309,13 @@ export default function InpaintMaskCanvas({
           <button
             type="button"
             aria-pressed={activeTool === "fill"}
-            onClick={() => setActiveTool("fill")}
+            onClick={() => {
+              if (onActiveToolChange) {
+                onActiveToolChange("fill");
+              } else {
+                setInternalActiveTool("fill");
+              }
+            }}
             className={
               activeTool === "fill"
                 ? "px-3 py-2 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors md:min-h-[44px]"
@@ -1290,7 +1333,13 @@ export default function InpaintMaskCanvas({
               aria-pressed={activeTool === "select"}
               aria-busy={segmenting}
               disabled={segmentDisabled}
-              onClick={() => setActiveTool("select")}
+              onClick={() => {
+                if (onActiveToolChange) {
+                  onActiveToolChange("select");
+                } else {
+                  setInternalActiveTool("select");
+                }
+              }}
               className={
                 activeTool === "select"
                   ? "flex items-center gap-1.5 px-3 py-2 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors disabled:cursor-not-allowed disabled:opacity-60 md:min-h-[44px]"
@@ -1316,7 +1365,14 @@ export default function InpaintMaskCanvas({
             min={1}
             max={100}
             value={brushSize}
-            onChange={(e) => setBrushSize(Number(e.target.value))}
+            onChange={(e) => {
+              const next = Number(e.target.value);
+              if (onBrushSizeChange) {
+                onBrushSizeChange(next);
+              } else {
+                setInternalBrushSize(next);
+              }
+            }}
             className="w-24 md:w-32"
             aria-label="Brush size"
           />
@@ -1349,8 +1405,9 @@ export default function InpaintMaskCanvas({
           ?
         </button>
       </div>
+      )}
 
-      {showLegend && (
+      {!zenMode && showLegend && (
         <div
           role="region"
           aria-label="Keyboard shortcuts"
