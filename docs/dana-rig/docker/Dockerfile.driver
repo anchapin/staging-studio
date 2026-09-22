@@ -1,0 +1,6 @@
+# Keep the playwright npm version in sync with the image tag.
+FROM mcr.microsoft.com/playwright:v1.63.0-noble
+WORKDIR /rig
+RUN npm init -y >/dev/null 2>&1 && npm i playwright@1.63.0 --no-audit --no-fund
+# driver.js is bind-mounted at /rig/driver.js by docker-compose.yml
+CMD ["node", "/rig/driver.js"]
