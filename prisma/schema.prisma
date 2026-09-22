@@ -55,6 +55,7 @@ model Project {
 
   rooms Room[]
   materialSwatches MaterialSwatch[]
+  procurementItems ProcurementItem[]
 }
 
 // Room model: a single room within a project
@@ -175,6 +176,27 @@ model MaterialSwatch {
   vendor      String? // e.g. "Wayfair", "Sherwin-Williams"
   sku         String? // e.g. "WF-HW-1234"
   sortOrder   Int     @default(0)
+
+  @@index([projectId])
+}
+
+// ProcurementItem model: furniture procurement items for the lookbook's
+// Furniture Procurement Table (issue #554).
+model ProcurementItem {
+  id            String   @id @default(cuid())
+  projectId    String
+  project      Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  category     String  // e.g. "Seating", "Tables", "Lighting"
+  item         String  // e.g. "Sofa", "Dining Table", "Floor Lamp"
+  description  String?
+  status      String  // "needed" | "ordered" | "received"
+  sku         String?
+  estCost     Float?
+  vendor      String?
+  notes       String?
+  sortOrder   Int     @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([projectId])
 }

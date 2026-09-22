@@ -1,5 +1,6 @@
 import {
   CoverPage,
+  FurnitureProcurementTable,
   PhilosophyPage,
   ROIMetricsDashboard,
   RoomSpread,
@@ -43,6 +44,17 @@ export interface PreviewProject {
   };
   rooms: PreviewRoom[];
   materialSwatches: MaterialSwatchData[];
+  procurementItems: PreviewProcurementItem[];
+}
+
+export interface PreviewProcurementItem {
+  id: string;
+  item: string;
+  category: string;
+  vendor: string | null;
+  sku: string | null;
+  estCost: number | null;
+  status: string;
 }
 
 interface LookbookPreviewViewProps {
@@ -128,6 +140,12 @@ export function LookbookPreviewView({ project, previewToken }: LookbookPreviewVi
           />
         </div>
       ))}
+
+      {project.procurementItems.length > 0 && (
+        <div id="lookbook-procurement">
+          <FurnitureProcurementTable items={project.procurementItems} />
+        </div>
+      )}
 
       <div id="lookbook-closing">
         {canSign ? (

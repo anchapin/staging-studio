@@ -49,6 +49,7 @@ const getOwnedLookbookProject = cache(async (projectId: string) => {
       },
       rooms: true,
       materialSwatches: true,
+      procurementItems: true,
     },
   });
 });
@@ -116,6 +117,15 @@ export default async function LookbookPage({ params }: LookbookPageProps) {
         room.checklistItems as PreviewProject["rooms"][number]["checklistItems"],
     })),
     materialSwatches: project.materialSwatches,
+    procurementItems: project.procurementItems.map((item) => ({
+      id: item.id,
+      item: item.item,
+      category: item.category,
+      vendor: item.vendor,
+      sku: item.sku,
+      estCost: item.estCost,
+      status: item.status,
+    })),
   };
 
   return (
