@@ -12,7 +12,6 @@ import EditorTabBar, {
 import { useToast, ToastContainer } from "@/components/ui/toast";
 import { Info, Loader2, Maximize2, Minimize2 } from "lucide-react";
 import { useInpaintStatus } from "./use-inpaint-status";
-import ZenModeToolbar from "./zen-mode-toolbar";
 import {
   entireRoomTabVisible,
   inpaintSourceLabel,
@@ -69,6 +68,8 @@ import VersionHistoryPanel, {
   generateThumbnailFromUrl,
 } from "./version-history-panel";
 import { saveInpaintVersion } from "@/app/actions/inpaint-versions";
+import QuickToolRail from "./quick-tool-rail";
+import FloatingCanvasToolbar from "./floating-canvas-toolbar";
 
 interface InpaintEditorProps {
   roomId: string;
@@ -469,6 +470,12 @@ export default function InpaintEditor({
   // Issue #560: lifted brush state — shared between InpaintMaskCanvas and ZenModeToolbar.
   const [zenBrushSize, setZenBrushSize] = useState(20);
   const [zenActiveTool, setZenActiveTool] = useState<MaskTool>("brush");
+
+  // Issue #548: lifted undo count from canvas for FloatingCanvasToolbar and QuickToolRail.
+  const [undoCount, setUndoCount] = useState(0);
+  // Issue #548: ref to the canvas's internal handleUndo — set via callback ref
+  // so FloatingCanvasToolbar and QuickToolRail can trigger canvas-native undo.
+  const canvasUndoRef = useRef<(() => void) | null>(null);
 
   // Issue #561: tracks the active result URL for the version history panel.
   // Updated on inpaint completion; also initialized from prop when provided.
@@ -1552,125 +1559,136 @@ export default function InpaintEditor({
   ];
 
   return (
-    /* Issue #252 D5: laptop-first two-pane layout — mask canvas LEFT
-       sized to the remaining viewport, fixed-width control panel RIGHT;
-       both panes scroll internally so page-level scrolling dies at laptop
-       size (AC-L1/L2). Below lg the same tabs stack in one column
-       (AC-L6). At md (768px-1023px) the layout stacks vertically to
-       prevent horizontal overflow on tablet screens (issue #317). */
+    /* Issue #548: Atelier Canvas workspace layout — three-column:
+       QuickToolRail (64px) | scene canvas | property inspector (360px).
+       FloatingCanvasToolbar anchors at viewport base in both normal and
+       Zen Mode. Zen Mode collapses chrome and shows only the canvas. */
     <div
-      className={`flex flex-col gap-6 ${
+      className={`flex flex-col ${
         fullWidth ? "md:flex-col lg:min-h-0 lg:flex-1 lg:flex-row lg:gap-6" : ""
       } ${zenMode ? "zen-mode-active zen-mode-vignette" : ""} ${zenDarkBackground && zenMode ? "zen-mode-dark" : ""}`}
     >
-      {/* ---- LEFT PANE: room imagery (optional slot) + mask canvas ------ */}
-      <div
-        className={`flex min-w-0 flex-col gap-4 ${
-          fullWidth ? "md:min-h-0 lg:min-h-0 lg:flex-1" : ""
-        }`}
-      >
-        {secondaryPane && (
-          <div
-            className={`flex flex-col gap-6 ${
-              fullWidth ? "md:max-h-none md:overflow-visible lg:max-h-[70%] lg:min-h-0 lg:overflow-y-auto" : ""
-            } ${zenMode ? "zen-mode-hidden" : ""}`}
-          >
-            {secondaryPane}
-          </div>
-        )}
-        {/* Issue #560: "Source Image" label hidden in Zen Mode */}
-        <div className={`flex items-center justify-between ${zenMode ? "zen-mode-hidden" : ""}`}>
-          <h4 className="mb-2 font-jakarta text-sm font-medium text-stone-700">Source Image</h4>
-          <button
-            type="button"
-            onClick={() => setZenMode((prev) => !prev)}
-            title={zenMode ? "Exit Zen Mode (Z)" : "Enter Zen Mode (Z)"}
-            aria-label={zenMode ? "Exit Zen Mode" : "Enter Zen Mode"}
-            className="flex items-center gap-1.5 rounded-md border border-stone-300 bg-white px-2.5 py-1.5 text-xs text-stone-600 shadow-sm transition-colors hover:bg-stone-50 hover:text-stone-900"
-          >
-            {zenMode ? (
-              <Minimize2 className="h-3.5 w-3.5" aria-hidden="true" />
-            ) : (
-              <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
-            )}
-            {zenMode ? "Exit Zen" : "Zen Mode"}
-          </button>
-        </div>
-        {/* Issue #460: comparison now via staged result image click in secondary pane */}
-        <InpaintMaskCanvas
-          overlayImageSrc={imageUrl}
-          aspectRatio={aspectRatio}
-          naturalWidth={imageDims?.width ?? null}
-          naturalHeight={imageDims?.height ?? null}
-          initialMaskDataUrl={maskDataUrl}
-          onMaskChange={setMaskDataUrl}
-          onInstanceToggle={handleInstanceToggle}
-          segmentDisabled={isProcessing || conceptLoading}
-          segmenting={conceptLoading}
-          detectingConcept={conceptLoading ? requestedConcept : undefined}
-          instanceOverlays={instanceOverlays}
-          selectionMarkers={selectionMarkers}
-          expansionRadius={maskExpansion}
-          includeFloorShadow={includeFloorShadow}
-          fullWidth={fullWidth}
-          selectionReset={selectionReset}
-          onMaskCleared={handleMaskCleared}
-          onSelectionDeselect={handleRemoveSelection}
-          zenMode={zenMode}
-          brushSize={zenMode ? zenBrushSize : undefined}
-          onBrushSizeChange={zenMode ? setZenBrushSize : undefined}
-          activeTool={zenMode ? zenActiveTool : undefined}
-          onActiveToolChange={zenMode ? setZenActiveTool : undefined}
+      {/* === WORKSPACE ROW: quick-tool rail | canvas area | property inspector === */}
+      <div className="flex min-h-0 flex-1 flex-row gap-0">
+        {/* ---- 64px Quick Tool Rail (issue #548) ---- */}
+        <QuickToolRail
+          activeTool={zenActiveTool}
+          onToolChange={setZenActiveTool}
+          undoCount={undoCount}
+          onClear={handleMaskCleared}
+          className={`${zenMode ? "zen-mode-hidden" : ""}`}
         />
 
-        {/* Issue #560: expand selection and floor shadow controls hidden in Zen Mode */}
-        <div className={zenMode ? "zen-mode-hidden" : ""}>
-          <label className="flex items-center gap-2 font-jakarta text-sm text-stone-700">
-            Expand selection:
-            <input
-              type="range"
-              min={0}
-              max={MAX_MASK_EXPANSION_RADIUS}
-              value={maskExpansion}
-              onChange={(e) => setMaskExpansion(Number(e.target.value))}
-              aria-describedby="mask-expansion-hint"
-              className="atelier-slider w-32"
-            />
-            <span className="w-10 text-right tabular-nums font-medium">{maskExpansion}px</span>
-          </label>
-          <p id="mask-expansion-hint" className="text-xs text-gray-500">
-            Grows the painted area so picture frames, bezels, and mounts are
-            included. 0 keeps the exact painted area.
-          </p>
-
-          {/* Issue #234: floor-shadow toggle — dilates the mask further downward than
-              upward so cast shadows on the floor are included in the regenerated region. */}
-          <label className="flex items-center gap-2 font-jakarta text-sm text-stone-700">
-            <input
-              type="checkbox"
-              checked={includeFloorShadow}
-              onChange={(e) => setIncludeFloorShadow(e.target.checked)}
-              className="h-4 w-4 accent-stone-800"
-            />
-            Add natural floor shadows under new furniture
-          </label>
-          <div className="flex items-center gap-1">
-            <span
-              role="img"
-              aria-label="More info"
-              title="Extends the painted area downward to include floor shadows, so they look natural with the new furniture. Best for hard floors."
-              className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-200 text-gray-500 hover:bg-gray-300"
+        {/* ---- LEFT PANE: room imagery (optional slot) + mask canvas ---- */}
+        <div
+          className={`flex min-w-0 flex-col gap-4 ${
+            fullWidth ? "md:min-h-0 lg:min-h-0 lg:flex-1" : ""
+          } ${zenMode ? "flex-1" : ""}`}
+        >
+          {secondaryPane && (
+            <div
+              className={`flex flex-col gap-6 ${
+                fullWidth ? "md:max-h-none md:overflow-visible lg:max-h-[70%] lg:min-h-0 lg:overflow-y-auto" : ""
+              } ${zenMode ? "zen-mode-hidden" : ""}`}
             >
-              <Info className="h-3 w-3" />
-            </span>
+              {secondaryPane}
+            </div>
+          )}
+          {/* Issue #560: "Source Image" label hidden in Zen Mode */}
+          <div className={`flex items-center justify-between ${zenMode ? "zen-mode-hidden" : ""}`}>
+            <h4 className="mb-2 font-jakarta text-sm font-medium text-stone-700">Source Image</h4>
+            <button
+              type="button"
+              onClick={() => setZenMode((prev) => !prev)}
+              title={zenMode ? "Exit Zen Mode (Z)" : "Enter Zen Mode (Z)"}
+              aria-label={zenMode ? "Exit Zen Mode" : "Enter Zen Mode"}
+              className="flex items-center gap-1.5 rounded-md border border-stone-300 bg-white px-2.5 py-1.5 text-xs text-stone-600 shadow-sm transition-colors hover:bg-stone-50 hover:text-stone-900"
+            >
+              {zenMode ? (
+                <Minimize2 className="h-3.5 w-3.5" aria-hidden="true" />
+              ) : (
+                <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+              {zenMode ? "Exit Zen" : "Zen Mode"}
+            </button>
+          </div>
+          {/* Issue #460: comparison now via staged result image click in secondary pane */}
+          <InpaintMaskCanvas
+            overlayImageSrc={imageUrl}
+            aspectRatio={aspectRatio}
+            naturalWidth={imageDims?.width ?? null}
+            naturalHeight={imageDims?.height ?? null}
+            initialMaskDataUrl={maskDataUrl}
+            onMaskChange={setMaskDataUrl}
+            onInstanceToggle={handleInstanceToggle}
+            segmentDisabled={isProcessing || conceptLoading}
+            segmenting={conceptLoading}
+            detectingConcept={conceptLoading ? requestedConcept : undefined}
+            instanceOverlays={instanceOverlays}
+            selectionMarkers={selectionMarkers}
+            expansionRadius={maskExpansion}
+            includeFloorShadow={includeFloorShadow}
+            fullWidth={fullWidth}
+            selectionReset={selectionReset}
+            onMaskCleared={handleMaskCleared}
+            onSelectionDeselect={handleRemoveSelection}
+            zenMode={zenMode}
+            brushSize={zenBrushSize}
+            onBrushSizeChange={setZenBrushSize}
+            activeTool={zenActiveTool}
+            onActiveToolChange={setZenActiveTool}
+            undoCount={undoCount}
+            undoRef={canvasUndoRef}
+            onUndoCountChange={setUndoCount}
+          />
+
+          {/* Issue #548: expand selection + floor shadow — shown in normal mode */}
+          <div className={zenMode ? "zen-mode-hidden" : ""}>
+            <label className="flex items-center gap-2 font-jakarta text-sm text-stone-700">
+              Expand selection:
+              <input
+                type="range"
+                min={0}
+                max={MAX_MASK_EXPANSION_RADIUS}
+                value={maskExpansion}
+                onChange={(e) => setMaskExpansion(Number(e.target.value))}
+                aria-describedby="mask-expansion-hint"
+                className="atelier-slider w-32"
+              />
+              <span className="w-10 text-right tabular-nums font-medium">{maskExpansion}px</span>
+            </label>
+            <p id="mask-expansion-hint" className="text-xs text-gray-500">
+              Grows the painted area so picture frames, bezels, and mounts are
+              included. 0 keeps the exact painted area.
+            </p>
+
+            {/* Issue #234: floor-shadow toggle */}
+            <label className="flex items-center gap-2 font-jakarta text-sm text-stone-700">
+              <input
+                type="checkbox"
+                checked={includeFloorShadow}
+                onChange={(e) => setIncludeFloorShadow(e.target.checked)}
+                className="h-4 w-4 accent-stone-800"
+              />
+              Add natural floor shadows under new furniture
+            </label>
+            <div className="flex items-center gap-1">
+              <span
+                role="img"
+                aria-label="More info"
+                title="Extends the painted area downward to include floor shadows, so they look natural with the new furniture. Best for hard floors."
+                className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-200 text-gray-500 hover:bg-gray-300"
+              >
+                <Info className="h-3 w-3" />
+              </span>
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Issue #560: right panel hidden in Zen Mode */}
-      <div
-        className={`flex w-full flex-col gap-3 no-print ${fullWidth ? "md:w-full md:flex-col lg:min-h-0 lg:w-[380px] lg:shrink-0" : ""} ${zenMode ? "zen-mode-hidden" : ""}`}
-      >
+        {/* Issue #560: right panel hidden in Zen Mode */}
+        <div
+          className={`flex w-full shrink-0 flex-col gap-3 no-print ${fullWidth ? "md:w-full md:flex-col lg:min-h-0 lg:w-[360px]" : ""} ${zenMode ? "zen-mode-hidden" : ""}`}
+        >
         {/* AC-L2: batch progress pins to the panel top during a run, so
             it stays visible beside the canvas on every tab. The full
             progress + retry affordance stays in the batch panel. */}
@@ -2106,65 +2124,32 @@ export default function InpaintEditor({
           }}
         />
       </div>
+      {/* closes right panel div */}
+      </div>
+      {/* closes workspace row div */}
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
 
-      {/* Issue #560: Zen Mode floating toolbar — shown only when Zen Mode is active */}
-      {zenMode && (
-        <ZenModeToolbar
-          darkBackground={zenDarkBackground}
-          onDarkBackgroundChange={setZenDarkBackground}
-        >
-          {/* Tool buttons */}
-          <div role="group" aria-label="Mask tool" className="flex items-center gap-1">
-            {(["brush", "fill", "select"] as const).map((tool) => (
-              <button
-                key={tool}
-                type="button"
-                aria-pressed={zenActiveTool === tool}
-                aria-label={tool === "brush" ? "Brush" : tool === "fill" ? "Fill Region" : "Select Regions"}
-                onClick={() => setZenActiveTool(tool)}
-                className={
-                  zenActiveTool === tool
-                    ? "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium bg-stone-800 text-white transition-colors"
-                    : "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium bg-stone-100 text-stone-600 transition-colors hover:bg-stone-200"
-                }
-              >
-                {tool === "brush" ? "Brush" : tool === "fill" ? "Fill" : "Select"}
-              </button>
-            ))}
-          </div>
-
-          {/* Brush size slider */}
-          <label className="flex items-center gap-2 text-xs text-stone-600">
-            <span>Size</span>
-            <input
-              type="range"
-              min={1}
-              max={100}
-              value={zenBrushSize}
-              onChange={(e) => setZenBrushSize(Number(e.target.value))}
-              className="w-20"
-              aria-label="Brush size"
-            />
-            <span className="w-5 text-right">{zenBrushSize}</span>
-          </label>
-
-          {/* Clear mask */}
-          <button
-            type="button"
-            onClick={() => {
-              setMaskDataUrl(null);
-              setBatchSelections([]);
-              setSelectedInstanceIndices([]);
-            }}
-            className="rounded-full px-3 py-1.5 text-xs text-stone-500 bg-stone-100 hover:bg-stone-200 transition-colors"
-            title="Clear mask"
-          >
-            Clear
-          </button>
-        </ZenModeToolbar>
-      )}
+      {/* Issue #548: FloatingCanvasToolbar — always visible at viewport base.
+          In Zen Mode the canvas fills the screen; toolbar provides controls.
+          In normal mode the rail + scene hierarchy panels flank the canvas. */}
+      <FloatingCanvasToolbar
+        activeTool={zenActiveTool}
+        onToolChange={setZenActiveTool}
+        brushSize={zenBrushSize}
+        onBrushSizeChange={setZenBrushSize}
+        zenMode={zenMode}
+        zenDarkBackground={zenDarkBackground}
+        onZenModeToggle={() => setZenMode((prev) => !prev)}
+        onZenDarkBackgroundToggle={() => setZenDarkBackground((prev) => !prev)}
+        undoCount={undoCount}
+        onUndo={() => canvasUndoRef.current?.()}
+        onClear={() => {
+          setMaskDataUrl(null);
+          setBatchSelections([]);
+          setSelectedInstanceIndices([]);
+        }}
+      />
     </div>
   );
 }

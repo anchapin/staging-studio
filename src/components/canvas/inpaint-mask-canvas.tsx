@@ -199,6 +199,25 @@ interface InpaintMaskCanvasProps {
    * badge while `segmenting` is true so users know detection is running.
    */
   detectingConcept?: string;
+  /**
+   * Issue #548: number of undo steps available in the canvas (exposed from
+   * internal undo stack for the FloatingCanvasToolbar and QuickToolRail).
+   */
+  undoCount?: number;
+  /**
+   * Issue #548: callback to trigger an undo operation from an external toolbar.
+   */
+  onUndo?: () => void;
+  /**
+   * Issue #548: called whenever the undo stack size changes so external
+   * controls (FloatingCanvasToolbar, QuickToolRail) can display the count.
+   */
+  onUndoCountChange?: (count: number) => void;
+  /**
+   * Issue #548: callback ref that exposes the canvas's internal handleUndo
+   * to the parent editor so external toolbars can trigger canvas-native undo.
+   */
+  undoRef?: React.MutableRefObject<(() => void) | null>;
 }
 
 export default function InpaintMaskCanvas({
@@ -227,6 +246,10 @@ export default function InpaintMaskCanvas({
   activeTool: externalActiveTool,
   onActiveToolChange,
   zenMode = false,
+  undoCount = 0,
+  onUndo,
+  onUndoCountChange,
+  undoRef,
 }: InpaintMaskCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -678,6 +701,18 @@ export default function InpaintMaskCanvas({
       });
     }
   }, [undoStack, restoreUndoState, onMaskChange]);
+
+  // Issue #548: report undo stack size to parent so FloatingCanvasToolbar
+  // and QuickToolRail can display the current undo count.
+  useEffect(() => {
+    onUndoCountChange?.(undoStack.length);
+  }, [undoStack.length, onUndoCountChange]);
+
+  // Issue #548: expose handleUndo to parent via callback ref so external
+  // toolbars can trigger canvas-native undo.
+  useEffect(() => {
+    if (undoRef) undoRef.current = handleUndo;
+  }, [handleUndo, undoRef]);
 
   // Fill Region tool: flood-fills the unpainted region connected to the
   // click/cursor point with painted pixels. Designed for cover-the-object
@@ -1408,12 +1443,19 @@ export default function InpaintMaskCanvas({
         </button>
 
         <button
-          onClick={handleUndo}
-          disabled={undoStack.length === 0}
+          onClick={onUndo ?? handleUndo}
+          disabled={(onUndo ? undoCount === 0 : undoStack.length === 0)}
           title="Undo (Cmd/Ctrl+Z)"
           className="px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-50 md:min-h-[44px]"
         >
-          Undo {undoStack.length > 0 && `(${undoStack.length})`}
+          Undo{" "}
+          {onUndo
+            ? undoCount > 0
+              ? `(${undoCount})`
+              : ""
+            : undoStack.length > 0
+              ? `(${undoStack.length})`
+              : ""}
         </button>
 
         <button
