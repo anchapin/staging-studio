@@ -6,6 +6,7 @@ import {
   type StagedVariantPair,
 } from "@/lib/staged-result";
 import { LookbookRoomData, ChecklistItem } from "./types";
+import { ComparisonPill } from "@/components/canvas/comparison-pill";
 
 const PRIORITY_STYLES: Record<ChecklistItem["priority"], string> = {
   Critical: "border-primary bg-primary/10",
@@ -75,10 +76,9 @@ export function RoomSpread({ room, project }: RoomSpreadProps) {
               <p className="font-jakarta text-muted-foreground">Before</p>
             </div>
           )}
-          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-4">
-            <p className="font-cinzel text-sm tracking-wider text-white uppercase">
-              Before
-            </p>
+          {/* Issue #644: ComparisonPill — report variant, top-left positioned */}
+          <div className="absolute left-3 top-3 pointer-events-none">
+            <ComparisonPill variant="report">Before</ComparisonPill>
           </div>
         </div>
 
@@ -97,10 +97,9 @@ export function RoomSpread({ room, project }: RoomSpreadProps) {
               <p className="font-jakarta text-muted-foreground">After</p>
             </div>
           )}
-          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-4">
-            <p className="font-cinzel text-sm tracking-wider text-white uppercase">
-              After
-            </p>
+          {/* Issue #644: ComparisonPill — after variant (terracotta), top-right positioned */}
+          <div className="absolute right-3 top-3 pointer-events-none">
+            <ComparisonPill variant="after">After</ComparisonPill>
           </div>
         </div>
       </div>
