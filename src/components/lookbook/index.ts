@@ -1,8 +1,10 @@
 export { BuyerPersonaPage } from "./buyer-persona-page";
 export { ConsultationReportClient } from "./consultation-report-client";
+export { ConsultationFurnitureTable } from "./consultation-furniture-table";
 export { CoverPage } from "./cover-page";
 export { FurnitureProcurementTable } from "./furniture-procurement-table";
 export { InvestmentSummaryPage } from "./investment-summary-page";
+export { MaterialSwatchCard } from "./material-swatch-card";
 export { MaterialSwatchChip } from "./material-swatch-chip";
 export { MaterialSwatchPage } from "./material-swatch-page";
 export { PhilosophyPage } from "./philosophy-page";

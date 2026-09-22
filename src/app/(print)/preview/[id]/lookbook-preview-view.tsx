@@ -62,6 +62,8 @@ export interface PreviewProcurementItem {
   sku: string | null;
   estCost: number | null;
   status: string;
+  quantity?: number;
+  leadTime?: string;
 }
 
 interface LookbookPreviewViewProps {
@@ -145,6 +147,8 @@ export function LookbookPreviewView({ project, previewToken }: LookbookPreviewVi
           user={project.user}
           project={projectData}
           previewToken={previewToken ?? ""}
+          materialSwatches={project.materialSwatches}
+          procurementItems={project.procurementItems}
         />
       </div>
 
