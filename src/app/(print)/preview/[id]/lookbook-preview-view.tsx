@@ -1,4 +1,5 @@
 import {
+  BuyerPersonaPage,
   CoverPage,
   FurnitureProcurementTable,
   InvestmentSummaryPage,
@@ -7,7 +8,7 @@ import {
   RoomSpread,
   SignoffPage,
 } from "@/components/lookbook";
-import type { LookbookRoomData, MaterialSwatchData, ProjectData, ROIMetric } from "@/components/lookbook";
+import type { BuyerDemographics, LookbookRoomData, MaterialSwatchData, ProjectData, ROIMetric } from "@/components/lookbook";
 import { parseChecklistItems } from "@/lib/checklist-schema";
 
 export interface PreviewRoom {
@@ -38,6 +39,8 @@ export interface PreviewProject {
   clientSignature?: string | null;
   clientSignatureStatus?: string | null;
   clientSignatureTimestamp?: string | null;
+  /** Buyer Demographics (issue #589) */
+  buyerDemographics?: BuyerDemographics | null;
   user: {
     firmName: string;
     ownerName: string;
@@ -117,6 +120,16 @@ export function LookbookPreviewView({ project, previewToken }: LookbookPreviewVi
       <div id="lookbook-roi">
         <ROIMetricsDashboard metrics={project.roiMetrics ?? undefined} />
       </div>
+
+      {project.buyerDemographics && (
+        <div id="lookbook-buyer-persona">
+          <BuyerPersonaPage
+            buyerDemographics={project.buyerDemographics}
+            user={project.user}
+            project={projectData}
+          />
+        </div>
+      )}
 
       <div id="lookbook-investment-summary">
         <InvestmentSummaryPage
