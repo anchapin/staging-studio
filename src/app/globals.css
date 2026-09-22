@@ -30,26 +30,31 @@
 
 @layer base {
   :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
+    /* Issue #546: Atelier Canvas design tokens */
+    /* Surface base: warm cream */
+    --background: #fff8f8;
+    --foreground: #181716;
+    --card: #fff8f8;
+    --card-foreground: #181716;
+    /* Primary: charred walnut */
+    --primary: #181716;
+    --primary-foreground: #fff8f8;
+    /* Secondary: terracotta bronze */
+    --secondary: #C47847;
+    --secondary-foreground: #fff8f8;
+    /* Neutral: Honed Taupe */
+    --muted: #F8F6F2;
+    --muted-foreground: #8C827A;
+    --accent: #F8F6F2;
+    --accent-foreground: #181716;
     --destructive: oklch(0.577 0.245 27.325);
     --destructive-foreground: 210 40% 98%;
     --border: oklch(0.922 0 0);
     --input: oklch(0.922 0 0);
     --ring: oklch(0.708 0 0);
     --radius: 0.625rem;
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
+    --popover: #fff8f8;
+    --popover-foreground: #181716;
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
@@ -62,14 +67,22 @@
     --warning-foreground: oklch(0.98 0.01 70.08);
     --info: oklch(0.546 0.245 252.149);
     --info-foreground: oklch(0.98 0.01 252.149);
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
+    /* Atelier Canvas sidebar */
+    --sidebar: #fff8f8;
+    --sidebar-foreground: #181716;
+    --sidebar-primary: #181716;
+    --sidebar-primary-foreground: #fff8f8;
+    --sidebar-accent: #F8F6F2;
+    --sidebar-accent-foreground: #181716;
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
+
+    /* Atelier Canvas canvas background */
+    --canvas-background: #F8F6F2;
+
+    /* Atelier Canvas inpaint mask overlay (Issue #546) */
+    --inpaint-mask-overlay: rgba(0, 245, 160, 0.35);
+    --inpaint-laser-rim: rgba(0, 245, 160, 0.8);
 
     --color-background: var(--background);
     --color-foreground: var(--foreground);
@@ -322,7 +335,7 @@
 
 /* Zen Mode dark background override for the inpaint canvas area */
 .zen-mode-dark {
-  background: #1c1917;
+  background: #181716;
 }
 
 /* Zen Mode: hides all non-essential chrome when active */

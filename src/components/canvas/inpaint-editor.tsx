@@ -1580,13 +1580,13 @@ export default function InpaintEditor({
         )}
         {/* Issue #560: "Source Image" label hidden in Zen Mode */}
         <div className={`flex items-center justify-between ${zenMode ? "zen-mode-hidden" : ""}`}>
-          <h4 className="mb-2 font-jakarta text-sm font-medium text-stone-700">Source Image</h4>
+          <h4 className="mb-2 font-jakarta text-sm font-medium text-atelier-primary">Source Image</h4>
           <button
             type="button"
             onClick={() => setZenMode((prev) => !prev)}
             title={zenMode ? "Exit Zen Mode (Z)" : "Enter Zen Mode (Z)"}
             aria-label={zenMode ? "Exit Zen Mode" : "Enter Zen Mode"}
-            className="flex items-center gap-1.5 rounded-md border border-stone-300 bg-white px-2.5 py-1.5 text-xs text-stone-600 shadow-sm transition-colors hover:bg-stone-50 hover:text-stone-900"
+            className="flex items-center gap-1.5 rounded-md border border-atelier-taupe/40 bg-white px-2.5 py-1.5 text-xs text-atelier-taupe shadow-sm transition-colors hover:bg-atelier-canvas hover:text-atelier-primary"
           >
             {zenMode ? (
               <Minimize2 className="h-3.5 w-3.5" aria-hidden="true" />
@@ -1625,7 +1625,7 @@ export default function InpaintEditor({
 
         {/* Issue #560: expand selection and floor shadow controls hidden in Zen Mode */}
         <div className={zenMode ? "zen-mode-hidden" : ""}>
-          <label className="flex items-center gap-2 font-jakarta text-sm text-stone-700">
+          <label className="flex items-center gap-2 font-jakarta text-sm text-atelier-primary">
             Expand selection:
             <input
               type="range"
@@ -1638,19 +1638,19 @@ export default function InpaintEditor({
             />
             <span className="w-10 text-right tabular-nums font-medium">{maskExpansion}px</span>
           </label>
-          <p id="mask-expansion-hint" className="text-xs text-gray-500">
+          <p id="mask-expansion-hint" className="text-xs text-atelier-taupe">
             Grows the painted area so picture frames, bezels, and mounts are
             included. 0 keeps the exact painted area.
           </p>
 
           {/* Issue #234: floor-shadow toggle — dilates the mask further downward than
               upward so cast shadows on the floor are included in the regenerated region. */}
-          <label className="flex items-center gap-2 font-jakarta text-sm text-stone-700">
+          <label className="flex items-center gap-2 font-jakarta text-sm text-atelier-primary">
             <input
               type="checkbox"
               checked={includeFloorShadow}
               onChange={(e) => setIncludeFloorShadow(e.target.checked)}
-              className="h-4 w-4 accent-stone-800"
+              className="h-4 w-4 accent-atelier-primary"
             />
             Add natural floor shadows under new furniture
           </label>
@@ -1659,7 +1659,7 @@ export default function InpaintEditor({
               role="img"
               aria-label="More info"
               title="Extends the painted area downward to include floor shadows, so they look natural with the new furniture. Best for hard floors."
-              className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-200 text-gray-500 hover:bg-gray-300"
+              className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-atelier-taupe/30 text-atelier-taupe hover:bg-atelier-taupe/50"
             >
               <Info className="h-3 w-3" />
             </span>
@@ -1695,15 +1695,15 @@ export default function InpaintEditor({
           }`}
         >
           {sourceOptions.length > 1 && (
-            <fieldset className="shrink-0 rounded-md border border-stone-200 p-3">
-              <legend className="px-1 font-jakarta text-sm font-medium text-stone-700">
+            <fieldset className="shrink-0 rounded-md border border-atelier-taupe/30 p-3">
+              <legend className="px-1 font-jakarta text-sm font-medium text-atelier-primary">
                 Edit from
               </legend>
               <div className="flex flex-wrap gap-x-4 gap-y-2">
                 {sourceOptions.map((option) => (
                   <label
                     key={inpaintSourceLabel(option)}
-                    className="inline-flex cursor-pointer items-center gap-2 font-jakarta text-sm text-stone-700"
+                    className="inline-flex cursor-pointer items-center gap-2 font-jakarta text-sm text-atelier-primary"
                   >
                     <input
                       type="radio"
@@ -1712,7 +1712,7 @@ export default function InpaintEditor({
                       checked={inpaintSourcesEqual(option, source)}
                       disabled={isProcessing}
                       onChange={() => handleSourceChange(option)}
-                      className="h-4 w-4 accent-stone-800"
+                      className="h-4 w-4 accent-atelier-primary"
                     />
                     {inpaintSourceLabel(option)}
                   </label>
@@ -1722,7 +1722,7 @@ export default function InpaintEditor({
                 <button
                   type="button"
                   onClick={handleUndoSource}
-                  className="mt-2 text-xs text-stone-500 underline hover:text-stone-700"
+                  className="mt-2 text-xs text-atelier-taupe underline hover:text-atelier-primary"
                 >
                   Undo source change
                 </button>
@@ -1730,7 +1730,7 @@ export default function InpaintEditor({
             </fieldset>
           )}
 
-          <div className="sticky top-0 z-10 bg-stone-50 pb-1">
+          <div className="sticky top-0 z-10 bg-atelier-canvas pb-1">
             <EditorTabBar
               tabs={editorTabs}
               activeTab={effectiveTab}
@@ -1785,7 +1785,7 @@ export default function InpaintEditor({
               <div>
                 <label
                   htmlFor={`inpaint-directives-${roomId}`}
-                  className="mb-1 font-jakarta block text-sm font-medium text-stone-700"
+                  className="mb-1 font-jakarta block text-sm font-medium text-atelier-primary"
                 >
                   Staging directives (required)
                 </label>
@@ -1812,8 +1812,8 @@ export default function InpaintEditor({
                     flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium
                     transition-colors
                     ${isProcessing || conceptLoading || !maskDataUrl
-                      ? "bg-stone-300 text-stone-500 cursor-not-allowed"
-                      : "bg-stone-800 text-white hover:bg-stone-700"
+                      ? "bg-atelier-taupe/40 text-atelier-taupe cursor-not-allowed"
+                      : "bg-atelier-primary text-white hover:bg-atelier-primary/80"
                     }
                   `}
                 >
@@ -1828,19 +1828,19 @@ export default function InpaintEditor({
                 </button>
 
                 {isProcessing && statusText && (
-                  <span aria-live="polite" className="text-sm text-stone-600">{statusText}</span>
+                  <span aria-live="polite" className="text-sm text-atelier-taupe">{statusText}</span>
                 )}
               </div>
 
               {/* Issue #558: AI Guidance controls — sliders for fine-tuning the inpaint run */}
-              <details className="rounded-md border border-stone-200">
-                <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50 select-none">
+              <details className="rounded-md border border-atelier-taupe/30">
+                <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-atelier-primary hover:bg-atelier-canvas select-none">
                   AI Guidance
                 </summary>
                 <div className="flex flex-col gap-3 px-3 pb-3 pt-1">
 
                   {/* Prompt Strength: how closely AI follows the text prompt */}
-                  <label className="flex items-center gap-2 text-sm text-stone-700">
+                  <label className="flex items-center gap-2 text-sm text-atelier-primary">
                     <span className="shrink-0">Prompt Strength</span>
                     <input
                       type="range"
@@ -1856,7 +1856,7 @@ export default function InpaintEditor({
                   </label>
 
                   {/* Mask Blur: feather edges of the mask */}
-                  <label className="flex items-center gap-2 text-sm text-stone-700">
+                  <label className="flex items-center gap-2 text-sm text-atelier-primary">
                     <span className="shrink-0">Mask Blur</span>
                     <input
                       type="range"
@@ -1872,7 +1872,7 @@ export default function InpaintEditor({
                   </label>
 
                   {/* Seed: reproducible results */}
-                  <div className="flex items-center gap-2 text-sm text-stone-700">
+                  <div className="flex items-center gap-2 text-sm text-atelier-primary">
                     <label htmlFor={`inpaint-seed-${roomId}`} className="shrink-0">Seed</label>
                     <input
                       id={`inpaint-seed-${roomId}`}
@@ -1887,22 +1887,22 @@ export default function InpaintEditor({
                       }}
                       placeholder="Random"
                       aria-label="Seed for reproducible results"
-                      className="w-28 rounded-md border border-gray-300 px-2 py-1 text-xs tabular-nums focus:outline-none focus:ring-2 focus:ring-stone-500"
+                      className="w-28 rounded-md border border-atelier-taupe/40 px-2 py-1 text-xs tabular-nums focus:outline-none focus:ring-2 focus:ring-atelier-primary"
                     />
-                    <label htmlFor={`inpaint-lockseed-${roomId}`} className="flex items-center gap-1 text-xs text-stone-600">
+                    <label htmlFor={`inpaint-lockseed-${roomId}`} className="flex items-center gap-1 text-xs text-atelier-taupe">
                       <input
                         id={`inpaint-lockseed-${roomId}`}
                         type="checkbox"
                         checked={lockSeed}
                         onChange={(e) => setLockSeed(e.target.checked)}
-                        className="h-3.5 w-3.5 accent-stone-800"
+                        className="h-3.5 w-3.5 accent-atelier-primary"
                       />
                       Lock Seed
                     </label>
                   </div>
 
                   {/* Creative Mode: higher variation */}
-                  <div className="flex items-center gap-2 text-sm text-stone-700">
+                  <div className="flex items-center gap-2 text-sm text-atelier-primary">
                     <span className="shrink-0">Creative Mode</span>
                     <button
                       type="button"
@@ -1910,8 +1910,8 @@ export default function InpaintEditor({
                       aria-checked={creativeMode}
                       aria-label="Creative Mode"
                       onClick={() => setCreativeMode((v) => !v)}
-                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-stone-500 focus:ring-offset-1 ${
-                        creativeMode ? "bg-stone-800" : "bg-gray-300"
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-atelier-primary focus:ring-offset-1 ${
+                        creativeMode ? "bg-atelier-primary" : "bg-atelier-taupe/40"
                       }`}
                     >
                       <span
@@ -1945,7 +1945,7 @@ export default function InpaintEditor({
                     aria-busy={conceptLoading}
                     className="flex flex-wrap items-center gap-2"
                   >
-                    <span className="font-jakarta text-sm font-medium text-stone-700">Concept:</span>
+                    <span className="font-jakarta text-sm font-medium text-atelier-primary">Concept:</span>
                     {CONCEPT_CHIPS.map((chip) => (
                       <button
                         key={chip}
@@ -1955,8 +1955,8 @@ export default function InpaintEditor({
                         onClick={() => handleConceptChange(chip)}
                         className={
                           requestedConcept === chip
-                            ? "px-2.5 py-1 text-xs rounded-full border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors"
-                            : "px-2.5 py-1 font-jakarta text-xs rounded-full border border-gray-300 bg-white text-stone-700 hover:bg-gray-50 transition-colors"
+                            ? "px-2.5 py-1 text-xs rounded-full border border-atelier-primary bg-atelier-primary text-white hover:bg-atelier-primary/80 transition-colors"
+                            : "px-2.5 py-1 font-jakarta text-xs rounded-full border border-atelier-taupe/40 bg-white text-atelier-primary hover:bg-atelier-canvas transition-colors"
                         }
                       >
                         {chip}
@@ -1969,7 +1969,7 @@ export default function InpaintEditor({
                         the button is replaced with a spinner so the
                         disabled state is not confusing (issue #474). */}
                     {conceptLoading ? (
-                      <span className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border border-stone-800 bg-white text-stone-600">
+                      <span className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border border-atelier-primary bg-white text-atelier-taupe">
                         <Loader2 className="h-3 w-3 animate-spin" />
                         Detecting {requestedConcept}…
                       </span>
@@ -1982,7 +1982,7 @@ export default function InpaintEditor({
                           detectedCount === 0 ||
                           selectionCount >= Math.min(detectedCount, MAX_BATCH_OBJECTS)
                         }
-                        className="px-2.5 py-1 text-xs rounded-md border border-stone-800 bg-white text-stone-800 hover:bg-stone-100 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                        className="px-2.5 py-1 text-xs rounded-md border border-atelier-primary bg-white text-atelier-primary hover:bg-atelier-canvas transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         Select all detected
                       </button>

@@ -1099,7 +1099,7 @@ export default function InpaintMaskCanvas({
       type="button"
       aria-label={`Deselect region ${marker.index}`}
       onClick={() => onSelectionDeselect?.(marker.id)}
-      className="absolute z-20 flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white bg-stone-900/85 text-[10px] font-semibold leading-none text-white shadow hover:bg-stone-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-400"
+      className="absolute z-20 flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white bg-atelier-primary/85 text-[10px] font-semibold leading-none text-white shadow hover:bg-atelier-primary/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-atelier-taupe"
       style={{
         left: `${(marker.x / markerSpace.width) * 100}%`,
         top: `${(marker.y / markerSpace.height) * 100}%`,
@@ -1181,8 +1181,8 @@ export default function InpaintMaskCanvas({
         aria-describedby={`${maskingHintId} ${hintId}`}
         className={
           hasOverlay
-            ? `absolute inset-0 h-full w-full rounded-lg ${cursorClass} touch-none opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-500 focus-visible:ring-offset-2`
-            : `border border-gray-300 rounded ${cursorClass} touch-none focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-500 focus-visible:ring-offset-2`
+            ? `absolute inset-0 h-full w-full rounded-lg ${cursorClass} touch-none opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-atelier-primary focus-visible:ring-offset-2`
+            : `border border-atelier-taupe/40 rounded ${cursorClass} touch-none focus:outline-none focus-visible:ring-2 focus-visible:ring-atelier-primary focus-visible:ring-offset-2`
         }
         style={
           hasOverlay ? undefined : { width: Math.min(dims.width, 512), height: Math.min(dims.height, 512) }
@@ -1261,7 +1261,7 @@ export default function InpaintMaskCanvas({
           <img
             src={overlayImageSrc || undefined}
             alt="Original"
-            className="absolute inset-0 h-full w-full rounded-lg border border-gray-300"
+            className="absolute inset-0 h-full w-full rounded-lg border border-atelier-taupe/40"
             loading="lazy"
             decoding="async"
           />
@@ -1273,7 +1273,7 @@ export default function InpaintMaskCanvas({
 
       {/* Cover-vs-outline semantics: the mask is region replacement, not
           selection — everything painted is regenerated. */}
-      <p ref={hintRef} id={maskingHintId} className="text-xs text-stone-700">
+      <p ref={hintRef} id={maskingHintId} className="text-xs text-atelier-primary">
         <span className="font-medium">How masking works:</span> Paint over the
         entire object or area you want changed — everything painted is
         regenerated, everything else is preserved. A thin outline won&apos;t
@@ -1292,11 +1292,11 @@ export default function InpaintMaskCanvas({
 
       {/* Issue #560: hint and legend hidden in Zen Mode */}
       {!zenMode && (
-        <p id={hintId} className="text-xs text-gray-500">
+        <p id={hintId} className="text-xs text-atelier-taupe">
           Tab to the canvas to paint. Press <button
             type="button"
             onClick={() => setShowLegend(true)}
-            className="mx-0.5 rounded border border-gray-300 bg-white px-1 py-0.5 text-xs font-medium hover:bg-gray-50"
+            className="mx-0.5 rounded border border-atelier-taupe/40 bg-white px-1 py-0.5 text-xs font-medium hover:bg-atelier-canvas"
           >?</button> for keyboard shortcuts.
         </p>
       )}
@@ -1305,7 +1305,7 @@ export default function InpaintMaskCanvas({
           Issue #560: toolbar hidden in Zen Mode (ZenModeToolbar takes over). */}
       {/* Issue #549: glassmorphic dock with translucent warm backdrop */}
       {!zenMode && (
-      <div className="flex flex-wrap items-center gap-4 rounded-lg border border-stone-200/50 bg-white/80 px-4 py-3 backdrop-blur-md shadow-sm">
+      <div className="flex flex-wrap items-center gap-4 rounded-lg border border-atelier-taupe/30 bg-white/80 px-4 py-3 backdrop-blur-md shadow-sm">
         <div role="group" aria-label="Mask tool" className="flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -1319,8 +1319,8 @@ export default function InpaintMaskCanvas({
             }}
             className={
               activeTool === "brush"
-                ? "relative px-3 py-2 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors md:min-h-[44px] after:absolute after:bottom-0 after:left-1/2 after:-translate-x-1/2 after:h-[2px] after:w-8 after:bg-[#C47847]"
-                : "px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors md:min-h-[44px]"
+                ? "relative px-3 py-2 text-sm rounded-md border border-atelier-primary bg-atelier-primary text-white hover:bg-atelier-primary/80 transition-colors md:min-h-[44px] after:absolute after:bottom-0 after:left-1/2 after:-translate-x-1/2 after:h-[2px] after:w-8 after:bg-atelier-secondary"
+                : "px-3 py-2 text-sm rounded-md border border-atelier-taupe/40 bg-white hover:bg-atelier-canvas transition-colors md:min-h-[44px]"
             }
           >
             Brush
@@ -1337,8 +1337,8 @@ export default function InpaintMaskCanvas({
             }}
             className={
               activeTool === "fill"
-                ? "relative px-3 py-2 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors md:min-h-[44px] after:absolute after:bottom-0 after:left-1/2 after:-translate-x-1/2 after:h-[2px] after:w-8 after:bg-[#C47847]"
-                : "px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors md:min-h-[44px]"
+                ? "relative px-3 py-2 text-sm rounded-md border border-atelier-primary bg-atelier-primary text-white hover:bg-atelier-primary/80 transition-colors md:min-h-[44px] after:absolute after:bottom-0 after:left-1/2 after:-translate-x-1/2 after:h-[2px] after:w-8 after:bg-atelier-secondary"
+                : "px-3 py-2 text-sm rounded-md border border-atelier-taupe/40 bg-white hover:bg-atelier-canvas transition-colors md:min-h-[44px]"
             }
           >
             Fill Region
@@ -1361,8 +1361,8 @@ export default function InpaintMaskCanvas({
               }}
               className={
                 activeTool === "select"
-                  ? "relative flex items-center gap-1.5 px-3 py-2 text-sm rounded-md border border-stone-800 bg-stone-800 text-white hover:bg-stone-700 transition-colors disabled:cursor-not-allowed disabled:opacity-60 md:min-h-[44px] after:absolute after:bottom-0 after:left-1/2 after:-translate-x-1/2 after:h-[2px] after:w-8 after:bg-[#C47847]"
-                  : "flex items-center gap-1.5 px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-60 md:min-h-[44px]"
+                  ? "relative flex items-center gap-1.5 px-3 py-2 text-sm rounded-md border border-atelier-primary bg-atelier-primary text-white hover:bg-atelier-primary/80 transition-colors disabled:cursor-not-allowed disabled:opacity-60 md:min-h-[44px] after:absolute after:bottom-0 after:left-1/2 after:-translate-x-1/2 after:h-[2px] after:w-8 after:bg-atelier-secondary"
+                  : "flex items-center gap-1.5 px-3 py-2 text-sm rounded-md border border-atelier-taupe/40 bg-white hover:bg-atelier-canvas transition-colors disabled:cursor-not-allowed disabled:opacity-60 md:min-h-[44px]"
               }
             >
               {segmenting ? (
@@ -1377,7 +1377,7 @@ export default function InpaintMaskCanvas({
         </div>
 
         {/* Issue #549: Precision Inspector slider styling */}
-        <label className="flex items-center gap-2 text-sm text-stone-700 md:min-h-[44px] md:py-1">
+        <label className="flex items-center gap-2 text-sm text-atelier-primary md:min-h-[44px] md:py-1">
           <span className="whitespace-nowrap">Brush Size:</span>
           <div className="relative">
             <input
@@ -1402,7 +1402,7 @@ export default function InpaintMaskCanvas({
 
         <button
           onClick={clearMask}
-          className="px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors md:min-h-[44px]"
+          className="px-3 py-2 text-sm rounded-md border border-atelier-taupe/40 bg-white hover:bg-atelier-canvas transition-colors md:min-h-[44px]"
         >
           Clear Mask
         </button>
@@ -1411,7 +1411,7 @@ export default function InpaintMaskCanvas({
           onClick={handleUndo}
           disabled={undoStack.length === 0}
           title="Undo (Cmd/Ctrl+Z)"
-          className="px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-50 md:min-h-[44px]"
+          className="px-3 py-2 text-sm rounded-md border border-atelier-taupe/40 bg-white hover:bg-atelier-canvas transition-colors disabled:cursor-not-allowed disabled:opacity-50 md:min-h-[44px]"
         >
           Undo {undoStack.length > 0 && `(${undoStack.length})`}
         </button>
@@ -1421,7 +1421,7 @@ export default function InpaintMaskCanvas({
           title="Keyboard shortcuts"
           aria-label={showLegend ? "Hide keyboard shortcuts" : "Show keyboard shortcuts"}
           aria-expanded={showLegend}
-          className="px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors md:min-h-[44px]"
+          className="px-3 py-2 text-sm rounded-md border border-atelier-taupe/40 bg-white hover:bg-atelier-canvas transition-colors md:min-h-[44px]"
         >
           ?
         </button>
@@ -1432,28 +1432,28 @@ export default function InpaintMaskCanvas({
         <div
           role="region"
           aria-label="Keyboard shortcuts"
-          className="rounded-md border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700"
+          className="rounded-md border border-atelier-taupe/30 bg-atelier-canvas p-3 text-xs text-atelier-primary"
         >
-          <p className="mb-2 font-medium text-gray-900">Keyboard Shortcuts</p>
+          <p className="mb-2 font-medium text-atelier-primary">Keyboard Shortcuts</p>
           <dl className="grid grid-cols-2 gap-x-6 gap-y-1">
             <div className="flex items-center gap-2">
-              <dt className="font-mono text-gray-500">Arrow keys</dt>
+              <dt className="font-mono text-atelier-taupe">Arrow keys</dt>
               <dd>Move brush</dd>
             </div>
             <div className="flex items-center gap-2">
-              <dt className="font-mono text-gray-500">Shift + Arrow</dt>
+              <dt className="font-mono text-atelier-taupe">Shift + Arrow</dt>
               <dd>Fine movement</dd>
             </div>
             <div className="flex items-center gap-2">
-              <dt className="font-mono text-gray-500">P / Space / Enter</dt>
+              <dt className="font-mono text-atelier-taupe">P / Space / Enter</dt>
               <dd>Start / stop painting</dd>
             </div>
             <div className="flex items-center gap-2">
-              <dt className="font-mono text-gray-500">Cmd / Ctrl + Z</dt>
+              <dt className="font-mono text-atelier-taupe">Cmd / Ctrl + Z</dt>
               <dd>Undo</dd>
             </div>
             <div className="flex items-center gap-2">
-              <dt className="font-mono text-gray-500">+ / -</dt>
+              <dt className="font-mono text-atelier-taupe">+ / -</dt>
               <dd>Brush size</dd>
             </div>
           </dl>
