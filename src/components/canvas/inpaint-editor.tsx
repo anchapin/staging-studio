@@ -1579,7 +1579,8 @@ export default function InpaintEditor({
           </div>
         )}
         {/* Issue #560: "Source Image" label hidden in Zen Mode */}
-        <div className={`flex items-center justify-between ${zenMode ? "zen-mode-hidden" : ""}`}>
+        {/* Issue #547/#546: sticky header per Atelier Canvas spec with Atelier Canvas colors */}
+        <div className={`sticky top-0 z-20 flex items-center justify-between bg-atelier-canvas ${zenMode ? "zen-mode-hidden" : ""}`}>
           <h4 className="mb-2 font-jakarta text-sm font-medium text-atelier-primary">Source Image</h4>
           <button
             type="button"
