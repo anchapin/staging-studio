@@ -17,7 +17,11 @@ import InpaintOperationModeTabs, {
 import { useToast, ToastContainer } from "@/components/ui/toast";
 import { ChevronDown, ChevronUp, Expand, Home, Info, Loader2, Maximize2, Minimize2 } from "lucide-react";
 import { useInpaintStatus } from "./use-inpaint-status";
-import ZenModeToolbar from "./zen-mode-toolbar";
+
+import BrushToolRail, {
+  BrushParameterFlyout,
+  type StudioTool,
+} from "./BrushToolRail";
 import {
   entireRoomTabVisible,
   inpaintSourceLabel,
@@ -579,7 +583,7 @@ export default function InpaintEditor({
   // Issue #560: Zen Mode state — hides all chrome for a distraction-free workspace.
   const [zenMode, setZenMode] = useState(false);
   // Issue #560: dark background toggle for eye comfort in Zen Mode.
-  const [zenDarkBackground, setZenDarkBackground] = useState(false);
+  const [zenDarkBackground] = useState(false);
 
   // Issue #638: Focus Canvas Mode state — collapses header and inspector simultaneously.
   const [focusMode, setFocusMode] = useState(false);
@@ -605,6 +609,12 @@ export default function InpaintEditor({
   // Issue #560: lifted brush state — shared between InpaintMaskCanvas and ZenModeToolbar.
   const [zenBrushSize, setZenBrushSize] = useState(20);
   const [zenActiveTool, setZenActiveTool] = useState<MaskTool>("brush");
+
+  // Issue #627: Brush Tool Rail state — lifted state for the full tool rail + parameter flyout.
+  const [studioActiveTool, setStudioActiveTool] = useState<StudioTool>("brush");
+  const [brushRadius, setBrushRadius] = useState(42);
+  const [brushEdgeSoftness, setBrushEdgeSoftness] = useState(35);
+  const [brushMaskOpacity, setBrushMaskOpacity] = useState(80);
 
   // Issue #561: tracks the active result URL for the version history panel.
   // Updated on inpaint completion; also initialized from prop when provided.
@@ -2299,61 +2309,25 @@ export default function InpaintEditor({
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
 
-      {/* Issue #560: Zen Mode floating toolbar — shown only when Zen Mode is active */}
+      {/* Issue #627: Brush Tool Rail — shown when Zen Mode is active */}
       {zenMode && (
-        <ZenModeToolbar
-          darkBackground={zenDarkBackground}
-          onDarkBackgroundChange={setZenDarkBackground}
-        >
-          {/* Tool buttons */}
-          <div role="group" aria-label="Mask tool" className="flex items-center gap-1">
-            {(["brush", "fill", "select"] as const).map((tool) => (
-              <button
-                key={tool}
-                type="button"
-                aria-pressed={zenActiveTool === tool}
-                aria-label={tool === "brush" ? "Brush" : tool === "fill" ? "Fill Region" : "Select Regions"}
-                onClick={() => setZenActiveTool(tool)}
-                className={
-                  zenActiveTool === tool
-                    ? "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium bg-stone-800 text-white transition-colors"
-                    : "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium bg-stone-100 text-stone-600 transition-colors hover:bg-stone-200"
-                }
-              >
-                {tool === "brush" ? "Brush" : tool === "fill" ? "Fill" : "Select"}
-              </button>
-            ))}
-          </div>
-
-          {/* Brush size slider */}
-          <label className="flex items-center gap-2 text-xs text-stone-600">
-            <span>Size</span>
-            <input
-              type="range"
-              min={1}
-              max={100}
-              value={zenBrushSize}
-              onChange={(e) => setZenBrushSize(Number(e.target.value))}
-              className="w-20"
-              aria-label="Brush size"
+        <>
+          <BrushToolRail
+            activeTool={studioActiveTool}
+            onToolChange={setStudioActiveTool}
+          />
+          {studioActiveTool === "brush" && (
+            <BrushParameterFlyout
+              radius={brushRadius}
+              edgeSoftness={brushEdgeSoftness}
+              maskOpacity={brushMaskOpacity}
+              onRadiusChange={setBrushRadius}
+              onEdgeSoftnessChange={setBrushEdgeSoftness}
+              onMaskOpacityChange={setBrushMaskOpacity}
+              onClose={() => setStudioActiveTool("select")}
             />
-            <span className="w-5 text-right">{zenBrushSize}</span>
-          </label>
-
-          {/* Clear mask */}
-          <button
-            type="button"
-            onClick={() => {
-              setMaskDataUrl(null);
-              setBatchSelections([]);
-              setSelectedInstanceIndices([]);
-            }}
-            className="rounded-full px-3 py-1.5 text-xs text-stone-500 bg-stone-100 hover:bg-stone-200 transition-colors"
-            title="Clear mask"
-          >
-            Clear
-          </button>
-        </ZenModeToolbar>
+          )}
+        </>
       )}
 
       {/* Issue #631: Version History Pills — floating bar at bottom-center of canvas
