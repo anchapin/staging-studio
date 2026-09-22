@@ -4,8 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { StagingPackageCard } from "@/components/packages";
-import { STAGING_PACKAGES } from "@/lib/staging-packages-schema";
+import { STAGING_PACKAGES, getStagingPackage } from "@/lib/staging-packages-schema";
 import { STAGING_AESTHETICS } from "@/lib/staging-aesthetics";
+import { ConsultationActionBar } from "@/components/dashboard/consultation-action-bar";
+import { consultationConfigSummary } from "@/lib/consultation-action-bar";
 
 const BUYER_PERSONAS = [
   "young professional couple",
@@ -309,6 +311,7 @@ export default function NewProjectPage() {
   const [error, setError] = useState<string | null>(null);
   const [rooms, setRooms] = useState<string[]>([""]);
   const [currentStep, setCurrentStep] = useState(0);
+  const [draftSaved, setDraftSaved] = useState(false);
   const errorRef = useRef<HTMLDivElement>(null);
 
   const [form, setForm] = useState({
@@ -343,8 +346,7 @@ export default function NewProjectPage() {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const createProject = async () => {
     setSubmitting(true);
     setError(null);
 
@@ -382,11 +384,37 @@ export default function NewProjectPage() {
     }
   };
 
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await createProject();
+  };
+
+  // Issue #619: "Save Draft" persists the in-progress consultation to
+  // localStorage (client-side only) and flashes a confirmation on the bar.
+  const handleSaveDraft = () => {
+    try {
+      window.localStorage.setItem(
+        "staging-studio:new-project-draft",
+        JSON.stringify({ form, buyerDemographics, rooms, currentStep })
+      );
+      setDraftSaved(true);
+      window.setTimeout(() => setDraftSaved(false), 2500);
+    } catch {
+      // Storage unavailable (private mode/quota) — draft saving is best-effort.
+    }
+  };
+
+  const configName = consultationConfigSummary({
+    aesthetic: form.stagingAesthetic,
+    packageName: getStagingPackage(form.stagingPackage)?.name ?? null,
+    roomCount: rooms.filter((r) => r.trim() !== "").length,
+  });
+
   const canAdvance =
     form.propertyAddress.trim() !== "" && form.clientName.trim() !== "";
 
   return (
-    <div className="mx-auto max-w-2xl p-8">
+    <div className="mx-auto max-w-2xl p-8 pb-44">
       <div className="mb-8">
         <h1 className="font-playfair text-3xl font-bold text-stone-800">
           New Project
@@ -740,6 +768,15 @@ export default function NewProjectPage() {
           </div>
         </div>
       </form>
+
+      {/* Issue #619: sticky bottom consultation action bar */}
+      <ConsultationActionBar
+        configName={configName}
+        onSaveDraft={handleSaveDraft}
+        onProceed={createProject}
+        busy={submitting}
+        draftSaved={draftSaved}
+      />
     </div>
   );
 }
