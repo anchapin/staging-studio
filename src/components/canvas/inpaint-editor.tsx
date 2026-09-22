@@ -446,7 +446,7 @@ function useCollapsiblePanel(storageKey: string, defaultCollapsed = false) {
     }
   }, [storageKey, isCollapsed]);
 
-  const toggle = useCallback(() => setIsCollapsed((prev) => !prev), []);
+  const toggle = useCallback(() => setIsCollapsed((prev: boolean) => !prev), []);
 
   return { isCollapsed, setIsCollapsed, toggle };
 }
