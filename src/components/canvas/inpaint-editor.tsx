@@ -81,8 +81,6 @@ import { saveInpaintVersion } from "@/app/actions/inpaint-versions";
 
 interface InpaintEditorProps {
   roomId: string;
-  /** Room display name — used for descriptive alt text in variation thumbnails (issue #630). */
-  roomName: string;
   /** The resolved source image the mask applies to (before photo or staged variant). */
   imageUrl: string;
   aesthetic: string;
@@ -544,7 +542,6 @@ export default function InpaintEditor({
   directivesValue,
   currentResultUrl,
   projectName,
-  roomName,
 }: InpaintEditorProps) {
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
   const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
@@ -2257,7 +2254,7 @@ export default function InpaintEditor({
           onToggle={generatedVariationsPanel.toggle}
         >
           <GeneratedVariationGrid
-            roomName={roomName}
+            roomName={roomName ?? "Room"}
             variations={generatedVariations}
             selectedId={selectedVariationId}
             isGenerating={isGeneratingVariations}
