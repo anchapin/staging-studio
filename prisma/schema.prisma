@@ -34,6 +34,9 @@ model Project {
   clientName      String
   targetBuyer     String   // e.g. "young professional couple", "growing family"
   stagingAesthetic String  // e.g. "Organic Modern Luxury", "Warm Transitional"
+  // Buyer Demographics JSON: buyer profile for AI copywriting + ROI metrics (issue #563)
+  // Shape: { buyerType, designPreferences[], budgetMin, budgetMax, mustHaveFeatures[], sellTimeline }
+  buyerDemographics Json?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
