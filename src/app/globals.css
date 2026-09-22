@@ -36,6 +36,8 @@
   /* Surface container utilities (values defined in :root, Issue #624) */
   --color-surface-container: var(--color-surface-container);
   --color-surface-container-low: var(--color-surface-container-low);
+  /* Issue #620: lowest tier — workbench top bar, active sidebar rows, dock */
+  --color-surface-container-lowest: var(--color-surface-container-lowest);
   --radius: var(--radius);
   --font-cinzel: var(--font-cinzel-google);
   --font-playfair: var(--font-playfair-google);

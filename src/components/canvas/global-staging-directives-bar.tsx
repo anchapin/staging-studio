@@ -4,6 +4,14 @@ import { useState } from "react";
 import { Download, RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { STAGING_AESTHETICS } from "@/lib/staging-aesthetics";
+import {
+  WORKBENCH_DIRECTIVE_GRID_CLASSES,
+  WORKBENCH_TOPBAR_SURFACE_CLASSES,
+} from "@/lib/workbench-layout";
+
+/** Card chrome shared by the four directive cards (issue #620). */
+const DIRECTIVE_CARD_CLASSES =
+  "flex flex-wrap items-center gap-2 rounded-lg border border-outline-variant/30 bg-surface-container-low/50 px-3 py-2";
 
 interface GlobalStagingDirectivesBarProps {
   /** Current design aesthetic selection */
@@ -63,13 +71,14 @@ export default function GlobalStagingDirectivesBar({
 
   return (
     <div
-      className="sticky top-0 z-20 flex flex-col gap-4 border-b border-border/30 bg-[#fff8f4] px-6 py-3.5"
+      className={`sticky top-0 z-20 flex flex-col gap-3 px-6 py-3.5 ${WORKBENCH_TOPBAR_SURFACE_CLASSES}`}
       aria-label="Global staging directives"
     >
-      {/* Top row: 4 directive cards */}
-      <div className="flex flex-wrap items-center gap-4">
+      {/* Issue #620: 4 directive cards in a responsive grid —
+          1 column mobile → 2 tablet → 4 desktop */}
+      <div className={WORKBENCH_DIRECTIVE_GRID_CLASSES}>
         {/* Card 1: Design Aesthetic Preset */}
-        <div className="flex items-center gap-2">
+        <div className={DIRECTIVE_CARD_CLASSES}>
           <span className="text-sm text-muted-foreground">Design Aesthetic</span>
           <select
             value={aesthetic}
@@ -87,7 +96,7 @@ export default function GlobalStagingDirectivesBar({
         </div>
 
         {/* Card 2: Architectural Preservation Lock */}
-        <div className="flex items-center gap-2">
+        <div className={DIRECTIVE_CARD_CLASSES}>
           <span className="text-sm text-muted-foreground">Preserve</span>
           <div className="flex flex-wrap items-center gap-1.5">
             {lockedElements.map((element) => (
@@ -135,7 +144,7 @@ export default function GlobalStagingDirectivesBar({
         </div>
 
         {/* Card 3: Realism & Lighting Lock */}
-        <div className="flex items-center gap-2">
+        <div className={DIRECTIVE_CARD_CLASSES}>
           <span className="text-sm text-muted-foreground">Realism &amp; Lighting</span>
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground">Artistic</span>
@@ -156,7 +165,7 @@ export default function GlobalStagingDirectivesBar({
         </div>
 
         {/* Card 4: Spatial Render Cluster */}
-        <div className="flex items-center gap-2">
+        <div className={DIRECTIVE_CARD_CLASSES}>
           <span className="text-sm text-muted-foreground">Render Status</span>
           <div className="flex items-center gap-1.5">
             {gpuActive ? (
@@ -187,30 +196,27 @@ export default function GlobalStagingDirectivesBar({
             Start Batch
           </Button>
         </div>
+      </div>
 
-        {/* Spacer */}
-        <div className="flex-1" />
-
-        {/* Right-side Actions */}
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onAutoRegenerateAll}
-            className="inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            <RotateCw className="h-3.5 w-3.5" aria-hidden="true" />
-            Auto-Regenerate All
-          </button>
-          <button
-            type="button"
-            onClick={onExportBatch}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border/40 bg-muted px-3 py-2 text-sm font-medium text-foreground hover:bg-muted/70"
-            aria-label="Export batch"
-          >
-            <Download className="h-4 w-4" aria-hidden="true" />
-            Export Batch
-          </button>
-        </div>
+      {/* Right-side actions — below the directive grid, aligned right */}
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={onAutoRegenerateAll}
+          className="inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-surface-container hover:text-foreground"
+        >
+          <RotateCw className="h-3.5 w-3.5" aria-hidden="true" />
+          Auto-Regenerate All
+        </button>
+        <button
+          type="button"
+          onClick={onExportBatch}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant/40 bg-surface-container px-3 py-2 text-sm font-medium text-foreground hover:bg-surface-container-low"
+          aria-label="Export batch"
+        >
+          <Download className="h-4 w-4" aria-hidden="true" />
+          Export Batch
+        </button>
       </div>
     </div>
   );
