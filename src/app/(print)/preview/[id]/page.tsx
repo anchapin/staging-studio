@@ -44,9 +44,11 @@ const getPreviewProject = cache(async (id: string) =>
       roiSalesPricePremium: true,
       roiTransactionVelocity: true,
       roiInvestmentTier: true,
+      stagingPackage: true,
       clientSignature: true,
       clientSignatureStatus: true,
       clientSignatureTimestamp: true,
+      buyerDemographics: true,
       user: {
         select: {
           firmName: true,
@@ -184,11 +186,13 @@ export default async function LookbookPreviewPage({
     targetBuyer: project.targetBuyer,
     stagingAesthetic: project.stagingAesthetic,
     roiMetrics: buildROIMetrics(project),
+    stagingPackage: project.stagingPackage,
     clientSignature: project.clientSignature,
     clientSignatureStatus: project.clientSignatureStatus,
     clientSignatureTimestamp: project.clientSignatureTimestamp
       ? project.clientSignatureTimestamp.toISOString()
       : null,
+    buyerDemographics: (project.buyerDemographics as PreviewProject["buyerDemographics"]) ?? null,
     user: {
       firmName: project.user.firmName,
       ownerName: project.user.ownerName,
