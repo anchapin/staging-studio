@@ -40,6 +40,7 @@ import VariantThumbnailStrip from "@/components/canvas/variant-thumbnail-strip";
 import GenerateCopyForm, {
   type GeneratedCopy,
 } from "@/components/canvas/generate-copy-form";
+import { Badge } from "@/components/ui/badge";
 import { useToast, ToastContainer } from "@/components/ui/toast";
 import {
   deleteVariantAfterImage,
@@ -48,6 +49,7 @@ import {
   saveRoomMetadata,
   saveVariantSelection,
 } from "@/app/actions/room";
+import { saveProjectMetadata } from "@/app/actions/project";
 import {
   AutosaveController,
   type AutosaveStatus,
@@ -64,6 +66,8 @@ import {
   type VariantSlot,
 } from "@/lib/inpaint-source";
 import { buildPrefill } from "@/lib/prompt-prefill";
+import { StagingPackageCard } from "@/components/packages";
+import { STAGING_PACKAGES } from "@/lib/staging-packages-schema";
 
 const MAX_DIRECTIVE_LENGTH = 2000;
 
@@ -91,6 +95,8 @@ interface Project {
   clientName: string;
   targetBuyer: string;
   stagingAesthetic: string;
+  stagingPackage?: string | null;
+  stagingDirectives?: string | null; // Issue #562: global project-level directives
   rooms: Room[];
 }
 
@@ -463,6 +469,34 @@ export default function ProjectDetailView({
         : prev
     );
   }, []);
+
+  /** Issue #555: saves the selected staging package. */
+  const handlePackageSelect = useCallback(
+    async (pkgId: string) => {
+      if (!project) return;
+      const previousPackage = project.stagingPackage;
+      // Optimistic update
+      setProject((prev) =>
+        prev ? { ...prev, stagingPackage: pkgId } : prev
+      );
+      const result = await saveProjectMetadata(project.id, {
+        stagingPackage: pkgId,
+      });
+      if (!result.success) {
+        // Revert on failure
+        setProject((prev) =>
+          prev ? { ...prev, stagingPackage: previousPackage } : prev
+        );
+        showError(
+          result.error || "Failed to save package selection",
+          true
+        );
+        return;
+      }
+      showSuccess("Package saved");
+    },
+    [project, showError, showSuccess]
+  );
 
   /**
    * Issue #192: refreshes a room's per-slot touch-up counts from its
@@ -923,6 +957,7 @@ export default function ProjectDetailView({
                   imageUrl={focusedInputs.inpaintImageUrl ?? ""}
                   aesthetic={project.stagingAesthetic}
                   promptDirectives={focusedInputs.roomDirectives.trim()}
+                  globalDirectives={project.stagingDirectives ?? ""}
                   variantSlot={resolveInpaintTargetSlot(
                     focusedRoom,
                     focusedInputs.inpaintSource
@@ -959,12 +994,22 @@ export default function ProjectDetailView({
                       {/* Issue #460: textarea first — always visible above the fold */}
                       <section aria-label="Staging directives">
                         <div className="flex items-center justify-between mb-1">
-                          <label
-                            htmlFor={`directives-${focusedRoom.id}`}
-                            className="block text-sm font-medium text-foreground"
-                          >
-                            Staging directives (required)
-                          </label>
+                          <div className="flex items-center gap-2">
+                            <label
+                              htmlFor={`directives-${focusedRoom.id}`}
+                              className="block text-sm font-medium text-foreground"
+                            >
+                              Staging directives (required)
+                            </label>
+                            {/* Issue #562: directive source indicator */}
+                            {project.stagingDirectives?.trim() && focusedInputs.roomDirectives.trim() ? (
+                              <Badge variant="secondary" size="sm">Global + Room</Badge>
+                            ) : project.stagingDirectives?.trim() ? (
+                              <Badge variant="outline" size="sm">Global</Badge>
+                            ) : focusedInputs.roomDirectives.trim() ? (
+                              <Badge variant="secondary" size="sm">Room</Badge>
+                            ) : null}
+                          </div>
                           {/* Issue #496: Saving… / Saved / error indicator */}
                           {(() => {
                             const status = directiveStatuses[focusedRoom.id];
@@ -1080,6 +1125,30 @@ export default function ProjectDetailView({
           </div>
         ) : (
           <>
+            {/* Issue #555: Staging Package Tiers selector */}
+            {project.stagingPackage !== null && (
+              <section aria-label="Staging package" className="mb-8">
+                <h2 className="font-playfair text-xl font-semibold text-foreground mb-4">
+                  Staging Package
+                </h2>
+                <div
+                  className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+                  role="radiogroup"
+                  aria-label="Staging package selection"
+                >
+                  {STAGING_PACKAGES.map((pkg) => (
+                    <StagingPackageCard
+                      key={pkg.id}
+                      pkg={pkg}
+                      selected={project.stagingPackage === pkg.id}
+                      onSelect={handlePackageSelect}
+                      selectable
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
             <h2 className="font-playfair text-xl font-semibold text-foreground mb-6">Rooms</h2>
 
             {project.rooms.length === 0 ? (

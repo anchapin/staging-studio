@@ -283,7 +283,7 @@ export default function StageEntireRoomPreset({
             transition-colors
             ${buttonDisabled
               ? "bg-stone-100 text-stone-400 cursor-not-allowed border border-stone-200"
-              : "border border-stone-300 bg-white text-stone-700 hover:bg-stone-50"
+              : "border border-stone-300 bg-white font-jakarta text-stone-700 hover:bg-stone-50"
             }
           `}
         >

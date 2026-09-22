@@ -15,9 +15,13 @@ import {
   CoverPage,
   PhilosophyPage,
   SignoffPage,
+  type MaterialSwatchData,
   type ProjectData,
 } from "@/components/lookbook";
+import { FurnitureProcurementTable } from "@/components/lookbook/furniture-procurement-table";
+import { MaterialSwatchEditor } from "./material-swatch-editor";
 import { saveRoomCopyEdits } from "@/app/actions/room";
+import { saveProcurementItems, type ProcurementItemInput } from "@/app/actions/procurement";
 import {
   AutosaveController,
   type AutosaveStatus,
@@ -69,6 +73,30 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
   );
   const [switching, setSwitching] = useState(false);
   const [saveBlocked, setSaveBlocked] = useState(false);
+
+  // Procurement items state
+  const [procurementDraft, setProcurementDraft] = useState<ProcurementItemInput[]>(
+    () =>
+      project.procurementItems.map((item) => ({
+        id: item.id,
+        item: item.item,
+        category: item.category,
+        vendor: item.vendor,
+        sku: item.sku,
+        estCost: item.estCost,
+      }))
+  );
+  const procurementControllerRef = useRef(
+    new AutosaveController<ProcurementItemInput[]>({
+      save: async (items) => {
+        const result = await saveProcurementItems(project.id, items);
+        return result.success;
+      },
+      onStatusChange: (status) => {
+        setStatuses((prev) => ({ ...prev, __procurement__: status }));
+      },
+    })
+  );
 
   const draftsRef = useRef(new Map<string, RoomCopyEditInput>());
   const controllersRef = useRef(
@@ -136,6 +164,9 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
     for (const controller of controllersRef.current.values()) {
       if (controller.status === "error") controller.retry();
     }
+    if (procurementControllerRef.current.status === "error") {
+      procurementControllerRef.current.retry();
+    }
   }, []);
 
   /**
@@ -144,10 +175,11 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
    * capture a stale book.
    */
   const flushBeforeExport = useCallback(async () => {
+    const procurementResult = await procurementControllerRef.current.flush();
     const results = await Promise.all(
       [...controllersRef.current.values()].map((c) => c.flush())
     );
-    return results.every((ok) => ok);
+    return procurementResult && results.every((ok) => ok);
   }, []);
 
   const handleGenerate = useCallback(
@@ -213,7 +245,14 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
 
   // Aggregated save indicator: error wins, then in-flight work, then
   // "Saved" once at least one write has landed.
-  const statusList = Object.values(statuses);
+  const procurementStatus = statuses.__procurement__;
+  const roomStatuses = Object.entries(statuses)
+    .filter(([k]) => k !== "__procurement__")
+    .map(([, v]) => v) as AutosaveStatus[];
+  const statusList: AutosaveStatus[] = [
+    ...roomStatuses,
+    procurementStatus,
+  ].filter((s): s is AutosaveStatus => Boolean(s));
   const indicator: SaveIndicatorState = statusList.includes("error")
     ? "error"
     : statusList.includes("saving") || statusList.includes("dirty")
@@ -229,6 +268,11 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
     clientName: project.clientName,
     targetBuyer: project.targetBuyer,
     stagingAesthetic: project.stagingAesthetic,
+    clientSignature: project.clientSignature,
+    clientSignatureStatus: project.clientSignatureStatus,
+    clientSignatureTimestamp: project.clientSignatureTimestamp
+      ? String(project.clientSignatureTimestamp)
+      : null,
   };
   const signoffRooms = project.rooms.map((room) => ({
     id: room.id,
@@ -327,6 +371,7 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
         <div>
           <LookbookNav
             rooms={project.rooms.map((r) => ({ id: r.id, name: r.name }))}
+            hasSwatches={project.materialSwatches.length > 0}
           />
           <div className="paper-preview">
             <LookbookPreviewView project={project} />
@@ -363,6 +408,22 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
             />
           ))}
 
+          {/* Material Swatches editor */}
+          <div id="lookbook-swatches">
+            <MaterialSwatchEditor
+              projectId={project.id}
+              swatches={project.materialSwatches as MaterialSwatchData[]}
+            />
+          </div>
+          {/* Procurement table editor */}
+          <ProcurementTableEditor
+            items={procurementDraft}
+            onChange={(items) => {
+              setProcurementDraft(items);
+              procurementControllerRef.current.edit(items);
+            }}
+          />
+
           <div className="paper-preview">
             <SignoffPage
               user={project.user}
@@ -373,6 +434,31 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
         </div>
       )}
     </div>
+  );
+}
+
+interface ProcurementTableEditorProps {
+  items: ProcurementItemInput[];
+  onChange: (items: ProcurementItemInput[]) => void;
+}
+
+/**
+ * Editable procurement table with autosave.
+ */
+function ProcurementTableEditor({ items, onChange }: ProcurementTableEditorProps) {
+  return (
+    <section className="rounded-lg border border-stone-200 bg-white p-6">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="font-playfair text-xl font-bold text-stone-800">
+          Furniture Procurement
+        </h2>
+      </div>
+      <FurnitureProcurementTable
+        items={items as import("@/components/lookbook/furniture-procurement-table").ProcurementItemDisplay[]}
+        editable
+        onChange={onChange}
+      />
+    </section>
   );
 }
 

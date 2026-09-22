@@ -59,6 +59,14 @@ export const aiMaskUrlSchema = z
  * the FLUX.1 Fill generation. `negativePrompt` is optional (issue #190):
  * the holistic full-room path sends `HOLISTIC_NEGATIVE_PROMPT` there;
  * omitted ⇒ the route keeps the single-object `NEGATIVE_PROMPT`.
+ *
+ * AI Guidance (issue #558):
+ * - `promptStrength`: how closely AI follows the text prompt (0.1–1.0, default 0.8)
+ * - `maskBlur`: feather edges of the mask for softer transitions (0–20, default 5)
+ * - `seed`: reproducible results for iteration (0–999999, optional = random)
+ * - `creativeMode`: higher variation (boolean, default false)
+ * - `lockSeed`: reproduce exact results (boolean, default false)
+ *
  * Side effects: none (pure validation); the fal.ai call happens in the
  * route, gated by `assertFalConfigured()`/`FAL_KEY`.
  */
@@ -68,6 +76,12 @@ export const inpaintRequestSchema = z.object({
   promptDirectives: z.string().min(1).max(2000),
   aesthetic: z.string().min(1).max(200),
   negativePrompt: z.string().min(1).max(2000).optional(),
+  // Issue #558: AI Guidance controls
+  promptStrength: z.number().min(0.1).max(1.0).optional(),
+  maskBlur: z.number().int().min(0).max(20).optional(),
+  seed: z.number().int().min(0).max(999999).optional(),
+  creativeMode: z.boolean().optional(),
+  lockSeed: z.boolean().optional(),
 });
 
 /**
@@ -89,6 +103,53 @@ export const generateCopyRequestSchema = z
     roomId: z.string().min(1),
   })
   .strict();
+
+/**
+ * Zod schema for a click-to-segment point in the source image's natural
+ * pixel space (origin top-left). Coordinates must be finite and
+ * non-negative; upper bounds are enforced against the image dimensions by
+ * {@link segmentRequestSchema}'s cross-field refinement.
+ * Side effects: none (pure validation).
+ */
+export const segmentPointSchema = z.object({
+  x: z.number().finite().min(0),
+  y: z.number().finite().min(0),
+});
+
+/**
+ * Zod schema for the `POST /api/segment` request body (issue #183).
+ *
+ * Contract: `roomId` scopes the click to a room the caller owns (the
+ * route re-checks ownership server-side); `imageUrl`
+ * ({@link aiImageUrlSchema}) is the room photo fal will segment;
+ * `point` ({@link segmentPointSchema}) is the clicked point in the
+ * image's natural pixel space; `imageWidth`/`imageHeight` are the
+ * natural dimensions the client measured for the same image, and the
+ * point must fall within them. `.strict()` rejects unknown keys so
+ * stale clients fail loudly.
+ *
+ * `warm` (issue #202) marks an editor-open pre-warm ping: the route runs
+ * only the auth + room-ownership path and returns `{ warmed: true }`
+ * WITHOUT calling fal (zero provider cost). The body still validates as
+ * a full click — the probe point exercises the identical schema path a
+ * real click takes — but the point is never executed.
+ * Side effects: none (pure validation); the fal.ai SAM call happens in
+ * the route, gated by `assertFalConfigured()`/`FAL_KEY`.
+ */
+export const segmentRequestSchema = z
+  .object({
+    roomId: z.string().min(1),
+    imageUrl: aiImageUrlSchema,
+    point: segmentPointSchema,
+    imageWidth: z.number().int().positive().max(20_000),
+    imageHeight: z.number().int().positive().max(20_000),
+    warm: z.boolean().optional(),
+  })
+  .strict()
+  .refine(
+    (data) => data.point.x <= data.imageWidth && data.point.y <= data.imageHeight,
+    { message: "Point must fall within the image bounds" }
+  );
 
 /**
  * Zod schema for a SAM 3.1 detection concept (issue #227).
@@ -120,7 +181,8 @@ export const segmentConceptSchema = z
  * ({@link aiImageUrlSchema}) is the room photo fal will segment;
  * `concept` ({@link segmentConceptSchema}) is the optional detection
  * concept — omitted ⇒ the route's "furniture" default, keeping the
- * one-click preset path byte-equivalent.
+ * one-click preset path byte-equivalent. There is no point, image-size
+ * pair, or warm flag — detection is prompted by a concept, not a click.
  * `.strict()` rejects unknown keys so stale clients fail loudly.
  * Side effects: none (pure validation).
  */

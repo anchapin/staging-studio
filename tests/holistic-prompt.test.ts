@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import { inpaintRequestSchema } from "@/lib/ai-route-schemas";
 import {
   HOLISTIC_NEGATIVE_PROMPT,
+  buildDeclutterDirective,
   buildHolisticDirectives,
   buildHolisticPrompt,
+  DECLUTTER_INTENSITY_LABELS,
 } from "@/lib/holistic-prompt";
 import { FRAMING_CONTEXT, NEGATIVE_PROMPT, buildInpaintPrompt } from "@/lib/prompts";
 
@@ -160,5 +162,81 @@ describe("end-to-end schema compatibility", () => {
       negativePrompt: "x".repeat(2001),
     });
     expect(oversized.success).toBe(false);
+  });
+});
+
+describe("buildDeclutterDirective (issue #559)", () => {
+  it("returns unique text for each intensity level", () => {
+    const results = ([1, 2, 3, 4, 5] as const).map((i) => buildDeclutterDirective(i));
+    const unique = new Set(results);
+    expect(unique.size).toBe(5);
+  });
+
+  it("intensity 1 mentions only obvious, bulky clutter", () => {
+    const d = buildDeclutterDirective(1);
+    expect(d).toContain("obvious");
+    expect(d).toContain("bulky");
+  });
+
+  it("intensity 5 uses 'full purge' language", () => {
+    const d = buildDeclutterDirective(5);
+    expect(d.toLowerCase()).toContain("full purge");
+    expect(d.toLowerCase()).toContain("core furnishings");
+  });
+
+  it("DECLUTTER_INTENSITY_LABELS has all 5 levels", () => {
+    expect(DECLUTTER_INTENSITY_LABELS).toHaveProperty("1", "Light");
+    expect(DECLUTTER_INTENSITY_LABELS).toHaveProperty("5", "Full purge");
+  });
+});
+
+describe("buildHolisticDirectives with declutterMode (issue #559)", () => {
+  it("appends declutter directive when declutterMode is true (thematic variant)", () => {
+    const result = buildHolisticDirectives({
+      aesthetic: "Modern Farmhouse",
+      variant: "thematic",
+      declutterMode: true,
+      declutterIntensity: 3,
+    });
+    expect(result).toContain("Clear away clutter from surfaces and floors");
+  });
+
+  it("does NOT append declutter directive when declutterMode is false", () => {
+    const without = buildHolisticDirectives({
+      aesthetic: "Modern Farmhouse",
+      variant: "thematic",
+      declutterMode: false,
+    });
+    const withDefault = buildHolisticDirectives({
+      aesthetic: "Modern Farmhouse",
+      variant: "thematic",
+    });
+    expect(without).toBe(withDefault);
+    expect(without).not.toContain("bulky clutter");
+  });
+
+  it("appends declutter directive for architecture-first variant", () => {
+    const result = buildHolisticDirectives({
+      aesthetic: "Japandi",
+      variant: "architecture-first",
+      declutterMode: true,
+      declutterIntensity: 4,
+    });
+    expect(result).toContain("all clutter");
+    expect(result).toContain("non-essential items");
+  });
+
+  it("stays within the promptDirectives schema bound when declutter is enabled", () => {
+    const maxAesthetic = "x".repeat(200);
+    for (const variant of ["thematic", "architecture-first"] as const) {
+      const result = buildHolisticDirectives({
+        aesthetic: maxAesthetic,
+        variant,
+        declutterMode: true,
+        declutterIntensity: 5,
+      });
+      expect(result.length).toBeLessThanOrEqual(2000);
+      expect(result.length).toBeGreaterThanOrEqual(1);
+    }
   });
 });

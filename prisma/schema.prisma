@@ -34,10 +34,28 @@ model Project {
   clientName      String
   targetBuyer     String   // e.g. "young professional couple", "growing family"
   stagingAesthetic String  // e.g. "Organic Modern Luxury", "Warm Transitional"
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+
+  // ROI Metrics Dashboard (issue #552)
+  roiSalesPricePremium   String? // e.g. "+8–12%"
+  roiTransactionVelocity  String? // e.g. "24 Days"
+  roiInvestmentTier      String? // e.g. "$45,000"
+
+  stagingPackage   String? // e.g. "essential", "premium", "turnkey"
+  stagingDirectives String? // Issue #562: global project-wide AI staging directives
+  // Buyer Demographics JSON: buyer profile for AI copywriting + ROI metrics (issue #563)
+  // Shape: { buyerType, designPreferences[], budgetMin, budgetMax, mustHaveFeatures[], sellTimeline }
+  buyerDemographics Json?
+  // Client digital sign-off (issue #556)
+  clientSignature          String?   // PNG data URL of the signature
+  clientSignatureStatus    String?   // "Pending" | "Signed"
+  clientSignatureTimestamp  DateTime? // ISO 8601 timestamp of when signed
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   rooms Room[]
+  materialSwatches MaterialSwatch[]
+  procurementItems ProcurementItem[]
 }
 
 // Room model: a single room within a project
@@ -69,6 +87,7 @@ model Room {
   createdAt            DateTime @default(now())
 
   inpaintRequests InpaintRequest[]
+  inpaintVersions InpaintVersion[]
   selectionLogs  SelectionLog[]
 
   @@index([projectId])
@@ -92,6 +111,24 @@ model InpaintRequest {
   updatedAt   DateTime @updatedAt
 
   @@index([roomId])
+}
+
+// InpaintVersion model: version history for inpaint results (issue #561).
+// Tracks each completed inpaint run per variant slot so users can preview,
+// restore, and compare previous versions. Thumbnails are stored in Supabase
+// Storage; full images use the resultUrl (persisted in staging-images).
+model InpaintVersion {
+  id             String   @id @default(cuid())
+  roomId         String
+  room           Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  variantSlot    Int      // 0 or 1 — which "after" variant slot this version belongs to
+  resultUrl      String   // URL of the full-resolution image (from staging-images)
+  thumbnailUrl   String?  // URL of the low-res thumbnail in Supabase Storage
+  seed           String?  // fal.ai seed used for this run (for regeneration)
+  promptDirectives String? // The staging directives used for this run
+  createdAt      DateTime @default(now())
+
+  @@index([roomId, variantSlot, createdAt])
 }
 
 // VisionLabel model: caches GPT-4o-mini vision labels for detected instances
@@ -124,4 +161,42 @@ model SelectionLog {
   room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
 
   @@index([roomId, createdAt])
+}
+
+// MaterialSwatch model: finish and palette references displayed in the lookbook
+// (issue #553). Belongs to a project so swatches are shared across rooms.
+model MaterialSwatch {
+  id           String  @id @default(cuid())
+  projectId    String
+  project      Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name         String  // e.g. "White Oak", "Brushed Brass", "Cream Linen"
+  hexCode      String  // e.g. "#C8A882", "#B8860B"
+  materialType String  // e.g. "Hardwood", "Metal", "Fabric"
+  useCase     String  // e.g. "Flooring", "Hardware", "Textile"
+  vendor      String? // e.g. "Wayfair", "Sherwin-Williams"
+  sku         String? // e.g. "WF-HW-1234"
+  sortOrder   Int     @default(0)
+
+  @@index([projectId])
+}
+
+// ProcurementItem model: furniture procurement items for the lookbook's
+// Furniture Procurement Table (issue #554).
+model ProcurementItem {
+  id            String   @id @default(cuid())
+  projectId    String
+  project      Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  category     String  // e.g. "Seating", "Tables", "Lighting"
+  item         String  // e.g. "Sofa", "Dining Table", "Floor Lamp"
+  description  String?
+  status      String  // "needed" | "ordered" | "received"
+  sku         String?
+  estCost     Float?
+  vendor      String?
+  notes       String?
+  sortOrder   Int     @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([projectId])
 }

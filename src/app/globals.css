@@ -226,3 +226,34 @@
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
   background: white;
 }
+
+/* Issue #560: Zen Mode styles
+   Zen Mode hides all non-essential chrome and shows a full-viewport canvas
+   with a floating pill toolbar and subtle vignette. */
+.zen-mode-active {
+  cursor: default;
+}
+
+/* Vignette overlay — subtle darkening at canvas edges */
+.zen-mode-vignette::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 40;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 50%,
+    rgba(0, 0, 0, 0.18) 100%
+  );
+}
+
+/* Zen Mode dark background override for the inpaint canvas area */
+.zen-mode-dark {
+  background: #1c1917;
+}
+
+/* Zen Mode: hides all non-essential chrome when active */
+.zen-mode-hidden {
+  display: none !important;
+}

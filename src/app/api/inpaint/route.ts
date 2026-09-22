@@ -115,6 +115,8 @@ export async function POST(request: NextRequest) {
     const { imageUrl, maskUrl, promptDirectives, aesthetic, variantSlot, negativePrompt } =
       parsed.data;
     const sourceSlot = parsed.data.sourceSlot ?? null;
+    // Issue #558: AI guidance controls
+    const { promptStrength, maskBlur, seed, creativeMode } = parsed.data;
     roomId = parsed.data.roomId;
 
     const room = await prisma.room.findFirst({
@@ -153,7 +155,16 @@ export async function POST(request: NextRequest) {
     // instead of holding the request open for the full generation.
     const falQueueSubmit = fal.queue.submit as FalQueueSubmitFunction;
     const submission = await falQueueSubmit(FAL_FLUX_FILL_MODEL, {
-      input: buildFalFillPayload({ imageUrl, maskUrl, prompt, negativePrompt }),
+      input: buildFalFillPayload({
+        imageUrl,
+        maskUrl,
+        prompt,
+        negativePrompt,
+        promptStrength,
+        maskBlur,
+        seed,
+        creativeMode,
+      }),
     });
 
     // Persist the requestId → room mapping before responding so the status

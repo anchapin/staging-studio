@@ -1,5 +1,12 @@
-import { CoverPage, PhilosophyPage, RoomSpread, SignoffPage } from "@/components/lookbook";
-import type { ProjectData } from "@/components/lookbook";
+import {
+  CoverPage,
+  FurnitureProcurementTable,
+  PhilosophyPage,
+  ROIMetricsDashboard,
+  RoomSpread,
+  SignoffPage,
+} from "@/components/lookbook";
+import type { LookbookRoomData, MaterialSwatchData, ProjectData, ROIMetric } from "@/components/lookbook";
 import { parseChecklistItems } from "@/lib/checklist-schema";
 
 export interface PreviewRoom {
@@ -22,6 +29,12 @@ export interface PreviewProject {
   clientName: string;
   targetBuyer: string;
   stagingAesthetic: string;
+  /** ROI metrics from project settings. Null means use the dashboard's defaults. */
+  roiMetrics: ROIMetric[] | null;
+  /** Client sign-off (issue #556) */
+  clientSignature?: string | null;
+  clientSignatureStatus?: string | null;
+  clientSignatureTimestamp?: string | null;
   user: {
     firmName: string;
     ownerName: string;
@@ -30,6 +43,24 @@ export interface PreviewProject {
     signoffContent: string | null;
   };
   rooms: PreviewRoom[];
+  materialSwatches: MaterialSwatchData[];
+  procurementItems: PreviewProcurementItem[];
+}
+
+export interface PreviewProcurementItem {
+  id: string;
+  item: string;
+  category: string;
+  vendor: string | null;
+  sku: string | null;
+  estCost: number | null;
+  status: string;
+}
+
+interface LookbookPreviewViewProps {
+  project: PreviewProject;
+  /** Optional preview token — only set on the public preview page for client signing. */
+  previewToken?: string;
 }
 
 /**
@@ -37,14 +68,38 @@ export interface PreviewProject {
  * hooks, no client fetch): the page's server component loads the project
  * and passes it in, so the full lookbook markup is present in the initial
  * HTML response — required for the cookie-less Browserless PDF capture.
+ *
+ * When `previewToken` is provided AND the project is not yet signed, the
+ * interactive `SignoffPageClient` is rendered to allow the client to sign
+ * the lookbook. Otherwise the static `SignoffPage` (server component) is
+ * rendered for PDF export / print.
  */
-export function LookbookPreviewView({ project }: { project: PreviewProject }) {
+export function LookbookPreviewView({ project, previewToken }: LookbookPreviewViewProps) {
   const projectData: ProjectData = {
     propertyAddress: project.propertyAddress,
     clientName: project.clientName,
     targetBuyer: project.targetBuyer,
     stagingAesthetic: project.stagingAesthetic,
+    clientSignature: project.clientSignature,
+    clientSignatureStatus: project.clientSignatureStatus,
+    clientSignatureTimestamp: project.clientSignatureTimestamp
+      ? String(project.clientSignatureTimestamp)
+      : null,
   };
+
+  const signoffRooms: LookbookRoomData[] = project.rooms.map((room) => ({
+    id: room.id,
+    name: room.name,
+    beforeImageUrl: room.beforeImageUrl,
+    afterImageUrl: room.afterImageUrl,
+    beforeImageUrl2: room.beforeImageUrl2,
+    afterImageUrl2: room.afterImageUrl2,
+    project: projectData,
+    user: project.user,
+  }));
+
+  const isSigned = project.clientSignatureStatus === "Signed" && !!project.clientSignature;
+  const canSign = !!previewToken && !isSigned;
 
   return (
     <div className="lookbook-preview">
@@ -54,6 +109,10 @@ export function LookbookPreviewView({ project }: { project: PreviewProject }) {
 
       <div id="lookbook-philosophy">
         <PhilosophyPage project={projectData} user={project.user} />
+      </div>
+
+      <div id="lookbook-roi">
+        <ROIMetricsDashboard metrics={project.roiMetrics ?? undefined} />
       </div>
 
       {project.rooms.map((room) => (
@@ -82,22 +141,52 @@ export function LookbookPreviewView({ project }: { project: PreviewProject }) {
         </div>
       ))}
 
+      {project.procurementItems.length > 0 && (
+        <div id="lookbook-procurement">
+          <FurnitureProcurementTable items={project.procurementItems} />
+        </div>
+      )}
+
       <div id="lookbook-closing">
-        <SignoffPage
-          user={project.user}
-          project={projectData}
-          rooms={project.rooms.map((room) => ({
-            id: room.id,
-            name: room.name,
-            beforeImageUrl: room.beforeImageUrl,
-            afterImageUrl: room.afterImageUrl,
-            beforeImageUrl2: room.beforeImageUrl2,
-            afterImageUrl2: room.afterImageUrl2,
-            project: projectData,
-            user: project.user,
-          }))}
-        />
+        {canSign ? (
+          <SignoffPageWithSigning
+            user={project.user}
+            projectData={projectData}
+            signoffRooms={signoffRooms}
+            previewToken={previewToken}
+          />
+        ) : (
+          <SignoffPage
+            user={project.user}
+            project={projectData}
+            rooms={signoffRooms}
+          />
+        )}
       </div>
     </div>
+  );
+}
+
+// Lazy-loaded signing wrapper (client component)
+import { SignoffPageClient } from "@/components/lookbook/signoff-page-client";
+
+function SignoffPageWithSigning({
+  user,
+  projectData,
+  signoffRooms,
+  previewToken,
+}: {
+  user: LookbookPreviewViewProps["project"]["user"];
+  projectData: ProjectData;
+  signoffRooms: LookbookRoomData[];
+  previewToken: string;
+}) {
+  return (
+    <SignoffPageClient
+      user={user}
+      project={projectData}
+      rooms={signoffRooms}
+      previewToken={previewToken}
+    />
   );
 }
