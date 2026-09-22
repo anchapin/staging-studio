@@ -21,6 +21,14 @@ import { fillHoles } from "@/lib/mask-postprocess";
 /** Tools for building the mask: freehand paint, flood-fill, or concept select. */
 export type MaskTool = "brush" | "fill" | "select";
 
+/** Issue #591: a copied mask region — stored as an RGBA ImageData snapshot. */
+export interface CopiedMaskRegion {
+  /** Snapshot of the selected rectangle at canvas (logical) resolution. */
+  imageData: ImageData;
+  /** Bounding box in logical canvas pixels. */
+  bounds: { x: number; y: number; width: number; height: number };
+}
+
 /**
  * Issue #549: Atelier Canvas spec mask overlay colors.
  * Electric emerald for mask overlay on canvas, with laser-rim 1px solid border
@@ -250,6 +258,13 @@ export default function InpaintMaskCanvas({
   const [hasPainted, setHasPainted] = useState(false);
   const [lowCoverage, setLowCoverage] = useState(false);
 
+  // Issue #591: copy-paste mask state
+  const [copiedMask, setCopiedMask] = useState<CopiedMaskRegion | null>(null);
+  const [selectionRect, setSelectionRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [isSelecting, setIsSelecting] = useState(false);
+  const selectionStartRef = useRef<{ x: number; y: number } | null>(null);
+  const [pastePreview, setPastePreview] = useState<{ x: number; y: number; mirrored: boolean } | null>(null);
+
   // Keyboard painting: the virtual brush cursor lives in canvas pixel space
   // (the same space clientPointToCanvas produces) so arrow-key deltas scale
   // with the canvas resolution, not with client pixels.
@@ -439,6 +454,111 @@ export default function InpaintMaskCanvas({
     }
     ctx.globalAlpha = 1;
   }, [instanceOverlays, overlayTick, dims.width, dims.height]);
+
+  // Issue #591: render the copy-paste selection rectangle and paste preview
+  // on the overlay canvas (above instance overlays, below the interactive canvas).
+  useEffect(() => {
+    const overlayCanvas = overlayCanvasRef.current;
+    const ctx = overlayCanvas?.getContext("2d");
+    if (!overlayCanvas || !ctx) return;
+    // Always clear first — we redraw the full overlay stack on every change
+    ctx.clearRect(0, 0, dims.width, dims.height);
+
+    // Re-draw instance overlays so the selection/preview sits above them
+    const cache = instanceImageCacheRef.current;
+    if (instanceOverlays && instanceOverlays.length > 0) {
+      for (const overlay of instanceOverlays) {
+        const img = cache.get(overlay.maskDataUrl);
+        if (!img || !img.complete || !img.naturalWidth) continue;
+        const paletteColor =
+          INSTANCE_OVERLAY_PALETTE[
+            (overlay.selected && overlay.colorIndex !== undefined
+              ? overlay.colorIndex
+              : overlay.rank) % INSTANCE_OVERLAY_PALETTE.length
+          ];
+        const tinted = document.createElement("canvas");
+        tinted.width = dims.width;
+        tinted.height = dims.height;
+        const tintedCtx = tinted.getContext("2d");
+        if (!tintedCtx) continue;
+        tintedCtx.drawImage(img, 0, 0, dims.width, dims.height);
+        const tintedData = paintMaskPixels(
+          tintedCtx.getImageData(0, 0, dims.width, dims.height).data,
+          dims.width,
+          dims.height,
+          { maskedColor: paletteColor, transparentBackground: true }
+        );
+        tintedCtx.putImageData(
+          new ImageData(new Uint8ClampedArray(tintedData), dims.width, dims.height),
+          0,
+          0
+        );
+        ctx.globalAlpha = overlay.selected ? SELECTED_FILL_ALPHA : DETECTED_WASH_ALPHA;
+        ctx.drawImage(tinted, 0, 0);
+        if (!overlay.selected) {
+          const outlineData = extractMaskOutline(tintedData, dims.width, dims.height, {
+            outlineColor: paletteColor,
+          });
+          const outlined = document.createElement("canvas");
+          outlined.width = dims.width;
+          outlined.height = dims.height;
+          const outlinedCtx = outlined.getContext("2d");
+          if (!outlinedCtx) continue;
+          outlinedCtx.putImageData(
+            new ImageData(new Uint8ClampedArray(outlineData), dims.width, dims.height),
+            0,
+            0
+          );
+          ctx.globalAlpha = 1;
+          ctx.drawImage(outlined, 0, 0);
+        }
+      }
+    }
+
+    // Issue #591: paste preview — draw the copied mask region at the cursor
+    // position as a faint preview, using a distinct amber tint.
+    if (pastePreview && copiedMask) {
+      const { imageData, bounds } = copiedMask;
+      const previewCanvas = document.createElement("canvas");
+      previewCanvas.width = bounds.width;
+      previewCanvas.height = bounds.height;
+      const previewCtx = previewCanvas.getContext("2d");
+      if (previewCtx) {
+        previewCtx.putImageData(imageData, 0, 0);
+        if (pastePreview.mirrored) {
+          ctx.save();
+          ctx.translate(pastePreview.x + bounds.width, pastePreview.y);
+          ctx.scale(-1, 1);
+          ctx.globalAlpha = 0.45;
+          ctx.drawImage(previewCanvas, 0, 0);
+          ctx.restore();
+        } else {
+          ctx.globalAlpha = 0.45;
+          ctx.drawImage(previewCanvas, pastePreview.x, pastePreview.y);
+        }
+        // Amber dashed border to indicate preview
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = "#FFB800";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 4]);
+        ctx.strokeRect(pastePreview.x, pastePreview.y, bounds.width, bounds.height);
+        ctx.setLineDash([]);
+      }
+    }
+
+    // Issue #591: selection rectangle — electric cyan dashed border
+    if (selectionRect) {
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = "rgba(0, 245, 160, 0.08)";
+      ctx.fillRect(selectionRect.x, selectionRect.y, selectionRect.width, selectionRect.height);
+      ctx.strokeStyle = "#00F5A0";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 4]);
+      ctx.strokeRect(selectionRect.x, selectionRect.y, selectionRect.width, selectionRect.height);
+      ctx.setLineDash([]);
+    }
+    ctx.globalAlpha = 1;
+  }, [selectionRect, pastePreview, copiedMask, instanceOverlays, overlayTick, dims.width, dims.height]);
 
 
   // Latest initial mask without making initCanvas depend on it — re-running
@@ -716,12 +836,86 @@ export default function InpaintMaskCanvas({
     return true;
   };
 
+  // Issue #591: track initial mouse position to distinguish click from drag
+  const selectionDragStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Issue #591: copy selected mask region to clipboard state
+  const performCopy = useCallback(() => {
+    if (!selectionRect) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const { x, y, width, height } = selectionRect;
+    const imageData = ctx.getImageData(
+      Math.round(x * backing.width / dims.width),
+      Math.round(y * backing.height / dims.height),
+      Math.max(1, Math.round(width * backing.width / dims.width)),
+      Math.max(1, Math.round(height * backing.height / dims.height))
+    );
+    setCopiedMask({ imageData, bounds: { x, y, width, height } });
+    setPastePreview(null);
+  }, [selectionRect, backing, dims]);
+
+  // Issue #591: paste copied mask region at cursor (optionally mirrored)
+  const performPaste = useCallback((mirrored: boolean) => {
+    if (!copiedMask) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const undoState = captureUndoState();
+    if (undoState !== null) {
+      setUndoStack((prev) => [...prev, undoState]);
+    }
+
+    const { imageData, bounds } = copiedMask;
+    const pasteX = pastePreview?.x ?? (cursor?.x ?? bounds.x);
+    const pasteY = pastePreview?.y ?? (cursor?.y ?? bounds.y);
+
+    const pasteCanvas = document.createElement("canvas");
+    pasteCanvas.width = bounds.width;
+    pasteCanvas.height = bounds.height;
+    const pasteCtx = pasteCanvas.getContext("2d");
+    if (!pasteCtx) return;
+    pasteCtx.putImageData(imageData, 0, 0);
+
+    // getImageData/putImageData operate in PHYSICAL pixel space (issue #181)
+    const physicalPasteX = Math.round(pasteX * backing.width / dims.width);
+    const physicalPasteY = Math.round(pasteY * backing.height / dims.height);
+    const physicalWidth = Math.round(bounds.width * backing.width / dims.width);
+    const physicalHeight = Math.round(bounds.height * backing.height / dims.height);
+
+    if (mirrored) {
+      ctx.save();
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(pasteCanvas, 0, 0, pasteCanvas.width, pasteCanvas.height,
+        canvas.width - physicalPasteX - physicalWidth, physicalPasteY,
+        physicalWidth, physicalHeight);
+      ctx.restore();
+    } else {
+      ctx.drawImage(pasteCanvas, 0, 0, pasteCanvas.width, pasteCanvas.height,
+        physicalPasteX, physicalPasteY, physicalWidth, physicalHeight);
+    }
+
+    setHasPainted(true);
+    setPastePreview(null);
+    exportMaskRef.current();
+  }, [copiedMask, pastePreview, cursor, backing, dims, captureUndoState]);
+
   const handleStart = (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
     const point = getCoordinates(e);
     if (!point) return;
     if (activeTool === "select") {
-      handleInstanceClick(point);
+      // Issue #591: start selection drag — store start point; handleMove
+      // upgrades this to a real selection rect once movement is detected.
+      selectionDragStartRef.current = point;
+      setIsSelecting(true);
+      selectionStartRef.current = point;
+      setPastePreview(null);
       return;
     }
     if (activeTool === "fill") {
@@ -758,9 +952,26 @@ export default function InpaintMaskCanvas({
 
   const handleMove = (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
-    if (!isDrawing || !lastPointRef.current) return;
     const point = getCoordinates(e);
     if (!point) return;
+
+    // Issue #591: selection dragging — update rect and paste preview
+    if (isSelecting && selectionStartRef.current) {
+      const start = selectionStartRef.current;
+      setSelectionRect({
+        x: start.x,
+        y: start.y,
+        width: point.x - start.x,
+        height: point.y - start.y,
+      });
+      if (copiedMask) {
+        setPastePreview({ x: point.x - copiedMask.bounds.width / 2, y: point.y - copiedMask.bounds.height / 2, mirrored: false });
+      }
+      return;
+    }
+
+    // Brush painting
+    if (!isDrawing || !lastPointRef.current) return;
     draw(lastPointRef.current, point);
     lastPointRef.current = point;
   };
@@ -770,6 +981,31 @@ export default function InpaintMaskCanvas({
       setIsDrawing(false);
       lastPointRef.current = null;
       exportMask();
+    }
+    // Issue #591: finalize selection rectangle
+    if (isSelecting) {
+      setIsSelecting(false);
+      const startPoint = selectionDragStartRef.current;
+      selectionDragStartRef.current = null;
+      // Normalize rect so width/height are always positive
+      if (selectionRect) {
+        const normalized = {
+          x: selectionRect.width < 0 ? selectionRect.x + selectionRect.width : selectionRect.x,
+          y: selectionRect.height < 0 ? selectionRect.y + selectionRect.height : selectionRect.y,
+          width: Math.abs(selectionRect.width),
+          height: Math.abs(selectionRect.height),
+        };
+        // Tiny movement = treat as an instance click (issue #228) if overlays exist;
+        // otherwise treat as a cancelled selection.
+        if (normalized.width <= 3 && normalized.height <= 3 && startPoint) {
+          if (instanceOverlays && instanceOverlays.length > 0) {
+            handleInstanceClick(startPoint);
+          }
+          setSelectionRect(null);
+        } else {
+          setSelectionRect(normalized.width > 2 && normalized.height > 2 ? normalized : null);
+        }
+      }
     }
   };
 
@@ -861,6 +1097,12 @@ export default function InpaintMaskCanvas({
       setLowCoverage(shouldWarnLowCoverage(coverage));
     }
   }, [naturalWidth, naturalHeight, onMaskChange, expansionRadius, includeFloorShadow, dims.width, dims.height]);
+
+  // Keep a ref to the latest exportMask so copy/paste callbacks don't go stale
+  const exportMaskRef = useRef(exportMask);
+  useEffect(() => {
+    exportMaskRef.current = exportMask;
+  }, [exportMask]);
 
   // Re-export when the expansion radius changes so the dispatched mask
   // always reflects the current dilation setting (issue #180). Refs keep the
@@ -1023,6 +1265,33 @@ export default function InpaintMaskCanvas({
   };
 
   const handleCanvasKeyDown = (e: React.KeyboardEvent<HTMLCanvasElement>) => {
+    // Issue #591: copy mask selection
+    if ((e.metaKey || e.ctrlKey) && e.key === "c") {
+      e.preventDefault();
+      if (selectionRect) performCopy();
+      return;
+    }
+
+    // Issue #591: paste mask (normal)
+    if ((e.metaKey || e.ctrlKey) && e.key === "v" && !e.shiftKey) {
+      e.preventDefault();
+      if (copiedMask) {
+        performPaste(false);
+        setPastePreview(null);
+      }
+      return;
+    }
+
+    // Issue #591: mirror-paste mask
+    if ((e.metaKey || e.ctrlKey) && e.key === "v" && e.shiftKey) {
+      e.preventDefault();
+      if (copiedMask) {
+        performPaste(true);
+        setPastePreview(null);
+      }
+      return;
+    }
+
     // Issue #378: Cmd/Ctrl+Z for undo
     if ((e.metaKey || e.ctrlKey) && e.key === "z") {
       e.preventDefault();
@@ -1455,6 +1724,18 @@ export default function InpaintMaskCanvas({
             <div className="flex items-center gap-2">
               <dt className="font-mono text-atelier-taupe">+ / -</dt>
               <dd>Brush size</dd>
+            </div>
+            <div className="flex items-center gap-2">
+              <dt className="font-mono text-atelier-taupe">Cmd / Ctrl + C</dt>
+              <dd>Copy mask selection</dd>
+            </div>
+            <div className="flex items-center gap-2">
+              <dt className="font-mono text-atelier-taupe">Cmd / Ctrl + V</dt>
+              <dd>Paste mask</dd>
+            </div>
+            <div className="flex items-center gap-2">
+              <dt className="font-mono text-atelier-taupe">Cmd / Ctrl + Shift + V</dt>
+              <dd>Mirror-paste mask</dd>
             </div>
           </dl>
         </div>

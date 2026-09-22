@@ -2,6 +2,7 @@ import {
   BuyerPersonaPage,
   CoverPage,
   FurnitureProcurementTable,
+  InvestmentSummaryPage,
   PhilosophyPage,
   ROIMetricsDashboard,
   RoomSpread,
@@ -32,6 +33,8 @@ export interface PreviewProject {
   stagingAesthetic: string;
   /** ROI metrics from project settings. Null means use the dashboard's defaults. */
   roiMetrics: ROIMetric[] | null;
+  /** Selected staging package tier id, e.g. "essential" | "premium" | "turnkey" */
+  stagingPackage?: string | null;
   /** Client sign-off (issue #556) */
   clientSignature?: string | null;
   clientSignatureStatus?: string | null;
@@ -127,6 +130,13 @@ export function LookbookPreviewView({ project, previewToken }: LookbookPreviewVi
           />
         </div>
       )}
+
+      <div id="lookbook-investment-summary">
+        <InvestmentSummaryPage
+          stagingPackageId={project.stagingPackage}
+          roomCount={project.rooms.length}
+        />
+      </div>
 
       {project.rooms.map((room) => (
         <div key={room.id} id={`lookbook-room-${room.id}`}>
