@@ -2,7 +2,10 @@ export interface CopyPromptInput {
   roomName: string;
   aesthetic: string;
   targetBuyer: string;
+  /** Room-specific directives (override or supplement global directives). */
   rawDirectives: string;
+  /** Issue #562: Global project-level directives applied to every room. */
+  globalDirectives?: string;
 }
 
 export const NEGATIVE_PROMPT =
@@ -48,6 +51,26 @@ export type FalFillPayload = {
 }
 
 /**
+ * Issue #562: Merges global project directives with room-specific directives.
+ * Room directives take precedence; global directives fill in gaps.
+ * Empty global directives → returns room directives verbatim.
+ * Both empty → returns "Per room requirements".
+ */
+export function mergeDirectives(
+  globalDirectives: string | null | undefined,
+  roomDirectives: string | null | undefined
+): string {
+  const global = (globalDirectives ?? "").trim();
+  const room = (roomDirectives ?? "").trim();
+
+  if (!global && !room) return "";
+  if (!global) return room;
+  if (!room) return global;
+  // Both present: room builds on global (global first, room supplements)
+  return `${global}\n\nRoom-specific: ${room}`;
+}
+
+/**
  * Builds the gpt-4o-mini copywriting prompt sent to `generateObject` in
  * `api/generate-copy`.
  *
@@ -57,7 +80,10 @@ export type FalFillPayload = {
  * Side effects: none (pure).
  */
 export function buildCopyPrompt(input: CopyPromptInput): string {
-  const { roomName, aesthetic, targetBuyer, rawDirectives } = input;
+  const { roomName, aesthetic, targetBuyer, rawDirectives, globalDirectives } = input;
+
+  // Issue #562: merge global + room directives
+  const mergedDirectives = mergeDirectives(globalDirectives, rawDirectives);
 
   return `You are a professional home staging copywriter for a staging company.
 
@@ -65,7 +91,7 @@ Generate structured copywriting for a room with the following details:
 - Room: ${roomName}
 - Design Aesthetic: ${aesthetic}
 - Target Buyer: ${targetBuyer}
-- Staging Directives: ${rawDirectives}
+- Staging Directives: ${mergedDirectives}
 
 Based on the room details and staging directives, generate:
 1. **observedChallenge**: Describe the key staging challenge or opportunity observed in this room

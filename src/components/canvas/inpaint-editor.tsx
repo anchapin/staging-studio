@@ -69,7 +69,10 @@ interface InpaintEditorProps {
   /** The resolved source image the mask applies to (before photo or staged variant). */
   imageUrl: string;
   aesthetic: string;
+  /** Room-specific staging directives (displayed in textarea, merged with global for AI). */
   promptDirectives: string;
+  /** Issue #562: Global project-level directives merged with room directives for AI. */
+  globalDirectives?: string;
   /** The "after" slot this run's result will land in (resolved by the parent). */
   variantSlot: 0 | 1;
   /** Currently selected source; the parent owns this state (issue #170). */
@@ -413,6 +416,7 @@ export default function InpaintEditor({
   imageUrl,
   aesthetic,
   promptDirectives,
+  globalDirectives = "",
   variantSlot,
   source,
   sourceOptions,
@@ -1139,13 +1143,28 @@ export default function InpaintEditor({
   // for the strategy-generated ones. Batch steps pass `sourceUrl` (the
   // previous step's persisted result) so per-object results stack into the
   // same variant slot; omitted = the editor's current source image.
+  // Issue #562: globalDirectives are merged with room directives for AI prompts.
   const beginInpaintRun = useCallback(
     async (run: {
       maskUrl: string;
       promptDirectives: string;
       negativePrompt?: string;
       sourceUrl?: string;
+      globalDirectives?: string;
     }) => {
+      // Issue #562: merge global + room directives for AI
+      const mergedDirectives = (() => {
+        const global = (run.globalDirectives ?? globalDirectives ?? "").trim();
+        const room = run.promptDirectives.trim();
+        if (!global) return room;
+        if (!room) return global;
+        return `${global}\n\nRoom-specific: ${room}`;
+      })();
+
+      if (!mergedDirectives) {
+        showError("No staging directives available.");
+        return;
+      }
       if (!imageUrl) {
         showError("No image available to edit.");
         return;
@@ -1165,7 +1184,7 @@ export default function InpaintEditor({
           body: JSON.stringify({
             imageUrl: run.sourceUrl ?? imageUrl,
             maskUrl: run.maskUrl,
-            promptDirectives: run.promptDirectives,
+            promptDirectives: mergedDirectives,
             negativePrompt: run.negativePrompt,
             aesthetic,
             roomId,
@@ -1184,7 +1203,7 @@ export default function InpaintEditor({
         return startData.requestId as string;
       });
     },
-    [imageUrl, aesthetic, roomId, variantSlot, source, start, showError]
+    [imageUrl, aesthetic, roomId, variantSlot, source, start, showError, globalDirectives]
   );
 
   const handleInpaint = useCallback(async () => {
@@ -1198,8 +1217,8 @@ export default function InpaintEditor({
       return;
     }
 
-    await beginInpaintRun({ maskUrl: maskDataUrl, promptDirectives });
-  }, [maskDataUrl, promptDirectives, beginInpaintRun, showError]);
+    await beginInpaintRun({ maskUrl: maskDataUrl, promptDirectives, globalDirectives });
+  }, [maskDataUrl, promptDirectives, beginInpaintRun, showError, globalDirectives]);
 
   // Holistic spike entry (issue #190): the panel builds the full-room
   // mask + aesthetic-derived directives; this just forwards them into
@@ -1251,6 +1270,7 @@ export default function InpaintEditor({
             maskUrl: plan.steps[index].maskDataUrl,
             promptDirectives: plan.steps[index].promptDirectives,
             sourceUrl,
+            globalDirectives,
           });
 
           const outcome = batchOutcomeRef.current;
@@ -1287,7 +1307,7 @@ export default function InpaintEditor({
         batchActiveRef.current = false;
       }
     },
-    [beginInpaintRun, showSuccess]
+    [beginInpaintRun, showSuccess, globalDirectives]
   );
 
   // Issue #203: batch entry point from the panel. Builds the validated
@@ -1312,6 +1332,7 @@ export default function InpaintEditor({
         void beginInpaintRun({
           maskUrl: plan.maskDataUrl,
           promptDirectives: plan.promptDirectives,
+          globalDirectives,
         }).then(() => {
           // A thematic batch is one ordinary run — consume the selection
           // set only when it actually completed (outcome ref is set by
@@ -1326,7 +1347,7 @@ export default function InpaintEditor({
       }
       void runPerObjectBatch(plan);
     },
-    [batchSelections, unionMaskDataUrl, beginInpaintRun, runPerObjectBatch, showError]
+    [batchSelections, unionMaskDataUrl, beginInpaintRun, runPerObjectBatch, showError, globalDirectives]
   );
 
   const handleBatchRetry = useCallback(() => {

@@ -105,7 +105,13 @@ export async function POST(request: NextRequest) {
     const room = await prisma.room.findFirst({
       where: { id: roomId, project: { userId: user.id } },
       include: {
-        project: { select: { stagingAesthetic: true, targetBuyer: true } },
+        project: {
+          select: {
+            stagingAesthetic: true,
+            targetBuyer: true,
+            stagingDirectives: true,
+          },
+        },
       },
     });
     if (!room) {
@@ -119,13 +125,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!room.rawDirectives?.trim()) {
+    // Issue #562: allow copy generation if either room or global directives exist
+    const hasDirectives =
+      room.rawDirectives?.trim() || room.project.stagingDirectives?.trim();
+    if (!hasDirectives) {
       return NextResponse.json(
         {
           success: false,
           error: "Missing staging directives",
           message:
-            "This room has no staging directives yet. Add directives before generating copy.",
+            "Add staging directives at the project or room level before generating copy.",
         },
         { status: 400 }
       );
@@ -138,7 +147,8 @@ export async function POST(request: NextRequest) {
         roomName: room.name,
         aesthetic: room.project.stagingAesthetic,
         targetBuyer: room.project.targetBuyer,
-        rawDirectives: room.rawDirectives,
+        rawDirectives: room.rawDirectives ?? "",
+        globalDirectives: room.project.stagingDirectives ?? undefined,
       }),
     });
 

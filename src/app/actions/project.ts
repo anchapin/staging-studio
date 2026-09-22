@@ -23,7 +23,7 @@ import { revalidatePath } from "next/cache";
  *
  * @param projectId ID of the project to update.
  * @param metadata Partial fields: `propertyAddress`, `clientName`,
- *   `targetBuyer`, and/or `stagingAesthetic`.
+ *   `targetBuyer`, `stagingAesthetic`, and/or `stagingDirectives`.
  * @returns `{ success: true }` on write, or
  *   `{ success: false, error }` when unauthenticated or the update fails.
  */
@@ -34,6 +34,7 @@ export async function saveProjectMetadata(
     clientName?: string;
     targetBuyer?: string;
     stagingAesthetic?: string;
+    stagingDirectives?: string;
   }
 ): Promise<{ success: boolean; error?: string }> {
   const user = await getAuthedPrismaUser();
