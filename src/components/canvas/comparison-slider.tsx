@@ -30,6 +30,10 @@ export default function ComparisonSlider({
   const [sliderPosition, setSliderPosition] = useState(50);
   const [isDragging, setIsDragging] = useState(false);
   const [containerRect, setContainerRect] = useState<DOMRect | null>(null);
+  const [imageAspect, setImageAspect] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const imageSizes = largeImage ? FOCUSED_IMAGE_SIZES : GRID_IMAGE_SIZES;
@@ -45,6 +49,21 @@ export default function ComparisonSlider({
     window.addEventListener("resize", updateRect);
     return () => window.removeEventListener("resize", updateRect);
   }, [updateRect]);
+
+  // Measure the photo once it loads so the frame adapts to its aspect ratio
+  // instead of forcing a fixed 16/9 letterbox (issue #542).
+  useEffect(() => {
+    const img = new window.Image();
+    img.onload = () => {
+      if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+        setImageAspect({ width: img.naturalWidth, height: img.naturalHeight });
+      }
+    };
+    img.src = beforeImageUrl;
+    return () => {
+      img.onload = null;
+    };
+  }, [beforeImageUrl]);
 
   const handleMove = useCallback(
     (clientX: number) => {
@@ -118,7 +137,11 @@ export default function ComparisonSlider({
     <div
       ref={containerRef}
       className="relative w-full overflow-hidden rounded-lg border border-stone-200 bg-stone-100 select-none"
-      style={{ aspectRatio: "16/9" }}
+      style={
+        imageAspect
+          ? { aspectRatio: `${imageAspect.width} / ${imageAspect.height}` }
+          : undefined
+      }
       role="slider"
       tabIndex={0}
       aria-label="Before and after comparison slider"
