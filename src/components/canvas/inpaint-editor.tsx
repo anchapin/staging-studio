@@ -13,6 +13,9 @@ import { useToast, ToastContainer } from "@/components/ui/toast";
 import { Info, Loader2, Maximize2, Minimize2 } from "lucide-react";
 import { useInpaintStatus } from "./use-inpaint-status";
 import ZenModeToolbar from "./zen-mode-toolbar";
+import FloatingToolDock from "./floating-tool-dock";
+import BrushParameterFlyout from "./brush-parameter-flyout";
+import ZoomHUD from "./zoom-hud";
 import {
   entireRoomTabVisible,
   inpaintSourceLabel,
@@ -469,6 +472,14 @@ export default function InpaintEditor({
   // Issue #560: lifted brush state — shared between InpaintMaskCanvas and ZenModeToolbar.
   const [zenBrushSize, setZenBrushSize] = useState(20);
   const [zenActiveTool, setZenActiveTool] = useState<MaskTool>("brush");
+
+  // Issue #551: floating tool dock state (active when NOT in zen mode)
+  const [activeMaskTool, setActiveMaskTool] = useState<MaskTool>("brush");
+  const [brushRadius, setBrushRadius] = useState(20);
+  const [edgeSoftness, setEdgeSoftness] = useState(5);
+  const [maskOpacity, setMaskOpacity] = useState(0.8);
+  const [zoomLevel, setZoomLevel] = useState(1.0);
+  const [showBrushFlyout, setShowBrushFlyout] = useState(false);
 
   // Issue #561: tracks the active result URL for the version history panel.
   // Updated on inpaint completion; also initialized from prop when provided.
@@ -1617,10 +1628,10 @@ export default function InpaintEditor({
           onMaskCleared={handleMaskCleared}
           onSelectionDeselect={handleRemoveSelection}
           zenMode={zenMode}
-          brushSize={zenMode ? zenBrushSize : undefined}
-          onBrushSizeChange={zenMode ? setZenBrushSize : undefined}
-          activeTool={zenMode ? zenActiveTool : undefined}
-          onActiveToolChange={zenMode ? setZenActiveTool : undefined}
+          brushSize={zenMode ? zenBrushSize : brushRadius}
+          onBrushSizeChange={zenMode ? setZenBrushSize : setBrushRadius}
+          activeTool={zenMode ? zenActiveTool : activeMaskTool}
+          onActiveToolChange={zenMode ? setZenActiveTool : setActiveMaskTool}
         />
 
         {/* Issue #560: expand selection and floor shadow controls hidden in Zen Mode */}
@@ -2164,6 +2175,40 @@ export default function InpaintEditor({
             Clear
           </button>
         </ZenModeToolbar>
+      )}
+
+      {/* Issue #551: Floating Tool Dock — shown when NOT in Zen Mode */}
+      {!zenMode && (
+        <FloatingToolDock
+          activeTool={activeMaskTool}
+          onToolChange={(tool) => {
+            setActiveMaskTool(tool);
+            if (tool === "brush") setShowBrushFlyout(true);
+          }}
+        />
+      )}
+
+      {/* Issue #551: Brush Parameter Flyout — shown when brush tool is active */}
+      {!zenMode && activeMaskTool === "brush" && (
+        <BrushParameterFlyout
+          brushRadius={brushRadius}
+          edgeSoftness={edgeSoftness}
+          maskOpacity={maskOpacity}
+          onBrushRadiusChange={(v) => { setBrushRadius(v); setShowBrushFlyout(true); }}
+          onEdgeSoftnessChange={(v) => { setEdgeSoftness(v); setShowBrushFlyout(true); }}
+          onMaskOpacityChange={(v) => { setMaskOpacity(v); setShowBrushFlyout(true); }}
+          onClose={() => setShowBrushFlyout(false)}
+        />
+      )}
+
+      {/* Issue #551: Zoom HUD — shown when NOT in Zen Mode */}
+      {!zenMode && (
+        <ZoomHUD
+          zoomLevel={zoomLevel}
+          onZoomIn={() => setZoomLevel((z) => Math.min(z + 0.1, 3))}
+          onZoomOut={() => setZoomLevel((z) => Math.max(z - 0.1, 0.25))}
+          onFitToCanvas={() => setZoomLevel(1.0)}
+        />
       )}
     </div>
   );
