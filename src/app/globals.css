@@ -509,3 +509,20 @@ button .material-symbols-outlined,
 .animate-chip-flash {
   animation: chipFlash 0.08s ease-out;
 }
+
+/* Issue #623: Comparison slider tooltip — appears at low opacity then fades out */
+@keyframes tooltipFade {
+  0% {
+    opacity: 0.1;
+  }
+  20% {
+    opacity: 0.1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.animate-tooltip-fade {
+  animation: tooltipFade 2s ease-out forwards;
+}

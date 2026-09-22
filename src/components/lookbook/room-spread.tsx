@@ -8,6 +8,7 @@ import {
 } from "@/lib/staged-result";
 import { LookbookRoomData, ChecklistItem } from "./types";
 import { ComparisonPill } from "@/components/canvas/comparison-pill";
+import ComparisonSlider from "@/components/canvas/comparison-slider";
 
 const PRIORITY_STYLES: Record<ChecklistItem["priority"], string> = {
   Critical: "border-primary bg-primary/10",
@@ -17,7 +18,7 @@ const PRIORITY_STYLES: Record<ChecklistItem["priority"], string> = {
 
 // Standalone /preview route: no dashboard sidebar — spreads span the full
 // viewport width.
-const SPREAD_IMAGE_SIZES = "calc(100vw / 2)";
+const SPREAD_IMAGE_SIZES = "(max-width: 767px) 100vw, 50vw";
 
 interface RoomSpreadProps {
   room: LookbookRoomData;
@@ -61,48 +62,64 @@ export function RoomSpread({ room, project }: RoomSpreadProps) {
         </div>
       </div>
 
-      <div className="avoid-break flex-1 grid grid-cols-2 gap-0">
-        <div className="relative aspect-[4/3] bg-muted">
-          {beforeImageUrl ? (
-            <Image
-              src={beforeImageUrl}
-              alt={`${room.name} - Before staging`}
-              fill
-              sizes={SPREAD_IMAGE_SIZES}
-              loading="eager"
-              className="object-cover"
+      <div className="avoid-break flex-1">
+        {beforeImageUrl && afterImageUrl ? (
+          // Issue #623: interactive comparison slider with hover mode, reveal animation,
+          // drag tooltip, and mobile progress bar.
+          <div className="relative aspect-[3/2] bg-muted">
+            <ComparisonSlider
+              beforeImageUrl={beforeImageUrl}
+              afterImageUrl={afterImageUrl}
+              beforeAlt={`${room.name} - Before staging`}
+              afterAlt={`${room.name} - After staging`}
+              afterLabel="After"
+              report
             />
-          ) : (
-            <div className="flex items-center justify-center h-full">
-              <p className="font-jakarta text-muted-foreground">Before</p>
-            </div>
-          )}
-          {/* Issue #644: ComparisonPill — report variant, top-left positioned */}
-          <div className="absolute left-3 top-3 pointer-events-none">
-            <ComparisonPill variant="report">Before</ComparisonPill>
           </div>
-        </div>
+        ) : (
+          // Fallback: static before/after when one image is missing
+          <div className="avoid-break flex-1 grid grid-cols-2 gap-0">
+            <div className="relative aspect-[4/3] bg-muted">
+              {beforeImageUrl ? (
+                <Image
+                  src={beforeImageUrl}
+                  alt={`${room.name} - Before staging`}
+                  fill
+                  sizes={SPREAD_IMAGE_SIZES}
+                  loading="eager"
+                  className="object-cover"
+                />
+              ) : (
+                <div className="flex items-center justify-center h-full">
+                  <p className="font-jakarta text-muted-foreground">Before</p>
+                </div>
+              )}
+              <div className="absolute left-3 top-3 pointer-events-none">
+                <ComparisonPill variant="report">Before</ComparisonPill>
+              </div>
+            </div>
 
-        <div className="relative aspect-[4/3] bg-muted">
-          {afterImageUrl ? (
-            <Image
-              src={afterImageUrl}
-              alt={`${room.name} - After staging`}
-              fill
-              sizes={SPREAD_IMAGE_SIZES}
-              loading="eager"
-              className="object-cover"
-            />
-          ) : (
-            <div className="flex items-center justify-center h-full">
-              <p className="font-jakarta text-muted-foreground">After</p>
+            <div className="relative aspect-[4/3] bg-muted">
+              {afterImageUrl ? (
+                <Image
+                  src={afterImageUrl}
+                  alt={`${room.name} - After staging`}
+                  fill
+                  sizes={SPREAD_IMAGE_SIZES}
+                  loading="eager"
+                  className="object-cover"
+                />
+              ) : (
+                <div className="flex items-center justify-center h-full">
+                  <p className="font-jakarta text-muted-foreground">After</p>
+                </div>
+              )}
+              <div className="absolute right-3 top-3 pointer-events-none">
+                <ComparisonPill variant="after">After</ComparisonPill>
+              </div>
             </div>
-          )}
-          {/* Issue #644: ComparisonPill — after variant (terracotta), top-right positioned */}
-          <div className="absolute right-3 top-3 pointer-events-none">
-            <ComparisonPill variant="after">After</ComparisonPill>
           </div>
-        </div>
+        )}
       </div>
 
       <div className="avoid-break p-8 bg-white border-t border-border">
