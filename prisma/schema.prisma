@@ -38,6 +38,7 @@ model Project {
   updatedAt       DateTime @updatedAt
 
   rooms Room[]
+  materialSwatches MaterialSwatch[]
 }
 
 // Room model: a single room within a project
@@ -124,4 +125,21 @@ model SelectionLog {
   room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
 
   @@index([roomId, createdAt])
+}
+
+// MaterialSwatch model: finish and palette references displayed in the lookbook
+// (issue #553). Belongs to a project so swatches are shared across rooms.
+model MaterialSwatch {
+  id           String  @id @default(cuid())
+  projectId    String
+  project      Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name         String  // e.g. "White Oak", "Brushed Brass", "Cream Linen"
+  hexCode      String  // e.g. "#C8A882", "#B8860B"
+  materialType String  // e.g. "Hardwood", "Metal", "Fabric"
+  useCase     String  // e.g. "Flooring", "Hardware", "Textile"
+  vendor      String? // e.g. "Wayfair", "Sherwin-Williams"
+  sku         String? // e.g. "WF-HW-1234"
+  sortOrder   Int     @default(0)
+
+  @@index([projectId])
 }

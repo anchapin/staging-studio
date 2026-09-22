@@ -1,5 +1,12 @@
-import { CoverPage, PhilosophyPage, RoomSpread, SignoffPage } from "@/components/lookbook";
-import type { ProjectData } from "@/components/lookbook";
+import {
+  CoverPage,
+  MaterialSwatchPage,
+  PhilosophyPage,
+  RoomSpread,
+  SignoffPage,
+  type MaterialSwatchData,
+  type ProjectData,
+} from "@/components/lookbook";
 import { parseChecklistItems } from "@/lib/checklist-schema";
 
 export interface PreviewRoom {
@@ -30,6 +37,7 @@ export interface PreviewProject {
     signoffContent: string | null;
   };
   rooms: PreviewRoom[];
+  materialSwatches: MaterialSwatchData[];
 }
 
 /**
@@ -81,6 +89,12 @@ export function LookbookPreviewView({ project }: { project: PreviewProject }) {
           />
         </div>
       ))}
+
+      {project.materialSwatches.length > 0 && (
+        <div id="lookbook-swatches">
+          <MaterialSwatchPage swatches={project.materialSwatches} />
+        </div>
+      )}
 
       <div id="lookbook-closing">
         <SignoffPage
