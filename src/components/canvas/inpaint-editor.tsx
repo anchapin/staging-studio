@@ -17,7 +17,7 @@ import InpaintOperationModeTabs, {
 import { useToast, ToastContainer } from "@/components/ui/toast";
 import { ChevronDown, ChevronUp, Expand, Home, Info, Loader2, Maximize2, Minimize2 } from "lucide-react";
 import { useInpaintStatus } from "./use-inpaint-status";
-import ZenModeToolbar from "./zen-mode-toolbar";
+
 import BrushToolRail, {
   BrushParameterFlyout,
   type StudioTool,
@@ -583,7 +583,7 @@ export default function InpaintEditor({
   // Issue #560: Zen Mode state — hides all chrome for a distraction-free workspace.
   const [zenMode, setZenMode] = useState(false);
   // Issue #560: dark background toggle for eye comfort in Zen Mode.
-  const [zenDarkBackground, setZenDarkBackground] = useState(false);
+  const [zenDarkBackground] = useState(false);
 
   // Issue #638: Focus Canvas Mode state — collapses header and inspector simultaneously.
   const [focusMode, setFocusMode] = useState(false);

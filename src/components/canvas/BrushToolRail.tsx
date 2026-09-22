@@ -9,7 +9,6 @@ import {
   Lasso,
   Pipette,
   Hand,
-  Minus,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -173,7 +172,6 @@ export function BrushParameterFlyout({
   onClose,
 }: BrushParameterFlyoutProps) {
   const previewSize = Math.min(radius * 1.5, 80);
-  const cardWidth = 240;
 
   return (
     <div
