@@ -5,6 +5,7 @@ export { InvestmentSummaryPage } from "./investment-summary-page";
 export { MaterialSwatchChip } from "./material-swatch-chip";
 export { MaterialSwatchPage } from "./material-swatch-page";
 export { PhilosophyPage } from "./philosophy-page";
+export { ProposalFooter } from "./proposal-footer";
 export { ROIMetricsDashboard } from "./roi-metrics-dashboard";
 export { RoomSpread } from "./room-spread";
 export { SignoffPage } from "./signoff-page";

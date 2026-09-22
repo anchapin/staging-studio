@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import ComparisonSlider from "./comparison-slider";
+import { ComparisonPill } from "./comparison-pill";
 
 /**
  * Matches RoomCanvas's grid-card sizing: half the two-column grid on
@@ -145,8 +146,8 @@ function StaticStagedResultImage({
         sizes={imageSizes}
         className="object-contain"
       />
-      <div className="absolute left-3 top-3 rounded-md bg-black/60 px-2 py-1 text-xs font-medium text-white">
-        {label}
+      <div className="absolute left-3 top-3 pointer-events-none">
+        <ComparisonPill variant="studio">{label}</ComparisonPill>
       </div>
     </div>
   );

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import { ComparisonPill } from "./comparison-pill";
 
 interface ComparisonSliderProps {
   beforeImageUrl: string;
@@ -29,6 +30,7 @@ export default function ComparisonSlider({
 }: ComparisonSliderProps) {
   const [sliderPosition, setSliderPosition] = useState(50);
   const [isDragging, setIsDragging] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
   const [containerRect, setContainerRect] = useState<DOMRect | null>(null);
   const [imageAspect, setImageAspect] = useState<{
     width: number;
@@ -179,40 +181,51 @@ export default function ComparisonSlider({
         />
       </div>
 
-      {/* Slider handle — transparent 44px hit area wrapping a 1px visual line */}
+      {/* Slider handle — transparent 44px hit area wrapping the visual 28px handle */}
       <div
         className="absolute top-0 bottom-0 w-11 cursor-ew-resize z-10"
         style={{ left: `${sliderPosition}%`, transform: "translateX(-50%)" }}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
       >
-        {/* 1px visual line */}
-        <div className="absolute inset-0 w-1 bg-white shadow-lg" />
-        {/* Center circle handle */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white shadow-lg flex items-center justify-center">
-          <div className="flex items-center gap-0.5">
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="text-stone-600"
-            >
-              <path d="M8 4l-6 8 6 8" />
-              <path d="M16 4l6 8-6 8" />
-            </svg>
-          </div>
+        {/* 1px visual line — Issue #645 */}
+        <div className="absolute inset-0 w-0.5 bg-secondary pointer-events-none" />
+        {/* Center circle handle — Issue #645 */}
+        <div
+          className={`
+            absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2
+            w-7 h-7 rounded-full
+            bg-atelier-primary
+            flex items-center justify-center
+            transition-transform duration-150
+            ${isDragging ? "scale-105 cursor-grabbing" : isHovered ? "scale-110" : ""}
+            ${isHovered || isDragging ? "shadow-handle-hover" : ""}
+          `}
+        >
+          {/* Drag indicator icon — 3 horizontal grip dots */}
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="white"
+            className="pointer-events-none"
+          >
+            <circle cx="8" cy="6" r="1.5" />
+            <circle cx="16" cy="6" r="1.5" />
+            <circle cx="8" cy="12" r="1.5" />
+            <circle cx="16" cy="12" r="1.5" />
+            <circle cx="8" cy="18" r="1.5" />
+            <circle cx="16" cy="18" r="1.5" />
+          </svg>
         </div>
       </div>
 
-      {/* Labels */}
-      <div className="absolute left-3 top-3 rounded-md bg-black/60 px-2 py-1 text-xs font-medium text-white pointer-events-none">
-        {afterLabel}
+      {/* Labels — Issue #644: ComparisonPill styling */}
+      <div className="absolute left-3 top-3 pointer-events-none">
+        <ComparisonPill variant="studio">{afterLabel}</ComparisonPill>
       </div>
-      <div className="absolute right-3 top-3 rounded-md bg-black/60 px-2 py-1 text-xs font-medium text-white pointer-events-none">
-        Original
+      <div className="absolute right-3 top-3 pointer-events-none">
+        <ComparisonPill variant="studio">Original</ComparisonPill>
       </div>
     </div>
   );

@@ -1,3 +1,4 @@
+import { ProposalFooter } from "./proposal-footer";
 import { LookbookRoomData } from "./types";
 
 interface PhilosophyPageProps {
@@ -10,43 +11,47 @@ export function PhilosophyPage({ user, project, room }: PhilosophyPageProps) {
   const content = user.psychologyPageContent || getDefaultPhilosophy(project, room);
 
   return (
-    <div className="lookbook-page min-h-screen flex flex-col items-center justify-center bg-stone-50 p-12">
-      <div className="max-w-3xl text-center space-y-8">
-        <div className="space-y-4">
-          <p className="font-cinzel text-sm tracking-[0.3em] uppercase text-muted-foreground">
-            Our Staging Philosophy
-          </p>
-
-          <h2 className="font-playfair text-4xl font-bold text-foreground">
-            Understanding the Buyer
-          </h2>
-
-          <div className="w-24 h-0.5 bg-primary mx-auto" />
-        </div>
-
-        <div className="prose prose-stone mx-auto">
-          <div className="font-jakarta text-lg text-foreground leading-relaxed whitespace-pre-line">
-            {content}
-          </div>
-        </div>
-
-        {room?.buyerPsychology && (
-          <div className="mt-8 p-6 bg-white rounded-lg border border-border">
-            <p className="font-cinzel text-xs tracking-widest uppercase text-muted-foreground mb-3">
-              Room-Specific Insight
+    <div className="lookbook-page min-h-screen flex flex-col items-center justify-between bg-stone-50 p-12">
+      <div className="flex-1 flex flex-col items-center justify-center">
+        <div className="max-w-3xl text-center space-y-8">
+          <div className="space-y-4">
+            <p className="font-cinzel text-sm tracking-[0.3em] uppercase text-muted-foreground">
+              Our Staging Philosophy
             </p>
-            <p className="font-playfair text-xl text-foreground">
-              {room.buyerPsychology}
+
+            <h2 className="font-playfair text-4xl font-bold text-foreground">
+              Understanding the Buyer
+            </h2>
+
+            <div className="w-24 h-0.5 bg-primary mx-auto" />
+          </div>
+
+          <div className="prose prose-stone mx-auto">
+            <div className="font-jakarta text-lg text-foreground leading-relaxed whitespace-pre-line">
+              {content}
+            </div>
+          </div>
+
+          {room?.buyerPsychology && (
+            <div className="mt-8 p-6 bg-white rounded-lg border border-border">
+              <p className="font-cinzel text-xs tracking-widest uppercase text-muted-foreground mb-3">
+                Room-Specific Insight
+              </p>
+              <p className="font-playfair text-xl text-foreground">
+                {room.buyerPsychology}
+              </p>
+            </div>
+          )}
+
+          <div className="pt-12">
+            <p className="font-cinzel text-xs tracking-widest text-muted-foreground">
+              {user.firmName}
             </p>
           </div>
-        )}
-
-        <div className="pt-12">
-          <p className="font-cinzel text-xs tracking-widest text-muted-foreground">
-            {user.firmName}
-          </p>
         </div>
       </div>
+
+      <ProposalFooter />
     </div>
   );
 }

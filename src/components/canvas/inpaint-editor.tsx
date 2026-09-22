@@ -9,8 +9,13 @@ import EditorTabBar, {
   type EditorTab,
   type EditorTabId,
 } from "./editor-tab-bar";
+import InpaintOperationModeTabs, {
+  type InpaintOperationModeId,
+  type LightDirection,
+  type MaterialCategory,
+} from "./inpaint-operation-mode-tabs";
 import { useToast, ToastContainer } from "@/components/ui/toast";
-import { ChevronDown, ChevronUp, Info, Loader2, Maximize2, Minimize2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Expand, Home, Info, Loader2, Maximize2, Minimize2 } from "lucide-react";
 import { useInpaintStatus } from "./use-inpaint-status";
 import ZenModeToolbar from "./zen-mode-toolbar";
 import {
@@ -71,6 +76,7 @@ import VersionHistoryPanel, {
 import GeneratedVariationGrid, {
   type GeneratedVariation,
 } from "./generated-variation-grid";
+import VersionHistoryPills from "./version-history-pills";
 import { saveInpaintVersion } from "@/app/actions/inpaint-versions";
 
 interface InpaintEditorProps {
@@ -127,6 +133,10 @@ interface InpaintEditorProps {
   onDirectivesChange?: (value: string) => void;
   /** Current directives value for the inline textarea. */
   directivesValue?: string;
+  /** Issue #638: Project name for Focus Canvas Mode breadcrumb. */
+  projectName?: string;
+  /** Issue #638: Room name for Focus Canvas Mode breadcrumb. */
+  roomName?: string;
 }
 
 /** Resolves when the image is loaded; rejects on a load error. */
@@ -533,6 +543,8 @@ export default function InpaintEditor({
   onDirectivesChange,
   directivesValue,
   currentResultUrl,
+  projectName,
+  roomName,
 }: InpaintEditorProps) {
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
   const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
@@ -546,10 +558,24 @@ export default function InpaintEditor({
 
   // Issue #558: AI guidance controls for inpaint runs
   const [promptStrength, setPromptStrength] = useState(0.8);
-  const [maskBlur, setMaskBlur] = useState(5);
+  // maskBlur, creativeMode, lockSeed: controlled by the new operation-mode tabs in issue #629.
+  // The setters are unused (no UI for these in the Manual paint panel any more).
+  const [maskBlur] = useState(5);
+  const [creativeMode] = useState(false);
+  const [lockSeed] = useState(false);
   const [seed, setSeed] = useState<number | undefined>(undefined);
-  const [creativeMode, setCreativeMode] = useState(false);
-  const [lockSeed, setLockSeed] = useState(false);
+
+  // Issue #629: Inpaint Operation Mode — secondary tab strip inside Manual paint panel
+  const [operationMode, setOperationMode] = useState<InpaintOperationModeId>("inpaint-zone");
+  const [guidanceScale, setGuidanceScale] = useState(7.5);
+  // Relight controls
+  const [lightDirection, setLightDirection] = useState<LightDirection>("up");
+  const [relightIntensity, setRelightIntensity] = useState(50);
+  const [relightTemperature, setRelightTemperature] = useState(50);
+  // Material swap controls
+  const [materialCategory, setMaterialCategory] = useState<MaterialCategory>("wood");
+  // Tracks in-flight Restore/Relight/Material Swap operations
+  const [isApplyingOperation, setIsApplyingOperation] = useState(false);
   // Issue #460: comparison now via staged result image click in secondary pane
   const { toasts, showError, showSuccess, dismissToast } = useToast();
 
@@ -557,6 +583,9 @@ export default function InpaintEditor({
   const [zenMode, setZenMode] = useState(false);
   // Issue #560: dark background toggle for eye comfort in Zen Mode.
   const [zenDarkBackground, setZenDarkBackground] = useState(false);
+
+  // Issue #638: Focus Canvas Mode state — collapses header and inspector simultaneously.
+  const [focusMode, setFocusMode] = useState(false);
 
   // Issue #588: Collapsible workspace panels — persist collapsed state in localStorage.
   const brushPanel = useCollapsiblePanel("inpaint-editor:brushPanel", false);
@@ -1142,6 +1171,7 @@ export default function InpaintEditor({
   const aspectRatio = imageDims ? imageDims.width / imageDims.height : null;
 
   // Issue #560: keyboard shortcuts for Zen Mode — Z toggles, Escape exits.
+  // Issue #638: keyboard shortcut for Focus Canvas Mode — F toggles, Escape exits.
   // Issue #588: backtick (`) toggles all collapsible panels.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1158,9 +1188,18 @@ export default function InpaintEditor({
         }
       }
 
-      if (e.key === "Escape" && zenMode) {
+      // Issue #638: F toggles Focus Canvas Mode
+      if (e.key === "f" || e.key === "F") {
+        if (!isInput) {
+          e.preventDefault();
+          setFocusMode((prev) => !prev);
+        }
+      }
+
+      if (e.key === "Escape" && (zenMode || focusMode)) {
         e.preventDefault();
         setZenMode(false);
+        setFocusMode(false);
       }
 
       // Issue #588: backtick toggles all workspace panels
@@ -1184,7 +1223,7 @@ export default function InpaintEditor({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [zenMode, brushPanel, promptPanel, variantPanel, generatedVariationsPanel]);
+  }, [zenMode, focusMode, brushPanel, promptPanel, variantPanel, generatedVariationsPanel]);
 
   // Resume an in-flight job (e.g. after a refresh): skip the submit and go
   // straight to polling the persisted requestId. The run's source comes from
@@ -1452,6 +1491,26 @@ export default function InpaintEditor({
     });
   }, [maskDataUrl, promptDirectives, beginInpaintRun, showError, globalDirectives, promptStrength, maskBlur, seed, creativeMode, lockSeed]);
 
+  // Issue #629: placeholder handler for Restore Original / Relight / Material Swap.
+  // These operation modes are UI-ready; the actual API endpoints (relight,
+  // material-swap, restore-original) are a future enhancement.
+  const handleApplyOperation = useCallback(
+    async (mode: InpaintOperationModeId) => {
+      if (!maskDataUrl) {
+        showError("Please draw a mask on the image first.");
+        return;
+      }
+      setIsApplyingOperation(true);
+      try {
+        // TODO (#629 follow-up): wire up /api/relight, /api/material-swap, /api/restore-original
+        showError(`${mode.replace("-", " ").replace(/^\w/, (c) => c.toUpperCase())} is not yet connected to an API endpoint.`);
+      } finally {
+        setIsApplyingOperation(false);
+      }
+    },
+    [maskDataUrl, showError]
+  );
+
   // Holistic spike entry (issue #190): the panel builds the full-room
   // mask + aesthetic-derived directives; this just forwards them into
   // the shared run launcher. The one-click preset (issue #191) reuses
@@ -1690,8 +1749,35 @@ export default function InpaintEditor({
     <div
       className={`flex flex-col gap-6 ${
         fullWidth ? "md:flex-col lg:min-h-0 lg:flex-1 lg:flex-row lg:gap-6" : ""
-      } ${zenMode ? "zen-mode-active zen-mode-vignette" : ""} ${zenDarkBackground && zenMode ? "zen-mode-dark" : ""}`}
+      } ${zenMode ? "zen-mode-active zen-mode-vignette" : ""} ${focusMode ? "zen-mode-active zen-mode-vignette" : ""} ${zenDarkBackground && zenMode ? "zen-mode-dark" : ""}`}
     >
+      {/* Issue #638: Floating restore pill — shown at top-center when Focus Canvas Mode is active */}
+      {focusMode && (
+        <div
+          className="fixed top-3 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full border border-outline-variant/50 bg-surface-container-lowest/95 px-4 py-2 shadow-warm-lg transition-all duration-200 max-w-md"
+          style={{ opacity: 0, animation: "focusPillShow 200ms ease-out forwards" }}
+        >
+          <div className="flex items-center gap-2">
+            <Home className="h-4 w-4 text-secondary" aria-hidden="true" />
+            <span className="font-jakarta text-sm text-secondary">
+              {projectName && roomName
+                ? `${projectName} > ${roomName}`
+                : projectName || roomName || "Project"}
+            </span>
+          </div>
+          <div className="h-4 w-px bg-outline-variant/50" aria-hidden="true" />
+          <button
+            type="button"
+            onClick={() => setFocusMode(false)}
+            title="Restore Layout"
+            aria-label="Restore Layout"
+            className="flex items-center gap-1.5 font-jakarta text-sm text-secondary hover:text-primary label-sm"
+          >
+            Restore Layout
+            <Expand className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </div>
+      )}
       {/* ---- LEFT PANE: room imagery (optional slot) + mask canvas ------ */}
       <div
         className={`flex min-w-0 flex-col gap-4 ${
@@ -1704,7 +1790,7 @@ export default function InpaintEditor({
             title="Room Details"
             isCollapsed={promptPanel.isCollapsed}
             onToggle={promptPanel.toggle}
-            className={zenMode ? "zen-mode-hidden" : ""}
+            className={zenMode || focusMode ? "zen-mode-hidden" : ""}
           >
             <div
               className={`flex flex-col gap-6 ${
@@ -1716,23 +1802,42 @@ export default function InpaintEditor({
           </CollapsibleSection>
         )}
         {/* Issue #560: "Source Image" label hidden in Zen Mode */}
+        {/* Issue #638: sticky header hidden in Focus Canvas Mode */}
         {/* Issue #547/#546: sticky header per Atelier Canvas spec with Atelier Canvas colors */}
-        <div className={`sticky top-0 z-20 flex items-center justify-between bg-atelier-canvas ${zenMode ? "zen-mode-hidden" : ""}`}>
+        <div className={`sticky top-0 z-20 flex items-center justify-between bg-atelier-canvas ${zenMode || focusMode ? "zen-mode-hidden" : ""}`}>
           <h4 className="mb-2 font-jakarta text-sm font-medium text-atelier-primary">Source Image</h4>
-          <button
-            type="button"
-            onClick={() => setZenMode((prev) => !prev)}
-            title={zenMode ? "Exit Zen Mode (Z)" : "Enter Zen Mode (Z)"}
-            aria-label={zenMode ? "Exit Zen Mode" : "Enter Zen Mode"}
-            className="flex items-center gap-1.5 rounded-md border border-atelier-taupe/40 bg-white px-2.5 py-1.5 text-xs text-atelier-taupe shadow-sm transition-colors hover:bg-atelier-canvas hover:text-atelier-primary"
-          >
-            {zenMode ? (
-              <Minimize2 className="h-3.5 w-3.5" aria-hidden="true" />
-            ) : (
-              <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
-            )}
-            {zenMode ? "Exit Zen" : "Zen Mode"}
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Issue #638: Focus Canvas button */}
+            <button
+              type="button"
+              onClick={() => setFocusMode((prev) => !prev)}
+              title={focusMode ? "Exit Focus Canvas (F)" : "Enter Focus Canvas (F)"}
+              aria-label={focusMode ? "Exit Focus Canvas" : "Enter Focus Canvas"}
+              className="flex items-center gap-1.5 rounded-md border border-atelier-taupe/40 bg-white px-2.5 py-1.5 text-xs text-atelier-taupe shadow-sm transition-colors hover:bg-atelier-canvas hover:text-atelier-primary"
+            >
+              {focusMode ? (
+                <Minimize2 className="h-3.5 w-3.5" aria-hidden="true" />
+              ) : (
+                <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+              {focusMode ? "Exit Focus" : "Focus Canvas"}
+            </button>
+            {/* Issue #560: Zen Mode button */}
+            <button
+              type="button"
+              onClick={() => setZenMode((prev) => !prev)}
+              title={zenMode ? "Exit Zen Mode (Z)" : "Enter Zen Mode (Z)"}
+              aria-label={zenMode ? "Exit Zen Mode" : "Enter Zen Mode"}
+              className="flex items-center gap-1.5 rounded-md border border-atelier-taupe/40 bg-white px-2.5 py-1.5 text-xs text-atelier-taupe shadow-sm transition-colors hover:bg-atelier-canvas hover:text-atelier-primary"
+            >
+              {zenMode ? (
+                <Minimize2 className="h-3.5 w-3.5" aria-hidden="true" />
+              ) : (
+                <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+              {zenMode ? "Exit Zen" : "Zen Mode"}
+            </button>
+          </div>
         </div>
         {/* Issue #460: comparison now via staged result image click in secondary pane */}
         <InpaintMaskCanvas
@@ -1744,6 +1849,7 @@ export default function InpaintEditor({
           onMaskChange={setMaskDataUrl}
           onInstanceToggle={handleInstanceToggle}
           segmentDisabled={isProcessing || conceptLoading}
+          processing={isProcessing}
           segmenting={conceptLoading}
           detectingConcept={conceptLoading ? requestedConcept : undefined}
           instanceOverlays={instanceOverlays}
@@ -1762,7 +1868,8 @@ export default function InpaintEditor({
         />
 
         {/* Issue #560: expand selection and floor shadow controls hidden in Zen Mode */}
-        <div className={zenMode ? "zen-mode-hidden" : ""}>
+        {/* Issue #638: hidden in Focus Canvas Mode */}
+        <div className={zenMode || focusMode ? "zen-mode-hidden" : ""}>
           <label className="flex items-center gap-2 font-jakarta text-sm text-atelier-primary">
             Expand selection:
             <input
@@ -1806,8 +1913,9 @@ export default function InpaintEditor({
       </div>
 
       {/* Issue #560: right panel hidden in Zen Mode */}
+      {/* Issue #638: right panel hidden in Focus Canvas Mode */}
       <div
-        className={`flex w-full flex-col gap-3 no-print ${fullWidth ? "md:w-full md:flex-col lg:min-h-0 lg:w-[380px] lg:shrink-0" : ""} ${zenMode ? "zen-mode-hidden" : ""}`}
+        className={`flex w-full flex-col gap-3 no-print ${fullWidth ? "md:w-full md:flex-col lg:min-h-0 lg:w-[380px] lg:shrink-0" : ""} ${zenMode || focusMode ? "zen-mode-hidden" : ""}`}
       >
         {/* AC-L2: batch progress pins to the panel top during a run, so
             it stays visible beside the canvas on every tab. The full
@@ -1942,132 +2050,32 @@ export default function InpaintEditor({
                   className="w-full px-3 py-2 rounded-md border border-border text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
                 />
               </div>
-              {/* Manual-paint controls (AC-L7): the single-object run affordance.
-                  The brush / Fill Region / Select Regions toggles live in the
-                  canvas toolbar and stay beside the canvas on every tab, so
-                  painted work is always visible. The "Expand selection" slider
-                  above controls mask expansion and is shared across all tabs. */}
-              <div className="flex items-center gap-4">
-                <button
-                  onClick={handleInpaint}
-                  disabled={isProcessing || conceptLoading || !maskDataUrl}
-                  title={!maskDataUrl ? "Paint on the image to select the area you want to regenerate" : undefined}
-                  className={`
-                    flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium
-                    transition-colors
-                    ${isProcessing || conceptLoading || !maskDataUrl
-                      ? "bg-atelier-taupe/40 text-atelier-taupe cursor-not-allowed"
-                      : "bg-atelier-primary text-white hover:bg-atelier-primary/80"
-                    }
-                  `}
-                >
-                  {isProcessing ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Processing...
-                    </>
-                  ) : (
-                    "Apply Inpainting"
-                  )}
-                </button>
-
-                {isProcessing && statusText && (
-                  <span aria-live="polite" className="text-sm text-atelier-taupe">{statusText}</span>
-                )}
-              </div>
-
-              {/* Issue #558: AI Guidance controls — sliders for fine-tuning the inpaint run */}
-              <details className="rounded-md border border-atelier-taupe/30">
-                <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-atelier-primary hover:bg-atelier-canvas select-none">
-                  AI Guidance
-                </summary>
-                <div className="flex flex-col gap-3 px-3 pb-3 pt-1">
-
-                  {/* Prompt Strength: how closely AI follows the text prompt */}
-                  <label className="flex items-center gap-2 text-sm text-atelier-primary">
-                    <span className="shrink-0">Prompt Strength</span>
-                    <input
-                      type="range"
-                      min={0.1}
-                      max={1.0}
-                      step={0.05}
-                      value={promptStrength}
-                      onChange={(e) => setPromptStrength(Number(e.target.value))}
-                      aria-label="Prompt Strength"
-                      className="w-28"
-                    />
-                    <span className="w-10 text-right tabular-nums">{promptStrength.toFixed(2)}</span>
-                  </label>
-
-                  {/* Mask Blur: feather edges of the mask */}
-                  <label className="flex items-center gap-2 text-sm text-atelier-primary">
-                    <span className="shrink-0">Mask Blur</span>
-                    <input
-                      type="range"
-                      min={0}
-                      max={20}
-                      step={1}
-                      value={maskBlur}
-                      onChange={(e) => setMaskBlur(Number(e.target.value))}
-                      aria-label="Mask Blur"
-                      className="w-28"
-                    />
-                    <span className="w-10 text-right tabular-nums">{maskBlur}px</span>
-                  </label>
-
-                  {/* Seed: reproducible results */}
-                  <div className="flex items-center gap-2 text-sm text-atelier-primary">
-                    <label htmlFor={`inpaint-seed-${roomId}`} className="shrink-0">Seed</label>
-                    <input
-                      id={`inpaint-seed-${roomId}`}
-                      type="number"
-                      min={0}
-                      max={999999}
-                      step={1}
-                      value={seed ?? ""}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setSeed(val === "" ? undefined : Number(val));
-                      }}
-                      placeholder="Random"
-                      aria-label="Seed for reproducible results"
-                      className="w-28 rounded-md border border-atelier-taupe/40 px-2 py-1 text-xs tabular-nums focus:outline-none focus:ring-2 focus:ring-atelier-primary"
-                    />
-                    <label htmlFor={`inpaint-lockseed-${roomId}`} className="flex items-center gap-1 text-xs text-atelier-taupe">
-                      <input
-                        id={`inpaint-lockseed-${roomId}`}
-                        type="checkbox"
-                        checked={lockSeed}
-                        onChange={(e) => setLockSeed(e.target.checked)}
-                        className="h-3.5 w-3.5 accent-atelier-primary"
-                      />
-                      Lock Seed
-                    </label>
-                  </div>
-
-                  {/* Creative Mode: higher variation */}
-                  <div className="flex items-center gap-2 text-sm text-atelier-primary">
-                    <span className="shrink-0">Creative Mode</span>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={creativeMode}
-                      aria-label="Creative Mode"
-                      onClick={() => setCreativeMode((v) => !v)}
-                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-atelier-primary focus:ring-offset-1 ${
-                        creativeMode ? "bg-atelier-primary" : "bg-atelier-taupe/40"
-                      }`}
-                    >
-                      <span
-                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
-                          creativeMode ? "translate-x-5" : "translate-x-1"
-                        }`}
-                      />
-                    </button>
-                  </div>
-
-                </div>
-              </details>
+              {/* Issue #629: Inpaint Operation Mode tabs — secondary tab strip for AI
+                  inpaint operations (Inpaint Zone, Restore Original, Relight, Material Swap).
+                  The brush / Fill / Select Region toggles live in the canvas toolbar. */}
+              <InpaintOperationModeTabs
+                activeMode={operationMode}
+                onModeChange={setOperationMode}
+                strength={Math.round(promptStrength * 100)}
+                onStrengthChange={(v) => setPromptStrength(v / 100)}
+                guidanceScale={guidanceScale}
+                onGuidanceScaleChange={setGuidanceScale}
+                seed={seed}
+                onSeedChange={setSeed}
+                onGenerate={handleInpaint}
+                isGenerating={isProcessing}
+                hasMask={!!maskDataUrl}
+                lightDirection={lightDirection}
+                onLightDirectionChange={setLightDirection}
+                relightIntensity={relightIntensity}
+                onRelightIntensityChange={setRelightIntensity}
+                relightTemperature={relightTemperature}
+                onRelightTemperatureChange={setRelightTemperature}
+                materialCategory={materialCategory}
+                onMaterialCategoryChange={setMaterialCategory}
+                onApplyMaterial={handleApplyOperation}
+                isApplyingMaterial={isApplyingOperation}
+              />
             </div>
           </div>
 
@@ -2350,6 +2358,17 @@ export default function InpaintEditor({
           </button>
         </ZenModeToolbar>
       )}
+
+      {/* Issue #631: Version History Pills — floating bar at bottom-center of canvas
+          showing pass/version history with undo/redo controls. */}
+      <VersionHistoryPills
+        roomId={roomId}
+        variantSlot={variantSlot}
+        activeResultUrl={activeResultUrl}
+        onVersionChange={(resultUrl) => {
+          setActiveResultUrl(resultUrl);
+        }}
+      />
     </div>
   );
 }

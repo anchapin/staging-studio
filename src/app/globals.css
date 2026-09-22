@@ -29,6 +29,7 @@
   --color-canvas: #F8F6F2;
   --color-taupe: #8C827A;
   --color-cream: #fff8f8;
+  --color-outline-variant: var(--outline-variant);
   --radius: var(--radius);
   --font-cinzel: var(--font-cinzel-google);
   --font-playfair: var(--font-playfair-google);
@@ -98,6 +99,9 @@
     /* Atelier Canvas inpaint mask overlay (Issue #546) */
     --inpaint-mask-overlay: rgba(0, 245, 160, 0.35);
     --inpaint-laser-rim: rgba(0, 245, 160, 0.8);
+
+    /* Hairline divider token (Issue #640) */
+    --outline-variant: #8C827A;
   }
   .theme {
     --font-heading: var(--font-sans);
@@ -142,6 +146,8 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+    /* Hairline divider token (Issue #640) */
+    --outline-variant: oklch(0.65 0.02 70);
   }
   * {
     @apply border-border outline-ring/50;
@@ -173,11 +179,6 @@
     page-break-inside: avoid;
   }
 
-  @page {
-    size: letter portrait;
-    margin: 0mm;
-  }
-
   /* Hide navigation in print */
   nav,
   .no-print {
@@ -195,6 +196,30 @@
 
   .lookbook-page:last-child {
     page-break-after: auto;
+  }
+
+  /* Issue #643: Proposal Footer — inline footer hidden in PDF (content
+     comes from @page bottom-center). Show on screen only. */
+  .proposal-footer {
+    display: none;
+  }
+
+  /* PDF page footer via @page rule (issue #643: Browserless/print capture). */
+  @page {
+    size: letter portrait;
+    margin: 0mm;
+    @bottom-center {
+      content: "Atelier\u{2009}Canvas  \00A9\u{2009}2026\u{2009}Circle\u{2009}G\u{2009}Designs\u{2009}\u00B7\u{2009}Staging\u{2009}Studio  \u{2009}\u{2009}\u{2009}\u{2009}\u{2009}Policy\u{2009}\u00B7\u{2009}Privacy\u{2009}\u00B7\u{2009}Terms";
+      font-family: var(--font-jakarta), sans-serif;
+      font-size: 6pt;
+      color: #8C827A;
+    }
+    @bottom-center:before {
+      content: "";
+      display: block;
+      border-top: 0.5pt solid #8C827A;
+      margin-bottom: 2pt;
+    }
   }
 }
 
@@ -311,6 +336,65 @@
   cursor: default;
 }
 
+/* Issue #639: Material Symbols icon system */
+.material-symbols-outlined {
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20;
+  font-size: 1em;
+  line-height: 1;
+  display: inline-block;
+  vertical-align: middle;
+  user-select: none;
+}
+
+/* Size variants */
+.material-symbols-outlined.icon-xs {
+  font-size: 16px;
+  font-variation-settings: "FILL" 0, "wght" 300, "GRAD" 0, "opsz" 16;
+}
+.material-symbols-outlined.icon-sm {
+  font-size: 18px;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20;
+}
+.material-symbols-outlined.icon-md {
+  font-size: 24px;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+}
+.material-symbols-outlined.icon-lg {
+  font-size: 32px;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 32;
+}
+.material-symbols-outlined.icon-xl {
+  font-size: 48px;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 48;
+}
+
+/* Filled variant (for active states) */
+.material-symbols-outlined.filled {
+  font-variation-settings: "FILL" 1, "wght" 400, "GRAD" 0, "opsz" 20;
+}
+
+/* Icon in buttons */
+button .material-symbols-outlined,
+.btn .material-symbols-outlined {
+  vertical-align: middle;
+  margin-right: 0.25em;
+}
+
+/* Icon-only buttons */
+.icon-only-button {
+  width: 2.5rem;
+  height: 2.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  transition: background-color 0.15s;
+}
+
+.icon-only-button:hover {
+  background-color: var(--accent);
+}
+
 /* Vignette overlay — subtle darkening at canvas edges */
 .zen-mode-vignette::after {
   content: "";
@@ -333,4 +417,42 @@
 /* Zen Mode: hides all non-essential chrome when active */
 .zen-mode-hidden {
   display: none !important;
+}
+
+/* Issue #638: Focus Canvas Mode floating restore pill animation */
+@keyframes focusPillShow {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+/* Issue #641: Stage Status Pulse Animation — subtle animated indicator showing
+   that a room is in active AI staging processing. */
+@keyframes stage-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(0.85);
+  }
+}
+
+.stage-pulse {
+  animation: stage-pulse 1.8s ease-in-out infinite;
+}
+
+/* Issue #645: Comparison slider handle */
+.shadow-handle {
+  box-shadow: 0 2px 8px rgba(196, 120, 71, 0.35);
+}
+
+.shadow-handle-hover {
+  box-shadow: 0 2px 8px rgba(196, 120, 71, 0.5);
 }
