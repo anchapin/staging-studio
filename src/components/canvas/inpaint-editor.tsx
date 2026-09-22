@@ -15,13 +15,21 @@ import InpaintOperationModeTabs, {
   type MaterialCategory,
 } from "./inpaint-operation-mode-tabs";
 import { useToast, ToastContainer } from "@/components/ui/toast";
-import { ChevronDown, ChevronUp, Expand, Home, Info, Loader2, Maximize2, Minimize2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Expand, Home, Info, Loader2, Maximize2, Minimize2, PanelRightClose } from "lucide-react";
 import { useInpaintStatus } from "./use-inpaint-status";
 
 import BrushToolRail, {
   BrushParameterFlyout,
   type StudioTool,
 } from "./BrushToolRail";
+import InspectorCollapsedRail from "./inspector-collapsed-rail";
+import {
+  INSPECTOR_PANEL_STORAGE_KEY,
+  resolveInspectorPanelView,
+  resolveInspectorRailTarget,
+  resolveInspectorShortcut,
+  type InspectorRailActionId,
+} from "@/lib/inspector-panel";
 import {
   entireRoomTabVisible,
   inpaintSourceLabel,
@@ -596,6 +604,18 @@ export default function InpaintEditor({
     "inpaint-editor:generatedVariations",
     false
   );
+
+  // Issue #617: collapsible right inspector — the whole 380px panel
+  // collapses to a 48px rail (persisted per the #588 pattern; expanded by
+  // default). Zen/Focus modes hide the column entirely, so they override
+  // (not clobber) this state — view resolution is pure, in
+  // lib/inspector-panel.ts.
+  const inspectorPanel = useCollapsiblePanel(INSPECTOR_PANEL_STORAGE_KEY, false);
+  const inspectorView = resolveInspectorPanelView({
+    inspectorCollapsed: inspectorPanel.isCollapsed,
+    focusMode,
+    zenMode,
+  });
 
   // Issue #630: Generated Variation Grid state
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- placeholder: setGeneratedVariations will be called by the parent's variation generation logic
@@ -1180,6 +1200,9 @@ export default function InpaintEditor({
   // Issue #560: keyboard shortcuts for Zen Mode — Z toggles, Escape exits.
   // Issue #638: keyboard shortcut for Focus Canvas Mode — F toggles, Escape exits.
   // Issue #588: backtick (`) toggles all collapsible panels.
+  // Issue #617: Cmd/Ctrl+B toggles the right inspector panel; F is classified
+  // by the same resolver so modifier combos (Cmd/Ctrl+F stays browser Find)
+  // never trigger Focus Canvas Mode.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
@@ -1195,12 +1218,22 @@ export default function InpaintEditor({
         }
       }
 
-      // Issue #638: F toggles Focus Canvas Mode
-      if (e.key === "f" || e.key === "F") {
-        if (!isInput) {
-          e.preventDefault();
-          setFocusMode((prev) => !prev);
-        }
+      // Issue #617/#638: inspector + focus-mode shortcut resolution
+      // (pure, pinned by tests/inspector-panel.test.ts).
+      const shortcut = resolveInspectorShortcut({
+        key: e.key,
+        metaKey: e.metaKey,
+        ctrlKey: e.ctrlKey,
+        altKey: e.altKey,
+        isTextEntry: isInput,
+      });
+      if (shortcut === "toggle-inspector") {
+        e.preventDefault();
+        inspectorPanel.toggle();
+      }
+      if (shortcut === "toggle-focus-mode") {
+        e.preventDefault();
+        setFocusMode((prev) => !prev);
       }
 
       if (e.key === "Escape" && (zenMode || focusMode)) {
@@ -1230,7 +1263,7 @@ export default function InpaintEditor({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [zenMode, focusMode, brushPanel, promptPanel, variantPanel, generatedVariationsPanel]);
+  }, [zenMode, focusMode, brushPanel, promptPanel, variantPanel, generatedVariationsPanel, inspectorPanel]);
 
   // Resume an in-flight job (e.g. after a refresh): skip the submit and go
   // straight to polling the persisted requestId. The run's source comes from
@@ -1746,6 +1779,21 @@ export default function InpaintEditor({
     ],
   ];
 
+  // Issue #617: rail buttons re-expand the inspector and navigate to the
+  // matching section (prompt editor / AI variations / relight). Targets
+  // are pure, from resolveInspectorRailTarget.
+  const handleInspectorRailExpand = useCallback(
+    (actionId: InspectorRailActionId) => {
+      const target = resolveInspectorRailTarget(actionId);
+      inspectorPanel.setIsCollapsed(false);
+      setActiveTab(target.tab);
+      if (target.operationMode) {
+        setOperationMode(target.operationMode);
+      }
+    },
+    [inspectorPanel]
+  );
+
   return (
     /* Issue #252 D5: laptop-first two-pane layout — mask canvas LEFT
        sized to the remaining viewport, fixed-width control panel RIGHT;
@@ -1919,11 +1967,50 @@ export default function InpaintEditor({
         </div>
       </div>
 
-      {/* Issue #560: right panel hidden in Zen Mode */}
-      {/* Issue #638: right panel hidden in Focus Canvas Mode */}
+      {/* Issue #617: collapsible right inspector — the 380px panel and the
+          48px rail share this column; `transition-all duration-300` on the
+          column animates the width between them.
+          Issue #560: right panel hidden in Zen Mode.
+          Issue #638: right panel hidden in Focus Canvas Mode (the restore
+          pill owns the way back — no rail in either mode). */}
       <div
-        className={`flex w-full flex-col gap-3 no-print ${fullWidth ? "md:w-full md:flex-col lg:min-h-0 lg:w-[380px] lg:shrink-0" : ""} ${zenMode || focusMode ? "zen-mode-hidden" : ""}`}
+        data-inspector-column=""
+        className={`no-print transition-all duration-300 ${
+          inspectorView === "hidden"
+            ? "zen-mode-hidden"
+            : inspectorView === "rail"
+              ? `w-full ${fullWidth ? "lg:w-12 lg:shrink-0" : ""}`
+              : `flex w-full flex-col gap-3 ${fullWidth ? "lg:min-h-0 lg:w-[380px] lg:shrink-0" : ""}`
+        }`}
       >
+        {inspectorView === "rail" ? (
+          <InspectorCollapsedRail onExpand={handleInspectorRailExpand} />
+        ) : (
+          <>
+        {/* Issue #617: Active Inpaint Zone header with the collapse toggle.
+            The five inspector sections live below: operation mode tabs +
+            targeted prompt editor + AI guidance sliders (Manual paint tab,
+            via #629/#558) and the generated variation grid (#630). */}
+        <div
+          id="inspector-panel-content"
+          className="flex w-full min-h-0 flex-1 flex-col gap-3"
+        >
+          <div className="flex shrink-0 items-center justify-between rounded-md border border-atelier-taupe/30 bg-white px-3 py-2">
+            <h3 className="font-jakarta text-sm font-semibold text-atelier-primary">
+              Active Inpaint Zone
+            </h3>
+            <button
+              type="button"
+              onClick={inspectorPanel.toggle}
+              title="Collapse inspector (Cmd+B)"
+              aria-label="Collapse inspector (Cmd+B)"
+              aria-expanded={inspectorView === "expanded"}
+              aria-controls="inspector-panel-content"
+              className="flex h-7 w-7 items-center justify-center rounded-md border border-atelier-taupe/40 bg-white text-atelier-taupe shadow-sm transition-colors hover:bg-atelier-canvas hover:text-atelier-primary"
+            >
+              <PanelRightClose className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </div>
         {/* AC-L2: batch progress pins to the panel top during a run, so
             it stays visible beside the canvas on every tab. The full
             progress + retry affordance stays in the batch panel. */}
@@ -2305,6 +2392,9 @@ export default function InpaintEditor({
             }}
           />
         </CollapsibleSection>
+        </div>
+          </>
+        )}
       </div>
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
