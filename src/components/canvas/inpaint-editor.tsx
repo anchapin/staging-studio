@@ -73,6 +73,9 @@ import {
 import VersionHistoryPanel, {
   generateThumbnailFromUrl,
 } from "./version-history-panel";
+import GeneratedVariationGrid, {
+  type GeneratedVariation,
+} from "./generated-variation-grid";
 import VersionHistoryPills from "./version-history-pills";
 import { saveInpaintVersion } from "@/app/actions/inpaint-versions";
 
@@ -466,6 +469,7 @@ const PANEL_LABELS = {
   brushPanel: "Brush Tools",
   promptPanel: "Prompts & Suggestions",
   variantPanel: "Layers & Variants",
+  generatedVariationsPanel: "Generated Variations",
 } as const;
 
 interface CollapsibleSectionProps {
@@ -519,6 +523,7 @@ function CollapsibleSection({
 
 export default function InpaintEditor({
   roomId,
+  roomName,
   imageUrl,
   aesthetic,
   promptDirectives,
@@ -537,7 +542,6 @@ export default function InpaintEditor({
   directivesValue,
   currentResultUrl,
   projectName,
-  roomName,
 }: InpaintEditorProps) {
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
   const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
@@ -584,6 +588,19 @@ export default function InpaintEditor({
   const brushPanel = useCollapsiblePanel("inpaint-editor:brushPanel", false);
   const promptPanel = useCollapsiblePanel("inpaint-editor:promptPanel", false);
   const variantPanel = useCollapsiblePanel("inpaint-editor:variantPanel", false);
+  const generatedVariationsPanel = useCollapsiblePanel(
+    "inpaint-editor:generatedVariations",
+    false
+  );
+
+  // Issue #630: Generated Variation Grid state
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- placeholder: setGeneratedVariations will be called by the parent's variation generation logic
+  const [generatedVariations, setGeneratedVariations] = useState<
+    readonly GeneratedVariation[]
+  >([]);
+  const [selectedVariationId, setSelectedVariationId] = useState<string | null>(null);
+  const [isGeneratingVariations, setIsGeneratingVariations] = useState(false);
+  const [variationProgress, setVariationProgress] = useState("");
 
   // Issue #560: lifted brush state — shared between InpaintMaskCanvas and ZenModeToolbar.
   const [zenBrushSize, setZenBrushSize] = useState(20);
@@ -1186,22 +1203,24 @@ export default function InpaintEditor({
       if (e.key === "`" && !isInput) {
         e.preventDefault();
         const allCollapsed =
-          brushPanel.isCollapsed && promptPanel.isCollapsed && variantPanel.isCollapsed;
+          brushPanel.isCollapsed && promptPanel.isCollapsed && variantPanel.isCollapsed && generatedVariationsPanel.isCollapsed;
         if (allCollapsed) {
           brushPanel.setIsCollapsed(false);
           promptPanel.setIsCollapsed(false);
           variantPanel.setIsCollapsed(false);
+          generatedVariationsPanel.setIsCollapsed(false);
         } else {
           brushPanel.setIsCollapsed(true);
           promptPanel.setIsCollapsed(true);
           variantPanel.setIsCollapsed(true);
+          generatedVariationsPanel.setIsCollapsed(true);
         }
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [zenMode, focusMode, brushPanel, promptPanel, variantPanel]);
+  }, [zenMode, focusMode, brushPanel, promptPanel, variantPanel, generatedVariationsPanel]);
 
   // Resume an in-flight job (e.g. after a refresh): skip the submit and go
   // straight to polling the persisted requestId. The run's source comes from
@@ -2224,6 +2243,39 @@ export default function InpaintEditor({
             </div>
           </div>
           </div>
+        </CollapsibleSection>
+
+        {/* Issue #630: Generated Variation Grid — 4-column grid of AI-generated
+            inpainting variations the user can select and apply to the canvas. */}
+        <CollapsibleSection
+          id="generatedVariationsPanel"
+          title="Generated Variations"
+          isCollapsed={generatedVariationsPanel.isCollapsed}
+          onToggle={generatedVariationsPanel.toggle}
+        >
+          <GeneratedVariationGrid
+            roomName={roomName ?? "Room"}
+            variations={generatedVariations}
+            selectedId={selectedVariationId}
+            isGenerating={isGeneratingVariations}
+            generationProgress={variationProgress}
+            onSelect={setSelectedVariationId}
+            onGenerateMore={() => {
+              // Issue #630: the parent is responsible for calling the inpaint
+              // API multiple times to produce new variations and updating
+              // generatedVariations / isGeneratingVariations / variationProgress.
+              // Placeholder handler — replace with actual generation logic.
+              setIsGeneratingVariations(true);
+              setVariationProgress("Generating variation 1 of 4…");
+            }}
+            onUse={(variation) => {
+              // Issue #630: apply the selected variation's result URL to the
+              // canvas — typically by calling onInpaintComplete or updating
+              // the active result URL.
+              setSelectedVariationId(variation.id);
+              onInpaintComplete?.(variation.resultUrl, source);
+            }}
+          />
         </CollapsibleSection>
 
         {/* Issue #561: Version History — collapsible panel at the bottom of the
