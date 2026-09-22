@@ -1035,6 +1035,8 @@ export default function ProjectDetailView({
                   }}
                   directivesValue={focusedInputs.roomDirectives}
                   onDirectivesChange={(value) => editDirectives(focusedRoom.id, value)}
+                  projectName={project.propertyAddress}
+                  roomName={focusedRoom.name}
                   secondaryPane={
                     <>
                       {/* Issue #460: textarea first — always visible above the fold */}
