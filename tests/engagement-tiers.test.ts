@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   ENGAGEMENT_TIERS,
   formatEngagementPrice,
-  type EngagementTier,
 } from "@/lib/engagement-tiers";
 
 describe("ENGAGEMENT_TIERS", () => {
