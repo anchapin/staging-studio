@@ -450,6 +450,13 @@ export default function InpaintEditor({
   // Issue #234: when enabled, dilate further downward than upward so floor
   // shadows cast by objects are swallowed by the regenerated region.
   const [includeFloorShadow, setIncludeFloorShadow] = useState(false);
+
+  // Issue #558: AI guidance controls for inpaint runs
+  const [promptStrength, setPromptStrength] = useState(0.8);
+  const [maskBlur, setMaskBlur] = useState(5);
+  const [seed, setSeed] = useState<number | undefined>(undefined);
+  const [creativeMode, setCreativeMode] = useState(false);
+  const [lockSeed, setLockSeed] = useState(false);
   // Issue #460: comparison now via staged result image click in secondary pane
   const { toasts, showError, showSuccess, dismissToast } = useToast();
 
@@ -1188,6 +1195,12 @@ export default function InpaintEditor({
       negativePrompt?: string;
       sourceUrl?: string;
       globalDirectives?: string;
+      // Issue #558: AI guidance
+      promptStrength?: number;
+      maskBlur?: number;
+      seed?: number;
+      creativeMode?: boolean;
+      lockSeed?: boolean;
     }) => {
       // Issue #562: merge global + room directives for AI
       const mergedDirectives = (() => {
@@ -1214,6 +1227,9 @@ export default function InpaintEditor({
       batchOutcomeRef.current = null;
       batchFailureRef.current = null;
 
+      // Issue #558: resolve effective seed — use explicit seed only when lockSeed is true
+      const effectiveSeed = run.lockSeed ? run.seed : undefined;
+
       await start(async (signal) => {
         const startResponse = await fetch("/api/inpaint", {
           method: "POST",
@@ -1227,6 +1243,11 @@ export default function InpaintEditor({
             roomId,
             variantSlot,
             sourceSlot: source.kind === "variant" ? source.slot : null,
+            // Issue #558: AI guidance params
+            promptStrength: run.promptStrength,
+            maskBlur: run.maskBlur,
+            seed: effectiveSeed,
+            creativeMode: run.creativeMode,
           }),
           signal,
         });
@@ -1245,7 +1266,7 @@ export default function InpaintEditor({
 
   const handleInpaint = useCallback(async () => {
     if (!promptDirectives.trim()) {
-      showError("Please fill in the \"Staging directives\" textarea in the right panel.");
+      showError("Please fill in the \u201cStaging directives\u201d textarea in the right panel.");
       return;
     }
 
@@ -1254,8 +1275,17 @@ export default function InpaintEditor({
       return;
     }
 
-    await beginInpaintRun({ maskUrl: maskDataUrl, promptDirectives, globalDirectives });
-  }, [maskDataUrl, promptDirectives, beginInpaintRun, showError, globalDirectives]);
+    await beginInpaintRun({
+      maskUrl: maskDataUrl,
+      promptDirectives,
+      globalDirectives,
+      promptStrength,
+      maskBlur,
+      seed,
+      creativeMode,
+      lockSeed,
+    });
+  }, [maskDataUrl, promptDirectives, beginInpaintRun, showError, globalDirectives, promptStrength, maskBlur, seed, creativeMode, lockSeed]);
 
   // Holistic spike entry (issue #190): the panel builds the full-room
   // mask + aesthetic-derived directives; this just forwards them into
@@ -1267,9 +1297,15 @@ export default function InpaintEditor({
         maskUrl: run.maskDataUrl,
         promptDirectives: run.promptDirectives,
         negativePrompt: run.negativePrompt,
+        // Issue #558: pass AI guidance settings
+        promptStrength,
+        maskBlur,
+        seed,
+        creativeMode,
+        lockSeed,
       });
     },
-    [beginInpaintRun]
+    [beginInpaintRun, promptStrength, maskBlur, seed, creativeMode, lockSeed]
   );
 
   // Issue #203: sequential per-object batch runner. Steps run ONE AT A
@@ -1308,6 +1344,11 @@ export default function InpaintEditor({
             promptDirectives: plan.steps[index].promptDirectives,
             sourceUrl,
             globalDirectives,
+            promptStrength,
+            maskBlur,
+            seed,
+            creativeMode,
+            lockSeed,
           });
 
           const outcome = batchOutcomeRef.current;
@@ -1344,7 +1385,7 @@ export default function InpaintEditor({
         batchActiveRef.current = false;
       }
     },
-    [beginInpaintRun, showSuccess, globalDirectives]
+    [beginInpaintRun, showSuccess, globalDirectives, promptStrength, maskBlur, seed, creativeMode, lockSeed]
   );
 
   // Issue #203: batch entry point from the panel. Builds the validated
@@ -1378,6 +1419,11 @@ export default function InpaintEditor({
           maskUrl: plan.maskDataUrl,
           promptDirectives: plan.promptDirectives,
           globalDirectives,
+          promptStrength,
+          maskBlur,
+          seed,
+          creativeMode,
+          lockSeed,
         }).then(() => {
           // A thematic batch is one ordinary run — consume the selection
           // set only when it actually completed (outcome ref is set by
@@ -1392,7 +1438,7 @@ export default function InpaintEditor({
       }
       void runPerObjectBatch(plan);
     },
-    [batchSelections, unionMaskDataUrl, beginInpaintRun, runPerObjectBatch, showError, globalDirectives]
+    [batchSelections, unionMaskDataUrl, beginInpaintRun, runPerObjectBatch, showError, globalDirectives, promptStrength, maskBlur, seed, creativeMode, lockSeed]
   );
 
   const handleBatchRetry = useCallback(() => {
@@ -1726,6 +1772,99 @@ export default function InpaintEditor({
                   <span aria-live="polite" className="text-sm text-stone-600">{statusText}</span>
                 )}
               </div>
+
+              {/* Issue #558: AI Guidance controls — sliders for fine-tuning the inpaint run */}
+              <details className="rounded-md border border-stone-200">
+                <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50 select-none">
+                  AI Guidance
+                </summary>
+                <div className="flex flex-col gap-3 px-3 pb-3 pt-1">
+
+                  {/* Prompt Strength: how closely AI follows the text prompt */}
+                  <label className="flex items-center gap-2 text-sm text-stone-700">
+                    <span className="shrink-0">Prompt Strength</span>
+                    <input
+                      type="range"
+                      min={0.1}
+                      max={1.0}
+                      step={0.05}
+                      value={promptStrength}
+                      onChange={(e) => setPromptStrength(Number(e.target.value))}
+                      aria-label="Prompt Strength"
+                      className="w-28"
+                    />
+                    <span className="w-10 text-right tabular-nums">{promptStrength.toFixed(2)}</span>
+                  </label>
+
+                  {/* Mask Blur: feather edges of the mask */}
+                  <label className="flex items-center gap-2 text-sm text-stone-700">
+                    <span className="shrink-0">Mask Blur</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={20}
+                      step={1}
+                      value={maskBlur}
+                      onChange={(e) => setMaskBlur(Number(e.target.value))}
+                      aria-label="Mask Blur"
+                      className="w-28"
+                    />
+                    <span className="w-10 text-right tabular-nums">{maskBlur}px</span>
+                  </label>
+
+                  {/* Seed: reproducible results */}
+                  <div className="flex items-center gap-2 text-sm text-stone-700">
+                    <label htmlFor={`inpaint-seed-${roomId}`} className="shrink-0">Seed</label>
+                    <input
+                      id={`inpaint-seed-${roomId}`}
+                      type="number"
+                      min={0}
+                      max={999999}
+                      step={1}
+                      value={seed ?? ""}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSeed(val === "" ? undefined : Number(val));
+                      }}
+                      placeholder="Random"
+                      aria-label="Seed for reproducible results"
+                      className="w-28 rounded-md border border-gray-300 px-2 py-1 text-xs tabular-nums focus:outline-none focus:ring-2 focus:ring-stone-500"
+                    />
+                    <label htmlFor={`inpaint-lockseed-${roomId}`} className="flex items-center gap-1 text-xs text-stone-600">
+                      <input
+                        id={`inpaint-lockseed-${roomId}`}
+                        type="checkbox"
+                        checked={lockSeed}
+                        onChange={(e) => setLockSeed(e.target.checked)}
+                        className="h-3.5 w-3.5 accent-stone-800"
+                      />
+                      Lock Seed
+                    </label>
+                  </div>
+
+                  {/* Creative Mode: higher variation */}
+                  <div className="flex items-center gap-2 text-sm text-stone-700">
+                    <span className="shrink-0">Creative Mode</span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={creativeMode}
+                      aria-label="Creative Mode"
+                      onClick={() => setCreativeMode((v) => !v)}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-stone-500 focus:ring-offset-1 ${
+                        creativeMode ? "bg-stone-800" : "bg-gray-300"
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                          creativeMode ? "translate-x-5" : "translate-x-1"
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                </div>
+              </details>
             </div>
           </div>
 
