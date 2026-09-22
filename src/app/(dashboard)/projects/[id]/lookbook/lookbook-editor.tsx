@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import Image from "next/image";
@@ -95,6 +95,7 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
       onStatusChange: (status) => {
         setStatuses((prev) => ({ ...prev, __procurement__: status }));
       },
+      idleMs: 2000,
     })
   );
 
@@ -114,6 +115,7 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
         onStatusChange: (status) => {
           setStatuses((prev) => ({ ...prev, [roomId]: status }));
         },
+        idleMs: 2000,
       });
       controllersRef.current.set(roomId, controller);
     }
@@ -261,6 +263,33 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
         ? "saved"
         : "idle";
 
+  // Autosave indicator: fade "Saved" text to dot-only after 3 seconds (issue #633)
+  const [showDotText, setShowDotText] = useState(false);
+  const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (indicator === "saved") {
+      setShowDotText(true);
+      if (fadeTimerRef.current !== null) clearTimeout(fadeTimerRef.current);
+      fadeTimerRef.current = setTimeout(() => {
+        setShowDotText(false);
+        fadeTimerRef.current = null;
+      }, 3000);
+    } else {
+      setShowDotText(false);
+      if (fadeTimerRef.current !== null) {
+        clearTimeout(fadeTimerRef.current);
+        fadeTimerRef.current = null;
+      }
+    }
+    return () => {
+      if (fadeTimerRef.current !== null) {
+        clearTimeout(fadeTimerRef.current);
+        fadeTimerRef.current = null;
+      }
+    };
+  }, [indicator]);
+
   // Lookbook context for the edit mode (issue #250 feedback): the
   // un-editable pages stay visible around the editors.
   const projectData: ProjectData = {
@@ -325,22 +354,45 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
 
         <div className="flex items-center gap-4">
           {mode === "edit" && (
-            <div aria-live="polite" className="text-sm">
+            <div
+              aria-live="polite"
+              className="flex items-center gap-1.5"
+            >
+              {/* Dot — always visible when in edit mode */}
+              <span
+                className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                  indicator === "saved"
+                    ? "bg-tertiary"
+                    : indicator === "saving"
+                      ? "bg-secondary animate-pulse"
+                      : indicator === "error"
+                        ? "bg-destructive"
+                        : "bg-outline"
+                }`}
+                aria-hidden="true"
+              />
+              {/* Text label */}
               {indicator === "error" ? (
-                <span className="flex items-center gap-2 text-red-700">
-                  Save failed
+                <span className="flex items-center gap-1.5">
+                  <span className="text-xs font-medium text-destructive">
+                    Save failed — Retry
+                  </span>
                   <button
                     type="button"
                     onClick={retryFailedSaves}
-                    className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+                    className="rounded-md border border-destructive/40 px-2 py-0.5 text-xs font-medium text-destructive hover:bg-destructive/5"
                   >
                     Retry
                   </button>
                 </span>
               ) : indicator === "saving" ? (
-                <span className="text-stone-500">Saving…</span>
-              ) : indicator === "saved" ? (
-                <span className="text-green-700">Saved</span>
+                <span className="text-xs text-secondary font-medium">
+                  Saving...
+                </span>
+              ) : indicator === "saved" && showDotText ? (
+                <span className="text-xs text-tertiary font-medium">
+                  Saved
+                </span>
               ) : null}
             </div>
           )}
