@@ -1,13 +1,11 @@
 import {
   CoverPage,
-  LookbookRoomData,
-  MaterialSwatchPage,
   PhilosophyPage,
+  ROIMetricsDashboard,
   RoomSpread,
   SignoffPage,
-  type MaterialSwatchData,
-  type ProjectData,
 } from "@/components/lookbook";
+import type { LookbookRoomData, ProjectData, ROIMetric } from "@/components/lookbook";
 import { parseChecklistItems } from "@/lib/checklist-schema";
 
 export interface PreviewRoom {
@@ -30,6 +28,8 @@ export interface PreviewProject {
   clientName: string;
   targetBuyer: string;
   stagingAesthetic: string;
+  /** ROI metrics from project settings. Null means use the dashboard's defaults. */
+  roiMetrics: ROIMetric[] | null;
   /** Client sign-off (issue #556) */
   clientSignature?: string | null;
   clientSignatureStatus?: string | null;
@@ -42,7 +42,6 @@ export interface PreviewProject {
     signoffContent: string | null;
   };
   rooms: PreviewRoom[];
-  materialSwatches: MaterialSwatchData[];
 }
 
 interface LookbookPreviewViewProps {
@@ -99,6 +98,10 @@ export function LookbookPreviewView({ project, previewToken }: LookbookPreviewVi
         <PhilosophyPage project={projectData} user={project.user} />
       </div>
 
+      <div id="lookbook-roi">
+        <ROIMetricsDashboard metrics={project.roiMetrics ?? undefined} />
+      </div>
+
       {project.rooms.map((room) => (
         <div key={room.id} id={`lookbook-room-${room.id}`}>
           <RoomSpread
@@ -124,12 +127,6 @@ export function LookbookPreviewView({ project, previewToken }: LookbookPreviewVi
           />
         </div>
       ))}
-
-      {project.materialSwatches.length > 0 && (
-        <div id="lookbook-swatches">
-          <MaterialSwatchPage swatches={project.materialSwatches} />
-        </div>
-      )}
 
       <div id="lookbook-closing">
         {canSign ? (
