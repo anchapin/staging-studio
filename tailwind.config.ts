@@ -178,13 +178,10 @@ const config: Config = {
         /* Hairline divider token (Issue #640) */
         "outline-variant": "hsl(var(--outline-variant))",
         /* Atelier Canvas palette (Issue #546) + full Stitch token system
-         * (Issue #613). The spec tokens come from src/lib/color-tokens.ts;
-         * canvas/taupe/cream are legacy Atelier aliases kept for existing
-         * call sites (atelier-canvas, atelier-taupe). */
+         * (Issue #613), entirely generated from src/lib/color-tokens.ts —
+         * including the pre-#613 legacy aliases (canvas/taupe/cream) that
+         * #719 consolidated into the same table. */
         atelier: {
-          canvas: "#F8F6F2",
-          taupe: "#8C827A",
-          cream: "#fff8f8",
           ...ATELIER_COLOR_TOKENS,
         },
       },

@@ -29,6 +29,12 @@ import {
  * - borderRadius keeps `pill: 0.75rem` for pills and `full` for true circles
  * - globals.css :root mirrors every token value (CSS-first Tailwind v4 path)
  * - acceptance: no arbitrary-value `[#…]` utilities remain in component code
+ *
+ * Issue #719: the pre-#613 legacy aliases (canvas/taupe/cream) are part of
+ * the table, globals.css `@theme inline` maps every token through var()
+ * (no raw hex), every hex literal remaining in `:root`/`@theme inline` is a
+ * token value, and the shadcn-family vars ride var() references instead of
+ * duplicating token hexes.
  */
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
@@ -85,6 +91,12 @@ const SPEC_TABLE: Record<string, string> = {
   "on-error": "#ffffff",
   "error-container": "#ffdad6",
   "on-error-container": "#93000a",
+  // Legacy Atelier aliases (pre-#613, issue #592; folded into the table by
+  // #719). Values preserved verbatim — deduplication, not redesign; cream
+  // deliberately differs from surface by one channel.
+  canvas: "#F8F6F2",
+  taupe: "#8C827A",
+  cream: "#fff8f8",
 };
 
 describe("Atelier color token table — issue #613", () => {
@@ -174,6 +186,11 @@ describe("Tailwind wiring — issue #613 task 1", () => {
   });
 
   it("keeps the legacy Atelier aliases alongside the spec tokens", () => {
+    // #719: the aliases are table-driven now, not hardcoded in the config
+    expect(atelier.canvas).toBe(ATELIER_COLOR_TOKENS.canvas);
+    expect(atelier.taupe).toBe(ATELIER_COLOR_TOKENS.taupe);
+    expect(atelier.cream).toBe(ATELIER_COLOR_TOKENS.cream);
+    // verbatim values (pre-#613 palette, unchanged on purpose)
     expect(atelier.canvas).toBe("#F8F6F2");
     expect(atelier.taupe).toBe("#8C827A");
     expect(atelier.cream).toBe("#fff8f8");
@@ -218,9 +235,9 @@ describe("globals.css mirror — CSS-first Tailwind v4 path", () => {
   });
 
   it("maps every token through @theme inline (utility emission)", () => {
-    // secondary is a literal in @theme inline; background/outline-variant/
-    // primary ride their shadcn vars
-    expect(css).toContain("--color-secondary: #8f4d20;");
+    // background/outline-variant/primary ride their shadcn vars; every
+    // other token — secondary and the legacy aliases included since #719 —
+    // self-maps through its :root --color-* value
     expect(css).toContain("--color-background: var(--background);");
     expect(css).toContain("--color-outline-variant: var(--outline-variant);");
     expect(css).toContain("--color-primary: var(--primary);");
@@ -228,7 +245,6 @@ describe("globals.css mirror — CSS-first Tailwind v4 path", () => {
       if (
         token === "background" ||
         token === "outline-variant" ||
-        token === "secondary" ||
         token === "primary"
       ) {
         continue;
@@ -242,6 +258,91 @@ describe("globals.css mirror — CSS-first Tailwind v4 path", () => {
   it("names css vars exactly after the tokens", () => {
     expect(cssVarName("on-surface-variant")).toBe("--color-on-surface-variant");
     expect(cssVarName("primary-container")).toBe("--color-primary-container");
+  });
+});
+
+describe("globals.css hex consolidation — issue #719", () => {
+  const css = readProjectFile("src/app/globals.css");
+
+  /** Extract a balanced `{…}` block starting at the given opener. */
+  function extractBlock(source: string, opener: string): string {
+    const start = source.indexOf(opener);
+    expect(start, `globals.css must contain ${opener}`).toBeGreaterThanOrEqual(0);
+    const openBrace = source.indexOf("{", start);
+    let depth = 0;
+    for (let i = openBrace; i < source.length; i++) {
+      if (source[i] === "{") depth += 1;
+      else if (source[i] === "}") {
+        depth -= 1;
+        if (depth === 0) return source.slice(openBrace, i + 1);
+      }
+    }
+    throw new Error(`Unbalanced braces after ${opener}`);
+  }
+
+  const themeInlineBlock = extractBlock(css, "@theme inline {");
+  const rootBlock = extractBlock(css, ":root {");
+  const tokenHexValues = new Set(
+    Object.values(ATELIER_COLOR_TOKENS).map((value) => value.toLowerCase()),
+  );
+
+  it("@theme inline carries no raw hex — every mapping is var()-backed", () => {
+    // strip comments first: they cite issue numbers (#613) and old draft
+    // hexes that are not declarations
+    const declarations = themeInlineBlock.replace(/\/\*[\s\S]*?\*\//g, "");
+    const hexes = declarations.match(/#[0-9a-fA-F]{3,8}\b/g) ?? [];
+    expect(hexes).toEqual([]);
+  });
+
+  it("every hex literal in :root is a value from the token table", () => {
+    // strip comments first: they cite issue numbers (#613) and old draft
+    // hexes that are not declarations
+    const declarations = rootBlock.replace(/\/\*[\s\S]*?\*\//g, "");
+    const hexes = [
+      ...new Set(
+        (declarations.match(/#[0-9a-fA-F]{3,8}\b/g) ?? []).map((h) =>
+          h.toLowerCase(),
+        ),
+      ),
+    ].sort();
+    const strays = hexes.filter((hex) => !tokenHexValues.has(hex));
+    expect(
+      strays,
+      `:root hex literals absent from ATELIER_COLOR_TOKENS: ${strays.join(", ")}`,
+    ).toEqual([]);
+    // the consolidated strays from the issue body are present and token-backed
+    for (const token of ["canvas", "cream", "secondary"] as const) {
+      expect(rootBlock).toContain(
+        `--color-${token}: ${ATELIER_COLOR_TOKENS[token]};`,
+      );
+    }
+  });
+
+  it("shadcn-family :root vars reference tokens via var(), not duplicate hexes", () => {
+    const wiring: Record<string, string> = {
+      "--foreground": "var(--primary)",
+      "--card": "var(--color-surface)",
+      "--card-foreground": "var(--primary)",
+      "--popover": "var(--color-surface)",
+      "--popover-foreground": "var(--primary)",
+      "--primary-foreground": "var(--color-on-primary)",
+      "--secondary": "var(--color-secondary)",
+      "--secondary-foreground": "var(--color-on-secondary)",
+      "--muted": "var(--color-canvas)",
+      "--muted-foreground": "var(--color-taupe)",
+      "--accent": "var(--color-canvas)",
+      "--accent-foreground": "var(--primary)",
+      "--sidebar": "var(--color-cream)",
+      "--sidebar-foreground": "var(--primary)",
+      "--sidebar-primary": "var(--primary)",
+      "--sidebar-primary-foreground": "var(--color-cream)",
+      "--sidebar-accent": "var(--color-canvas)",
+      "--sidebar-accent-foreground": "var(--primary)",
+      "--canvas-background": "var(--color-canvas)",
+    };
+    for (const [property, value] of Object.entries(wiring)) {
+      expect(css).toContain(`${property}: ${value};`);
+    }
   });
 });
 
