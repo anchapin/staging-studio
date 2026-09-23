@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { Cinzel, Playfair_Display, Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
-import ReviewPanel from "@/components/review-panel";
 
 const cinzel = Cinzel({
   subsets: ["latin"],
@@ -52,10 +51,7 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body className="antialiased">
-        {children}
-        <ReviewPanel />
-      </body>
+      <body className="antialiased">{children}</body>
     </html>
   );
 }
