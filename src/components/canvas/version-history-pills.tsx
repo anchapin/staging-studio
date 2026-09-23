@@ -7,6 +7,7 @@ import {
   Redo2,
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { formatRelativeTime } from "@/lib/relative-time";
 import {
   planVersionRestore,
@@ -46,6 +47,10 @@ export default function VersionHistoryPills({
   });
   const [menuOpen, setMenuOpen] = useState(false);
   const [animatingPill, setAnimatingPill] = useState(false);
+  const [pendingRestore, setPendingRestore] = useState<{
+    plan: VersionRestorePlan;
+    version: InpaintVersion;
+  } | null>(null);
   const { showSuccess, showError } = useToast();
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -145,8 +150,13 @@ export default function VersionHistoryPills({
       activeResultUrl ?? null
     );
     if (!plan) return;
-    if (!window.confirm("Restore this version? This will update your current image.")) return;
-    void runRestore(plan, version, stacks);
+    setPendingRestore({ plan, version });
+  };
+
+  const handleConfirmRestore = () => {
+    if (!pendingRestore) return;
+    void runRestore(pendingRestore.plan, pendingRestore.version, stacks);
+    setPendingRestore(null);
   };
 
   // Display versions in chronological order (oldest first = v1, v2, v3...)
@@ -320,6 +330,15 @@ export default function VersionHistoryPills({
           animation: newPill 0.3s ease-out forwards;
         }
       `}</style>
+
+      <ConfirmDialog
+        open={pendingRestore !== null}
+        onCancel={() => setPendingRestore(null)}
+        onConfirm={handleConfirmRestore}
+        title="Restore this version?"
+        message="This will overwrite your current image with this historical version. This action cannot be undone."
+        confirmLabel="Restore"
+      />
     </div>
   );
 }
