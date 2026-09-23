@@ -80,7 +80,7 @@ All in `.env.example`, copied to `.env.local` (with `.env` symlinked to it — s
 - `DAILY_INPAINT_LIMIT` — optional. Daily per-user fal.ai FLUX.1 Fill inpaint cap (default 20), read via `lib/api-quota.ts` and enforced in `api/inpaint` (exact: counted from `InpaintRequest` rows in Postgres). Set 0 to block the surface.
 - `DAILY_COPY_LIMIT` — optional. Daily per-user gpt-4o-mini copy-generation cap (default 50), read via `lib/api-quota.ts` and enforced in `api/generate-copy` (in-process counter). Set 0 to block the surface.
 - `DAILY_LABEL_LIMIT` — optional. Daily per-user gpt-4o-mini vision label-instance cap (default 50), read via `lib/api-quota.ts` and enforced in `api/label-instances` and the `room-batch` server action (in-process counter). Set 0 to block the surface.
-- `DAILY_EXPORT_LIMIT` — optional. Daily per-user Browserless PDF export cap (default 20), read via `lib/api-quota.ts` and enforced in `api/export-pdf` (in-process counter). Set 0 to block the surface.
+- `DAILY_EXPORT_LIMIT` — optional. Daily per-user Browserless PDF export cap (default 20), read via `lib/api-quota.ts` and enforced in `api/export-pdf` (in-process counter — NOT exact like `DAILY_INPAINT_LIMIT`'s Postgres row count: it resets on restart/serverless cold start and is per-instance on Vercel, so the daily cap can under-count; accepted for this single-tenant deployment, #716). Set 0 to block the surface.
 - `DAILY_SEGMENT_LIMIT` — optional. Daily per-user fal.ai SAM 3.1 segmentation cap (default 100), read via `lib/api-quota.ts` and enforced in `api/segment/furnishings` (in-process counter). Set 0 to block the surface.
 
 ## Toolchain quirks
