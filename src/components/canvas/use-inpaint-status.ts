@@ -2,18 +2,79 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  pollInpaintStatus,
+  classifyStatusResponse,
+  InpaintPollError,
   type FetchInpaintStatus,
   type InpaintStatusResponse,
+  type StatusOutcome,
 } from "@/lib/inpaint-polling";
+import {
+  createBackoff,
+  nextDelay,
+  type BackoffOptions,
+  type BackoffState,
+} from "@/lib/inpaint-backoff";
 import { resolveInpaintRetry } from "@/lib/inpaint-retry";
 
 const POLL_OPTIONS = {
   intervalMs: 1000,
-  maxIntervalMs: 5000,
+  maxIntervalMs: 30_000,
   maxAttempts: 30,
   maxWaitMs: 5 * 60_000,
 };
+
+const _backoffStates = new Map<string, BackoffState>();
+
+function _getBackoff(requestId: string): BackoffState {
+  if (!_backoffStates.has(requestId)) {
+    _backoffStates.set(requestId, createBackoff(POLL_OPTIONS));
+  }
+  return _backoffStates.get(requestId)!;
+}
+
+const _pollBackoffOptions: BackoffOptions = {
+  intervalMs: POLL_OPTIONS.intervalMs,
+  maxIntervalMs: POLL_OPTIONS.maxIntervalMs,
+};
+
+async function _pollWithBackoff(
+  fetchStatus: FetchInpaintStatus,
+  requestId: string,
+  signal?: AbortSignal,
+  onProgress?: (status: string) => void,
+): Promise<{ imageUrl: string; persisted: boolean }> {
+  for (let i = 0; i < POLL_OPTIONS.maxAttempts; i++) {
+    if (signal?.aborted) {
+      throw new InpaintPollError("aborted", "Polling was aborted.");
+    }
+
+    let outcome: StatusOutcome;
+    try {
+      const response = await fetchStatus(requestId, signal);
+      outcome = classifyStatusResponse(response);
+    } catch (error) {
+      if (signal?.aborted) return { imageUrl: "", persisted: false };
+      if (error instanceof InpaintPollError) throw error;
+      const action = resolveInpaintRetry(error, requestId);
+      if (action.kind === "resubmit") throw error;
+      // "resume" — poll-phase error; re-poll the same requestId
+      continue;
+    }
+
+    if (outcome.kind === "completed") {
+      return { imageUrl: outcome.imageUrl, persisted: outcome.persisted };
+    }
+    if (outcome.kind === "error") {
+      throw new InpaintPollError("terminal", outcome.message);
+    }
+
+    onProgress?.(outcome.message);
+    const state = _getBackoff(requestId);
+    const delayMs = nextDelay(state, _pollBackoffOptions);
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  throw new InpaintPollError("max-attempts", "Polling timed out.");
+}
 
 const MIN_PROCESSING_MS = 600;
 
@@ -94,11 +155,12 @@ export function useInpaintStatus(
       lastRequestIdRef.current = requestId;
       setStatusText("Processing image...");
 
-      const result = await pollInpaintStatus(fetchInpaintStatus, requestId, {
-        ...POLL_OPTIONS,
+      const result = await _pollWithBackoff(
+        fetchInpaintStatus,
+        requestId,
         signal,
-        onProgress: (status) => setStatusText(`Processing: ${status}`),
-      });
+        (status) => setStatusText(`Processing: ${status}`),
+      );
       if (signal.aborted) return;
 
       const elapsed = Date.now() - (processingStartRef.current ?? 0);
