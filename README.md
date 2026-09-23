@@ -20,24 +20,32 @@ The middleware-protected post-login landing page (`src/app/dashboard/page.tsx`);
 
 ### 4. Project intake — `/projects` and `/projects/new`
 
-`/projects` lists staging jobs. `/projects/new` is the intake form — property address, client name, target buyer, and staging aesthetic — which creates a `Project` through the ownership-checked server action in `src/app/actions/project.ts` and lands on the new project's workspace. A REST surface for projects and rooms also exists under `src/app/api/projects/` (including nested `[id]` and `[id]/rooms/[roomId]` handlers).
+`/projects` lists staging jobs. `/projects/new` is the intake form — property address, client name, target buyer, and a staging aesthetic chosen from curated staging packages (`src/components/packages/staging-package-card.tsx`, validated by `lib/staging-packages-schema.ts`) — which creates a `Project` through the ownership-checked server action in `src/app/actions/project.ts` and lands on the new project's workspace. A REST surface for projects and rooms also exists under `src/app/api/projects/` (including nested `[id]` and `[id]/rooms/[roomId]` handlers).
 
 ### 5. Staging workspace — `/projects/[id]`
 
-The core editor, one workspace per property with rooms as the unit of work. The UI lives in `src/components/canvas/`; server actions in `src/app/actions/` (`room.ts`, `room-photos.ts`) own all mutations. Per room:
+The core editor, one workspace per property with rooms as the unit of work. The per-room studio lives at `/projects/[id]/rooms` (refinement continues on `/projects/[id]/refine`, `?room=`-scoped). The UI lives in `src/components/canvas/`; server actions in `src/app/actions/` (`room.ts`, `room-photos.ts`, `room-batch.ts`) own all mutations. Per room:
 
+- **Batch room upload** — create every room of a property in one pass (`batch-room-upload.tsx` → `createRoomsBatch` / `getBatchRoomUploadUrls` in `room-batch.ts`), with AI room-type detection from the uploaded photos (`detectBatchRoomTypes`) and bulk aesthetic assignment from the room matrix (`room-batch-card-matrix.tsx` → `bulkUpdateRoomAesthetic`).
 - **Before-photo upload with client-side compression** — images are compressed in the browser (`browser-image-compression` in `room-canvas.tsx`) and stored in Supabase Storage via `src/app/actions/room-photos.ts`, into either of two variant slots.
 - **Brush-mask AI staging** — paint a mask over the region to restage (`inpaint-mask-canvas.tsx`) and run fal.ai FLUX.1 Fill inpainting (`POST /api/inpaint`). Each run is persisted as an `InpaintRequest` row, so queued jobs survive serverless deadlines and page refreshes resume polling (`GET /api/inpaint/[requestId]/status` + `use-inpaint-status.ts`).
-- **Two selectable variants per room** — each room keeps two before/after pairs (`variant-picker.tsx`, `comparison-slider.tsx`) and a selected-variant index controls which one reaches the PDF.
+- **SAM auto-segmentation** — masks don't have to be painted by hand: `POST /api/segment` turns a click on the photo into a furnishing-accurate mask (fal.ai SAM, model id in `lib/segment-mask.ts`, results cached by image hash in `lib/segment-cache.ts`), and `POST /api/segment/furnishings` returns the furnishings SAM 3.1 detects in the room. Both calls are synchronous, daily-capped routes (`DAILY_SEGMENT_LIMIT` via `lib/api-quota.ts`).
+- **Vision label instances** — `POST /api/label-instances` runs GPT-4o-mini vision over the photo and persists per-furnishing labels as `VisionLabel` rows (`lib/vision-labels.ts`); the inspector (`inspector-collapsed-rail.tsx`, hit-testing via `lib/instance-hit-test.ts`) makes each labeled furnishing clickable, so you can select exactly the pieces to restage. Capped by `DAILY_LABEL_LIMIT`.
+- **Inpaint version history** — staged results are saved as restorable `InpaintVersion` snapshots (`src/app/actions/inpaint-versions.ts`), browsed and restored from `version-history-panel.tsx`, so refinements never destroy an earlier take.
+- **Two selectable variants per room** — each room keeps two before/after pairs (`variant-thumbnail-strip.tsx`, `comparison-slider.tsx`) and a selected-variant index controls which one reaches the PDF.
 - **AI room copy** — freeform staging directives are expanded by GPT-4o-mini through the Vercel AI SDK (`generate-copy-form.tsx` → `POST /api/generate-copy`) into an observed challenge, a staging recommendation, buyer-psychology notes, and a prioritized staging checklist.
 
-### 6. Lookbook preview and PDF export — `/projects/[id]/preview`
+### 6. Lookbook editor — `/projects/[id]/lookbook`
 
-A printable lookbook composed of cover, philosophy, room-spread, and sign-off pages (`src/components/lookbook/`). `POST /api/export-pdf` renders it with Browserless.io, signing a short-lived preview token (`src/lib/preview-token.ts`) so the cloud browser can fetch the page without session cookies.
+The interactive lookbook assembles the client-facing document from `src/components/lookbook/`: cover, philosophy, room spreads, buyer persona, ROI metrics (`roi-metrics-dashboard.tsx`), a material-swatch page for finish and palette references (`MaterialSwatch` rows via `src/app/actions/material-swatch.ts`), a furniture procurement table (`ProcurementItem` rows via `src/app/actions/procurement.ts`), an investment summary, and the sign-off page. A client-facing consultation report with a before/after comparison slider lives at `/projects/[id]/report`.
+
+### 7. Client sign-off and PDF export — `/preview/[id]`
+
+`POST /api/export-pdf` renders the lookbook with Browserless.io, signing a short-lived preview token (`lib/preview-token.ts`) so the cloud browser can fetch the cookie-less print page at `/preview/[id]` without a session. The same token gates client digital sign-off: on the sign-off page the client draws a signature (`signature-canvas.tsx`) and `POST /api/sign-project` persists it to the project (`clientSignature` PNG data URL + timestamp; already-signed projects are refused) — the client never needs a login.
 
 ### Domain model
 
-`prisma/schema.prisma` chains `User → Project → Room → InpaintRequest` with cascading deletes: a firm (`User`, with branding) owns staging jobs (`Project`), each job holds rooms, and each room holds its two before/after variant pairs, selected variant, AI copy fields, and checklist JSON — plus the inpaint queue requests that track one fal.ai job each (status + durable result URL).
+`prisma/schema.prisma` chains `User → Project → Room → InpaintRequest` with cascading deletes: a firm (`User`, with branding) owns staging jobs (`Project`), each job holds rooms, and each room holds its two before/after variant pairs, selected variant, AI copy fields, and checklist JSON — plus the inpaint queue requests that track one fal.ai job each (status + durable result URL) and the `InpaintVersion` snapshots that version history restores from. Rooms also persist detected furnishings as `VisionLabel` rows keyed by image hash; projects carry client-facing `MaterialSwatch` and `ProcurementItem` rows alongside the client's digital signature fields.
 
 ### Route → source map
 
@@ -52,7 +60,7 @@ A printable lookbook composed of cover, philosophy, room-spread, and sign-off pa
 | `/settings` | Firm branding and lookbook page templates | `src/app/(dashboard)/settings/page.tsx` |
 | `/projects` | Project list | `src/app/(dashboard)/projects/page.tsx` |
 | `/projects/new` | Project intake form | `src/app/(dashboard)/projects/new/page.tsx`, `src/app/actions/project.ts` |
-| `/projects/[id]` | Staging workspace (rooms, masks, variants, copy) | `src/app/(dashboard)/projects/[id]/page.tsx`, `src/components/canvas/`, `src/app/actions/`, `src/app/api/inpaint/`, `src/app/api/generate-copy/` |
+| `/projects/[id]` | Staging workspace (rooms, masks, segmentation, variants, version history, copy) | `src/app/(dashboard)/projects/[id]/page.tsx`, `src/components/canvas/`, `src/app/actions/`, `src/app/api/inpaint/`, `src/app/api/segment/`, `src/app/api/label-instances/`, `src/app/api/generate-copy/` |
 | `/projects/[id]/setup` | Project intake (first workflow-stepper step) | `src/app/(dashboard)/projects/[id]/setup/page.tsx` |
 | `/projects/[id]/rooms` | Per-room staging studio | `src/app/(dashboard)/projects/[id]/rooms/page.tsx` |
 | `/projects/[id]/refine` | Staged-result refinement (`?room=`-scoped) | `src/app/(dashboard)/projects/[id]/refine/page.tsx` |
@@ -62,12 +70,12 @@ A printable lookbook composed of cover, philosophy, room-spread, and sign-off pa
 
 ## Tech Stack
 
-- **Next.js 15** (App Router, TypeScript)
+- **Next.js 16** (App Router, TypeScript)
 - **Tailwind CSS + shadcn/ui**
 - **Supabase** (Postgres + Storage + Auth)
 - **Prisma** ORM
-- **Vercel AI SDK + GPT-4o-mini** — structured copywriting
-- **fal.ai FLUX.1 Fill** — AI inpainting
+- **Vercel AI SDK + GPT-4o-mini** — structured copywriting and vision labeling
+- **fal.ai** — FLUX.1 Fill inpainting + SAM segmentation
 - **Browserless.io** — PDF export
 
 ## Getting Started
