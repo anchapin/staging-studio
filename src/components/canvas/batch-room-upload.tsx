@@ -201,6 +201,7 @@ export default function BatchRoomUpload({
 
     if (toDetect.length > 0) {
       const detectResult = await detectBatchRoomTypes(
+        projectId,
         toDetect.map((u) => u.publicUrl)
       );
 

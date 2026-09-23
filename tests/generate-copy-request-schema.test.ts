@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { generateCopyRequestSchema, visionLabelRequestSchema } from "@/lib/ai-route-schemas";
+import {
+  BATCH_ROOM_TYPE_MAX_IMAGES,
+  batchRoomTypesRequestSchema,
+  generateCopyRequestSchema,
+  visionLabelRequestSchema,
+} from "@/lib/ai-route-schemas";
 
 describe("generateCopyRequestSchema", () => {
   it("accepts a body carrying only roomId", () => {
@@ -77,6 +82,83 @@ describe("visionLabelRequestSchema", () => {
     expect(
       visionLabelRequestSchema.safeParse({
         ...validBody,
+        extraField: "not allowed",
+      }).success
+    ).toBe(false);
+  });
+});
+
+describe("batchRoomTypesRequestSchema (detectBatchRoomTypes gate, issue #681)", () => {
+  const validUrl =
+    "https://xxxx.supabase.co/storage/v1/object/public/room-photos/batch-rooms/p1/room-0.jpg";
+
+  it("accepts a projectId with one allowlisted image URL", () => {
+    const result = batchRoomTypesRequestSchema.safeParse({
+      projectId: "project_123",
+      imageUrls: [validUrl],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({
+        projectId: "project_123",
+        imageUrls: [validUrl],
+      });
+    }
+  });
+
+  it("accepts a batch exactly at the cap", () => {
+    const result = batchRoomTypesRequestSchema.safeParse({
+      projectId: "project_123",
+      imageUrls: Array.from({ length: BATCH_ROOM_TYPE_MAX_IMAGES }, () => validUrl),
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects an empty list and a list over the cap", () => {
+    expect(
+      batchRoomTypesRequestSchema.safeParse({ projectId: "project_123", imageUrls: [] })
+        .success
+    ).toBe(false);
+    expect(
+      batchRoomTypesRequestSchema.safeParse({
+        projectId: "project_123",
+        imageUrls: Array.from(
+          { length: BATCH_ROOM_TYPE_MAX_IMAGES + 1 },
+          () => validUrl
+        ),
+      }).success
+    ).toBe(false);
+  });
+
+  it("rejects non-allowlisted hosts, plain http, and non-URLs per entry", () => {
+    const badUrls = [
+      "https://example.com/room.jpg", // host not on the allowlist
+      "http://xxxx.supabase.co/room.jpg", // not https
+      "not-a-url",
+      "",
+    ];
+    for (const bad of badUrls) {
+      expect(
+        batchRoomTypesRequestSchema.safeParse({
+          projectId: "project_123",
+          imageUrls: [validUrl, bad],
+        }).success
+      ).toBe(false);
+    }
+  });
+
+  it("rejects a missing or empty projectId and unknown keys (strict)", () => {
+    expect(
+      batchRoomTypesRequestSchema.safeParse({ imageUrls: [validUrl] }).success
+    ).toBe(false);
+    expect(
+      batchRoomTypesRequestSchema.safeParse({ projectId: "", imageUrls: [validUrl] })
+        .success
+    ).toBe(false);
+    expect(
+      batchRoomTypesRequestSchema.safeParse({
+        projectId: "project_123",
+        imageUrls: [validUrl],
         extraField: "not allowed",
       }).success
     ).toBe(false);

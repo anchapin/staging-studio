@@ -10,6 +10,7 @@ import {
   SEGMENT_DAILY_LIMIT,
   dailyQuotaExceededPayload,
   dailyWindow,
+  evaluateDailyBatchQuota,
   evaluateDailyQuota,
   getDailyUsage,
   inpaintDailyUsageWhere,
@@ -284,5 +285,41 @@ describe("default limits and env var names", () => {
       export: "DAILY_EXPORT_LIMIT",
       segment: "DAILY_SEGMENT_LIMIT",
     });
+  });
+});
+
+describe("evaluateDailyBatchQuota (batch room-type detection, issue #681)", () => {
+  it("allows a batch that fits entirely in the remaining headroom", () => {
+    const decision = evaluateDailyBatchQuota(45, 5, 50);
+    expect(decision).toEqual({ allowed: true, used: 45, limit: 50 });
+  });
+
+  it("allows the exactly-filling batch (used + count === limit)", () => {
+    expect(evaluateDailyBatchQuota(30, 20, 50).allowed).toBe(true);
+    expect(evaluateDailyBatchQuota(0, 50, 50).allowed).toBe(true);
+  });
+
+  it("rejects a batch that would straddle the boundary — no partial service", () => {
+    const decision = evaluateDailyBatchQuota(45, 6, 50);
+    expect(decision.allowed).toBe(false);
+    if (!decision.allowed) {
+      expect(decision.used).toBe(45);
+      expect(decision.limit).toBe(50);
+    }
+  });
+
+  it("rejects any batch at an exhausted limit", () => {
+    expect(evaluateDailyBatchQuota(50, 1, 50).allowed).toBe(false);
+    expect(evaluateDailyBatchQuota(50, 20, 50).allowed).toBe(false);
+    expect(evaluateDailyBatchQuota(60, 1, 50).allowed).toBe(false);
+  });
+
+  it("reports the next-midnight reset window for a denied batch", () => {
+    const decision = evaluateDailyBatchQuota(50, 1, 50, midDay);
+    expect(decision.allowed).toBe(false);
+    if (!decision.allowed) {
+      expect(decision.resetsAt).toBe(nextMidnight.toISOString());
+      expect(decision.resetsAt).toBe(dailyWindow(midDay).endAt.toISOString());
+    }
   });
 });
