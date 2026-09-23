@@ -54,7 +54,7 @@ export function ConsultationActionBar({
         {/* Left cluster: pulsing dot + config summary + subtext */}
         <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
           <div className="flex min-w-0 items-center gap-2.5">
-            <span className="flex h-2.5 w-2.5 shrink-0" aria-hidden="true">
+            <span className="relative flex h-2.5 w-2.5 shrink-0" aria-hidden="true">
               <span className={CONSULTATION_PULSE_DOT_HALO_CLASSES} />
               <span className={CONSULTATION_PULSE_DOT_CORE_CLASSES} />
             </span>
