@@ -8,6 +8,11 @@ import {
 } from "lucide-react";
 import { getInpaintVersions, restoreInpaintVersion } from "@/app/actions/inpaint-versions";
 import { useToast } from "@/components/ui/toast";
+import {
+  planVersionRestore,
+  type VersionHistoryStackState,
+  type VersionRestorePlan,
+} from "@/lib/version-history-stack";
 
 interface InpaintVersion {
   id: string;
@@ -54,9 +59,11 @@ export default function VersionHistoryPills({
 }: VersionHistoryPillsProps) {
   const [versions, setVersions] = useState<InpaintVersion[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [currentIndex, setCurrentIndex] = useState(0); // Index into versions array
-  const [undoStack, setUndoStack] = useState<string[]>([]); // Stack of resultUrls for undo
-  const [redoStack, setRedoStack] = useState<string[]>([]); // Stack of resultUrls for redo
+  const [stacks, setStacks] = useState<VersionHistoryStackState>({
+    undoStack: [], // Stack of resultUrls for undo
+    redoStack: [], // Stack of resultUrls for redo
+    currentIndex: 0, // Index into versions array
+  });
   const [menuOpen, setMenuOpen] = useState(false);
   const [animatingPill, setAnimatingPill] = useState(false);
   const { showSuccess, showError } = useToast();
@@ -73,7 +80,7 @@ export default function VersionHistoryPills({
         // Set current index to the active version, or 0 if none
         if (activeResultUrl) {
           const idx = vers.findIndex((v) => v.resultUrl === activeResultUrl);
-          setCurrentIndex(idx >= 0 ? idx : 0);
+          setStacks((prev) => ({ ...prev, currentIndex: idx >= 0 ? idx : 0 }));
         }
       }
     } finally {
@@ -110,75 +117,66 @@ export default function VersionHistoryPills({
     }
   }, [activeResultUrl, versions, loadVersions]);
 
-  const handleRestore = async (version: InpaintVersion) => {
+  /**
+   * Runs one restore with optimistic stack updates and #699 rollback: the
+   * plan is applied while the server call is in flight, and the pre-click
+   * snapshot is re-applied verbatim when the server rejects the restore
+   * (failure result or throw), so the pills never point at a version the
+   * server never applied.
+   */
+  const runRestore = async (
+    plan: VersionRestorePlan,
+    version: InpaintVersion,
+    snapshot: VersionHistoryStackState
+  ) => {
+    setStacks(plan.next);
     try {
       const result = await restoreInpaintVersion(version.id);
       if (result.success) {
-        // Add current to undo stack before restoring
-        if (activeResultUrl) {
-          setUndoStack((prev) => [...prev, activeResultUrl]);
-        }
-        // Clear redo stack on new action
-        setRedoStack([]);
-        // Update current index
-        const idx = versions.findIndex((v) => v.id === version.id);
-        if (idx >= 0) setCurrentIndex(idx);
         onVersionChange?.(version.resultUrl);
         showSuccess("Version restored");
-      } else {
-        showError(result.error ?? "Failed to restore version");
+        return;
       }
+      showError(result.error ?? "Failed to restore version");
     } catch {
       showError("Failed to restore version");
     }
+    setStacks(snapshot);
   };
 
+  const versionUrls = versions.map((v) => v.resultUrl);
+
   const handleUndo = () => {
-    if (undoStack.length === 0) return;
-    const previousUrl = undoStack[undoStack.length - 1];
-    const newUndoStack = undoStack.slice(0, -1);
-    // Push current to redo stack
-    if (activeResultUrl) {
-      setRedoStack((prev) => [...prev, activeResultUrl]);
-    }
-    setUndoStack(newUndoStack);
-    // Find the version with this URL and restore it
-    const version = versions.find((v) => v.resultUrl === previousUrl);
-    if (version) {
-      const idx = versions.findIndex((v) => v.id === version.id);
-      if (idx >= 0) setCurrentIndex(idx);
-      void handleRestore(version);
-    }
+    const plan = planVersionRestore(
+      stacks,
+      versionUrls,
+      { kind: "undo" },
+      activeResultUrl ?? null
+    );
+    if (!plan) return;
+    void runRestore(plan, versions[plan.targetIndex], stacks);
   };
 
   const handleRedo = () => {
-    if (redoStack.length === 0) return;
-    const nextUrl = redoStack[redoStack.length - 1];
-    const newRedoStack = redoStack.slice(0, -1);
-    // Push current to undo stack
-    if (activeResultUrl) {
-      setUndoStack((prev) => [...prev, activeResultUrl]);
-    }
-    setRedoStack(newRedoStack);
-    // Find the version with this URL and restore it
-    const version = versions.find((v) => v.resultUrl === nextUrl);
-    if (version) {
-      const idx = versions.findIndex((v) => v.id === version.id);
-      if (idx >= 0) setCurrentIndex(idx);
-      void handleRestore(version);
-    }
+    const plan = planVersionRestore(
+      stacks,
+      versionUrls,
+      { kind: "redo" },
+      activeResultUrl ?? null
+    );
+    if (!plan) return;
+    void runRestore(plan, versions[plan.targetIndex], stacks);
   };
 
   const handlePillClick = (version: InpaintVersion, index: number) => {
-    if (index === currentIndex) return;
-    // Add current to undo stack before switching
-    if (activeResultUrl && activeResultUrl !== version.resultUrl) {
-      setUndoStack((prev) => [...prev, activeResultUrl]);
-    }
-    // Clear redo stack on new action
-    setRedoStack([]);
-    setCurrentIndex(index);
-    void handleRestore(version);
+    const plan = planVersionRestore(
+      stacks,
+      versionUrls,
+      { kind: "direct", targetIndex: index },
+      activeResultUrl ?? null
+    );
+    if (!plan) return;
+    void runRestore(plan, version, stacks);
   };
 
   // Display versions in chronological order (oldest first = v1, v2, v3...)
@@ -219,7 +217,7 @@ export default function VersionHistoryPills({
         <div className="flex items-center gap-1">
           {visibleVersions.map((version, i) => {
             const actualIndex = hasMore ? offsetCount + i : i;
-            const isActive = actualIndex === currentIndex;
+            const isActive = actualIndex === stacks.currentIndex;
             return (
               <button
                 key={version.id}
@@ -252,7 +250,7 @@ export default function VersionHistoryPills({
       <button
         type="button"
         onClick={handleUndo}
-        disabled={undoStack.length === 0}
+        disabled={stacks.undoStack.length === 0}
         className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         title="Undo (previous version)"
         aria-label="Undo"
@@ -264,7 +262,7 @@ export default function VersionHistoryPills({
       <button
         type="button"
         onClick={handleRedo}
-        disabled={redoStack.length === 0}
+        disabled={stacks.redoStack.length === 0}
         className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         title="Redo (next version)"
         aria-label="Redo"
