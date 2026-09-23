@@ -30,3 +30,27 @@ export const roomCopyEditSchema = z
   });
 
 export type RoomCopyEditInput = z.infer<typeof roomCopyEditSchema>;
+
+/**
+ * Zod schema for the full-form AI-copy payload persisted by the
+ * `saveRoomCopy` server action (issue #703).
+ *
+ * Contract: mirrors the `GeneratedCopy` shape exactly — the three prose
+ * fields (1–2000 chars each, the same caps as `roomCopyEditSchema`) and
+ * the `checklist` array (existing `checklistItemSchema` items). All four
+ * fields are required (unlike the partial edit schema), and `.strict()`
+ * rejects unknown keys outright so client-controlled extras can never
+ * ride this write path.
+ *
+ * Side effects: none — pure validation.
+ */
+export const generatedCopySchema = z
+  .object({
+    observedChallenge: z.string().min(1).max(2000),
+    recommendation: z.string().min(1).max(2000),
+    buyerPsychology: z.string().min(1).max(2000),
+    checklist: z.array(checklistItemSchema),
+  })
+  .strict();
+
+export type GeneratedCopyInput = z.infer<typeof generatedCopySchema>;

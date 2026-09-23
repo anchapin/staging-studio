@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { roomCopyEditSchema } from "@/lib/room-copy-edit-schema";
+import {
+  generatedCopySchema,
+  roomCopyEditSchema,
+} from "@/lib/room-copy-edit-schema";
 
 const VALID_ITEM = {
   item: "Re-caulk bathroom tile",
@@ -60,6 +63,84 @@ describe("roomCopyEditSchema", () => {
     expect(
       roomCopyEditSchema.safeParse({
         checklistItems: [{ ...VALID_ITEM, priority: "Urgent" }],
+      }).success
+    ).toBe(false);
+  });
+});
+
+describe("generatedCopySchema", () => {
+  const VALID_COPY = {
+    observedChallenge: "Narrow galley kitchen reads as cramped.",
+    recommendation: "Clear counters and style one open stretch.",
+    buyerPsychology: "Buyers gauge counter space as prep potential.",
+    checklist: [VALID_ITEM],
+  } as const;
+
+  it("accepts a well-formed full generated-copy payload", () => {
+    const result = generatedCopySchema.safeParse(VALID_COPY);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.checklist).toHaveLength(1);
+    }
+  });
+
+  it("rejects a prose field over the 2000-character cap", () => {
+    expect(
+      generatedCopySchema.safeParse({
+        ...VALID_COPY,
+        observedChallenge: "x".repeat(2001),
+      }).success
+    ).toBe(false);
+    expect(
+      generatedCopySchema.safeParse({
+        ...VALID_COPY,
+        buyerPsychology: "x".repeat(2001),
+      }).success
+    ).toBe(false);
+  });
+
+  it("rejects an empty prose field", () => {
+    expect(
+      generatedCopySchema.safeParse({
+        ...VALID_COPY,
+        recommendation: "",
+      }).success
+    ).toBe(false);
+  });
+
+  it("rejects malformed checklist JSON (item with a bad category)", () => {
+    expect(
+      generatedCopySchema.safeParse({
+        ...VALID_COPY,
+        checklist: [{ ...VALID_ITEM, category: "Not A Category" }],
+      }).success
+    ).toBe(false);
+  });
+
+  it("rejects malformed checklist JSON (non-array checklist)", () => {
+    expect(
+      generatedCopySchema.safeParse({
+        ...VALID_COPY,
+        checklist: { item: "not an array" },
+      }).success
+    ).toBe(false);
+  });
+
+  it("rejects a partial payload (all four fields are required)", () => {
+    expect(
+      generatedCopySchema.safeParse({
+        observedChallenge: "ok",
+        recommendation: "ok",
+        buyerPsychology: "ok",
+      }).success
+    ).toBe(false);
+  });
+
+  it("rejects unknown keys (strict object — only the four copy fields)", () => {
+    expect(
+      generatedCopySchema.safeParse({
+        ...VALID_COPY,
+        selectedVariantIndex: 0,
       }).success
     ).toBe(false);
   });
