@@ -124,7 +124,7 @@ export function resolveDailyLimit(raw: string | undefined, fallback: number): nu
 }
 
 export type QuotaDecision =
-  | { allowed: true; used: number; limit: number }
+  | { allowed: true; used: number; limit: number; remaining: number }
   | {
       allowed: false;
       used: number;
@@ -140,7 +140,7 @@ export type QuotaDecision =
  */
 export function evaluateDailyQuota(used: number, limit: number, now: Date = new Date()): QuotaDecision {
   if (used < limit) {
-    return { allowed: true, used, limit };
+    return { allowed: true, used, limit, remaining: limit - used };
   }
   return {
     allowed: false,
@@ -169,7 +169,7 @@ export function evaluateDailyBatchQuota(
   now: Date = new Date()
 ): QuotaDecision {
   if (used + count <= limit) {
-    return { allowed: true, used, limit };
+    return { allowed: true, used, limit, remaining: limit - used };
   }
   return {
     allowed: false,

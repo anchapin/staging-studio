@@ -124,6 +124,60 @@ export async function GET(
 
     const falQueueStatus = fal.queue.status as FalQueueStatusFunction;
     const falQueueResult = fal.queue.result as FalQueueResultFunction;
+
+    // PERSISTENCE_FAILED: persistence previously failed (Supabase storage error).
+    // Retry by fetching the fal result and attempting persistence again.
+    // On success: DB updated to COMPLETED with storage URL.
+    // On failure: stays PERSISTENCE_FAILED; client polls again.
+    if (inpaintRequest.status === "PERSISTENCE_FAILED") {
+      let persisted = true;
+      let resolvedImageUrl: string | null = null;
+      try {
+        const falResult = await falQueueResult(FAL_FLUX_FILL_MODEL, { requestId }).catch(
+          () => null
+        );
+        const falImageUrl: string | null = falResult?.images?.[0]?.url ?? null;
+        if (!falImageUrl) throw new Error("fal result unavailable");
+
+        const imageBlob = await fetch(falImageUrl).then((r) => r.blob());
+        const supabase = await createSupabaseRequestClient();
+        const objectPath = `after-${requestId}.png`;
+
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from("staging-images")
+          .upload(objectPath, imageBlob, {
+            contentType: "image/png",
+            upsert: true,
+          });
+
+        if (uploadError || !uploadData) throw new Error(uploadError?.message ?? "upload failed");
+        const storageUrl = supabase.storage
+          .from("staging-images")
+          .getPublicUrl(objectPath).data.publicUrl;
+        resolvedImageUrl = storageUrl;
+      } catch {
+        persisted = false;
+      }
+
+      if (persisted && resolvedImageUrl) {
+        await prisma.inpaintRequest.update({
+          where: { id: requestId },
+          data: { status: "COMPLETED", resultUrl: resolvedImageUrl },
+        });
+        return NextResponse.json({
+          status: "completed",
+          imageUrl: resolvedImageUrl,
+          persisted: true,
+        });
+      }
+
+      return NextResponse.json({
+        status: "retryable",
+        imageUrl: null,
+        persisted: false,
+      });
+    }
+
     const statusResponse = await falQueueStatus(FAL_FLUX_FILL_MODEL, { requestId });
 
     if (statusResponse.status === "ERROR") {
@@ -262,11 +316,14 @@ export async function GET(
         });
       }
 
-      // Storage persistence failed: return the fal URL explicitly marked as
-      // not persisted so the client can warn — it expires, so it must not be
-      // treated as a durable success.
+      // Storage persistence failed: update DB to PERSISTENCE_FAILED so subsequent
+      // polls retry persistence, and return retryable so the client knows to poll again.
+      await prisma.inpaintRequest.update({
+        where: { id: requestId },
+        data: { status: "PERSISTENCE_FAILED", resultUrl: null },
+      });
       return NextResponse.json({
-        status: "completed",
+        status: "retryable",
         imageUrl: falImageUrl,
         persisted: false,
       });

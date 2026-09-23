@@ -105,7 +105,7 @@ model InpaintRequest {
                        // overwrites its "after" slot in place (selection untouched).
                        // Persisted so a pendingRequestId resume can apply the same
                        // result-persistence semantics as the original submit.
-  status      String   // mirrors fal queue status: IN_QUEUE | IN_PROGRESS | COMPLETED | ERROR
+  status      String   // mirrors fal queue status: IN_QUEUE | IN_PROGRESS | COMPLETED | ERROR | PERSISTENCE_FAILED
   resultUrl   String?  // filled when status is COMPLETED
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
