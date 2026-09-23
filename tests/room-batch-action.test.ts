@@ -96,8 +96,8 @@ describe("detectBatchRoomTypes", () => {
 
   it("rejects when daily label quota is exceeded (issue #790)", async () => {
     const imageUrls = [
-      "https://example.com/room1.jpg",
-      "https://example.com/room2.jpg",
+      "https://room1.jpg.supabase.co/storage/v1/object/public/rooms/room1.jpg",
+      "https://room2.jpg.supabase.co/storage/v1/object/public/rooms/room2.jpg",
     ];
 
     // Simulate quota exceeded - remaining quota (0) < requested count (2)
@@ -125,7 +125,9 @@ describe("detectBatchRoomTypes", () => {
   });
 
   it("allows batch when quota is within limits", async () => {
-    const imageUrls = ["https://example.com/room1.jpg"];
+    const imageUrls = [
+      "https://room1.jpg.supabase.co/storage/v1/object/public/rooms/room1.jpg",
+    ];
 
     mockEvaluateDailyBatchQuota.mockReturnValue({
       allowed: true,
