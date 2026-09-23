@@ -2,6 +2,10 @@
 
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
+import {
+  projectMetadataSchema,
+  type ProjectMetadataInput,
+} from "@/lib/metadata-schemas";
 import { revalidatePath } from "next/cache";
 
 /**
@@ -14,7 +18,11 @@ import { revalidatePath } from "next/cache";
  * Contract: requires an authenticated session; the update's `where`
  * filter (`id: projectId, userId: user.id`) enforces ownership, so a
  * foreign projectId matches nothing and returns "Not authenticated".
- * Failures are caught and reported, never thrown.
+ * `metadata` is validated with `projectMetadataSchema` — server action
+ * arguments are client-controlled RPC payloads, so only the six
+ * editable fields can ever reach Prisma (`.strict()` rejects unknown
+ * keys like `userId`, preventing ownership transfer). Failures are
+ * caught and reported, never thrown.
  *
  * Side effects: needs `DATABASE_URL` and a valid Supabase session
  * cookie; performs a Prisma `project.update` and calls
@@ -25,19 +33,22 @@ import { revalidatePath } from "next/cache";
  * @param metadata Partial fields: `propertyAddress`, `clientName`,
  *   `targetBuyer`, `stagingAesthetic`, and/or `stagingDirectives`.
  * @returns `{ success: true }` on write, or
- *   `{ success: false, error }` when unauthenticated or the update fails.
+ *   `{ success: false, error }` when unauthenticated, the payload is
+ *   invalid, or the update fails.
  */
 export async function saveProjectMetadata(
   projectId: string,
-  metadata: {
-    propertyAddress?: string;
-    clientName?: string;
-    targetBuyer?: string;
-    stagingAesthetic?: string;
-    stagingPackage?: string;
-    stagingDirectives?: string;
-  }
+  metadata: ProjectMetadataInput
 ): Promise<{ success: boolean; error?: string }> {
+  const parsed = projectMetadataSchema.safeParse(metadata);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error:
+        parsed.error.issues[0]?.message ?? "Invalid project metadata payload",
+    };
+  }
+
   const user = await getAuthedPrismaUser();
   if (!user) {
     return { success: false, error: "Not authenticated" };
@@ -46,7 +57,7 @@ export async function saveProjectMetadata(
   try {
     await prisma.project.update({
       where: { id: projectId, userId: user.id },
-      data: metadata,
+      data: parsed.data,
     });
     revalidatePath(`/projects/${projectId}`);
     return { success: true };
