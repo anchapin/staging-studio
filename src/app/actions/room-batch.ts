@@ -19,51 +19,11 @@ import {
   recordDailyUsage,
   resolveDailyLimit,
 } from "@/lib/api-quota";
+import {
+  ROOM_TYPE_SYSTEM_PROMPT,
+  detectRoomType,
+} from "@/lib/room-type-detection";
 
-/**
- * Room type detection prompt sent to GPT-4o-mini vision.
- */
-const ROOM_TYPE_SYSTEM_PROMPT = `You are an expert interior design assistant. Given a room photo, identify the room type from this list:
-- Primary Bedroom
-- Secondary Bedroom
-- Living Room
-- Dining Room
-- Kitchen
-- Bathroom
-- Home Office
-- Garage
-- Outdoor/Patio
-- Other
-
-Respond with ONLY the room type name. If uncertain, respond with the most likely option.`;
-
-/**
- * Detects the room type of an image using GPT-4o-mini vision.
- * Returns a room type label string.
- */
-async function detectRoomType(imageDataUrl: string): Promise<string> {
-  const { generateObject } = await import("ai");
-  const { aiModel, assertOpenAIConfigured } = await import("@/lib/ai");
-
-  assertOpenAIConfigured();
-
-  const { object } = await generateObject({
-    model: aiModel,
-    schema: z.object({ roomType: z.string() }),
-    messages: [
-      { role: "system", content: ROOM_TYPE_SYSTEM_PROMPT },
-      {
-        role: "user",
-        content: [
-          { type: "text" as const, text: "What type of room is shown in this photo?" },
-          { type: "image" as const, image: imageDataUrl },
-        ],
-      },
-    ],
-  });
-
-  return object.roomType ?? "Other";
-}
 
 export interface BatchRoomEntry {
   fileName: string;
