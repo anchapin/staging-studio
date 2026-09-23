@@ -40,6 +40,7 @@ vi.mock("@/lib/api-quota", () => ({
     limit: decision.limit,
     remaining: Math.max(0, decision.limit - decision.used),
   })),
+  DAILY_LIMIT_ENV_VAR: { label: "DAILY_LABEL_LIMIT" },
 }));
 
 // Re-import after mocks are set up
