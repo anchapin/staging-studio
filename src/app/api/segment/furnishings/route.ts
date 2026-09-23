@@ -171,9 +171,8 @@ export async function POST(request: NextRequest) {
     // (the same pattern as /api/segment). Omitted concept ⇒ the payload
     // builder applies the verified "furniture" default, so the preset
     // path stays byte-equivalent.
-    const startedAtMs = Date.now();
-    const falSubscribe = fal.subscribe as FalSubscribeFunction;
     const payload = buildFurnishingDetectionPayload({ imageUrl, concept });
+    const falSubscribe = fal.subscribe as FalSubscribeFunction;
     const result = await falSubscribe(FAL_FURNISHING_DETECTION_MODEL, {
       input: payload,
       abortSignal: AbortSignal.timeout(DETECTION_TIMEOUT_MS),
@@ -191,17 +190,10 @@ export async function POST(request: NextRequest) {
 
     // An empty maskDataUrls list is a VALID result ("no {concept} found"
     // is presentable, not an error) — the response succeeds either way.
-    // Billing and timing are logged only for completed detections.
+    // Billing is recorded only for completed detections (the
+    // segment_concept_timing console.log was removed as debug debris,
+    // #720).
     recordDailyUsage("segment", user.id);
-    console.log(
-      JSON.stringify({
-        event: "segment_concept_timing",
-        source: "network",
-        concept: payload.prompt,
-        instanceCount: maskDataUrls.length,
-        ms: Date.now() - startedAtMs,
-      })
-    );
 
     return NextResponse.json({
       concept: payload.prompt,

@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
+import { PrismaClient } from "@prisma/client";
 
 import {
+  DATABASE_URL,
   E2E_CONCEPT_PROJECT_ID,
   E2E_CONCEPT_ROOM_ID,
 } from "../env";
@@ -13,8 +15,6 @@ import {
   openFocusedEditor,
   whitePixelShare,
 } from "../helpers";
-
-const CONSOLE_EVENT_PREFIX = "[concept-tool] ";
 
 /**
  * SAM 3.1 concept find-and-replace, end to end (issue #231; #249 adds the
@@ -41,19 +41,6 @@ test.describe("sam 3.1 concept find-and-replace flow", () => {
     // OpenAI vision call — mocked here; cache hits must never re-fire it.
     const labeling = interceptLabelInstances(page);
     detection.respondWithMaskDataUrls(CONCEPT_INSTANCE_GRAYSCALE_MASKS);
-
-    // The toggles emit the training-corpus event (W3 depends on the
-    // shape); collect them for the shape assertion at the end.
-    const selectionEvents: Array<Record<string, unknown>> = [];
-    page.on("console", (message) => {
-      const text = message.text();
-      if (!text.startsWith(CONSOLE_EVENT_PREFIX)) return;
-      try {
-        selectionEvents.push(JSON.parse(text.slice(CONSOLE_EVENT_PREFIX.length)));
-      } catch {
-        // Non-JSON concept-tool lines are none of this spec's business.
-      }
-    });
 
     await login(page);
     // A dedicated seeded room (issue #231): this spec stages real variants
@@ -246,22 +233,41 @@ test.describe("sam 3.1 concept find-and-replace flow", () => {
     await expect(batchPanel).toBeHidden();
 
     // ---- 7. Training-corpus events (W3 contract shape) ------------------
-    expect(selectionEvents.length).toBeGreaterThanOrEqual(2);
-    const byInstance = (index: number) =>
-      selectionEvents.filter((event) => event.instanceIndex === index);
-    expect(byInstance(0)[0]).toMatchObject({
-      event: "selection_logged",
-      roomId: E2E_CONCEPT_ROOM_ID,
-      concept: "sofa",
-      instanceIndex: 0,
-      score: null, // the mocked response carries no provider scores
+    // Issue #720: the editor no longer mirrors selection events to the
+    // browser console — the durable SelectionLog row is the event of
+    // record. The toggle paths above write through the REAL server
+    // action into the suite's Postgres; poll until both instances of
+    // this room's log appear, then assert the same W3 shape the old
+    // console emission carried.
+    const prisma = new PrismaClient({
+      datasources: { db: { url: DATABASE_URL } },
     });
-    expect(byInstance(1)[0]).toMatchObject({
-      event: "selection_logged",
-      roomId: E2E_CONCEPT_ROOM_ID,
-      concept: "sofa",
-      instanceIndex: 1,
-    });
+    try {
+      const selectionRows = () =>
+        prisma.selectionLog.findMany({
+          where: { roomId: E2E_CONCEPT_ROOM_ID },
+          orderBy: { createdAt: "asc" },
+        });
+      await expect
+        .poll(async () => (await selectionRows()).length, { timeout: 15_000 })
+        .toBeGreaterThanOrEqual(2);
+      const rows = await selectionRows();
+      const byInstance = (index: number) =>
+        rows.filter((row) => row.instanceIndex === index);
+      expect(byInstance(0)[0]).toMatchObject({
+        roomId: E2E_CONCEPT_ROOM_ID,
+        concept: "sofa",
+        instanceIndex: 0,
+        score: 0, // the mocked response carries no provider scores
+      });
+      expect(byInstance(1)[0]).toMatchObject({
+        roomId: E2E_CONCEPT_ROOM_ID,
+        concept: "sofa",
+        instanceIndex: 1,
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
 
     // ---- 8. Chip click on the staged base: the explicit lazy refresh ---
     await page.getByRole("button", { name: "furniture" }).click();

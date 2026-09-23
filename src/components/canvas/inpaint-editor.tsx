@@ -61,7 +61,6 @@ import {
   buildConceptEmptyMessage,
   buildSelectionLoggedEvent,
   CONCEPT_CHIPS,
-  CONCEPT_EVENT_LOG_PREFIX,
   DEFAULT_CONCEPT,
   isValidConceptName,
   normalizeConceptInput,
@@ -1175,10 +1174,9 @@ export default function InpaintEditor({
         instanceIndex: hit,
         score: instance.score,
       });
-      console.log(
-        `${CONCEPT_EVENT_LOG_PREFIX} ${JSON.stringify(selectionEvent)}`
-      );
-      // Durable write for training corpus (issue #238 / W3)
+      // Durable write for training corpus (issue #238 / W3) — the
+      // SelectionLog row is the event of record; the browser console
+      // mirror was removed as debug debris (#720).
       logSelectionEvent({
         roomId,
         concept: selectionEvent.concept,
@@ -1240,10 +1238,9 @@ export default function InpaintEditor({
         instanceIndex: index,
         score: instance?.score ?? null,
       });
-      console.log(
-        `${CONCEPT_EVENT_LOG_PREFIX} ${JSON.stringify(selectionEvent)}`
-      );
-      // Durable write for training corpus (issue #238 / W3)
+      // Durable write for training corpus (issue #238 / W3) — the
+      // SelectionLog row is the event of record; the browser console
+      // mirror was removed as debug debris (#720).
       logSelectionEvent({
         roomId,
         concept: selectionEvent.concept,
