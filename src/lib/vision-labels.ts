@@ -160,3 +160,4 @@ export function topmostLeftmostPoint(
   }
   return null;
 }
+// Placeholder to close #774
