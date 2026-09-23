@@ -1,27 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   MoreHorizontal,
   Undo2,
   Redo2,
 } from "lucide-react";
-import { getInpaintVersions, restoreInpaintVersion } from "@/app/actions/inpaint-versions";
 import { useToast } from "@/components/ui/toast";
+import { formatRelativeTime } from "@/lib/relative-time";
 import {
   planVersionRestore,
   type VersionHistoryStackState,
   type VersionRestorePlan,
 } from "@/lib/version-history-stack";
-
-interface InpaintVersion {
-  id: string;
-  resultUrl: string;
-  thumbnailUrl: string | null;
-  seed: string | null;
-  promptDirectives: string | null;
-  createdAt: Date;
-}
+import { useVersionHistory, type InpaintVersion } from "./use-version-history";
 
 interface VersionHistoryPillsProps {
   roomId: string;
@@ -35,20 +27,6 @@ interface VersionHistoryPillsProps {
   onNewVersion?: () => void;
 }
 
-function formatRelativeTime(date: Date): string {
-  const now = Date.now();
-  const diff = now - new Date(date).getTime();
-  const seconds = Math.floor(diff / 1000);
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  return new Date(date).toLocaleDateString();
-}
-
 const MAX_VISIBLE_PILLS = 10;
 
 export default function VersionHistoryPills({
@@ -57,8 +35,10 @@ export default function VersionHistoryPills({
   activeResultUrl,
   onVersionChange,
 }: VersionHistoryPillsProps) {
-  const [versions, setVersions] = useState<InpaintVersion[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const { versions, isLoading, loadVersions, restoreVersion } = useVersionHistory(
+    roomId,
+    variantSlot
+  );
   const [stacks, setStacks] = useState<VersionHistoryStackState>({
     undoStack: [], // Stack of resultUrls for undo
     redoStack: [], // Stack of resultUrls for redo
@@ -69,28 +49,17 @@ export default function VersionHistoryPills({
   const { showSuccess, showError } = useToast();
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Load versions from server
-  const loadVersions = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const result = await getInpaintVersions(roomId, variantSlot);
-      if (result.success) {
-        const vers = result.versions as InpaintVersion[];
-        setVersions(vers);
-        // Set current index to the active version, or 0 if none
-        if (activeResultUrl) {
-          const idx = vers.findIndex((v) => v.resultUrl === activeResultUrl);
-          setStacks((prev) => ({ ...prev, currentIndex: idx >= 0 ? idx : 0 }));
-        }
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, [roomId, variantSlot, activeResultUrl]);
-
+  // Load versions from the shared hook; refetch when the room/slot (via
+  // loadVersions' identity) or the active result changes, mirroring the
+  // pre-#713 dep set. After a successful fetch, point currentIndex at the
+  // active version (or 0 when it is absent from the list).
   useEffect(() => {
-    void loadVersions();
-  }, [loadVersions]);
+    void loadVersions().then((fetched) => {
+      if (!fetched || !activeResultUrl) return;
+      const idx = fetched.findIndex((v) => v.resultUrl === activeResultUrl);
+      setStacks((prev) => ({ ...prev, currentIndex: idx >= 0 ? idx : 0 }));
+    });
+  }, [activeResultUrl, loadVersions]);
 
   // Close menu on outside click
   useEffect(() => {
@@ -131,7 +100,7 @@ export default function VersionHistoryPills({
   ) => {
     setStacks(plan.next);
     try {
-      const result = await restoreInpaintVersion(version.id);
+      const result = await restoreVersion(version.id);
       if (result.success) {
         onVersionChange?.(version.resultUrl);
         showSuccess("Version restored");

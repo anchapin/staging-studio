@@ -12,6 +12,7 @@ import {
   formatEngagementPrice,
   type EngagementTier,
 } from "@/lib/engagement-tiers";
+import { formatLongDate } from "@/lib/relative-time";
 
 interface ConsultationReportClientProps {
   user: LookbookRoomData["user"];
@@ -176,11 +177,7 @@ export function ConsultationReportClient({
                     Date
                   </p>
                   <p className="font-playfair text-lg text-foreground border-b border-on-surface-variant/40 pb-1">
-                    {new Date().toLocaleDateString("en-US", {
-                      year: "numeric",
-                      month: "long",
-                      day: "numeric",
-                    })}
+                    {formatLongDate(new Date())}
                   </p>
                 </div>
               </div>
