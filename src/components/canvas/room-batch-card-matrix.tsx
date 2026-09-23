@@ -5,37 +5,17 @@ import { MoreHorizontal, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { StagedVariantPair } from "@/lib/staged-result";
 import { sliderFillStyle } from "@/lib/precision-slider";
+import {
+  cardBorderClasses,
+  resolveRoomStatus,
+  statusBadgeClasses,
+  statusLabel,
+} from "@/lib/room-batch-card-matrix";
+import type { CameraLabel } from "@/lib/room-batch-card-matrix";
 
-/** Camera label types */
-export type CameraLabel = "Cam A" | "360° Panoramic";
-
-/** Room card status */
-export type RoomCardStatus = "pending" | "in_progress" | "staged";
-
-function resolveRoomStatus(pairs: readonly [StagedVariantPair, StagedVariantPair]): RoomCardStatus {
-  const completeCount = [pairs[0], pairs[1]].filter((p) => p.after !== null).length;
-  if (completeCount === 2) return "staged";
-  if (completeCount === 1) return "in_progress";
-  return "pending";
-}
-
-function statusLabel(status: RoomCardStatus): string {
-  if (status === "staged") return "Staged ✓";
-  if (status === "in_progress") return "In Progress...";
-  return "Pending";
-}
-
-function statusBadgeClasses(status: RoomCardStatus): string {
-  if (status === "staged") return "bg-tertiary/20 text-tertiary";
-  if (status === "in_progress") return "bg-secondary/20 text-secondary";
-  return "bg-outline/20 text-outline";
-}
-
-function cardBorderClasses(status: RoomCardStatus): string {
-  if (status === "staged") return "border-tertiary/40";
-  if (status === "in_progress") return "border-secondary/40";
-  return "border-outline-variant/40";
-}
+// Re-exported for API stability: these types originate in
+// `@/lib/room-batch-card-matrix` (see issue #707).
+export type { CameraLabel, RoomCardStatus } from "@/lib/room-batch-card-matrix";
 
 export interface RoomBatchCardProps {
   /** Room display name */
