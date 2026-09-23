@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Download, RotateCw } from "lucide-react";
+import { Download, Loader2, RotateCw, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { STAGING_AESTHETICS } from "@/lib/staging-aesthetics";
 import {
@@ -33,6 +33,8 @@ interface GlobalStagingDirectivesBarProps {
   roomCount: number;
   /** Number of rooms currently being rendered */
   renderingCount: number;
+  /** Per-room staging status breakdown (optional for project-level views) */
+  roomStatuses?: { id: string; name: string; status: "idle" | "pending" | "in_progress" | "done" | "failed" }[];
   /** Whether GPU/cluster is active */
   gpuActive: boolean;
   /** Called when Start Batch is clicked. Omit to render it disabled as "coming soon" (issue #692). */
@@ -53,6 +55,7 @@ export default function GlobalStagingDirectivesBar({
   onRealismChange,
   roomCount,
   renderingCount,
+  roomStatuses,
   gpuActive,
   onStartBatch,
   onAutoRegenerateAll,
@@ -169,25 +172,48 @@ export default function GlobalStagingDirectivesBar({
         {/* Card 4: Spatial Render Cluster */}
         <div className={DIRECTIVE_CARD_CLASSES}>
           <span className="text-sm text-muted-foreground">Render Status</span>
-          <div className="flex items-center gap-1.5">
-            {gpuActive ? (
-              <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-outline opacity-75" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-outline" />
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-1.5">
+              {gpuActive ? (
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-outline opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-outline" />
+                </span>
+              ) : (
+                <span className="relative flex h-2 w-2">
+                  <span className="inline-flex h-2 w-2 rounded-full bg-border" />
+                </span>
+              )}
+              <span className="text-xs text-foreground">
+                {gpuActive ? "GPU Active" : "GPU Idle"}
               </span>
-            ) : (
-              <span className="relative flex h-2 w-2">
-                <span className="inline-flex h-2 w-2 rounded-full bg-border" />
+              <span className="text-xs text-muted-foreground">
+                {renderingCount > 0
+                  ? `${renderingCount} room${renderingCount !== 1 ? "s" : ""} rendering`
+                  : `${roomCount} room${roomCount !== 1 ? "s" : ""}`}
               </span>
+            </div>
+            {roomStatuses && roomStatuses.length > 0 && (
+              <div className="mt-1 flex flex-col gap-0.5">
+                {roomStatuses.map((room) => (
+                  <div key={room.id} className="flex items-center gap-1.5">
+                    <RoomStatusIcon status={room.status} />
+                    <span className="text-xs text-foreground truncate max-w-24">{room.name}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {room.status === "idle"
+                        ? "Idle"
+                        : room.status === "pending"
+                        ? "Pending"
+                        : room.status === "in_progress"
+                        ? "In Progress"
+                        : room.status === "done"
+                        ? "Done"
+                        : "Failed"}
+                    </span>
+                  </div>
+                ))}
+              </div>
             )}
-            <span className="text-xs text-foreground">
-              {gpuActive ? "GPU Active" : "GPU Idle"}
-            </span>
-            <span className="text-xs text-muted-foreground">
-              {renderingCount > 0
-                ? `Rendering: ${renderingCount}/${roomCount}`
-                : `${roomCount} room${roomCount !== 1 ? "s" : ""}`}
-            </span>
           </div>
           {/* Issue #692: batch actions without a handler render disabled with
               visible "Coming soon" copy — no interactive dead-ends, no toasts. */}
@@ -245,5 +271,41 @@ export default function GlobalStagingDirectivesBar({
         )}
       </div>
     </div>
+  );
+}
+
+function RoomStatusIcon({ status }: { status: "idle" | "pending" | "in_progress" | "done" | "failed" }) {
+  if (status === "idle") {
+    return (
+      <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-border text-[8px] font-bold text-muted-foreground">
+        &mdash;
+      </span>
+    );
+  }
+  if (status === "pending") {
+    return (
+      <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-muted text-[8px] font-bold text-muted-foreground">
+        &bull;
+      </span>
+    );
+  }
+  if (status === "in_progress") {
+    return (
+      <span className="inline-flex h-3.5 w-3.5 animate-spin items-center justify-center rounded-full border border-outline text-[8px] font-bold text-foreground">
+        <Loader2 className="h-2.5 w-2.5" />
+      </span>
+    );
+  }
+  if (status === "done") {
+    return (
+      <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-emerald-500 text-[8px] font-bold text-white">
+        <Check className="h-2.5 w-2.5" />
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-destructive text-[8px] font-bold text-white">
+      <X className="h-2.5 w-2.5" />
+    </span>
   );
 }

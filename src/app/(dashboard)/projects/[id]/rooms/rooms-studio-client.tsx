@@ -28,6 +28,7 @@ interface StudioRoom {
   selectedVariantIndex: number | null;
   rawDirectives: string | null;
   activeRequestCount: number;
+  stagingStatus: "idle" | "pending" | "in_progress" | "done" | "failed";
 }
 
 interface RoomsStudioClientProps {
@@ -87,10 +88,9 @@ export function RoomsStudioClient({ project }: RoomsStudioClientProps) {
   const [promptByRoom, setPromptByRoom] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
-  const renderingCount = project.rooms.reduce(
-    (acc, room) => acc + room.activeRequestCount,
-    0
-  );
+  const renderingCount = project.rooms.filter(
+    (room) => room.stagingStatus === "in_progress"
+  ).length;
 
   const readyRooms = project.rooms.filter((room) =>
     variantPairsOf(room).some((pair) => pair.after !== null)
@@ -248,6 +248,11 @@ export function RoomsStudioClient({ project }: RoomsStudioClientProps) {
             onRealismChange={setRealismValue}
             roomCount={project.rooms.length}
             renderingCount={renderingCount}
+            roomStatuses={project.rooms.map((room) => ({
+              id: room.id,
+              name: room.name,
+              status: room.stagingStatus,
+            }))}
             gpuActive={renderingCount > 0}
             onStartBatch={() =>
               router.push(
