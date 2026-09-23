@@ -13,6 +13,14 @@ import { estimateMaskCoverage, shouldWarnLowCoverage } from "@/lib/mask-coverage
 import { extractMaskOutline, paintMaskPixels } from "@/lib/mask-format";
 import { floodFillMask, maskGridFromPixels } from "@/lib/mask-flood-fill";
 import {
+  canUndoMask,
+  emptyMaskUndoHistory,
+  maskUndoCount,
+  pushMaskSnapshot,
+  undoMaskSnapshot,
+  type MaskUndoHistory,
+} from "@/lib/mask-undo-stack";
+import {
   DEFAULT_MASK_EXPANSION_RADIUS,
   dilateMaskGridDirectional,
 } from "@/lib/mask-dilation";
@@ -250,10 +258,13 @@ export default function InpaintMaskCanvas({
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(initialMaskDataUrl ?? null);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
 
-  // Issue #378: undo history stack for mask operations. Each entry is a
+  // Issue #694: undo history stack for mask operations — the pure
+  // push/cap/undo logic lives in lib/mask-undo-stack.ts. Each entry is a
   // snapshot of the canvas content before a painting operation (brush stroke,
-  // fill, or clear). Undo pops the stack to restore a previous state.
-  const [undoStack, setUndoStack] = useState<string[]>([]);
+  // fill, clear, or paste). Undo pops the stack to restore a previous state.
+  // The component wires undo only (no redo affordance yet), so its undo
+  // calls discard the popped snapshot exactly as they did pre-extraction.
+  const [undoHistory, setUndoHistory] = useState<MaskUndoHistory>(emptyMaskUndoHistory);
 
   // Issue #560: external active tool takes priority (Zen Mode lifts state to parent).
   const [internalActiveTool, setInternalActiveTool] = useState<MaskTool>("brush");
@@ -771,11 +782,10 @@ export default function InpaintMaskCanvas({
   // Issue #378: pop the most recent undo state and restore it. Called both
   // from the explicit Undo button and from the Cmd/Ctrl+Z keyboard shortcut.
   const handleUndo = useCallback(() => {
-    if (undoStack.length === 0) return;
-    const previousState = undoStack[undoStack.length - 1];
-    if (!previousState) return;
+    const { history, snapshot: previousState } = undoMaskSnapshot(undoHistory);
+    if (previousState === null) return;
     if (restoreUndoState(previousState)) {
-      setUndoStack((prev) => prev.slice(0, -1));
+      setUndoHistory(history);
       // After restore, re-export to notify parent and update coverage warning
       // Use a microtask to ensure canvas is painted before exporting
       queueMicrotask(() => {
@@ -801,7 +811,7 @@ export default function InpaintMaskCanvas({
         }
       });
     }
-  }, [undoStack, restoreUndoState, onMaskChange]);
+  }, [undoHistory, restoreUndoState, onMaskChange]);
 
   // Fill Region tool: flood-fills the unpainted region connected to the
   // click/cursor point with painted pixels. Designed for cover-the-object
@@ -870,9 +880,7 @@ export default function InpaintMaskCanvas({
     if (!ctx) return;
 
     const undoState = captureUndoState();
-    if (undoState !== null) {
-      setUndoStack((prev) => [...prev, undoState]);
-    }
+    setUndoHistory((prev) => pushMaskSnapshot(prev, undoState));
 
     const { imageData, bounds } = copiedMask;
     const pasteX = pastePreview?.x ?? (cursor?.x ?? bounds.x);
@@ -925,9 +933,7 @@ export default function InpaintMaskCanvas({
     if (activeTool === "fill") {
       // Issue #378: capture undo state before fill
       const undoState = captureUndoState();
-      if (undoState !== null) {
-        setUndoStack((prev) => [...prev, undoState]);
-      }
+      setUndoHistory((prev) => pushMaskSnapshot(prev, undoState));
       if (performFill(point)) {
         setHasPainted(true);
         exportMask();
@@ -936,9 +942,7 @@ export default function InpaintMaskCanvas({
     }
     // Issue #378: capture undo state before brush stroke begins
     const undoState = captureUndoState();
-    if (undoState !== null) {
-      setUndoStack((prev) => [...prev, undoState]);
-    }
+    setUndoHistory((prev) => pushMaskSnapshot(prev, undoState));
     setIsDrawing(true);
     lastPointRef.current = point;
     setHasPainted(true);
@@ -1140,9 +1144,7 @@ export default function InpaintMaskCanvas({
   const clearMask = () => {
     // Issue #378: capture undo state before clearing so it can be undone
     const undoState = captureUndoState();
-    if (undoState !== null) {
-      setUndoStack((prev) => [...prev, undoState]);
-    }
+    setUndoHistory((prev) => pushMaskSnapshot(prev, undoState));
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -1688,11 +1690,11 @@ export default function InpaintMaskCanvas({
 
         <button
           onClick={handleUndo}
-          disabled={undoStack.length === 0}
+          disabled={!canUndoMask(undoHistory)}
           title="Undo (Cmd/Ctrl+Z)"
           className="px-3 py-2 text-sm rounded-md border border-atelier-taupe/40 bg-white hover:bg-atelier-canvas transition-colors disabled:cursor-not-allowed disabled:opacity-50 md:min-h-[44px]"
         >
-          Undo {undoStack.length > 0 && `(${undoStack.length})`}
+          Undo {maskUndoCount(undoHistory) > 0 && `(${maskUndoCount(undoHistory)})`}
         </button>
 
         <button
