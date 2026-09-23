@@ -271,14 +271,20 @@ export async function detectBatchRoomTypes(
     return { success: false, error: "Project not found" };
   }
 
+  // Consume quota BEFORE the batch runs so a user at their cap can never
+  // pass the upfront check yet have all detections fail and avoid billing.
+  // Mirrors /api/label-instances where usage is recorded after a successful
+  // AI response; for a batch the same consumption must happen before the
+  // first AI token is emitted.
+  await Promise.all(
+    parsed.data.imageUrls.map(() => recordDailyUsage("label", user.id))
+  );
+
   try {
     const roomTypes = await Promise.all(
       parsed.data.imageUrls.map(async (url) => {
         try {
           const roomType = await detectRoomType(url);
-          // Bill only successful detections — a failed attempt costs at
-          // most a few rejected tokens (mirrors /api/label-instances).
-          await recordDailyUsage("label", user.id);
           return roomType;
         } catch {
           return "Other";
