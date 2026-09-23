@@ -1,25 +1,14 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef, useMemo, useId } from "react";
-import type { ReactNode } from "react";
-import InpaintMaskCanvas, { type MaskTool } from "./inpaint-mask-canvas";
+import { useState, useCallback, useRef, useMemo } from "react";
 import { DEFAULT_MASK_EXPANSION_RADIUS } from "@/lib/mask-dilation";
 import CollapsibleSection, {
   useCollapsiblePanel,
 } from "./collapsible-section";
-import EditorTabBar, {
-  type EditorTab,
-  type EditorTabId,
-} from "./editor-tab-bar";
+import EditorTabBar from "./editor-tab-bar";
 import { type InpaintOperationModeId } from "./inpaint-operation-mode-tabs";
 import { useToast, ToastContainer } from "@/components/ui/toast";
-import { Loader2, PanelRightClose } from "lucide-react";
 
-import BrushToolRail, {
-  BrushParameterFlyout,
-  CanvasZoomHud,
-  type StudioTool,
-} from "./BrushToolRail";
 import InspectorCollapsedRail from "./inspector-collapsed-rail";
 import {
   INSPECTOR_PANEL_STORAGE_KEY,
@@ -28,84 +17,30 @@ import {
   type InspectorRailActionId,
 } from "@/lib/inspector-panel";
 import {
-  entireRoomTabVisible,
   inpaintSourcesEqual,
   type InpaintSource,
 } from "@/lib/inpaint-source";
 import { isOperationModeAvailable } from "@/lib/operation-mode-availability";
 import FocusRestorePill from "./focus-restore-pill";
-import SourceImageHeader from "./source-image-header";
-import MaskDilationControls from "./mask-dilation-controls";
 import EntireTabPanel from "./entire-tab-panel";
 import ManualTabPanel from "./manual-tab-panel";
 import DetectTabPanel from "./detect-tab-panel";
+import EditorCanvasPane from "./editor-canvas-pane";
+import InspectorHeader from "./inspector-header";
+import ZenToolRail from "./zen-tool-rail";
+import { useEditorTabs } from "./use-editor-tabs";
+import { useImageDimensions } from "./use-image-dimensions";
+import { useZenWorkspace } from "./use-zen-workspace";
+import { useSourceSelection } from "./use-source-selection";
 import { useConceptDetection } from "./use-concept-detection";
 import { useWorkspaceShortcuts } from "./use-workspace-shortcuts";
 import SourceSelectorFieldset from "./source-selector-fieldset";
 import InspectorFooterPanels from "./inspector-footer-panels";
 import { useSelectionMaskComposer } from "./use-selection-mask-composer";
 import { useInpaintRuns } from "./use-inpaint-runs";
-import { batchProgressText, hasFailedStep } from "@/lib/multi-select-batch";
 import { type GeneratedVariation } from "./generated-variation-grid";
+import type { InpaintEditorProps } from "./inpaint-editor-props";
 import VersionHistoryPills from "./version-history-pills";
-
-interface InpaintEditorProps {
-  roomId: string;
-  /** The resolved source image the mask applies to (before photo or staged variant). */
-  imageUrl: string;
-  aesthetic: string;
-  /** Room-specific staging directives (displayed in textarea, merged with global for AI). */
-  promptDirectives: string;
-  /** Issue #562: Global project-level directives merged with room directives for AI. */
-  globalDirectives?: string;
-  /** The "after" slot this run's result will land in (resolved by the parent). */
-  variantSlot: 0 | 1;
-  /** Currently selected source; the parent owns this state (issue #170). */
-  source: InpaintSource;
-  /** Available source options (original photo + staged variants). */
-  sourceOptions: InpaintSource[];
-  onSourceChange?: (source: InpaintSource) => void;
-  pendingRequestId?: string | null;
-  /** Source of the pending run, reconstructed from its persisted row. */
-  pendingSource?: InpaintSource | null;
-  onInpaintComplete?: (resultImageUrl: string, source: InpaintSource) => void;
-  /**
-   * Issue #561: the current "after" result URL for the variant slot being edited.
-   * Used to highlight the active version in the VersionHistoryPanel.
-   */
-  currentResultUrl?: string | null;
-  /**
-   * Issue #230: reports the active labeled concept selection — the label
-   * when exactly one labeled selection is active, null otherwise. The
-   * parent uses it to pre-fill the single-object staging directives
-   * ("Replace the {concept} with ") without ever clobbering typed text.
-   */
-  onActiveConceptLabelChange?: (label: string | null) => void;
-  /**
-   * Full-width focused layout (issue #169): the mask canvas spans the
-   * available content width instead of the compact card cap.
-   */
-  fullWidth?: boolean;
-  /**
-   * Issue #252 D5: content rendered above the mask canvas in the left
-   * pane (the focused page's room imagery, variant strip, and directives
-   * sections). At lg+ this area is height-capped and scrolls internally
-   * so the canvas and the control panel stay in view without page-level
-   * scrolling.
-   */
-  secondaryPane?: ReactNode;
-  /**
-   * Issue #507: callback to update staging directives from within the
-   * editor's inline textarea (kept in sync with the parent's copy).
-   */
-  onDirectivesChange?: (value: string) => void;
-  /** Current directives value for the inline textarea. */
-  directivesValue?: string;
-  /** Issue #638: Project name for Focus Canvas Mode breadcrumb. */
-  projectName?: string;
-  /** Issue #638: Room name for Focus Canvas Mode breadcrumb. */
-  roomName?: string;
-}
 
 export default function InpaintEditor({
   roomId,
@@ -130,7 +65,8 @@ export default function InpaintEditor({
   projectName,
 }: InpaintEditorProps) {
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
-  const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
+  // Natural-dimension tracking for the base photo (issue #691 hook).
+  const { imageDims, aspectRatio } = useImageDimensions(imageUrl);
   // Issue #180: outward mask growth (in mask-canvas pixels) applied before
   // the mask is dispatched, so bezels/frames at the painted boundary are
   // regenerated too. 0 restores the un-dilated mask.
@@ -156,14 +92,6 @@ export default function InpaintEditor({
   // Issue #460: comparison now via staged result image click in secondary pane
   const { toasts, showError, showSuccess, dismissToast } = useToast();
 
-  // Issue #560: Zen Mode state — hides all chrome for a distraction-free workspace.
-  const [zenMode, setZenMode] = useState(false);
-  // Issue #560: dark background toggle for eye comfort in Zen Mode.
-  const [zenDarkBackground] = useState(false);
-
-  // Issue #638: Focus Canvas Mode state — collapses header and inspector simultaneously.
-  const [focusMode, setFocusMode] = useState(false);
-
   // Issue #588: Collapsible workspace panels — persist collapsed state in localStorage.
   const brushPanel = useCollapsiblePanel("inpaint-editor:brushPanel", false);
   const promptPanel = useCollapsiblePanel("inpaint-editor:promptPanel", false);
@@ -179,11 +107,6 @@ export default function InpaintEditor({
   // (not clobber) this state — view resolution is pure, in
   // lib/inspector-panel.ts.
   const inspectorPanel = useCollapsiblePanel(INSPECTOR_PANEL_STORAGE_KEY, false);
-  const inspectorView = resolveInspectorPanelView({
-    inspectorCollapsed: inspectorPanel.isCollapsed,
-    focusMode,
-    zenMode,
-  });
 
   // Issue #630: Generated Variation Grid state
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- placeholder: setGeneratedVariations will be called by the parent's variation generation logic
@@ -194,23 +117,9 @@ export default function InpaintEditor({
   const [isGeneratingVariations, setIsGeneratingVariations] = useState(false);
   const [variationProgress, setVariationProgress] = useState("");
 
-  // Issue #560: lifted brush state — shared between InpaintMaskCanvas and ZenModeToolbar.
-  const [zenBrushSize, setZenBrushSize] = useState(20);
-  const [zenActiveTool, setZenActiveTool] = useState<MaskTool>("brush");
-
-  // Issue #627: Brush Tool Rail state — lifted state for the full tool rail + parameter flyout.
-  const [studioActiveTool, setStudioActiveTool] = useState<StudioTool>("brush");
-  const [brushRadius, setBrushRadius] = useState(42);
-  const [brushEdgeSoftness, setBrushEdgeSoftness] = useState(35);
-  const [brushMaskOpacity, setBrushMaskOpacity] = useState(80);
-
   // Issue #561: tracks the active result URL for the version history panel.
   // Updated on inpaint completion; also initialized from prop when provided.
   const [activeResultUrl, setActiveResultUrl] = useState<string | null>(currentResultUrl ?? null);
-
-  // Issue #378: source change undo state
-  const previousSourceRef = useRef<InpaintSource | null>(null);
-  const [canUndoSource, setCanUndoSource] = useState(false);
 
   // Concept detection + selection set (issue #691 extraction): the whole
   // #228/#229/#249/#252/#748 cluster — requested concept, refresh policy,
@@ -254,6 +163,35 @@ export default function InpaintEditor({
     resetForUserSourceSwitch,
     markRunCompletionRebase,
   } = concept;
+
+  // Zen/Focus workspace + brush tool rail state (issue #691 hook). The
+  // Select Regions tool arms refresh detection for a lazy base (#748).
+  const {
+    zenMode,
+    setZenMode,
+    zenDarkBackground,
+    focusMode,
+    setFocusMode,
+    zenBrushSize,
+    setZenBrushSize,
+    zenActiveTool,
+    setZenActiveTool,
+    studioActiveTool,
+    setStudioActiveTool,
+    brushRadius,
+    setBrushRadius,
+    brushEdgeSoftness,
+    setBrushEdgeSoftness,
+    brushMaskOpacity,
+    setBrushMaskOpacity,
+    handleStudioToolChange,
+  } = useZenWorkspace(armDetectionForCurrentBase);
+
+  const inspectorView = resolveInspectorPanelView({
+    inspectorCollapsed: inspectorPanel.isCollapsed,
+    focusMode,
+    zenMode,
+  });
 
   // Issue #203: selection-set union mask + canvas reset (composed by the
   // selection-mask composer, issue #691 extraction).
@@ -307,21 +245,6 @@ export default function InpaintEditor({
     setBatchSelections,
     setSelectedInstanceIndices,
   });
-  const handleTabSelect = useCallback(
-    (tab: EditorTabId) => {
-      setActiveTab(tab);
-      if (tab === "detect") armDetectionForCurrentBase();
-    },
-    [armDetectionForCurrentBase]
-  );
-
-  const handleStudioToolChange = useCallback(
-    (tool: StudioTool) => {
-      setStudioActiveTool(tool);
-      if (tool === "select") armDetectionForCurrentBase();
-    },
-    [armDetectionForCurrentBase]
-  );
 
   // Issue #228 guards (run status lives here, the handlers in the concept
   // hook): toggles and bulk selects are ignored while a run is in flight.
@@ -340,23 +263,6 @@ export default function InpaintEditor({
     conceptSelectAllDetected();
   }, [isProcessing, conceptSelectAllDetected]);
 
-  // and export masks at the photo's exact pixel dimensions.
-  useEffect(() => {
-    if (!imageUrl) return;
-    const img = new Image();
-    img.onload = () => {
-      if (img.naturalWidth > 0 && img.naturalHeight > 0) {
-        setImageDims({ width: img.naturalWidth, height: img.naturalHeight });
-      }
-    };
-    img.src = imageUrl;
-    return () => {
-      img.onload = null;
-    };
-  }, [imageUrl]);
-
-  const aspectRatio = imageDims ? imageDims.width / imageDims.height : null;
-
   // Issue #560/#588/#617/#638 workspace keyboard shortcuts (Z / Escape /
   // backtick / Cmd+B / F) — the listener lives in use-workspace-shortcuts.
   useWorkspaceShortcuts({
@@ -371,43 +277,15 @@ export default function InpaintEditor({
     inspectorPanel,
   });
 
-  // Switching source swaps the image being edited — any existing mask was
-  // drawn for the previous image and must not leak into the next run. The
-  // segment cache is dropped with it (issue #202/#228 lifecycle: one
-  // session per image), and the concept session resets to the default.
-  const handleSourceChange = useCallback(
-    (next: InpaintSource) => {
-      if (inpaintSourcesEqual(next, source)) return;
-      // Issue #378: save current source for undo before switching
-      previousSourceRef.current = source;
-      setCanUndoSource(true);
-      setMaskDataUrl(null);
-      // Issue #203: masks (and the selection set that produced them) were
-      // segmented against the previous image — they must not leak. The
-      // union/reset state follows the selection set via effects. The
-      // detection/selection session reset (incl. the #748 user-switch
-      // arming) lives in the concept hook.
-      resetForUserSourceSwitch();
-      clearRegionMaskCache();
-      onSourceChange?.(next);
-    },
-    [source, onSourceChange, resetForUserSourceSwitch, clearRegionMaskCache]
-  );
-
-  // Issue #378: undo source change by restoring the previous source
-  const handleUndoSource = useCallback(() => {
-    if (!previousSourceRef.current) return;
-    const prev = previousSourceRef.current;
-    // Restore the previous source by calling handleSourceChange with the previous source
-    // This will trigger the full reset logic that handleSourceChange does
-    previousSourceRef.current = source;
-    setMaskDataUrl(null);
-    // Undo is a user-driven source switch — same session reset, then arm
-    // the restored base (issue #748).
-    resetForUserSourceSwitch();
-    clearRegionMaskCache();
-    onSourceChange?.(prev);
-  }, [source, onSourceChange, resetForUserSourceSwitch, clearRegionMaskCache]);
+  // "Edit from" source switching with undo (issue #691 hook).
+  const { canUndoSource, handleSourceChange, handleUndoSource } =
+    useSourceSelection({
+      source,
+      onSourceChange,
+      clearMask: () => setMaskDataUrl(null),
+      resetForUserSourceSwitch,
+      clearRegionMaskCache,
+    });
 
   const handleInpaint = useCallback(async () => {
     if (!promptDirectives.trim()) {
@@ -455,38 +333,20 @@ export default function InpaintEditor({
     [beginInpaintRun, promptStrength, maskBlur, seed, creativeMode, lockSeed]
   );
 
-  // Issue #252 D5: control-panel tab state — purely presentational, so
-  // switching never touches staging state (AC-L5). The default is the
-  // Auto detect tab.
-  const [activeTab, setActiveTab] = useState<EditorTabId>("detect");
-  const tabIdBase = useId();
-  // AC-L4: tab availability is a pure function of the displayed base
-  // image — Entire room only over the original photo. Derived in render
-  // (zero effects): over a variant the tab disappears and the panel lands
-  // on Manual; switching back brings Entire room (and its active state)
-  // straight back.
-  const showEntireRoomTab = entireRoomTabVisible(source);
-  const effectiveTab =
-    activeTab === "entire" && !showEntireRoomTab ? "manual" : activeTab;
-  const editorTabs: EditorTab[] = [
-    ...(showEntireRoomTab
-      ? [{ id: "entire" as const, label: "Entire room" }]
-      : []),
-    {
-      id: "manual",
-      label: "Manual paint",
-      // Un-run work badge (AC-L5): a painted-but-unapplied mask.
-      badge: maskDataUrl ? true : undefined,
-    },
-    ...[
-      {
-        id: "detect" as const,
-        label: "Auto detect",
-        // Un-run work badge: pending region selections.
-        badge: selectionCount > 0 ? selectionCount : undefined,
-      },
-    ],
-  ];
+  // Issue #252 D5: control-panel tab state (issue #691 hook) — purely
+  // presentational, so switching never touches staging state (AC-L5).
+  const {
+    setActiveTab,
+    tabIdBase,
+    editorTabs,
+    effectiveTab,
+    handleTabSelect,
+  } = useEditorTabs({
+    source,
+    hasPaintedMask: Boolean(maskDataUrl),
+    selectionCount,
+    onSelectDetectTab: armDetectionForCurrentBase,
+  });
 
   // Issue #617: rail buttons re-expand the inspector and navigate to the
   // matching section (prompt editor / AI variations / relight). Targets
@@ -530,76 +390,41 @@ export default function InpaintEditor({
         />
       )}
       {/* ---- LEFT PANE: room imagery (optional slot) + mask canvas ------ */}
-      <div
-        className={`flex min-w-0 flex-col gap-4 ${
-          fullWidth ? "md:min-h-0 lg:min-h-0 lg:flex-1" : ""
-        }`}
-      >
-        {secondaryPane && (
-          <CollapsibleSection
-            id="promptPanel"
-            title="Room Details"
-            isCollapsed={promptPanel.isCollapsed}
-            onToggle={promptPanel.toggle}
-            className={zenMode || focusMode ? "zen-mode-hidden" : ""}
-          >
-            <div
-              className={`flex flex-col gap-6 ${
-                fullWidth ? "md:max-h-none md:overflow-visible lg:max-h-[70%] lg:min-h-0 lg:overflow-y-auto" : ""
-              }`}
-            >
-              {secondaryPane}
-            </div>
-          </CollapsibleSection>
-        )}
-        {/* Issue #560: "Source Image" label hidden in Zen Mode */}
-        {/* Issue #638: sticky header hidden in Focus Canvas Mode */}
-        {/* Issue #547/#546: sticky header per Atelier Canvas spec with Atelier Canvas colors */}
-        <SourceImageHeader
-          zenMode={zenMode}
-          focusMode={focusMode}
-          onToggleFocusMode={() => setFocusMode((prev) => !prev)}
-          onToggleZenMode={() => setZenMode((prev) => !prev)}
-        />
-        {/* Issue #460: comparison now via staged result image click in secondary pane */}
-        <InpaintMaskCanvas
-          overlayImageSrc={imageUrl}
-          aspectRatio={aspectRatio}
-          naturalWidth={imageDims?.width ?? null}
-          naturalHeight={imageDims?.height ?? null}
-          initialMaskDataUrl={maskDataUrl}
-          onMaskChange={setMaskDataUrl}
-          onInstanceToggle={handleInstanceToggle}
-          segmentDisabled={isProcessing || conceptLoading}
-          processing={isProcessing}
-          segmenting={conceptLoading}
-          detectingConcept={conceptLoading ? requestedConcept : undefined}
-          instanceOverlays={instanceOverlays}
-          selectionMarkers={selectionMarkers}
-          expansionRadius={maskExpansion}
-          includeFloorShadow={includeFloorShadow}
-          fullWidth={fullWidth}
-          selectionReset={selectionReset}
-          onMaskCleared={handleMaskCleared}
-          onSelectionDeselect={handleRemoveSelection}
-          zenMode={zenMode}
-          brushSize={zenMode ? zenBrushSize : undefined}
-          onBrushSizeChange={zenMode ? setZenBrushSize : undefined}
-          activeTool={zenMode ? zenActiveTool : undefined}
-          onActiveToolChange={zenMode ? setZenActiveTool : undefined}
-          onSelectRegionsActivate={armDetectionForCurrentBase}
-        />
-
-        {/* Issue #560: expand selection and floor shadow controls hidden in Zen Mode */}
-        {/* Issue #638: hidden in Focus Canvas Mode */}
-        <MaskDilationControls
-          hidden={zenMode || focusMode}
-          maskExpansion={maskExpansion}
-          onMaskExpansionChange={setMaskExpansion}
-          includeFloorShadow={includeFloorShadow}
-          onIncludeFloorShadowChange={setIncludeFloorShadow}
-        />
-      </div>
+      <EditorCanvasPane
+        fullWidth={fullWidth}
+        secondaryPane={secondaryPane}
+        promptPanel={promptPanel}
+        zenMode={zenMode}
+        focusMode={focusMode}
+        onToggleFocusMode={() => setFocusMode((prev) => !prev)}
+        onToggleZenMode={() => setZenMode((prev) => !prev)}
+        imageUrl={imageUrl}
+        aspectRatio={aspectRatio}
+        naturalWidth={imageDims?.width ?? null}
+        naturalHeight={imageDims?.height ?? null}
+        initialMaskDataUrl={maskDataUrl}
+        onMaskChange={setMaskDataUrl}
+        onInstanceToggle={handleInstanceToggle}
+        segmentDisabled={isProcessing || conceptLoading}
+        processing={isProcessing}
+        segmenting={conceptLoading}
+        detectingConcept={conceptLoading ? requestedConcept : undefined}
+        instanceOverlays={instanceOverlays}
+        selectionMarkers={selectionMarkers}
+        expansionRadius={maskExpansion}
+        includeFloorShadow={includeFloorShadow}
+        selectionReset={selectionReset}
+        onMaskCleared={handleMaskCleared}
+        onSelectionDeselect={handleRemoveSelection}
+        onSelectRegionsActivate={armDetectionForCurrentBase}
+        zenBrushSize={zenBrushSize}
+        onZenBrushSizeChange={setZenBrushSize}
+        zenActiveTool={zenActiveTool}
+        onZenActiveToolChange={setZenActiveTool}
+        maskExpansion={maskExpansion}
+        onMaskExpansionChange={setMaskExpansion}
+        onIncludeFloorShadowChange={setIncludeFloorShadow}
+      />
 
       {/* Issue #617: collapsible right inspector — the 380px panel and the
           48px rail share this column; `transition-all duration-300` on the
@@ -629,40 +454,11 @@ export default function InpaintEditor({
           id="inspector-panel-content"
           className="flex w-full min-h-0 flex-1 flex-col gap-3"
         >
-          <div className="flex shrink-0 items-center justify-between rounded-md border border-atelier-taupe/30 bg-white px-3 py-2">
-            <h3 className="font-jakarta text-sm font-semibold text-atelier-primary">
-              Active Inpaint Zone
-            </h3>
-            <button
-              type="button"
-              onClick={inspectorPanel.toggle}
-              title="Collapse inspector (Cmd+B)"
-              aria-label="Collapse inspector (Cmd+B)"
-              aria-expanded={inspectorView === "expanded"}
-              aria-controls="inspector-panel-content"
-              className="flex h-7 w-7 items-center justify-center rounded-md border border-atelier-taupe/40 bg-white text-atelier-taupe shadow-sm transition-colors hover:bg-atelier-canvas hover:text-atelier-primary"
-            >
-              <PanelRightClose className="h-4 w-4" aria-hidden="true" />
-            </button>
-          </div>
-        {/* AC-L2: batch progress pins to the panel top during a run, so
-            it stays visible beside the canvas on every tab. The full
-            progress + retry affordance stays in the batch panel. */}
-        {activeBatch && (
-          <div
-            role="status"
-            className="flex shrink-0 items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800"
-          >
-            {!hasFailedStep(activeBatch.progress) && (
-              <Loader2
-                className="h-3.5 w-3.5 animate-spin"
-                aria-hidden="true"
-              />
-            )}
-            {batchProgressText(activeBatch.progress) ??
-              "Batch staging in progress…"}
-          </div>
-        )}
+        <InspectorHeader
+          onToggleCollapse={inspectorPanel.toggle}
+          isExpanded={inspectorView === "expanded"}
+          activeBatch={activeBatch}
+        />
         <CollapsibleSection
           id="brushPanel"
           title="Editor Controls"
@@ -813,24 +609,17 @@ export default function InpaintEditor({
           stack (1.5rem from viewport edges) with the tool strip, brush
           parameter flyout, and zoom HUD. Shown when Zen Mode is active. */}
       {zenMode && (
-        <div className="fixed left-6 top-6 z-50 flex flex-col items-start gap-3">
-          <BrushToolRail
-            activeTool={studioActiveTool}
-            onToolChange={handleStudioToolChange}
-          />
-          {studioActiveTool === "brush" && (
-            <BrushParameterFlyout
-              radius={brushRadius}
-              edgeSoftness={brushEdgeSoftness}
-              maskOpacity={brushMaskOpacity}
-              onRadiusChange={setBrushRadius}
-              onEdgeSoftnessChange={setBrushEdgeSoftness}
-              onMaskOpacityChange={setBrushMaskOpacity}
-              onClose={() => setStudioActiveTool("select")}
-            />
-          )}
-          <CanvasZoomHud />
-        </div>
+        <ZenToolRail
+          studioActiveTool={studioActiveTool}
+          onStudioToolChange={handleStudioToolChange}
+          brushRadius={brushRadius}
+          onBrushRadiusChange={setBrushRadius}
+          brushEdgeSoftness={brushEdgeSoftness}
+          onBrushEdgeSoftnessChange={setBrushEdgeSoftness}
+          brushMaskOpacity={brushMaskOpacity}
+          onBrushMaskOpacityChange={setBrushMaskOpacity}
+          onCloseFlyout={() => setStudioActiveTool("select")}
+        />
       )}
 
       {/* Issue #631: Version History Pills — floating bar at bottom-center of canvas
