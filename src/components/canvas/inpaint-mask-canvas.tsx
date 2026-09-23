@@ -97,40 +97,11 @@ export interface SelectionReset {
   maskDataUrl: string | null;
 }
 
-/** Issue #203: one numbered badge marking a pending batch selection. */
-export interface SelectionMarker {
-  id: string;
-  /** Click point in the photo's natural pixel space. */
-  x: number;
-  y: number;
-  /** 1-based position in the selection set. */
-  index: number;
-}
-
-/**
- * Issue #228: one detected concept instance to tint on the overlay
- * canvas. `rank` is the score rank (0 = highest score) and picks the
- * palette color; issue #249 splits the rendering — `selected` instances
- * render as a solid rank-colored fill (their pixels are already in the
- * white mask canvas above), detected-only ones as a faint wash with a
- * rank-colored outline.
- */
-export interface InstanceOverlay {
-  /** Stable React key (concept + response position). */
-  id: string;
-  /** The provider mask (data URL; grayscale or alpha cutout) to tint. */
-  maskDataUrl: string;
-  /** Score rank, 0-based. */
-  rank: number;
-  selected: boolean;
-  /**
-   * Issue #252 D4: when the instance is SELECTED, its region's palette
-   * slot (region position in the batch set) — every member of a merged
-   * region tints with the SAME color, matching its numbered badge and the
-   * panel chip. Unset (or for unselected instances) the rank color is used.
-   */
-  colorIndex?: number;
-}
+// Issue #691: the overlay/badge descriptor shapes moved to
+// @/lib/instance-overlays (pure builders + 1:1 vitest pin); re-exported
+// here to keep this module's long-standing export surface stable.
+import type { InstanceOverlay, SelectionMarker } from "@/lib/instance-overlays";
+export type { InstanceOverlay, SelectionMarker };
 
 interface InpaintMaskCanvasProps {
   width?: number;

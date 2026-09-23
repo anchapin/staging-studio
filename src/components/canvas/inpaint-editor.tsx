@@ -77,7 +77,11 @@ import {
 import { maskGridFromPixels } from "@/lib/mask-flood-fill";
 import { computeMaskCanvasDimensions } from "@/lib/canvas-coords";
 import { fillHoles, closeRegion, MERGE_PROXIMITY_PX } from "@/lib/mask-postprocess";
-import { maskBounds, topmostLeftmostPoint } from "@/lib/vision-labels";
+import { maskBounds } from "@/lib/vision-labels";
+import {
+  buildInstanceOverlays,
+  buildSelectionMarkers,
+} from "@/lib/instance-overlays";
 import { type DeclutterIntensity } from "@/lib/holistic-prompt";
 import {
   MAX_BATCH_OBJECTS,
@@ -897,67 +901,26 @@ export default function InpaintEditor({
   // issue #252 D2/D4, SELECTED instances tint with their REGION's palette
   // color (all members of a merged region share one color — matching the
   // region's badge and panel chip); detected-only instances keep their
-  // score-rank color.
+  // score-rank color. Pure derivation in lib/instance-overlays.ts.
   const instanceOverlays = useMemo(() => {
     if (!displayedResult || !decodedInstances) return undefined;
-    const regionIndexByInstance = new Map<number, number>();
-    batchSelections.forEach((selection, position) => {
-      for (const member of selection.memberInstanceIndices ?? []) {
-        regionIndexByInstance.set(member, position);
-      }
-    });
-    const overlays: Array<{
-      id: string;
-      maskDataUrl: string;
-      rank: number;
-      selected: boolean;
-      colorIndex?: number;
-    }> = [];
-    for (let index = 0; index < displayedResult.maskDataUrls.length; index++) {
-      const instance = decodedInstances[index];
-      if (!instance) continue;
-      const selected = selectedInstanceIndices.includes(index);
-      const regionIndex = regionIndexByInstance.get(index);
-      overlays.push({
-        id: `${displayedResult.concept}:${index}`,
-        maskDataUrl: displayedResult.maskDataUrls[index],
-        rank: index,
-        selected,
-        ...(selected && regionIndex !== undefined ? { colorIndex: regionIndex } : {}),
-      });
-    }
-    return overlays;
+    return buildInstanceOverlays(
+      displayedResult,
+      decodedInstances,
+      batchSelections,
+      selectedInstanceIndices
+    );
   }, [displayedResult, decodedInstances, selectedInstanceIndices, batchSelections]);
 
   // Issue #252 D4: numbered canvas badges, one per pending region, positioned
   // at the topmost-leftmost pixel of the region's member union (grid space
   // scaled to natural pixels) so a merged region is anchored on its actual
-  // shape rather than any single member's seed point.
+  // shape rather than any single member's seed point. Pure derivation in
+  // lib/instance-overlays.ts.
   const selectionMarkers = useMemo(() => {
     if (!decodedInstances || batchSelections.length === 0) return undefined;
     if (!imageDims) return undefined;
-    return batchSelections.flatMap((selection, position) => {
-      const members = selection.memberInstanceIndices ?? [];
-      // Union's topmost-leftmost pixel = the minimum (y, then x) over the
-      // members' own topmost-leftmost points (D4).
-      let best: { x: number; y: number } | null = null;
-      for (const member of members) {
-        const instance = decodedInstances[member];
-        if (!instance) continue;
-        const point = topmostLeftmostPoint(instance.grid, instance.width, instance.height);
-        if (!point) continue;
-        if (!best || point.y < best.y || (point.y === best.y && point.x < best.x)) best = point;
-      }
-      if (!best) return [];
-      return [
-        {
-          id: selection.id,
-          x: best.x * (imageDims.width / (decodedInstances[0]?.width ?? imageDims.width)),
-          y: best.y * (imageDims.height / (decodedInstances[0]?.height ?? imageDims.height)),
-          index: position + 1,
-        },
-      ];
-    });
+    return buildSelectionMarkers(batchSelections, decodedInstances, imageDims);
   }, [batchSelections, decodedInstances, imageDims]);
 
   // The source in effect for the CURRENT run, captured at start time so the
