@@ -1,31 +1,17 @@
 "use client";
 
-import { useRef, useState, useEffect, useLayoutEffect, useCallback, useMemo, useId } from "react";
-import { Loader2 } from "lucide-react";
+import { useRef, useState, useEffect, useLayoutEffect, useMemo, useId } from "react";
+import { computeBackingStoreDimensions, computeMaskCanvasDimensions } from "@/lib/canvas-coords";
+import { DEFAULT_MASK_EXPANSION_RADIUS } from "@/lib/mask-dilation";
 import {
-  clientPointToCanvas,
-  computeBackingStoreDimensions,
-  computeMaskCanvasDimensions,
-  logicalPointToBackingStore,
-  type CanvasPoint,
-} from "@/lib/canvas-coords";
-import { estimateMaskCoverage, shouldWarnLowCoverage } from "@/lib/mask-coverage";
-import { extractMaskOutline, paintMaskPixels } from "@/lib/mask-format";
-import { floodFillMask, maskGridFromPixels } from "@/lib/mask-flood-fill";
-import {
-  canUndoMask,
-  emptyMaskUndoHistory,
-  maskUndoCount,
-  pushMaskSnapshot,
-  undoMaskSnapshot,
-  type MaskUndoHistory,
-} from "@/lib/mask-undo-stack";
-import {
-  DEFAULT_MASK_EXPANSION_RADIUS,
-  dilateMaskGridDirectional,
-} from "@/lib/mask-dilation";
-import { fillHoles } from "@/lib/mask-postprocess";
-import { sliderFillStyle } from "@/lib/precision-slider";
+  useMaskBuffer,
+} from "./use-mask-buffer";
+import { useMaskOverlayLayer } from "./use-mask-overlay-layer";
+import { useMaskKeyboardPainting } from "./use-mask-keyboard-painting";
+import { useMaskPainting } from "./use-mask-painting";
+import MaskCanvasToolbar from "./mask-canvas-toolbar";
+import MaskCanvasStage from "./mask-canvas-stage";
+import type { InpaintMaskCanvasProps } from "./inpaint-mask-canvas-props";
 
 /** Tools for building the mask: freehand paint, flood-fill, or concept select. */
 export type MaskTool = "brush" | "fill" | "select";
@@ -38,52 +24,18 @@ export interface CopiedMaskRegion {
   bounds: { x: number; y: number; width: number; height: number };
 }
 
-/**
- * Issue #549: Atelier Canvas spec mask overlay colors.
- * Electric emerald for mask overlay on canvas, with laser-rim 1px solid border
- * for visibility over mixed fabrics and warm woodwork.
- */
-export const MASK_OVERLAY_EMERALD = "rgba(0, 245, 160, 0.35)";
-export const MASK_OVERLAY_AMBER = "rgba(255, 184, 0, 0.38)";
-
-/**
- * Issue #549: Laser-rim border for mask visibility.
- * 1px solid border ensuring the mask overlay is visible over varied surfaces.
- */
-export const MASK_LASER_RIM_BORDER = "1px solid rgba(0, 245, 160, 0.8)";
-
-/**
- * Rank→color palette for instance overlays (issue #228). Six hues,
- * cycled by score rank, so adjacent instances stay distinguishable. RGB
- * tuples feed `paintMaskPixels` directly (issue #248). Exported since
- * issue #252 so the batch panel's number chips can carry the SAME color
- * as a region's canvas tint (D4: tint and chip double-encode the mapping).
- */
-export const INSTANCE_OVERLAY_PALETTE: Array<readonly [number, number, number]> = [
-  [0x22, 0xc5, 0x5f],
-  [0xf9, 0x73, 0x16],
-  [0x3b, 0x82, 0xf6],
-  [0xa8, 0x55, 0xf7],
-  [0x06, 0xb6, 0xd4],
-  [0xea, 0xb3, 0x08],
-];
-
-/** CSS color for palette slot `index` (cycles), shared with the panel chips. */
-export function paletteCssColor(index: number): string {
-  const [r, g, b] = INSTANCE_OVERLAY_PALETTE[((index % INSTANCE_OVERLAY_PALETTE.length) + INSTANCE_OVERLAY_PALETTE.length) % INSTANCE_OVERLAY_PALETTE.length];
-  return `rgb(${r} ${g} ${b})`;
-}
-
-/**
- * Issue #249: detected-only vs selected must be distinguishable at a
- * glance. A detected-only instance renders as a FAINT rank-colored wash
- * plus a crisp rank-colored outline; a selected one renders as a solid
- * rank-colored fill. (The pre-#249 scheme tinted both the same way and
- * only dimmed selected — on a furnished room that read as "everything
- * is selected".)
- */
-const DETECTED_WASH_ALPHA = 0.15;
-const SELECTED_FILL_ALPHA = 0.45;
+// Issue #691: the overlay constants, palette, and descriptor shapes moved
+// to dedicated modules (pure builders + 1:1 pins); re-exported here to
+// keep this module's long-standing export surface stable.
+export {
+  MASK_OVERLAY_EMERALD,
+  MASK_OVERLAY_AMBER,
+  MASK_LASER_RIM_BORDER,
+  INSTANCE_OVERLAY_PALETTE,
+  paletteCssColor,
+} from "./use-mask-overlay-layer";
+import type { InstanceOverlay, SelectionMarker } from "@/lib/instance-overlays";
+export type { InstanceOverlay, SelectionMarker };
 
 /**
  * Issue #203: editor-side sync of the batch selection set. Whenever `id`
@@ -95,106 +47,6 @@ const SELECTED_FILL_ALPHA = 0.45;
 export interface SelectionReset {
   id: number;
   maskDataUrl: string | null;
-}
-
-// Issue #691: the overlay/badge descriptor shapes moved to
-// @/lib/instance-overlays (pure builders + 1:1 vitest pin); re-exported
-// here to keep this module's long-standing export surface stable.
-import type { InstanceOverlay, SelectionMarker } from "@/lib/instance-overlays";
-export type { InstanceOverlay, SelectionMarker };
-
-interface InpaintMaskCanvasProps {
-  width?: number;
-  height?: number;
-  brushSize?: number;
-  /** Issue #560: callback to notify parent of brush size changes (Zen Mode). */
-  onBrushSizeChange?: (size: number) => void;
-  initialMaskDataUrl?: string | null;
-  onMaskChange?: (maskDataUrl: string | null) => void;
-  /** Issue #560: external active tool state (Zen Mode). */
-  activeTool?: MaskTool;
-  /** Issue #560: callback when active tool changes (Zen Mode). */
-  onActiveToolChange?: (tool: MaskTool) => void;
-  /**
-   * Issue #748: fired when the user activates the Select Regions tool.
-   * Refresh detection is lazy after a completion rebase — the parent
-   * arms (and bills) the SAM call for the current base on this signal.
-   */
-  onSelectRegionsActivate?: () => void;
-  /** Issue #560: when true, hides the toolbar and non-essential chrome. */
-  zenMode?: boolean;
-  /** Natural aspect ratio (width / height) of the source photo; sizes the mask canvas to match it. */
-  aspectRatio?: number | null;
-  /** Natural pixel width of the uploaded photo; exported masks are scaled to match. */
-  naturalWidth?: number | null;
-  /** Natural pixel height of the uploaded photo. */
-  naturalHeight?: number | null;
-  /** Photo rendered underneath the mask so the canvas overlays it exactly. */
-  overlayImageSrc?: string | null;
-  /**
-   * Full-width focused layout (issue #169): the photo + mask span the
-   * available content width instead of the compact card cap (`max-w-md`).
-   */
-  fullWidth?: boolean;
-  /**
-   * Select Objects tool (issue #228): called on click with the point in
-   * LOGICAL canvas pixel space (dims — the same space the parent decodes
-   * instance grids at). The parent hit-tests client-side; no provider
-   * call happens on click. Repeated clicks are MEANINGFUL (toggle), so
-   * unlike the old point-SAM flow there is no same-point dedupe.
-   */
-  onInstanceToggle?: (point: CanvasPoint) => void;
-  /** True while segmenting (or inpainting) runs; select clicks are ignored. */
-  segmentDisabled?: boolean;
-  /** Issue #641: true while an inpaint request is in flight — shows a pulsing ring around the canvas. */
-  processing?: boolean;
-  /**
-   * True while a concept detection is in flight (issue #228, formerly the
-   * per-click SAM request): shows a spinner + "Selecting..." on the
-   * Select Objects tool itself and a wait cursor on the canvas.
-   */
-  segmenting?: boolean;
-  /**
-   * Issue #228: score-ranked detected instances to tint beneath the mask
-   * canvas. Pure DOM/canvas overlay — never touches the exported mask.
-   */
-  instanceOverlays?: InstanceOverlay[];
-  /**
-   * Outward mask growth in mask-canvas pixels applied at export time
-   * (issue #180): makes FLUX.1 Fill regenerate bezels/frames at the painted
-   * boundary instead of preserving them. 0 restores the un-dilated mask.
-   */
-  expansionRadius?: number;
-  /**
-   * Issue #234: when true, dilate further downward than upward so cast floor
-   * shadows are included in the regenerated region. Has no effect when
-   * `expansionRadius` is 0.
-   */
-  includeFloorShadow?: boolean;
-  /**
-   * Issue #203: numbered badges (1-based) for each pending batch selection,
-   * positioned by natural-pixel click point. Pure DOM overlay — like the
-   * brush cursor, they never touch canvas pixels, so the exported mask
-   * stays clean.
-   */
-  selectionMarkers?: SelectionMarker[];
-  /**
-   * Issue #203: replace the mask grid with this union mask whenever `id`
-   * changes (a selection was added, removed, or cleared). `maskDataUrl`
-   * null clears the grid. Single-select (issue #183) flows through the
-   * same path: one selection's union is its own mask.
-   */
-  selectionReset?: SelectionReset | null;
-  /** Issue #203: the user pressed Clear Mask; lets the parent drop the
-   * batch selection set so it cannot disagree with the now-empty grid. */
-  onMaskCleared?: () => void;
-  /** Issue #448: click a numbered badge to deselect that region. */
-  onSelectionDeselect?: (id: string) => void;
-  /**
-   * Issue #454: the concept name being detected — shown in the empty-state
-   * badge while `segmenting` is true so users know detection is running.
-   */
-  detectingConcept?: string;
 }
 
 export default function InpaintMaskCanvas({
@@ -227,45 +79,15 @@ export default function InpaintMaskCanvas({
   zenMode = false,
 }: InpaintMaskCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
 
   // Issue #560: external brush size takes priority (Zen Mode lifts state to parent).
   const [internalBrushSize, setInternalBrushSize] = useState(externalBrushSize ?? 20);
   const brushSize = externalBrushSize ?? internalBrushSize;
 
-  const [maskDataUrl, setMaskDataUrl] = useState<string | null>(initialMaskDataUrl ?? null);
-  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
-
-  // Issue #694: undo history stack for mask operations — the pure
-  // push/cap/undo logic lives in lib/mask-undo-stack.ts. Each entry is a
-  // snapshot of the canvas content before a painting operation (brush stroke,
-  // fill, clear, or paste). Undo pops the stack to restore a previous state.
-  // The component wires undo only (no redo affordance yet), so its undo
-  // calls discard the popped snapshot exactly as they did pre-extraction.
-  const [undoHistory, setUndoHistory] = useState<MaskUndoHistory>(emptyMaskUndoHistory);
-
   // Issue #560: external active tool takes priority (Zen Mode lifts state to parent).
   const [internalActiveTool, setInternalActiveTool] = useState<MaskTool>("brush");
   const activeTool = externalActiveTool ?? internalActiveTool;
 
-  const [hasPainted, setHasPainted] = useState(false);
-  const [lowCoverage, setLowCoverage] = useState(false);
-
-  // Issue #591: copy-paste mask state
-  const [copiedMask, setCopiedMask] = useState<CopiedMaskRegion | null>(null);
-  const [selectionRect, setSelectionRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
-  const [isSelecting, setIsSelecting] = useState(false);
-  const selectionStartRef = useRef<{ x: number; y: number } | null>(null);
-  const [pastePreview, setPastePreview] = useState<{ x: number; y: number; mirrored: boolean } | null>(null);
-
-  // Keyboard painting: the virtual brush cursor lives in canvas pixel space
-  // (the same space clientPointToCanvas produces) so arrow-key deltas scale
-  // with the canvas resolution, not with client pixels.
-  const [isCanvasFocused, setIsCanvasFocused] = useState(false);
-  const [isKeyboardPainting, setIsKeyboardPainting] = useState(false);
-  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
-  const cursorRef = useRef<{ x: number; y: number } | null>(null);
-  const keyboardPaintingRef = useRef(false);
   const hintId = useId();
   const maskingHintId = useId();
   const [showLegend, setShowLegend] = useState(false);
@@ -280,12 +102,6 @@ export default function InpaintMaskCanvas({
     [aspectRatio, width, height]
   );
 
-  // Issue #262: track the previous dims so we can detect when the canvas
-  // grid re-sizes due to the photo's aspect ratio finally resolving (null →
-  // a real value).  In that window the user may already be painting — we must
-  // not silently drop their strokes when the grid re-initializes.
-  const prevDimsRef = useRef(dims);
-
   // HiDPI support (issue #181): all painting happens in LOGICAL canvas
   // space (dims, the same space clientPointToCanvas produces). The backing
   // store is scaled up to device pixels and the 2D context is transformed
@@ -295,6 +111,12 @@ export default function InpaintMaskCanvas({
   // and tracked across zoom / monitor changes via resize.
   const [devicePixelRatio, setDevicePixelRatio] = useState(1);
   useEffect(() => {
+    const syncRatio = () => setDevicePixelRatio(window.devicePixelRatio || 1);
+    syncRatio();
+    window.addEventListener("resize", syncRatio);
+    return () => window.removeEventListener("resize", syncRatio);
+  }, []);
+  useLayoutEffect(() => {
     const syncRatio = () => setDevicePixelRatio(window.devicePixelRatio || 1);
     syncRatio();
     window.addEventListener("resize", syncRatio);
@@ -347,1058 +169,91 @@ export default function InpaintMaskCanvas({
     };
   }, [fullWidth, hasOverlay, dims.width, dims.height]);
 
-  // ---------------------------------------------------------------------
-  // Issue #228: score-ranked instance overlays. A dedicated canvas layer
-  // (below the interactive mask canvas) tints each detected instance by
-  // rank; since issue #249 selected instances render as a solid fill
-  // (their pixels already show as white in the mask canvas above) while
-  // detected-only ones stay a faint wash plus an outline. This layer is
-  // decorative only — it never touches the exported mask pixels.
-  // ---------------------------------------------------------------------
-  const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
-  const instanceImageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
-  const [overlayTick, setOverlayTick] = useState(0);
-
-  // Preload instance cutout images once per response; the draw effect
-  // reads them from the cache. Failed decodes cache a zero-width image
-  // and are skipped at draw time.
-  useEffect(() => {
-    if (!instanceOverlays || instanceOverlays.length === 0) return;
-    let cancelled = false;
-    const cache = instanceImageCacheRef.current;
-    for (const overlay of instanceOverlays) {
-      if (cache.has(overlay.maskDataUrl)) continue;
-      const img = new Image();
-      img.onload = () => {
-        if (!cancelled) setOverlayTick((tick) => tick + 1);
-      };
-      img.onerror = () => {
-        if (!cancelled) setOverlayTick((tick) => tick + 1);
-      };
-      cache.set(overlay.maskDataUrl, img);
-      img.src = overlay.maskDataUrl;
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, [instanceOverlays]);
-
-  useEffect(() => {
-    const overlayCanvas = overlayCanvasRef.current;
-    const ctx = overlayCanvas?.getContext("2d");
-    if (!overlayCanvas || !ctx) return;
-    ctx.clearRect(0, 0, dims.width, dims.height);
-    if (!instanceOverlays || instanceOverlays.length === 0) return;
-    const cache = instanceImageCacheRef.current;
-    for (const overlay of instanceOverlays) {
-      const img = cache.get(overlay.maskDataUrl);
-      if (!img || !img.complete || !img.naturalWidth) continue;
-      const paletteColor = INSTANCE_OVERLAY_PALETTE[
-        (overlay.selected && overlay.colorIndex !== undefined
-          ? overlay.colorIndex
-          : overlay.rank) % INSTANCE_OVERLAY_PALETTE.length
-      ];
-      // Tint the mask with the rank color: alpha is DERIVED from the
-      // format-agnostic classification (issue #248) — a grayscale provider
-      // mask decodes fully opaque, which the replaced `source-in` fill
-      // trusted and painted frame-wide.
-      const tinted = document.createElement("canvas");
-      tinted.width = dims.width;
-      tinted.height = dims.height;
-      const tintedCtx = tinted.getContext("2d");
-      if (!tintedCtx) continue;
-      tintedCtx.drawImage(img, 0, 0, dims.width, dims.height);
-      const tintedData = paintMaskPixels(
-        tintedCtx.getImageData(0, 0, dims.width, dims.height).data,
-        dims.width,
-        dims.height,
-        {
-          maskedColor: paletteColor,
-          transparentBackground: true,
-        }
-      );
-      // Issue #249: selected = solid rank-colored fill; detected-only =
-      // faint wash PLUS a crisp rank-colored outline, so "detected" and
-      // "selected" are distinguishable at a glance on furnished rooms.
-      tintedCtx.putImageData(
-        new ImageData(new Uint8ClampedArray(tintedData), dims.width, dims.height),
-        0,
-        0
-      );
-      ctx.globalAlpha = overlay.selected ? SELECTED_FILL_ALPHA : DETECTED_WASH_ALPHA;
-      ctx.drawImage(tinted, 0, 0);
-      if (!overlay.selected) {
-        const outlineData = extractMaskOutline(tintedData, dims.width, dims.height, {
-          outlineColor: paletteColor,
-        });
-        const outlined = document.createElement("canvas");
-        outlined.width = dims.width;
-        outlined.height = dims.height;
-        const outlinedCtx = outlined.getContext("2d");
-        if (!outlinedCtx) continue;
-        outlinedCtx.putImageData(
-          new ImageData(new Uint8ClampedArray(outlineData), dims.width, dims.height),
-          0,
-          0
-        );
-        ctx.globalAlpha = 1;
-        ctx.drawImage(outlined, 0, 0);
-      }
-    }
-    ctx.globalAlpha = 1;
-  }, [instanceOverlays, overlayTick, dims.width, dims.height]);
-
-  // Issue #591: render the copy-paste selection rectangle and paste preview
-  // on the overlay canvas (above instance overlays, below the interactive canvas).
-  useEffect(() => {
-    const overlayCanvas = overlayCanvasRef.current;
-    const ctx = overlayCanvas?.getContext("2d");
-    if (!overlayCanvas || !ctx) return;
-    // Always clear first — we redraw the full overlay stack on every change
-    ctx.clearRect(0, 0, dims.width, dims.height);
-
-    // Re-draw instance overlays so the selection/preview sits above them
-    const cache = instanceImageCacheRef.current;
-    if (instanceOverlays && instanceOverlays.length > 0) {
-      for (const overlay of instanceOverlays) {
-        const img = cache.get(overlay.maskDataUrl);
-        if (!img || !img.complete || !img.naturalWidth) continue;
-        const paletteColor =
-          INSTANCE_OVERLAY_PALETTE[
-            (overlay.selected && overlay.colorIndex !== undefined
-              ? overlay.colorIndex
-              : overlay.rank) % INSTANCE_OVERLAY_PALETTE.length
-          ];
-        const tinted = document.createElement("canvas");
-        tinted.width = dims.width;
-        tinted.height = dims.height;
-        const tintedCtx = tinted.getContext("2d");
-        if (!tintedCtx) continue;
-        tintedCtx.drawImage(img, 0, 0, dims.width, dims.height);
-        const tintedData = paintMaskPixels(
-          tintedCtx.getImageData(0, 0, dims.width, dims.height).data,
-          dims.width,
-          dims.height,
-          { maskedColor: paletteColor, transparentBackground: true }
-        );
-        tintedCtx.putImageData(
-          new ImageData(new Uint8ClampedArray(tintedData), dims.width, dims.height),
-          0,
-          0
-        );
-        ctx.globalAlpha = overlay.selected ? SELECTED_FILL_ALPHA : DETECTED_WASH_ALPHA;
-        ctx.drawImage(tinted, 0, 0);
-        if (!overlay.selected) {
-          const outlineData = extractMaskOutline(tintedData, dims.width, dims.height, {
-            outlineColor: paletteColor,
-          });
-          const outlined = document.createElement("canvas");
-          outlined.width = dims.width;
-          outlined.height = dims.height;
-          const outlinedCtx = outlined.getContext("2d");
-          if (!outlinedCtx) continue;
-          outlinedCtx.putImageData(
-            new ImageData(new Uint8ClampedArray(outlineData), dims.width, dims.height),
-            0,
-            0
-          );
-          ctx.globalAlpha = 1;
-          ctx.drawImage(outlined, 0, 0);
-        }
-      }
-    }
-
-    // Issue #591: paste preview — draw the copied mask region at the cursor
-    // position as a faint preview, using a distinct amber tint.
-    if (pastePreview && copiedMask) {
-      const { imageData, bounds } = copiedMask;
-      const previewCanvas = document.createElement("canvas");
-      previewCanvas.width = bounds.width;
-      previewCanvas.height = bounds.height;
-      const previewCtx = previewCanvas.getContext("2d");
-      if (previewCtx) {
-        previewCtx.putImageData(imageData, 0, 0);
-        if (pastePreview.mirrored) {
-          ctx.save();
-          ctx.translate(pastePreview.x + bounds.width, pastePreview.y);
-          ctx.scale(-1, 1);
-          ctx.globalAlpha = 0.45;
-          ctx.drawImage(previewCanvas, 0, 0);
-          ctx.restore();
-        } else {
-          ctx.globalAlpha = 0.45;
-          ctx.drawImage(previewCanvas, pastePreview.x, pastePreview.y);
-        }
-        // Amber dashed border to indicate preview
-        ctx.globalAlpha = 1;
-        ctx.strokeStyle = "#FFB800";
-        ctx.lineWidth = 2;
-        ctx.setLineDash([4, 4]);
-        ctx.strokeRect(pastePreview.x, pastePreview.y, bounds.width, bounds.height);
-        ctx.setLineDash([]);
-      }
-    }
-
-    // Issue #591: selection rectangle — electric cyan dashed border
-    if (selectionRect) {
-      ctx.globalAlpha = 0.85;
-      ctx.fillStyle = "rgba(0, 245, 160, 0.08)";
-      ctx.fillRect(selectionRect.x, selectionRect.y, selectionRect.width, selectionRect.height);
-      ctx.strokeStyle = "#00F5A0";
-      ctx.lineWidth = 2;
-      ctx.setLineDash([5, 4]);
-      ctx.strokeRect(selectionRect.x, selectionRect.y, selectionRect.width, selectionRect.height);
-      ctx.setLineDash([]);
-    }
-    ctx.globalAlpha = 1;
-  }, [selectionRect, pastePreview, copiedMask, instanceOverlays, overlayTick, dims.width, dims.height]);
-
-
-  // Latest initial mask without making initCanvas depend on it — re-running
-  // init on every parent render would wipe in-progress strokes.
-  const initialMaskRef = useRef(initialMaskDataUrl);
-  useEffect(() => {
-    initialMaskRef.current = initialMaskDataUrl;
-  }, [initialMaskDataUrl]);
-
-  // Issue #262: preserve mask strokes when the canvas grid re-sizes due to
-  // the source photo's aspect ratio finally resolving (null → real value).
-  // Painting during the load window is now either preserved or visibly impossible
-  // (disabled) — never silently lost.
-  //
-  // When dims change we capture the current canvas content BEFORE initCanvas
-  // wipes it, then replay it scaled onto the new grid after initCanvas runs.
-  // A ref keeps `hasPainted` current for the effect without adding it as a
-  // reactive dependency. We also track the previous overlayImageSrc so we skip
-  // preservation when the source image itself changed (a mask is tied to one
-  // source image and must not survive onto a different image — issue #170).
-  // Note: hasPaintedRef is declared below in the expansion-radius section and
-  // shared here via the closure.
-  const prevOverlayRef = useRef(overlayImageSrc);
-
-  useEffect(() => {
-    const prev = prevDimsRef.current;
-    const prevOverlay = prevOverlayRef.current;
-
-    // Skip preservation when the source image changed — a mask belongs to one
-    // image and must not leak onto a different image's canvas (issue #170).
-    const sourceChanged = overlayImageSrc !== prevOverlay;
-
-    if (prev.width === dims.width && prev.height === dims.height) {
-      // Dims unchanged — still update refs so next dims change is clean.
-      prevDimsRef.current = dims;
-      prevOverlayRef.current = overlayImageSrc;
-      return;
-    }
-
-    // Dims changed — capture existing strokes before initCanvas wipes them.
-    // Capture the painting state HERE (not inside the deferred restore) because
-    // initCanvas resets hasPainted to false and the ref sync effect runs after
-    // we return, so hasPaintedRef.current would be stale by the time restore
-    // executes via queueMicrotask.
-    const wasPainted = hasPaintedRef.current;
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    const oldDims = prev;
-    const newDims = dims;
-
-    // Only preserve strokes when the source image is the same (aspect ratio
-    // resize), not when switching images (source switch wipes intentionally).
-    const capturedDataUrl =
-      !sourceChanged && wasPainted && canvas && ctx
-        ? canvas.toDataURL("image/png")
-        : null;
-
-    prevDimsRef.current = newDims;
-    prevOverlayRef.current = overlayImageSrc;
-
-    if (!capturedDataUrl) return;
-
-    // Defer the restore until after initCanvas has set up the new grid.
-    const restore = () => {
-      const c = canvasRef.current;
-      const cg = c?.getContext("2d");
-      if (!c || !cg) return;
-      const img = new Image();
-      img.onload = () => {
-        cg.drawImage(img, 0, 0, oldDims.width, oldDims.height, 0, 0, newDims.width, newDims.height);
-      };
-      img.src = capturedDataUrl;
-    };
-
-    // queueMicrotask runs after the current synchronous chunk (both effects
-    // complete) but before the browser renders — initCanvas effect is already
-    // done by the time restore fires.
-    queueMicrotask(restore);
-  }, [dims, overlayImageSrc]);
-
-  const initCanvas = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    // Painting stays in logical (dims) coordinates; this transform maps it
-    // onto the DPR-scaled backing store. Setting the canvas size (below,
-    // via React) resets the context, so re-apply it on every (re)init.
-    const dpr = backing.width / dims.width || 1;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const initial = initialMaskRef.current;
-    if (initial) {
-      const img = new Image();
-      img.onload = () => {
-        ctx.fillStyle = "black";
-        ctx.fillRect(0, 0, dims.width, dims.height);
-        ctx.drawImage(img, 0, 0, dims.width, dims.height);
-      };
-      img.src = initial;
-    } else {
-      ctx.fillStyle = "black";
-      ctx.fillRect(0, 0, dims.width, dims.height);
-    }
-    // Re-initializing replaces the canvas content, so reset the guidance
-    // state to match what will actually be on screen.
-    setHasPainted(Boolean(initial));
-    setLowCoverage(false);
-  }, [dims.width, dims.height, backing]);
-
-  // Initialize once on mount, and re-initialize when the geometry changes
-  // (e.g. the photo's aspect ratio resolves after the image loads) or when
-  // the underlying photo itself changes (issue #170 source switching) — a
-  // mask drawn for one image must never survive onto the next. The ref sync
-  // effect above runs first, so initCanvas reads the latest initial mask.
-  useEffect(() => {
-    // Issue #262: track source changes so the dims-change effect above can
-    // distinguish aspect-ratio resize (preserve strokes) from source switch
-    // (don't preserve — mask belongs to the old image).
-    if (overlayImageSrc !== prevOverlayRef.current) {
-      prevOverlayRef.current = overlayImageSrc;
-    }
-    initCanvas();
-  }, [initCanvas, overlayImageSrc]);
-
-  const getCoordinates = (
-    e: React.MouseEvent | React.TouchEvent
-  ): { x: number; y: number } | null => {
-    const canvas = canvasRef.current;
-    if (!canvas) return null;
-
-    const rect = canvas.getBoundingClientRect();
-
-    // Scale basis (issue #181): pointers map into the LOGICAL canvas space
-    // (dims), never the DPR-scaled backing store (canvas.width/height). The
-    // context transform carries logical coordinates onto physical pixels,
-    // so painted strokes land exactly under the cursor at any device
-    // pixel ratio.
-    if ("touches" in e) {
-      const touch = e.touches[0];
-      if (!touch) return null;
-      return clientPointToCanvas(touch.clientX, touch.clientY, rect, dims.width, dims.height);
-    }
-
-    return clientPointToCanvas(e.clientX, e.clientY, rect, dims.width, dims.height);
-  };
-
-  const draw = (
-    from: { x: number; y: number },
-    to: { x: number; y: number }
-  ) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    ctx.strokeStyle = "white";
-    ctx.lineWidth = brushSize;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-
-    ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.lineTo(to.x, to.y);
-    ctx.stroke();
-  };
-
-  // A zero-length stroked line renders inconsistently across browsers, so
-  // single-point paints (keyboard toggle-down, no movement yet) fill a disc.
-  const drawDot = (at: { x: number; y: number }) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    ctx.fillStyle = "white";
-    ctx.beginPath();
-    ctx.arc(at.x, at.y, brushSize / 2, 0, Math.PI * 2);
-    ctx.fill();
-  };
-
-  // Issue #378: capture the current canvas content as a data URL for the undo
-  // stack. Called before any destructive operation (stroke, fill, clear).
-  const captureUndoState = useCallback((): string | null => {
-    const canvas = canvasRef.current;
-    if (!canvas) return null;
-    return canvas.toDataURL("image/png");
-  }, []);
-
-  // Issue #378: restore a previously captured undo state back onto the canvas.
-  const restoreUndoState = useCallback((dataUrl: string) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return false;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return false;
-    const img = new Image();
-    img.onload = () => {
-      ctx.fillStyle = "black";
-      ctx.fillRect(0, 0, dims.width, dims.height);
-      ctx.drawImage(img, 0, 0, dims.width, dims.height);
-    };
-    img.src = dataUrl;
-    return true;
-  }, [dims.width, dims.height]);
-
-  // Issue #378: pop the most recent undo state and restore it. Called both
-  // from the explicit Undo button and from the Cmd/Ctrl+Z keyboard shortcut.
-  const handleUndo = useCallback(() => {
-    const { history, snapshot: previousState } = undoMaskSnapshot(undoHistory);
-    if (previousState === null) return;
-    if (restoreUndoState(previousState)) {
-      setUndoHistory(history);
-      // After restore, re-export to notify parent and update coverage warning
-      // Use a microtask to ensure canvas is painted before exporting
-      queueMicrotask(() => {
-        const currentDataUrl = canvasRef.current?.toDataURL("image/png") ?? null;
-        setMaskDataUrl(currentDataUrl);
-        onMaskChange?.(currentDataUrl);
-        // Update hasPainted based on whether there's any content
-        const canvas = canvasRef.current;
-        if (canvas) {
-          const ctx = canvas.getContext("2d");
-          if (ctx) {
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const data = imageData.data;
-            let hasContent = false;
-            for (let i = 0; i < data.length; i += 4) {
-              if (data[i] > 0 || data[i + 1] > 0 || data[i + 2] > 0) {
-                hasContent = true;
-                break;
-              }
-            }
-            setHasPainted(hasContent);
-          }
-        }
-      });
-    }
-  }, [undoHistory, restoreUndoState, onMaskChange]);
-
-  // Fill Region tool: flood-fills the unpainted region connected to the
-  // click/cursor point with painted pixels. Designed for cover-the-object
-  // semantics — draw a continuous outline around the object, then fill its
-  // interior in one click instead of painting it by hand. Returns true when
-  // pixels changed.
-  const performFill = (point: { x: number; y: number }): boolean => {
-    const canvas = canvasRef.current;
-    if (!canvas) return false;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return false;
-
-    // getImageData/putImageData operate on PHYSICAL pixels and ignore the
-    // context transform, so the logical-space seed is mapped into backing
-    // store pixels before flooding (issue #181).
-    const seed = logicalPointToBackingStore(point, devicePixelRatio, backing);
-
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const grid = maskGridFromPixels(imageData.data, canvas.width, canvas.height);
-    const result = floodFillMask(grid, canvas.width, canvas.height, seed.x, seed.y);
-    if (!result || result.filledCount === 0) return false;
-
-    // Snap filled (and already-painted) cells to pure white so the exported
-    // mask keeps clean region-replacement semantics.
-    const data = imageData.data;
-    for (let i = 0; i < result.mask.length; i++) {
-      if (result.mask[i] === 1) {
-        const o = i * 4;
-        data[o] = 255;
-        data[o + 1] = 255;
-        data[o + 2] = 255;
-        data[o + 3] = 255;
-      }
-    }
-    ctx.putImageData(imageData, 0, 0);
-    return true;
-  };
-
-  // Issue #591: track initial mouse position to distinguish click from drag
-  const selectionDragStartRef = useRef<{ x: number; y: number } | null>(null);
-
-  // Issue #591: copy selected mask region to clipboard state
-  const performCopy = useCallback(() => {
-    if (!selectionRect) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    const { x, y, width, height } = selectionRect;
-    const imageData = ctx.getImageData(
-      Math.round(x * backing.width / dims.width),
-      Math.round(y * backing.height / dims.height),
-      Math.max(1, Math.round(width * backing.width / dims.width)),
-      Math.max(1, Math.round(height * backing.height / dims.height))
-    );
-    setCopiedMask({ imageData, bounds: { x, y, width, height } });
-    setPastePreview(null);
-  }, [selectionRect, backing, dims]);
-
-  // Issue #591: paste copied mask region at cursor (optionally mirrored)
-  const performPaste = useCallback((mirrored: boolean) => {
-    if (!copiedMask) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const undoState = captureUndoState();
-    setUndoHistory((prev) => pushMaskSnapshot(prev, undoState));
-
-    const { imageData, bounds } = copiedMask;
-    const pasteX = pastePreview?.x ?? (cursor?.x ?? bounds.x);
-    const pasteY = pastePreview?.y ?? (cursor?.y ?? bounds.y);
-
-    const pasteCanvas = document.createElement("canvas");
-    pasteCanvas.width = bounds.width;
-    pasteCanvas.height = bounds.height;
-    const pasteCtx = pasteCanvas.getContext("2d");
-    if (!pasteCtx) return;
-    pasteCtx.putImageData(imageData, 0, 0);
-
-    // getImageData/putImageData operate in PHYSICAL pixel space (issue #181)
-    const physicalPasteX = Math.round(pasteX * backing.width / dims.width);
-    const physicalPasteY = Math.round(pasteY * backing.height / dims.height);
-    const physicalWidth = Math.round(bounds.width * backing.width / dims.width);
-    const physicalHeight = Math.round(bounds.height * backing.height / dims.height);
-
-    if (mirrored) {
-      ctx.save();
-      ctx.translate(canvas.width, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(pasteCanvas, 0, 0, pasteCanvas.width, pasteCanvas.height,
-        canvas.width - physicalPasteX - physicalWidth, physicalPasteY,
-        physicalWidth, physicalHeight);
-      ctx.restore();
-    } else {
-      ctx.drawImage(pasteCanvas, 0, 0, pasteCanvas.width, pasteCanvas.height,
-        physicalPasteX, physicalPasteY, physicalWidth, physicalHeight);
-    }
-
-    setHasPainted(true);
-    setPastePreview(null);
-    exportMaskRef.current();
-  }, [copiedMask, pastePreview, cursor, backing, dims, captureUndoState]);
-
-  const handleStart = (e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
-    const point = getCoordinates(e);
-    if (!point) return;
-    if (activeTool === "select") {
-      // Issue #591: start selection drag — store start point; handleMove
-      // upgrades this to a real selection rect once movement is detected.
-      selectionDragStartRef.current = point;
-      setIsSelecting(true);
-      selectionStartRef.current = point;
-      setPastePreview(null);
-      return;
-    }
-    if (activeTool === "fill") {
-      // Issue #378: capture undo state before fill
-      const undoState = captureUndoState();
-      setUndoHistory((prev) => pushMaskSnapshot(prev, undoState));
-      if (performFill(point)) {
-        setHasPainted(true);
-        exportMask();
-      }
-      return;
-    }
-    // Issue #378: capture undo state before brush stroke begins
-    const undoState = captureUndoState();
-    setUndoHistory((prev) => pushMaskSnapshot(prev, undoState));
-    setIsDrawing(true);
-    lastPointRef.current = point;
-    setHasPainted(true);
-    draw(point, point);
-  };
-
-  // Select Objects tool (issue #228): hands the clicked LOGICAL canvas
-  // point to the parent, which hit-tests it against the decoded concept
-  // instances — zero provider calls per click. Repeated clicks on the
-  // same point are meaningful (toggle in/out), so there is no dedupe.
-  const handleInstanceClick = (canvasPoint: CanvasPoint) => {
-    if (!onInstanceToggle || segmentDisabled) return;
-    onInstanceToggle(canvasPoint);
-  };
-
-  const handleMove = (e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
-    const point = getCoordinates(e);
-    if (!point) return;
-
-    // Issue #591: selection dragging — update rect and paste preview
-    if (isSelecting && selectionStartRef.current) {
-      const start = selectionStartRef.current;
-      setSelectionRect({
-        x: start.x,
-        y: start.y,
-        width: point.x - start.x,
-        height: point.y - start.y,
-      });
-      if (copiedMask) {
-        setPastePreview({ x: point.x - copiedMask.bounds.width / 2, y: point.y - copiedMask.bounds.height / 2, mirrored: false });
-      }
-      return;
-    }
-
-    // Brush painting
-    if (!isDrawing || !lastPointRef.current) return;
-    draw(lastPointRef.current, point);
-    lastPointRef.current = point;
-  };
-
-  const handleEnd = () => {
-    if (isDrawing) {
-      setIsDrawing(false);
-      lastPointRef.current = null;
-      exportMask();
-    }
-    // Issue #591: finalize selection rectangle
-    if (isSelecting) {
-      setIsSelecting(false);
-      const startPoint = selectionDragStartRef.current;
-      selectionDragStartRef.current = null;
-      // A plain click (press + release with no movement while pressed)
-      // never sets selectionRect — handleMove's drag branch only runs
-      // once the pointer moves with the button held. Treat that null
-      // case as a zero-size rect at the start point so the tiny-movement
-      // branch below routes the click to the instance toggle (issue
-      // #228) instead of silently dropping it. Pixel-exact clicks
-      // (automation, keyboard-adjacent input) have zero mid-press
-      // movement and were previously lost here (issue #742).
-      const rawRect =
-        selectionRect ??
-        (startPoint
-          ? { x: startPoint.x, y: startPoint.y, width: 0, height: 0 }
-          : null);
-      if (rawRect) {
-        // Normalize rect so width/height are always positive
-        const normalized = {
-          x: rawRect.width < 0 ? rawRect.x + rawRect.width : rawRect.x,
-          y: rawRect.height < 0 ? rawRect.y + rawRect.height : rawRect.y,
-          width: Math.abs(rawRect.width),
-          height: Math.abs(rawRect.height),
-        };
-        // Tiny movement = treat as an instance click (issue #228) if overlays exist;
-        // otherwise treat as a cancelled selection.
-        if (normalized.width <= 3 && normalized.height <= 3 && startPoint) {
-          if (instanceOverlays && instanceOverlays.length > 0) {
-            handleInstanceClick(startPoint);
-          }
-          setSelectionRect(null);
-        } else {
-          setSelectionRect(normalized.width > 2 && normalized.height > 2 ? normalized : null);
-        }
-      }
-    }
-  };
-
-  const exportMask = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    // fal-ai/flux-fill expects the mask geometry to match the source image,
-    // so rescale the painted mask to the photo's natural pixel dimensions.
-    const exportWidth =
-      naturalWidth && naturalWidth > 0 ? Math.max(1, Math.round(naturalWidth)) : canvas.width;
-    const exportHeight =
-      naturalHeight && naturalHeight > 0 ? Math.max(1, Math.round(naturalHeight)) : canvas.height;
-
-    // Issue #180: grow the painted mask outward before export so bezels,
-    // frames, brackets, and mounts at the painted boundary are regenerated
-    // instead of preserved. Dilation runs in logical mask-canvas pixel space
-    // (dims) BEFORE the scale-to-natural-dimensions step and only rewrites
-    // mask pixels — the source photo is never touched. A radius of 0 keeps
-    // the un-dilated mask.
-    //
-    // Issue #252 D3: filling runs LAST in the composition pipeline —
-    // dilation can seal unpainted pockets — so every manual mask reaching
-    // /api/inpaint is hole-free ("no donut reaches FLUX"). Strokes stay raw
-    // while drawing; this is the run-composition point.
-    let maskSource: HTMLCanvasElement = canvas;
-    {
-      const paint = document.createElement("canvas");
-      paint.width = dims.width;
-      paint.height = dims.height;
-      const paintCtx = paint.getContext("2d");
-      if (!paintCtx) return;
-      paintCtx.drawImage(canvas, 0, 0, dims.width, dims.height);
-      const paintData = paintCtx.getImageData(0, 0, dims.width, dims.height);
-      const grid = maskGridFromPixels(paintData.data, dims.width, dims.height);
-      // Issue #234: directional dilation extends further downward when
-      // includeFloorShadow is true, swallowing cast shadows on the floor.
-      const dilated = dilateMaskGridDirectional(grid, dims.width, dims.height, expansionRadius, {
-        includeFloorShadow,
-      });
-      if (!dilated) return;
-      const baseMask = dilated.mask;
-      const filled = fillHoles(baseMask, dims.width, dims.height);
-      const finalMask = filled ? filled.mask : baseMask;
-
-      const grown = paintCtx.createImageData(dims.width, dims.height);
-      const grownData = grown.data;
-      for (let i = 0; i < finalMask.length; i++) {
-        const o = i * 4;
-        if (finalMask[i] === 1) {
-          grownData[o] = 255;
-          grownData[o + 1] = 255;
-          grownData[o + 2] = 255;
-        }
-        grownData[o + 3] = 255;
-      }
-      paintCtx.putImageData(grown, 0, 0);
-      maskSource = paint;
-    }
-
-    let dataUrl: string;
-    if (exportWidth === maskSource.width && exportHeight === maskSource.height) {
-      dataUrl = maskSource.toDataURL("image/png");
-    } else {
-      const scaled = document.createElement("canvas");
-      scaled.width = exportWidth;
-      scaled.height = exportHeight;
-      const scaledCtx = scaled.getContext("2d");
-      if (!scaledCtx) return;
-      scaledCtx.drawImage(maskSource, 0, 0, exportWidth, exportHeight);
-      dataUrl = scaled.toDataURL("image/png");
-    }
-
-    setMaskDataUrl(dataUrl);
-    onMaskChange?.(dataUrl);
-
-    // Surface a low-coverage warning when the mask looks like a stray stroke
-    // or an outline-only mistake (cover-the-object semantics). Coverage is a
-    // ratio, so reading it from the paint canvas is equivalent to reading it
-    // from the scaled export.
-    if (ctx) {
-      const coverage = estimateMaskCoverage(
-        ctx.getImageData(0, 0, canvas.width, canvas.height).data,
-        canvas.width,
-        canvas.height
-      );
-      setLowCoverage(shouldWarnLowCoverage(coverage));
-    }
-  }, [naturalWidth, naturalHeight, onMaskChange, expansionRadius, includeFloorShadow, dims.width, dims.height]);
-
-  // Keep a ref to the latest exportMask so copy/paste callbacks don't go stale
-  const exportMaskRef = useRef(exportMask);
-  useEffect(() => {
-    exportMaskRef.current = exportMask;
-  }, [exportMask]);
-
-  // Re-export when the expansion radius changes so the dispatched mask
-  // always reflects the current dilation setting (issue #180). Refs keep the
-  // effect from firing on mount or on unrelated geometry changes — the mask
-  // is only re-exported once something has actually been painted.
-  const hasPaintedRef = useRef(hasPainted);
-  useEffect(() => {
-    hasPaintedRef.current = hasPainted;
-  }, [hasPainted]);
-
-  const lastAppliedRadiusRef = useRef(expansionRadius);
-  const lastAppliedIncludeFloorShadowRef = useRef(includeFloorShadow);
-  useEffect(() => {
-    const previous = lastAppliedRadiusRef.current;
-    lastAppliedRadiusRef.current = expansionRadius;
-    if (previous === expansionRadius) return;
-    if (!hasPaintedRef.current) return;
-    exportMask();
-  }, [expansionRadius, exportMask]);
-
-  // Issue #234: also re-export when includeFloorShadow toggles so the
-  // dispatched mask always reflects the current directional setting.
-  useEffect(() => {
-    const previous = lastAppliedIncludeFloorShadowRef.current;
-    lastAppliedIncludeFloorShadowRef.current = includeFloorShadow;
-    if (previous === includeFloorShadow) return;
-    if (!hasPaintedRef.current) return;
-    exportMask();
-  }, [includeFloorShadow, exportMask]);
-
-  const clearMask = () => {
-    // Issue #378: capture undo state before clearing so it can be undone
-    const undoState = captureUndoState();
-    setUndoHistory((prev) => pushMaskSnapshot(prev, undoState));
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.fillStyle = "black";
-    ctx.fillRect(0, 0, dims.width, dims.height);
-    setMaskDataUrl(null);
-    setHasPainted(false);
-    setLowCoverage(false);
-    onMaskChange?.(null);
-    // Issue #203: the grid is now empty — the parent must drop the batch
-    // selection set so the panel can't disagree with the canvas (the
-    // resulting empty-set reset below re-initializes to black, idempotent).
-    onMaskCleared?.();
-  };
-
-  // Issue #203: batch selection sync — replaces the #183 incremental
-  // segment merge. The grid must always equal the union of the current
-  // selection set, so ANY set change (add, undo-last, remove, clear)
-  // re-initializes the grid from the editor-composed union mask instead of
-  // merging (removals cannot be un-painted, and re-composing keeps the
-  // grid provably consistent with the panel's list). Manual strokes made
-  // on top of a selection are rebuilt away by design: while the selection
-  // set exists it is the source of truth (the batch panel says so).
-  const lastAppliedResetRef = useRef<number>(-1);
-  useEffect(() => {
-    if (!selectionReset || selectionReset.id === lastAppliedResetRef.current) return;
-    lastAppliedResetRef.current = selectionReset.id;
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (!canvas || !ctx) return;
-
-    if (!selectionReset.maskDataUrl) {
-      ctx.fillStyle = "black";
-      ctx.fillRect(0, 0, dims.width, dims.height);
-      setMaskDataUrl(null);
-      setHasPainted(false);
-      setLowCoverage(false);
-      onMaskChange?.(null);
-      return;
-    }
-
-    let cancelled = false;
-    const img = new Image();
-    img.onload = () => {
-      if (cancelled) return;
-      ctx.fillStyle = "black";
-      ctx.fillRect(0, 0, dims.width, dims.height);
-      ctx.drawImage(img, 0, 0, dims.width, dims.height);
-      setHasPainted(true);
-      exportMask();
-    };
-    img.src = selectionReset.maskDataUrl;
-    return () => {
-      cancelled = true;
-    };
-  }, [selectionReset, dims.width, dims.height, exportMask, onMaskChange]);
-
-  // The virtual brush cursor lives in LOGICAL canvas space — the same
-  // space clientPointToCanvas produces and the DOM cursor indicator
-  // positions against (issue #181 keeps it DPR-independent).
-  const centerOf = () => ({
-    x: dims.width / 2,
-    y: dims.height / 2,
+  // Issue #691: the pixel buffer lifecycle (init, #262 stroke preservation,
+  // #203 selection sync, export pipeline, undo) lives in use-mask-buffer.
+  const {
+    maskDataUrl,
+    hasPainted,
+    setHasPainted,
+    lowCoverage,
+    setUndoHistory,
+    captureUndoState,
+    handleUndo,
+    exportMask,
+    exportMaskRef,
+    clearMask,
+    canUndo,
+    undoCount,
+  } = useMaskBuffer({
+    canvasRef,
+    dims,
+    backing,
+    overlayImageSrc,
+    initialMaskDataUrl,
+    onMaskChange,
+    naturalWidth,
+    naturalHeight,
+    expansionRadius,
+    includeFloorShadow,
+    selectionReset,
+    onMaskCleared,
   });
 
-  const moveCursorTo = (next: { x: number; y: number }) => {
-    const point = {
-      x: Math.min(Math.max(next.x, 0), dims.width),
-      y: Math.min(Math.max(next.y, 0), dims.height),
-    };
-    if (keyboardPaintingRef.current) {
-      const from = cursorRef.current ?? point;
-      draw(from, point);
-    }
-    cursorRef.current = point;
-    setCursor(point);
-  };
+  // Issue #691: the decorative overlay layer (instance tints, #591
+  // selection rectangle + paste preview) lives in use-mask-overlay-layer.
+  const {
+    overlayCanvasRef,
+    copiedMask,
+    setCopiedMask,
+    selectionRect,
+    setSelectionRect,
+    pastePreview,
+    setPastePreview,
+  } = useMaskOverlayLayer({ dims, instanceOverlays });
 
-  const liftKeyboardPaint = () => {
-    if (!keyboardPaintingRef.current) return;
-    keyboardPaintingRef.current = false;
-    setIsKeyboardPainting(false);
-    exportMask();
-  };
+  // Issue #691: pointer painting (strokes, fill, copy/paste, instance
+  // clicks) lives in use-mask-painting. The paste-point fallback reads the
+  // keyboard cursor through a late-bound ref owned here.
+  const keyboardCursorRef = useRef<{ x: number; y: number } | null>(null);
+  const {
+    draw,
+    drawDot,
+    performFill,
+    performCopy,
+    performPaste,
+    handleInstanceClick,
+    handleStart,
+    handleMove,
+    handleEnd,
+  } = useMaskPainting({
+    canvasRef,
+    dims,
+    backing,
+    devicePixelRatio,
+    brushSize,
+    activeTool,
+    copiedMask,
+    setCopiedMask,
+    selectionRect,
+    setSelectionRect,
+    pastePreview,
+    setPastePreview,
+    captureUndoState,
+    setUndoHistory,
+    setHasPainted,
+    exportMask,
+    exportMaskRef,
+    onInstanceToggle,
+    segmentDisabled,
+    instanceOverlays,
+    keyboardCursorRef,
+  });
 
-  const toggleKeyboardPaint = () => {
-    if (!canvasRef.current) return;
-    if (activeTool === "select") {
-      const at = cursorRef.current ?? centerOf();
-      cursorRef.current = at;
-      setCursor(at);
-      handleInstanceClick(at);
-      return;
-    }
-    if (activeTool === "fill") {
-      const at = cursorRef.current ?? centerOf();
-      cursorRef.current = at;
-      setCursor(at);
-      if (performFill(at)) {
-        setHasPainted(true);
-        exportMask();
-      }
-      return;
-    }
-    if (keyboardPaintingRef.current) {
-      liftKeyboardPaint();
-      return;
-    }
-    const at = cursorRef.current ?? centerOf();
-    cursorRef.current = at;
-    setCursor(at);
-    keyboardPaintingRef.current = true;
-    setIsKeyboardPainting(true);
-    setHasPainted(true);
-    drawDot(at);
-  };
-
-  const ARROW_DELTAS: Record<string, [number, number]> = {
-    ArrowLeft: [-1, 0],
-    ArrowRight: [1, 0],
-    ArrowUp: [0, -1],
-    ArrowDown: [0, 1],
-  };
-
-  const handleCanvasKeyDown = (e: React.KeyboardEvent<HTMLCanvasElement>) => {
-    // Issue #591: copy mask selection
-    if ((e.metaKey || e.ctrlKey) && e.key === "c") {
-      e.preventDefault();
-      if (selectionRect) performCopy();
-      return;
-    }
-
-    // Issue #591: paste mask (normal)
-    if ((e.metaKey || e.ctrlKey) && e.key === "v" && !e.shiftKey) {
-      e.preventDefault();
-      if (copiedMask) {
-        performPaste(false);
-        setPastePreview(null);
-      }
-      return;
-    }
-
-    // Issue #591: mirror-paste mask
-    if ((e.metaKey || e.ctrlKey) && e.key === "v" && e.shiftKey) {
-      e.preventDefault();
-      if (copiedMask) {
-        performPaste(true);
-        setPastePreview(null);
-      }
-      return;
-    }
-
-    // Issue #378: Cmd/Ctrl+Z for undo
-    if ((e.metaKey || e.ctrlKey) && e.key === "z") {
-      e.preventDefault();
-      handleUndo();
-      return;
-    }
-
-    const delta = ARROW_DELTAS[e.key];
-    if (delta) {
-      e.preventDefault();
-      const fraction = e.shiftKey ? 0.01 : 0.05;
-      const current = cursorRef.current ?? centerOf();
-      moveCursorTo({
-        x: current.x + delta[0] * dims.width * fraction,
-        y: current.y + delta[1] * dims.height * fraction,
-      });
-      return;
-    }
-
-    if (e.key === "p" || e.key === "P" || e.key === " " || e.key === "Enter") {
-      e.preventDefault();
-      toggleKeyboardPaint();
-      return;
-    }
-
-    if (e.key === "+" || e.key === "=") {
-      e.preventDefault();
-      const next = Math.min(internalBrushSize + 2, 100);
-      if (onBrushSizeChange) {
-        onBrushSizeChange(next);
-      } else {
-        setInternalBrushSize(next);
-      }
-      return;
-    }
-
-    if (e.key === "-" || e.key === "_") {
-      e.preventDefault();
-      const next = Math.max(internalBrushSize - 2, 1);
-      if (onBrushSizeChange) {
-        onBrushSizeChange(next);
-      } else {
-        setInternalBrushSize(next);
-      }
-      return;
-    }
-  };
-
-  const handleCanvasFocus = () => {
-    setIsCanvasFocused(true);
-    const canvas = canvasRef.current;
-    if (canvas && !cursorRef.current) {
-      const at = centerOf();
-      cursorRef.current = at;
-      setCursor(at);
-    }
-  };
-
-  const handleCanvasBlur = () => {
-    setIsCanvasFocused(false);
-    liftKeyboardPaint();
-  };
-
-  // Issue #203: while a batch selection set exists, numbered badges mark
-  // each pending object at its click point. Like the brush cursor this is
-  // a DOM overlay — never canvas pixels — so the exported mask stays clean.
+  // Issue #203: badge space — natural photo pixels when known, else grid.
   const markerSpace = {
     width: naturalWidth && naturalWidth > 0 ? naturalWidth : dims.width,
     height: naturalHeight && naturalHeight > 0 ? naturalHeight : dims.height,
   };
-  const selectionBadges = (selectionMarkers ?? []).map((marker) => (
-    <button
-      key={marker.id}
-      type="button"
-      aria-label={`Deselect region ${marker.index}`}
-      onClick={() => onSelectionDeselect?.(marker.id)}
-      className="absolute z-20 flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white bg-atelier-primary/85 text-[10px] font-semibold leading-none text-white shadow hover:bg-atelier-primary/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-atelier-taupe"
-      style={{
-        left: `${(marker.x / markerSpace.width) * 100}%`,
-        top: `${(marker.y / markerSpace.height) * 100}%`,
-      }}
-    >
-      {marker.index}
-    </button>
-  ));
-
-  // Brush cursor indicator is a DOM overlay, never canvas pixels, so the
-  // exported mask stays clean. Positioned/sized as percentages of the canvas
-  // box so it matches the display size in both overlay and standalone modes.
-  // Issue #549: Uses electric emerald mask overlay color with laser-rim border
-  // for visibility over mixed fabrics and warm woodwork.
-  const cursorIndicator =
-    isCanvasFocused && cursor ? (
-      <div
-        aria-hidden="true"
-        className={`pointer-events-none absolute z-10 rounded-full ${
-          isKeyboardPainting ? "bg-white/40" : ""
-        }`}
-        style={{
-          left: `${(cursor.x / dims.width) * 100}%`,
-          top: `${(cursor.y / dims.height) * 100}%`,
-          width: `${(brushSize / dims.width) * 100}%`,
-          height: `${(brushSize / dims.height) * 100}%`,
-          transform: "translate(-50%, -50%)",
-          backgroundColor: isKeyboardPainting ? undefined : MASK_OVERLAY_EMERALD,
-          border: MASK_LASER_RIM_BORDER,
-          boxShadow: "0 0 0 1px rgba(0, 0, 0, 0.4)",
-        }}
-      />
-    ) : null;
 
   // Issue #202: while a segment request is in flight the canvas cursor
   // switches to wait — the click registered and processing is happening.
@@ -1415,79 +270,74 @@ export default function InpaintMaskCanvas({
         ? "Room mask canvas with the Select Regions tool active: detected instances show as faint tinted shapes with colored outlines, selected instances as solid fills — click one to toggle its shape in or out of the mask (clicks are free — detection already ran per concept), arrow keys move the cursor, press P, Space, or Enter to toggle the instance under the cursor"
         : "Room mask painting canvas: arrow keys move the brush (hold Shift for fine steps), press P, Space, or Enter to start and stop painting";
 
-  const canvasElement = (
-    <div
-      role="application"
-      className={hasOverlay ? "absolute inset-0" : "relative w-fit"}
-    >
-      {/* Issue #228: tinted per-instance overlays (score-ranked). Decorative
-          layer beneath the interactive mask canvas — never export pixels. */}
-      <canvas
-        ref={overlayCanvasRef}
-        width={dims.width}
-        height={dims.height}
-        aria-hidden="true"
-        className={
-          hasOverlay
-            ? "pointer-events-none absolute inset-0 h-full w-full"
-            : "pointer-events-none absolute left-0 top-0"
-        }
-        style={
-          hasOverlay
-            ? undefined
-            : { width: Math.min(dims.width, 512), height: Math.min(dims.height, 512) }
-        }
-      />
-      <canvas
-        ref={canvasRef}
-        width={backing.width}
-        height={backing.height}
-        tabIndex={0}
-        aria-label={canvasAriaLabel}
-        aria-describedby={`${maskingHintId} ${hintId}`}
-        className={
-          hasOverlay
-            ? `absolute inset-0 h-full w-full rounded-lg ${cursorClass} touch-none opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-atelier-primary focus-visible:ring-offset-2`
-            : `border border-atelier-taupe/40 rounded ${cursorClass} touch-none focus:outline-none focus-visible:ring-2 focus-visible:ring-atelier-primary focus-visible:ring-offset-2`
-        }
-        style={
-          hasOverlay ? undefined : { width: Math.min(dims.width, 512), height: Math.min(dims.height, 512) }
-        }
-        onMouseDown={handleStart}
-        onMouseMove={handleMove}
-        onMouseUp={handleEnd}
-        onMouseLeave={handleEnd}
-        onTouchStart={handleStart}
-        onTouchMove={handleMove}
-        onTouchEnd={handleEnd}
-        onKeyDown={handleCanvasKeyDown}
-        onFocus={handleCanvasFocus}
-        onBlur={handleCanvasBlur}
-      />
-      {cursorIndicator}
-      {selectionBadges}
+  // Issue #691: the virtual brush cursor + keyboard painting live in
+  // use-mask-keyboard-painting. The +/- steps compute from the INTERNAL
+  // brush size and write through the external handler when Zen Mode has
+  // lifted the state — exactly as the original handler did.
+  const {
+    isCanvasFocused,
+    isKeyboardPainting,
+    cursor,
+    cursorRef,
+    handleCanvasKeyDown,
+    handleCanvasFocus,
+    handleCanvasBlur,
+  } = useMaskKeyboardPainting({
+    canvasRef,
+    dims,
+    activeTool,
+    drawStroke: draw,
+    drawDot,
+    performFill,
+    onInstanceClick: handleInstanceClick,
+    exportMask,
+    setHasPainted,
+    performCopy,
+    performPaste,
+    handleUndo,
+    getBrushSize: () => internalBrushSize,
+    setBrushSize: (next) => {
+      if (onBrushSizeChange) {
+        onBrushSizeChange(next);
+      } else {
+        setInternalBrushSize(next);
+      }
+    },
+  });
+  keyboardCursorRef.current = cursorRef.current;
 
-      {/* Empty-state hint: the mask uses cover-the-object semantics, so make
-          the first paint action obvious. Hidden once anything is painted. */}
-      {!hasPainted && (
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"
-        >
-          <span
-            className={`rounded-md bg-black/60 px-3 py-1.5 text-center text-xs font-medium text-white ${
-              hasOverlay ? "" : "border border-white/30"
-            }`}
-          >
-            {segmenting && detectingConcept
-              ? `Analyzing room for ${detectingConcept}…`
-              : activeTool === "select"
-                ? "Click a tinted object to toggle it in the mask"
-                : "Drag to paint over the object you want changed"}
-          </span>
-        </div>
-      )}
-    </div>
+  // The interactive stage (overlay canvas + mask canvas + cursor +
+  // badges + empty-state hint) lives in mask-canvas-stage.tsx (#691).
+  const canvasElement = (
+    <MaskCanvasStage
+      canvasRef={canvasRef}
+      overlayCanvasRef={overlayCanvasRef}
+      dims={dims}
+      backing={backing}
+      hasOverlay={hasOverlay}
+      activeTool={activeTool}
+      cursorClass={cursorClass}
+      canvasAriaLabel={canvasAriaLabel}
+      maskingHintId={maskingHintId}
+      hintId={hintId}
+      handleStart={handleStart}
+      handleMove={handleMove}
+      handleEnd={handleEnd}
+      handleCanvasKeyDown={handleCanvasKeyDown}
+      handleCanvasFocus={handleCanvasFocus}
+      handleCanvasBlur={handleCanvasBlur}
+      isCanvasFocused={isCanvasFocused}
+      isKeyboardPainting={isKeyboardPainting}
+      cursor={cursor}
+      brushSize={brushSize}
+      selectionMarkers={selectionMarkers}
+      markerSpace={markerSpace}
+      onSelectionDeselect={onSelectionDeselect}
+      hasPainted={hasPainted}
+      segmenting={segmenting}
+      detectingConcept={detectingConcept}
+      instanceOverlays={instanceOverlays}
+    />
   );
 
   return (
@@ -1571,180 +421,34 @@ export default function InpaintMaskCanvas({
         </p>
       )}
 
-      {/* Issue #317: toolbar wraps at md+ and buttons have min-height 44px for touch.
-          Issue #560: toolbar hidden in Zen Mode (ZenModeToolbar takes over). */}
-      {/* Issue #549: glassmorphic dock with translucent warm backdrop */}
       {!zenMode && (
-      <div className="flex flex-wrap items-center gap-4 rounded-lg border border-atelier-taupe/30 bg-white/80 px-4 py-3 backdrop-blur-md shadow-sm">
-        <div role="group" aria-label="Mask tool" className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            aria-pressed={activeTool === "brush"}
-            onClick={() => {
-              if (onActiveToolChange) {
-                onActiveToolChange("brush");
-              } else {
-                setInternalActiveTool("brush");
-              }
-            }}
-            className={
-              activeTool === "brush"
-                ? "relative px-3 py-2 text-sm rounded-md border border-atelier-primary bg-atelier-primary text-white hover:bg-atelier-primary/80 transition-colors md:min-h-[44px] after:absolute after:bottom-0 after:left-1/2 after:-translate-x-1/2 after:h-[2px] after:w-8 after:bg-atelier-secondary"
-                : "px-3 py-2 text-sm rounded-md border border-atelier-taupe/40 bg-white hover:bg-atelier-canvas transition-colors md:min-h-[44px]"
+        <MaskCanvasToolbar
+          activeTool={activeTool}
+          onSelectTool={(tool) => {
+            if (onActiveToolChange) {
+              onActiveToolChange(tool);
+            } else {
+              setInternalActiveTool(tool);
             }
-          >
-            Brush
-          </button>
-          <button
-            type="button"
-            aria-pressed={activeTool === "fill"}
-            onClick={() => {
-              if (onActiveToolChange) {
-                onActiveToolChange("fill");
-              } else {
-                setInternalActiveTool("fill");
-              }
-            }}
-            className={
-              activeTool === "fill"
-                ? "relative px-3 py-2 text-sm rounded-md border border-atelier-primary bg-atelier-primary text-white hover:bg-atelier-primary/80 transition-colors md:min-h-[44px] after:absolute after:bottom-0 after:left-1/2 after:-translate-x-1/2 after:h-[2px] after:w-8 after:bg-atelier-secondary"
-                : "px-3 py-2 text-sm rounded-md border border-atelier-taupe/40 bg-white hover:bg-atelier-canvas transition-colors md:min-h-[44px]"
+          }}
+          segmenting={segmenting}
+          segmentDisabled={segmentDisabled}
+          onSelectRegionsActivate={onSelectRegionsActivate}
+          brushSize={brushSize}
+          onBrushSizeChange={(next) => {
+            if (onBrushSizeChange) {
+              onBrushSizeChange(next);
+            } else {
+              setInternalBrushSize(next);
             }
-          >
-            Fill Region
-          </button>
-          {/* Issue #228: the Select Objects tool runs SAM 3.1 concept
-              detection. The spinner below is THE processing indicator —
-              visible on the tool itself while a concept detection runs,
-              not just in the editor's status line. */}
-            <button
-              type="button"
-              aria-pressed={activeTool === "select"}
-              aria-busy={segmenting}
-              disabled={segmentDisabled}
-              onClick={() => {
-                if (onActiveToolChange) {
-                  onActiveToolChange("select");
-                } else {
-                  setInternalActiveTool("select");
-                }
-                // Issue #748: activating Select Regions is an explicit
-                // refresh signal for a lazily-detected base.
-                onSelectRegionsActivate?.();
-              }}
-              className={
-                activeTool === "select"
-                  ? "relative flex items-center gap-1.5 px-3 py-2 text-sm rounded-md border border-atelier-primary bg-atelier-primary text-white hover:bg-atelier-primary/80 transition-colors disabled:cursor-not-allowed disabled:opacity-60 md:min-h-[44px] after:absolute after:bottom-0 after:left-1/2 after:-translate-x-1/2 after:h-[2px] after:w-8 after:bg-atelier-secondary"
-                  : "flex items-center gap-1.5 px-3 py-2 text-sm rounded-md border border-atelier-taupe/40 bg-white hover:bg-atelier-canvas transition-colors disabled:cursor-not-allowed disabled:opacity-60 md:min-h-[44px]"
-              }
-            >
-              {segmenting ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-                  Selecting...
-                </>
-              ) : (
-                "Select Regions"
-              )}
-            </button>
-        </div>
-
-        {/* Issue #549: Precision Inspector slider styling */}
-        <label className="flex items-center gap-2 text-sm text-atelier-primary md:min-h-[44px] md:py-1">
-          <span className="whitespace-nowrap">Brush Size:</span>
-          <div className="relative">
-            <input
-              type="range"
-              min={1}
-              max={100}
-              value={brushSize}
-              onChange={(e) => {
-                const next = Number(e.target.value);
-                if (onBrushSizeChange) {
-                  onBrushSizeChange(next);
-                } else {
-                  setInternalBrushSize(next);
-                }
-              }}
-              className="atelier-slider atelier-slider-tooltip w-24 md:w-32"
-              style={sliderFillStyle(brushSize, 1, 100)}
-              data-slider-tooltip={`${brushSize}px`}
-              aria-label="Brush size"
-            />
-          </div>
-          <span className="w-8 text-right tabular-nums font-medium">{brushSize}</span>
-        </label>
-
-        <button
-          onClick={clearMask}
-          className="px-3 py-2 text-sm rounded-md border border-atelier-taupe/40 bg-white hover:bg-atelier-canvas transition-colors md:min-h-[44px]"
-        >
-          Clear Mask
-        </button>
-
-        <button
-          onClick={handleUndo}
-          disabled={!canUndoMask(undoHistory)}
-          title="Undo (Cmd/Ctrl+Z)"
-          className="px-3 py-2 text-sm rounded-md border border-atelier-taupe/40 bg-white hover:bg-atelier-canvas transition-colors disabled:cursor-not-allowed disabled:opacity-50 md:min-h-[44px]"
-        >
-          Undo {maskUndoCount(undoHistory) > 0 && `(${maskUndoCount(undoHistory)})`}
-        </button>
-
-        <button
-          onClick={() => setShowLegend((prev) => !prev)}
-          title="Keyboard shortcuts"
-          aria-label={showLegend ? "Hide keyboard shortcuts" : "Show keyboard shortcuts"}
-          aria-expanded={showLegend}
-          className="px-3 py-2 text-sm rounded-md border border-atelier-taupe/40 bg-white hover:bg-atelier-canvas transition-colors md:min-h-[44px]"
-        >
-          ?
-        </button>
-      </div>
-      )}
-
-      {!zenMode && showLegend && (
-        <div
-          role="region"
-          aria-label="Keyboard shortcuts"
-          className="rounded-md border border-atelier-taupe/30 bg-atelier-canvas p-3 text-xs text-atelier-primary"
-        >
-          <p className="mb-2 font-medium text-atelier-primary">Keyboard Shortcuts</p>
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-1">
-            <div className="flex items-center gap-2">
-              <dt className="font-mono text-atelier-taupe">Arrow keys</dt>
-              <dd>Move brush</dd>
-            </div>
-            <div className="flex items-center gap-2">
-              <dt className="font-mono text-atelier-taupe">Shift + Arrow</dt>
-              <dd>Fine movement</dd>
-            </div>
-            <div className="flex items-center gap-2">
-              <dt className="font-mono text-atelier-taupe">P / Space / Enter</dt>
-              <dd>Start / stop painting</dd>
-            </div>
-            <div className="flex items-center gap-2">
-              <dt className="font-mono text-atelier-taupe">Cmd / Ctrl + Z</dt>
-              <dd>Undo</dd>
-            </div>
-            <div className="flex items-center gap-2">
-              <dt className="font-mono text-atelier-taupe">+ / -</dt>
-              <dd>Brush size</dd>
-            </div>
-            <div className="flex items-center gap-2">
-              <dt className="font-mono text-atelier-taupe">Cmd / Ctrl + C</dt>
-              <dd>Copy mask selection</dd>
-            </div>
-            <div className="flex items-center gap-2">
-              <dt className="font-mono text-atelier-taupe">Cmd / Ctrl + V</dt>
-              <dd>Paste mask</dd>
-            </div>
-            <div className="flex items-center gap-2">
-              <dt className="font-mono text-atelier-taupe">Cmd / Ctrl + Shift + V</dt>
-              <dd>Mirror-paste mask</dd>
-            </div>
-          </dl>
-        </div>
+          }}
+          onClearMask={clearMask}
+          canUndo={canUndo}
+          undoCount={undoCount}
+          onUndo={handleUndo}
+          showLegend={showLegend}
+          onToggleLegend={() => setShowLegend((prev) => !prev)}
+        />
       )}
 
       <input type="hidden" value={maskDataUrl ?? ""} />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useMemo } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { DEFAULT_MASK_EXPANSION_RADIUS } from "@/lib/mask-dilation";
 import CollapsibleSection, {
   useCollapsiblePanel,
@@ -16,10 +16,6 @@ import {
   resolveInspectorRailTarget,
   type InspectorRailActionId,
 } from "@/lib/inspector-panel";
-import {
-  inpaintSourcesEqual,
-  type InpaintSource,
-} from "@/lib/inpaint-source";
 import { isOperationModeAvailable } from "@/lib/operation-mode-availability";
 import FocusRestorePill from "./focus-restore-pill";
 import EntireTabPanel from "./entire-tab-panel";
