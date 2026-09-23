@@ -113,6 +113,7 @@ export interface UseInpaintStatusResult {
   isProcessing: boolean;
   statusText: string;
   start: (submit: StartInpaint) => Promise<void>;
+  retryPoll: () => void;
 }
 
 export function useInpaintStatus(
@@ -210,5 +211,11 @@ export function useInpaintStatus(
   }, []);
   runRef.current = run;
 
-  return { isProcessing, statusText, start: run };
+  const retryPoll = useCallback(() => {
+    const id = lastRequestIdRef.current;
+    if (!id) return;
+    void runRef.current?.(async () => id);
+  }, []);
+
+  return { isProcessing, statusText, start: run, retryPoll };
 }
