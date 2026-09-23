@@ -8,7 +8,7 @@ The product follows a single end-to-end journey. Each step below names the real 
 
 ### 1. Sign in — `/login`
 
-Supabase Auth with a password or magic link (toggle on the login form, `src/app/(auth)/login/page.tsx`). The `/auth/callback` route handler (`src/app/auth/callback/route.ts`) completes the exchange. Route protection for `/dashboard` and `/projects` lives in the root `middleware.ts`; `/` (`src/app/page.tsx`) redirects signed-in visitors to `/projects`.
+Supabase Auth with a password or magic link (toggle on the login form, `src/app/(auth)/login/page.tsx`). The `/auth/callback` route handler (`src/app/auth/callback/route.ts`) completes the exchange. Route protection for `/dashboard`, `/projects`, and `/settings` lives in the root `middleware.ts`; `/` (`src/app/page.tsx`) redirects signed-in visitors to `/projects`.
 
 ### 2. First-run firm setup — `/setup`
 
@@ -45,13 +45,20 @@ A printable lookbook composed of cover, philosophy, room-spread, and sign-off pa
 | --- | --- | --- |
 | `/` | Auth redirector (signed in → `/projects`) | `src/app/page.tsx` |
 | `/login` | Password / magic-link sign-in | `src/app/(auth)/login/page.tsx` |
+| `/signup` | Redirect stub → `/login` (top-level, outside the `(auth)` group) | `src/app/signup/page.tsx` |
 | `/auth/callback` | Auth code exchange | `src/app/auth/callback/route.ts` |
 | `/setup` | First-run firm branding | `src/app/(auth)/setup/`, `src/app/api/setup/` |
 | `/dashboard` | Protected landing (redirects to `/projects`) | `src/app/dashboard/page.tsx`, `middleware.ts` |
+| `/settings` | Firm branding and lookbook page templates | `src/app/(dashboard)/settings/page.tsx` |
 | `/projects` | Project list | `src/app/(dashboard)/projects/page.tsx` |
 | `/projects/new` | Project intake form | `src/app/(dashboard)/projects/new/page.tsx`, `src/app/actions/project.ts` |
 | `/projects/[id]` | Staging workspace (rooms, masks, variants, copy) | `src/app/(dashboard)/projects/[id]/page.tsx`, `src/components/canvas/`, `src/app/actions/`, `src/app/api/inpaint/`, `src/app/api/generate-copy/` |
-| `/projects/[id]/preview` | Printable lookbook + PDF export | `src/app/(dashboard)/projects/[id]/preview/page.tsx`, `src/components/lookbook/`, `src/app/api/export-pdf/` |
+| `/projects/[id]/setup` | Project intake (first workflow-stepper step) | `src/app/(dashboard)/projects/[id]/setup/page.tsx` |
+| `/projects/[id]/rooms` | Per-room staging studio | `src/app/(dashboard)/projects/[id]/rooms/page.tsx` |
+| `/projects/[id]/refine` | Staged-result refinement (`?room=`-scoped) | `src/app/(dashboard)/projects/[id]/refine/page.tsx` |
+| `/projects/[id]/lookbook` | In-app interactive lookbook editor + ROI metrics | `src/app/(dashboard)/projects/[id]/lookbook/page.tsx`, `src/components/lookbook/` |
+| `/projects/[id]/report` | Client-facing consultation report with comparison slider | `src/app/(dashboard)/projects/[id]/report/page.tsx` |
+| `/preview/[id]` | Cookie-less print page Browserless fetches for PDF export (token-gated) | `src/app/(print)/preview/[id]/page.tsx`, `src/app/api/export-pdf/` |
 
 ## Tech Stack
 
