@@ -1303,7 +1303,10 @@ export default function ProjectDetailView({
               </div>
             ) : (
               <>
-                {/* Issue #636: Global Staging Directives Bar — shown above the room grid */}
+                {/* Issue #636: Global Staging Directives Bar — shown above the room grid.
+                    Issue #692: batch actions (TODO #636) have no backend yet — omitting
+                    the handlers renders them disabled with visible "Coming soon" copy
+                    instead of firing placeholder toasts. */}
                 <GlobalStagingDirectivesBar
                   aesthetic={globalAesthetic}
                   onAestheticChange={(aesthetic) => {
@@ -1333,18 +1336,6 @@ export default function ProjectDetailView({
                   roomCount={project.rooms.length}
                   renderingCount={0}
                   gpuActive={gpuActive}
-                  onStartBatch={() => {
-                    // TODO #636: open batch staging for selected rooms or all rooms
-                    showInfo("Batch rendering not yet connected — coming soon");
-                  }}
-                  onAutoRegenerateAll={() => {
-                    // TODO #636: trigger regeneration of all room variants
-                    showInfo("Auto-regenerate not yet implemented — coming soon");
-                  }}
-                  onExportBatch={() => {
-                    // TODO #636: export all room variants as a batch PDF
-                    showInfo("Batch export not yet implemented — coming soon");
-                  }}
                 />
               <DndContext
                 sensors={sensors}
