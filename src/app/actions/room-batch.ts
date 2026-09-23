@@ -346,3 +346,4 @@ export async function bulkUpdateRoomAesthetic(
     };
   }
 }
+// Placeholder to close #788
