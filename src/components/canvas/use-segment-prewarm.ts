@@ -26,7 +26,10 @@ import type { SegmentCacheEntry } from "@/lib/segment-cache";
  * ---------
  * - Fires once per (roomId, imageUrl, imageWidth×imageHeight, concept)
  *   key: the initial editor open, a source switch to a different image,
- *   and the first selection of each concept.
+ *   and the first selection of each concept — but ONLY while `enabled`
+ *   authorizes the base (issue #748: a post-completion rebase onto a
+ *   staged result keeps the gate closed until the user explicitly
+ *   refreshes).
  * - `resolveCached` lets the editor serve an already-cached concept
  *   instantly without touching the network (the hook marks it warm).
  * - Failures are SILENT by design: a failed auto-fire only means the
@@ -47,7 +50,13 @@ export type SegmentPrewarmFailedReason =
 export type SegmentPrewarmStatus = "idle" | "warming" | "warm" | "failed";
 
 interface UseConceptSegmentsArgs {
-  /** Master gate — mirror of the Select Objects tool visibility (the flag kill switch). */
+  /**
+   * Master gate — the issue #748 lazy-refresh authorization for the
+   * current base image (see lib/segment-refresh-policy.ts): true for the
+   * editor-open base, user-driven source switches, and an explicit user
+   * refresh; false after a bare post-completion rebase onto a staged
+   * result (no billed call until the user asks).
+   */
   enabled: boolean;
   roomId: string;
   /** The source image URL the editor is currently editing (null until known). */
