@@ -6,6 +6,7 @@ import {
   type FetchInpaintStatus,
   type InpaintStatusResponse,
 } from "@/lib/inpaint-polling";
+import { resolveInpaintRetry } from "@/lib/inpaint-retry";
 
 const POLL_OPTIONS = {
   intervalMs: 1000,
@@ -62,6 +63,10 @@ export function useInpaintStatus(
   callbacksRef.current = callbacks;
   const controllerRef = useRef<AbortController | null>(null);
   const lastSubmitRef = useRef<StartInpaint | null>(null);
+  // Issue #698: requestId captured once the submit phase succeeded —
+  // marks the run as "past the paid POST" so a later poll-phase failure
+  // can resume polling instead of resubmitting.
+  const lastRequestIdRef = useRef<string | null>(null);
   const runRef = useRef<((submit: StartInpaint) => Promise<void>) | undefined>(undefined);
   const processingStartRef = useRef<number | null>(null);
 
@@ -86,6 +91,7 @@ export function useInpaintStatus(
     try {
       const requestId = await submit(signal);
       if (signal.aborted) return;
+      lastRequestIdRef.current = requestId;
       setStatusText("Processing image...");
 
       const result = await pollInpaintStatus(fetchInpaintStatus, requestId, {
@@ -116,10 +122,21 @@ export function useInpaintStatus(
       setIsProcessing(false);
       setStatusText("");
       const message = error instanceof Error ? error.message : "Inpainting failed";
+      // Issue #698: classify the failure phase at capture time. A
+      // poll-phase failure means the submit already produced a requestId
+      // — a billed fal job exists and may still be running — so Retry
+      // re-polls that existing requestId (the editor's resume-by-requestId
+      // pattern) instead of submitting a second paid job. Only
+      // submit-phase failures re-run the POST closure.
+      const retryAction = resolveInpaintRetry(error, lastRequestIdRef.current);
       callbacksRef.current.showError(
         message,
         true,
         () => {
+          if (retryAction.kind === "resume") {
+            void runRef.current?.(async () => retryAction.requestId);
+            return;
+          }
           const retrySubmit = lastSubmitRef.current;
           if (retrySubmit) {
             void runRef.current?.(retrySubmit);
