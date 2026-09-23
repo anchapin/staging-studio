@@ -20,6 +20,7 @@ export function SignoffPageClient({ user, project, rooms, previewToken }: Signof
   const [showForm, setShowForm] = useState(!signed);
   const [agreed, setAgreed] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
 
   const handleSave = async (dataUrl: string) => {
     setError(null);
@@ -33,6 +34,7 @@ export function SignoffPageClient({ user, project, rooms, previewToken }: Signof
         const data = await res.json();
         throw new Error(data.message || "Failed to save signature");
       }
+      setSignatureDataUrl(dataUrl);
       setSigned(true);
       setShowForm(false);
     } catch (err) {
@@ -41,8 +43,16 @@ export function SignoffPageClient({ user, project, rooms, previewToken }: Signof
   };
 
   if (signed) {
-    // Already signed — render the static display (server component)
-    return <SignoffPage user={user} project={project} rooms={rooms} />;
+    // Already signed — render the static display. Freshly signed visitors
+    // still hold the page-load props (status "Unsigned", no signature), so
+    // overlay the just-submitted values; otherwise keep the DB-loaded ones.
+    const signedProject = {
+      ...project,
+      clientSignature: signatureDataUrl ?? project.clientSignature ?? null,
+      clientSignatureStatus: "Signed",
+      clientSignatureTimestamp: project.clientSignatureTimestamp ?? new Date().toISOString(),
+    };
+    return <SignoffPage user={user} project={signedProject} rooms={rooms} />;
   }
 
   if (!showForm) {
