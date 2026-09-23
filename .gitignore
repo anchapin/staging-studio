@@ -54,6 +54,11 @@ playwright/.cache/
 .agents/
 .claude/
 .cursor/
+.foreman/
+.opencode/
+.playwright-mcp/
+.reviews/
+opencode.json
 
 # generated toolchain artifacts
 next-env.d.ts
