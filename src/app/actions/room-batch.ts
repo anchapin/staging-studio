@@ -7,6 +7,10 @@ import { revalidatePath } from "next/cache";
 import { createSupabaseRequestClient } from "@/lib/supabase";
 import { batchRoomTypesRequestSchema } from "@/lib/ai-route-schemas";
 import {
+  batchRoomUploadUrlsRequestSchema,
+  createRoomsBatchRequestSchema,
+} from "@/lib/room-batch-schema";
+import {
   DEFAULT_DAILY_LABEL_LIMIT,
   DAILY_LIMIT_ENV_VAR,
   dailyQuotaExceededPayload,
@@ -15,12 +19,6 @@ import {
   recordDailyUsage,
   resolveDailyLimit,
 } from "@/lib/api-quota";
-
-const ALLOWED_IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp"];
-
-function isAllowedExtension(ext: string): boolean {
-  return ALLOWED_IMAGE_EXTENSIONS.includes(ext.toLowerCase());
-}
 
 /**
  * Room type detection prompt sent to GPT-4o-mini vision.
@@ -94,6 +92,14 @@ export interface CreateRoomsResult {
  *
  * This action handles step 3 only.
  *
+ * Issue #704 hardening: the input is validated with
+ * `createRoomsBatchRequestSchema(projectId)` (entries capped at 20,
+ * per-field length bounds, and each `beforeImageUrl` must be an
+ * allowlisted HTTPS image URL scoped to this project's
+ * `batch-rooms/{projectId}/...` storage path when on the Supabase
+ * host) BEFORE any DB write, so unbounded transactions and
+ * non-allowlisted URLs never reach a Room row.
+ *
  * @param projectId  Project to add rooms to.
  * @param entries    Array of { fileName, roomType, beforeImageUrl } for each room.
  * @param roomNames  Optional explicit room names (overrides AI-detected types).
@@ -104,17 +110,28 @@ export async function createRoomsBatch(
   entries: BatchRoomEntry[],
   roomNames?: string[]
 ): Promise<CreateRoomsResult> {
-  if (!Array.isArray(entries) || entries.length === 0) {
-    return { success: false, error: "No rooms provided" };
-  }
-
   const user = await getAuthedPrismaUser();
   if (!user) {
     return { success: false, error: "Not authenticated" };
   }
 
+  // Schema gate (pure): entry-count cap, field bounds, and the
+  // project-scoped beforeImageUrl allowlist — before any DB reads or
+  // writes (mirrors the #681 gate on detectBatchRoomTypes).
+  const parsed = createRoomsBatchRequestSchema(projectId).safeParse({
+    projectId,
+    entries,
+    roomNames,
+  });
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid request",
+    };
+  }
+
   const project = await prisma.project.findUnique({
-    where: { id: projectId, userId: user.id },
+    where: { id: parsed.data.projectId, userId: user.id },
     select: { id: true, rooms: { select: { id: true, sortOrder: true }, orderBy: { sortOrder: "desc" }, take: 1 } },
   });
   if (!project) {
@@ -125,11 +142,11 @@ export async function createRoomsBatch(
 
   try {
     const rooms = await prisma.$transaction(
-      entries.map((entry, index) =>
+      parsed.data.entries.map((entry, index) =>
         prisma.room.create({
           data: {
-            projectId,
-            name: roomNames?.[index] ?? entry.roomType,
+            projectId: parsed.data.projectId,
+            name: parsed.data.roomNames?.[index] ?? entry.roomType,
             beforeImageUrl: entry.beforeImageUrl,
             sortOrder: maxSortOrder + 1 + index,
           },
@@ -138,7 +155,7 @@ export async function createRoomsBatch(
       )
     );
 
-    revalidatePath(`/projects/${projectId}`);
+    revalidatePath(`/projects/${parsed.data.projectId}`);
     return { success: true, rooms };
   } catch (error) {
     console.error("Failed to create rooms batch:", error);
@@ -152,6 +169,13 @@ export async function createRoomsBatch(
 /**
  * Server action: issues signed upload URLs for batch room photo uploads.
  *
+ * Issue #704 hardening: the input is validated with
+ * `batchRoomUploadUrlsRequestSchema` (files capped at 20 per call;
+ * each name non-empty, ≤255 chars, and extension-allowlisted) BEFORE
+ * any storage-signed URL is minted — previously the extension check
+ * ran mid-loop, after signed URLs had already been issued for earlier
+ * files, and nothing capped the array length.
+ *
  * @param projectId  Project owning the rooms (for ownership check).
  * @param files      Array of { name: string } — original file names to derive extensions.
  * @returns Signed URL data per file, for direct browser→Supabase upload.
@@ -163,17 +187,27 @@ export async function getBatchRoomUploadUrls(
   | { success: true; uploads: Array<{ signedUrl: string; storagePath: string; roomIndex: number }> }
   | { success: false; error: string }
 > {
-  if (!Array.isArray(files) || files.length === 0) {
-    return { success: false, error: "No files provided" };
-  }
-
   const user = await getAuthedPrismaUser();
   if (!user) {
     return { success: false, error: "Not authenticated" };
   }
 
+  // Schema gate (pure): count cap + name/extension bounds for the
+  // whole batch up front, before any signed-URL minting (mirrors the
+  // #681 gate on detectBatchRoomTypes).
+  const parsed = batchRoomUploadUrlsRequestSchema.safeParse({
+    projectId,
+    files,
+  });
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid request",
+    };
+  }
+
   const project = await prisma.project.findUnique({
-    where: { id: projectId, userId: user.id },
+    where: { id: parsed.data.projectId, userId: user.id },
     select: { id: true },
   });
   if (!project) {
@@ -184,19 +218,13 @@ export async function getBatchRoomUploadUrls(
 
   const uploads: Array<{ signedUrl: string; storagePath: string; roomIndex: number }> = [];
 
-  for (let i = 0; i < files.length; i++) {
-    const fileName = files[i].name;
+  for (let i = 0; i < parsed.data.files.length; i++) {
+    const fileName = parsed.data.files[i].name;
     const fileExt = (fileName.split(".").pop() || "").toLowerCase();
-    if (!isAllowedExtension(fileExt)) {
-      return {
-        success: false,
-        error: `Unsupported file extension: .${fileExt}. Allowed: ${ALLOWED_IMAGE_EXTENSIONS.join(", ")}`,
-      };
-    }
 
     // Each room gets its own folder; roomIndex maps entry → room
     const roomIndex = i;
-    const storagePath = `batch-rooms/${projectId}/room-${roomIndex}-${Date.now()}.${fileExt}`;
+    const storagePath = `batch-rooms/${parsed.data.projectId}/room-${roomIndex}-${Date.now()}.${fileExt}`;
 
     const { data, error } = await supabase.storage
       .from("room-photos")
