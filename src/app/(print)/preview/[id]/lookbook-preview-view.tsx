@@ -85,6 +85,7 @@ interface LookbookPreviewViewProps {
  */
 export function LookbookPreviewView({ project, previewToken }: LookbookPreviewViewProps) {
   const projectData: ProjectData = {
+    id: project.id,
     propertyAddress: project.propertyAddress,
     clientName: project.clientName,
     targetBuyer: project.targetBuyer,
