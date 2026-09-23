@@ -215,7 +215,7 @@ export async function restoreInpaintVersion(
       room: {
         select: {
           id: true,
-          project: { select: { userId: true } },
+          project: { select: { id: true, userId: true } },
         },
       },
     },
@@ -233,6 +233,8 @@ export async function restoreInpaintVersion(
     data: { [column]: version.resultUrl },
   });
 
-  revalidatePath(`/projects/${version.room.project.userId}`);
+  const projectId = version.room.project.id;
+  revalidatePath(`/projects/${projectId}`);
+  revalidatePath(`/projects/${projectId}/lookbook`);
   return { success: true };
 }
