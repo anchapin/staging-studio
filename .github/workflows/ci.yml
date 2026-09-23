@@ -1,9 +1,18 @@
 name: CI
 
+# One run per change: feature branches are covered by the pull_request
+# event (opened/synchronize/reopened), so the push trigger is scoped to
+# the long-lived branches only. Before this, every branch push fired
+# BOTH a push run and a pull_request run — two queued jobs per update,
+# and because the concurrency group keys on github.ref
+# (refs/heads/<branch> vs refs/pull/<n>/merge) they never cancelled
+# each other. During hosted-runner famines that doubles the time every
+# PR waits for capacity for no added coverage.
 on:
   push:
     branches:
-      - '**'
+      - develop
+      - main
   pull_request:
     types:
       - opened
