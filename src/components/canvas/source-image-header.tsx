@@ -1,12 +1,14 @@
 "use client";
 
-import { Maximize2, Minimize2 } from "lucide-react";
+import { Maximize2, Minimize2, ImageIcon } from "lucide-react";
 
 export interface SourceImageHeaderProps {
   zenMode: boolean;
   focusMode: boolean;
+  showBefore: boolean;
   onToggleFocusMode: () => void;
   onToggleZenMode: () => void;
+  onToggleShowBefore: () => void;
 }
 
 /**
@@ -18,8 +20,10 @@ export interface SourceImageHeaderProps {
 export default function SourceImageHeader({
   zenMode,
   focusMode,
+  showBefore,
   onToggleFocusMode,
   onToggleZenMode,
+  onToggleShowBefore,
 }: SourceImageHeaderProps) {
   return (
     <div
@@ -58,6 +62,21 @@ export default function SourceImageHeader({
             <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
           )}
           {zenMode ? "Exit Zen" : "Zen Mode"}
+        </button>
+        {/* Issue #781: Before/After comparison toggle */}
+        <button
+          type="button"
+          onClick={onToggleShowBefore}
+          title={showBefore ? "Showing original (before)" : "Showing staged (after)"}
+          aria-label={showBefore ? "Show staged result (after)" : "Show original image (before)"}
+          className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs shadow-sm transition-colors ${
+            showBefore
+              ? "border-atelier-taupe/40 bg-white text-atelier-taupe hover:bg-atelier-canvas hover:text-atelier-primary"
+              : "border-atelier-green/50 bg-atelier-green/10 text-atelier-green hover:bg-atelier-green/20"
+          }`}
+        >
+          <ImageIcon className="h-3.5 w-3.5" aria-hidden="true" />
+          {showBefore ? "Before" : "After"}
         </button>
       </div>
     </div>

@@ -20,8 +20,12 @@ export interface EditorCanvasPaneProps {
   focusMode: boolean;
   onToggleFocusMode: () => void;
   onToggleZenMode: () => void;
+  /** Issue #781: Before/after comparison toggle. */
+  showBefore: boolean;
+  onToggleShowBefore: () => void;
   /** Mask canvas props (forwarded verbatim). */
   imageUrl: string;
+  activeResultUrl: string | null;
   aspectRatio: number | null;
   naturalWidth: number | null;
   naturalHeight: number | null;
@@ -64,7 +68,10 @@ export default function EditorCanvasPane({
   focusMode,
   onToggleFocusMode,
   onToggleZenMode,
+  showBefore,
+  onToggleShowBefore,
   imageUrl,
+  activeResultUrl,
   aspectRatio,
   naturalWidth,
   naturalHeight,
@@ -91,6 +98,7 @@ export default function EditorCanvasPane({
   onMaskExpansionChange,
   onIncludeFloorShadowChange,
 }: EditorCanvasPaneProps) {
+  const overlayImageSrc = showBefore ? imageUrl : (activeResultUrl ?? imageUrl);
   return (
     <div
       className={`flex min-w-0 flex-col gap-4 ${
@@ -120,12 +128,14 @@ export default function EditorCanvasPane({
       <SourceImageHeader
         zenMode={zenMode}
         focusMode={focusMode}
+        showBefore={showBefore}
         onToggleFocusMode={onToggleFocusMode}
         onToggleZenMode={onToggleZenMode}
+        onToggleShowBefore={onToggleShowBefore}
       />
       {/* Issue #460: comparison now via staged result image click in secondary pane */}
       <InpaintMaskCanvas
-        overlayImageSrc={imageUrl}
+        overlayImageSrc={overlayImageSrc}
         aspectRatio={aspectRatio}
         naturalWidth={naturalWidth}
         naturalHeight={naturalHeight}
