@@ -3,20 +3,17 @@
 import { useState, useCallback, useEffect, useRef, useMemo, useId } from "react";
 import type { ReactNode } from "react";
 import InpaintMaskCanvas, { type MaskTool } from "./inpaint-mask-canvas";
+import { DEFAULT_MASK_EXPANSION_RADIUS } from "@/lib/mask-dilation";
 import CollapsibleSection, {
   useCollapsiblePanel,
 } from "./collapsible-section";
 import EditorTabBar, {
-  editorTabId,
-  editorTabPanelId,
   type EditorTab,
   type EditorTabId,
 } from "./editor-tab-bar";
-import InpaintOperationModeTabs, {
-  type InpaintOperationModeId,
-} from "./inpaint-operation-mode-tabs";
+import { type InpaintOperationModeId } from "./inpaint-operation-mode-tabs";
 import { useToast, ToastContainer } from "@/components/ui/toast";
-import { Expand, Home, Info, Loader2, Maximize2, Minimize2, PanelRightClose } from "lucide-react";
+import { Loader2, PanelRightClose } from "lucide-react";
 
 import BrushToolRail, {
   BrushParameterFlyout,
@@ -37,26 +34,17 @@ import {
   inpaintSourcesEqual,
   type InpaintSource,
 } from "@/lib/inpaint-source";
-import { sliderFillStyle } from "@/lib/precision-slider";
 import { isOperationModeAvailable } from "@/lib/operation-mode-availability";
-import {
-  DEFAULT_MASK_EXPANSION_RADIUS,
-  MAX_MASK_EXPANSION_RADIUS,
-} from "@/lib/mask-dilation";
-import StageEntireRoomPreset from "./stage-entire-room-preset";
-import BatchStagingPanel from "./batch-staging-panel";
-import {
-  buildConceptEmptyMessage,
-  CONCEPT_CHIPS,
-} from "@/lib/concept-chips";
+import FocusRestorePill from "./focus-restore-pill";
+import SourceImageHeader from "./source-image-header";
+import MaskDilationControls from "./mask-dilation-controls";
+import EntireTabPanel from "./entire-tab-panel";
+import ManualTabPanel from "./manual-tab-panel";
+import DetectTabPanel from "./detect-tab-panel";
 import { useConceptDetection } from "./use-concept-detection";
 import { useSelectionMaskComposer } from "./use-selection-mask-composer";
 import { useInpaintRuns } from "./use-inpaint-runs";
-import {
-  MAX_BATCH_OBJECTS,
-  batchProgressText,
-  hasFailedStep,
-} from "@/lib/multi-select-batch";
+import { batchProgressText, hasFailedStep } from "@/lib/multi-select-batch";
 import VersionHistoryPanel from "./version-history-panel";
 import GeneratedVariationGrid, {
   type GeneratedVariation,
@@ -591,30 +579,11 @@ export default function InpaintEditor({
     >
       {/* Issue #638: Floating restore pill — shown at top-center when Focus Canvas Mode is active */}
       {focusMode && (
-        <div
-          className="fixed top-3 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full border border-outline-variant/50 bg-surface-container-lowest/95 px-4 py-2 shadow-warm-lg transition-all duration-200 max-w-md"
-          style={{ opacity: 0, animation: "focusPillShow 200ms ease-out forwards" }}
-        >
-          <div className="flex items-center gap-2">
-            <Home className="h-4 w-4 text-secondary" aria-hidden="true" />
-            <span className="font-jakarta text-sm text-secondary">
-              {projectName && roomName
-                ? `${projectName} > ${roomName}`
-                : projectName || roomName || "Project"}
-            </span>
-          </div>
-          <div className="h-4 w-px bg-outline-variant/50" aria-hidden="true" />
-          <button
-            type="button"
-            onClick={() => setFocusMode(false)}
-            title="Restore Layout"
-            aria-label="Restore Layout"
-            className="flex items-center gap-1.5 font-jakarta text-sm text-secondary hover:text-primary label-sm"
-          >
-            Restore Layout
-            <Expand className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
-        </div>
+        <FocusRestorePill
+          projectName={projectName}
+          roomName={roomName}
+          onRestore={() => setFocusMode(false)}
+        />
       )}
       {/* ---- LEFT PANE: room imagery (optional slot) + mask canvas ------ */}
       <div
@@ -642,41 +611,12 @@ export default function InpaintEditor({
         {/* Issue #560: "Source Image" label hidden in Zen Mode */}
         {/* Issue #638: sticky header hidden in Focus Canvas Mode */}
         {/* Issue #547/#546: sticky header per Atelier Canvas spec with Atelier Canvas colors */}
-        <div className={`sticky top-0 z-20 flex items-center justify-between bg-atelier-canvas ${zenMode || focusMode ? "zen-mode-hidden" : ""}`}>
-          <h4 className="mb-2 font-jakarta text-sm font-medium text-atelier-primary">Source Image</h4>
-          <div className="flex items-center gap-2">
-            {/* Issue #638: Focus Canvas button */}
-            <button
-              type="button"
-              onClick={() => setFocusMode((prev) => !prev)}
-              title={focusMode ? "Exit Focus Canvas (F)" : "Enter Focus Canvas (F)"}
-              aria-label={focusMode ? "Exit Focus Canvas" : "Enter Focus Canvas"}
-              className="flex items-center gap-1.5 rounded-md border border-atelier-taupe/40 bg-white px-2.5 py-1.5 text-xs text-atelier-taupe shadow-sm transition-colors hover:bg-atelier-canvas hover:text-atelier-primary"
-            >
-              {focusMode ? (
-                <Minimize2 className="h-3.5 w-3.5" aria-hidden="true" />
-              ) : (
-                <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
-              )}
-              {focusMode ? "Exit Focus" : "Focus Canvas"}
-            </button>
-            {/* Issue #560: Zen Mode button */}
-            <button
-              type="button"
-              onClick={() => setZenMode((prev) => !prev)}
-              title={zenMode ? "Exit Zen Mode (Z)" : "Enter Zen Mode (Z)"}
-              aria-label={zenMode ? "Exit Zen Mode" : "Enter Zen Mode"}
-              className="flex items-center gap-1.5 rounded-md border border-atelier-taupe/40 bg-white px-2.5 py-1.5 text-xs text-atelier-taupe shadow-sm transition-colors hover:bg-atelier-canvas hover:text-atelier-primary"
-            >
-              {zenMode ? (
-                <Minimize2 className="h-3.5 w-3.5" aria-hidden="true" />
-              ) : (
-                <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
-              )}
-              {zenMode ? "Exit Zen" : "Zen Mode"}
-            </button>
-          </div>
-        </div>
+        <SourceImageHeader
+          zenMode={zenMode}
+          focusMode={focusMode}
+          onToggleFocusMode={() => setFocusMode((prev) => !prev)}
+          onToggleZenMode={() => setZenMode((prev) => !prev)}
+        />
         {/* Issue #460: comparison now via staged result image click in secondary pane */}
         <InpaintMaskCanvas
           overlayImageSrc={imageUrl}
@@ -708,48 +648,13 @@ export default function InpaintEditor({
 
         {/* Issue #560: expand selection and floor shadow controls hidden in Zen Mode */}
         {/* Issue #638: hidden in Focus Canvas Mode */}
-        <div className={zenMode || focusMode ? "zen-mode-hidden" : ""}>
-          <label className="flex items-center gap-2 font-jakarta text-sm text-atelier-primary">
-            Expand selection:
-            <input
-              type="range"
-              min={0}
-              max={MAX_MASK_EXPANSION_RADIUS}
-              value={maskExpansion}
-              onChange={(e) => setMaskExpansion(Number(e.target.value))}
-              aria-describedby="mask-expansion-hint"
-              className="atelier-slider w-32"
-              style={sliderFillStyle(maskExpansion, 0, MAX_MASK_EXPANSION_RADIUS)}
-            />
-            <span className="w-10 text-right tabular-nums font-medium">{maskExpansion}px</span>
-          </label>
-          <p id="mask-expansion-hint" className="text-xs text-atelier-taupe">
-            Grows the painted area so picture frames, bezels, and mounts are
-            included. 0 keeps the exact painted area.
-          </p>
-
-          {/* Issue #234: floor-shadow toggle — dilates the mask further downward than
-              upward so cast shadows on the floor are included in the regenerated region. */}
-          <label className="flex items-center gap-2 font-jakarta text-sm text-atelier-primary">
-            <input
-              type="checkbox"
-              checked={includeFloorShadow}
-              onChange={(e) => setIncludeFloorShadow(e.target.checked)}
-              className="h-4 w-4 accent-atelier-primary"
-            />
-            Add natural floor shadows under new furniture
-          </label>
-          <div className="flex items-center gap-1">
-            <span
-              role="img"
-              aria-label="More info"
-              title="Extends the painted area downward to include floor shadows, so they look natural with the new furniture. Best for hard floors."
-              className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-atelier-taupe/30 text-atelier-taupe hover:bg-atelier-taupe/50"
-            >
-              <Info className="h-3 w-3" />
-            </span>
-          </div>
-        </div>
+        <MaskDilationControls
+          hidden={zenMode || focusMode}
+          maskExpansion={maskExpansion}
+          onMaskExpansionChange={setMaskExpansion}
+          includeFloorShadow={includeFloorShadow}
+          onIncludeFloorShadowChange={setIncludeFloorShadow}
+        />
       </div>
 
       {/* Issue #617: collapsible right inspector — the 380px panel and the
@@ -873,277 +778,75 @@ export default function InpaintEditor({
           {/* Tab panels stay MOUNTED (hidden, not unmounted) so tab
               switching performs zero state transitions — the batch
               panel's prompts and mode survive round-trips (AC-L5). */}
-          <div
-            role="tabpanel"
-            id={editorTabPanelId(tabIdBase, "entire")}
-            aria-labelledby={editorTabId(tabIdBase, "entire")}
+          <EntireTabPanel
+            tabIdBase={tabIdBase}
             hidden={effectiveTab !== "entire"}
-          >
-            <div className="flex flex-col gap-6">
-              {/* Issue #191/#223 one-click preset, demoted to an optional
-                  shortcut by issue #223: the brush → Apply Inpainting flow
-                  is the primary path and works on any source without
-                  running the preset first. The preset detects furnishings
-                  and restages only those regions (see
-                  stage-entire-room-preset.tsx). Entire-room staging only
-                  ever runs over the original photo (AC-L4). */}
-              <StageEntireRoomPreset
-                roomId={roomId}
-                imageUrl={imageUrl}
-                aesthetic={aesthetic}
-                imageWidth={imageDims?.width ?? null}
-                imageHeight={imageDims?.height ?? null}
-                disabled={isProcessing || conceptLoading}
-                processing={isProcessing}
-                statusText={statusText}
-                onRun={handleHolisticRun}
-                onError={showError}
-              />
+            roomId={roomId}
+            imageUrl={imageUrl}
+            aesthetic={aesthetic}
+            imageWidth={imageDims?.width ?? null}
+            imageHeight={imageDims?.height ?? null}
+            disabled={isProcessing || conceptLoading}
+            processing={isProcessing}
+            statusText={statusText}
+            onRun={handleHolisticRun}
+            onError={showError}
+          />
 
-            </div>
-          </div>
-
-          <div
-            role="tabpanel"
-            id={editorTabPanelId(tabIdBase, "manual")}
-            aria-labelledby={editorTabId(tabIdBase, "manual")}
+          <ManualTabPanel
+            tabIdBase={tabIdBase}
             hidden={effectiveTab !== "manual"}
-          >
-            <div className="flex flex-col gap-3">
-              {/* Issue #507: inline staging directives textarea — always visible
-                  in the right panel beside the Generate button, so users
-                  can find it without scrolling the left pane. The label is
-                  deliberately distinct from the Room Details "Staging
-                  directives (required)" field it mirrors (same state, both
-                  editable): two controls on one page must never share an
-                  accessible name — screen readers announce them
-                  interchangeably and strict locators (e2e, AT automation)
-                  become ambiguous (issue #742). */}
-              <div>
-                <label
-                  htmlFor={`inpaint-directives-${roomId}`}
-                  className="mb-1 font-jakarta block text-sm font-medium text-atelier-primary"
-                >
-                  Manual paint directives (required)
-                </label>
-                <textarea
-                  id={`inpaint-directives-${roomId}`}
-                  value={directivesValue ?? promptDirectives}
-                  onChange={(e) => onDirectivesChange?.(e.target.value)}
-                  rows={3}
-                  placeholder="e.g., Modern coastal furniture, light neutrals, natural textures, minimal accessories..."
-                  className="w-full px-3 py-2 rounded-md border border-border text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
-                />
-              </div>
-              {/* Issue #629: Inpaint Operation Mode tabs — secondary tab strip for AI
-                  inpaint operations. Issue #692: Relight / Restore / Material render
-                  visibly disabled ("Coming soon") until their endpoints exist; their
-                  parameter panels are inert. The brush / Fill / Select Region toggles
-                  live in the canvas toolbar. */}
-              <InpaintOperationModeTabs
-                activeMode={operationMode}
-                onModeChange={setOperationMode}
-                strength={Math.round(promptStrength * 100)}
-                onStrengthChange={(v) => setPromptStrength(v / 100)}
-                guidanceScale={guidanceScale}
-                onGuidanceScaleChange={setGuidanceScale}
-                seed={seed}
-                onSeedChange={setSeed}
-                onGenerate={handleInpaint}
-                isGenerating={isProcessing}
-                hasMask={!!maskDataUrl}
-              />
-            </div>
-          </div>
+            roomId={roomId}
+            directivesValue={directivesValue}
+            promptDirectives={promptDirectives}
+            onDirectivesChange={onDirectivesChange}
+            operationMode={operationMode}
+            onOperationModeChange={setOperationMode}
+            promptStrength={promptStrength}
+            onPromptStrengthChange={setPromptStrength}
+            guidanceScale={guidanceScale}
+            onGuidanceScaleChange={setGuidanceScale}
+            seed={seed}
+            onSeedChange={setSeed}
+            onGenerate={handleInpaint}
+            isGenerating={isProcessing}
+            hasMask={!!maskDataUrl}
+          />
 
-          <div
-            role="tabpanel"
-            id={editorTabPanelId(tabIdBase, "detect")}
-            aria-labelledby={editorTabId(tabIdBase, "detect")}
+          <DetectTabPanel
+            tabIdBase={tabIdBase}
             hidden={effectiveTab !== "detect"}
-          >
-            <div className="flex flex-col gap-3">
-              {/* Issue #748: the base was rebased (a run completed) and
-                  refresh detection landed LAZY — no SAM call was billed
-                  for the new image. This button is the explicit refresh;
-                  concept chips and the Select Regions tool arm too. */}
-              {!detectionArmed && imageUrl && (
-                <div
-                  role="status"
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-atelier-taupe/40 bg-atelier-canvas px-3 py-2"
-                >
-                  <p className="font-jakarta text-xs text-atelier-primary">
-                    New staged image — furnishings detection is paused to save quota.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={armDetectionForCurrentBase}
-                    disabled={isProcessing}
-                    className="px-2.5 py-1 font-jakarta text-xs rounded-md border border-atelier-primary bg-white text-atelier-primary hover:bg-atelier-canvas transition-colors disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    Detect furnishings
-                  </button>
-                </div>
-              )}
-              {/* Issue #228: concept chips + validated free text. Chips
-                  enforce single-concept by construction; free text is
-                  validated with isValidConceptName (the server schema's
-                  client mirror) BEFORE any billed call is built. */}
-              <div className="flex flex-col gap-2">
-                  <div
-                    role="group"
-                    aria-label="Detection concept"
-                    aria-busy={conceptLoading}
-                    className="flex flex-wrap items-center gap-2"
-                  >
-                    <span className="font-jakarta text-sm font-medium text-atelier-primary">Concept:</span>
-                    {CONCEPT_CHIPS.map((chip) => (
-                      <button
-                        key={chip}
-                        type="button"
-                        aria-pressed={requestedConcept === chip}
-                        disabled={isProcessing}
-                        onClick={() => handleConceptChange(chip)}
-                        className={
-                          requestedConcept === chip
-                            ? "px-2.5 py-1 text-xs rounded-full border border-atelier-primary bg-atelier-primary text-white hover:bg-atelier-primary/80 transition-colors"
-                            : "px-2.5 py-1 font-jakarta text-xs rounded-full border border-atelier-taupe/40 bg-white text-atelier-primary hover:bg-atelier-canvas transition-colors"
-                        }
-                      >
-                        {chip}
-                      </button>
-                    ))}
-                    {/* Issue #249/#474: bulk selection affordances. Select-all
-                        is a pure client-side walk over the decoded
-                        instances (zero billed calls); it stops at the
-                        batch cap and says so. When detection is running,
-                        the button is replaced with a spinner so the
-                        disabled state is not confusing (issue #474). */}
-                    {conceptLoading ? (
-                      <span className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border border-atelier-primary bg-white text-atelier-taupe">
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                        Detecting {requestedConcept}…
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={handleSelectAllDetected}
-                        disabled={
-                          isProcessing ||
-                          detectedCount === 0 ||
-                          selectionCount >= Math.min(detectedCount, MAX_BATCH_OBJECTS)
-                        }
-                        className="px-2.5 py-1 text-xs rounded-md border border-atelier-primary bg-white text-atelier-primary hover:bg-atelier-canvas transition-colors disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        Select all detected
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={handleClearSelection}
-                      disabled={isProcessing || selectionCount === 0}
-                      className="px-2.5 py-1 font-jakarta text-xs rounded-md border border-gray-300 bg-white text-stone-700 hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      Clear selection
-                    </button>
-                  </div>
-                  <form onSubmit={handleConceptSubmit} className="flex flex-wrap items-center gap-2">
-                    <label htmlFor={conceptInputId} className="text-xs text-stone-600">
-                      Custom concept:
-                    </label>
-                    <input
-                      id={conceptInputId}
-                      type="text"
-                      value={conceptInput}
-                      onChange={(event) => {
-                        setConceptInput(event.target.value);
-                        if (conceptInputError) setConceptInputError(null);
-                      }}
-                      placeholder="e.g. wall art"
-                      className="w-44 rounded-md border border-gray-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-stone-500"
-                    />
-                    <button
-                      type="submit"
-                      disabled={isProcessing}
-                      className="px-2.5 py-1 text-xs rounded-md border border-stone-800 bg-white text-stone-800 hover:bg-stone-100 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      Detect
-                    </button>
-                  </form>
-                  {conceptInputError && (
-                    <p role="alert" className="text-xs font-medium text-red-700">
-                      {conceptInputError}
-                    </p>
-                  )}
-                  {conceptLoading && (
-                    <p role="status" className="flex items-center gap-1.5 text-xs text-stone-600">
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                      Looking for {requestedConcept}…
-                    </p>
-                  )}
-                  {!conceptLoading && conceptSegments.status === "failed" && (
-                    <div className="flex flex-col gap-1">
-                      {conceptSegments.failedReason === "service-unreachable" ? (
-                        <>
-                          <p role="status" className="text-xs font-medium text-amber-700">
-                            We could not reach the detection service. Try the Manual paint tab
-                            instead, or try again later.
-                          </p>
-                          <button
-                            type="button"
-                            onClick={() => setActiveTab("manual")}
-                            className="text-xs text-amber-700 underline hover:text-amber-900"
-                          >
-                            Paint the area manually instead
-                          </button>
-                        </>
-                      ) : (
-                        <p role="status" className="text-xs font-medium text-amber-700">
-                          Couldn&apos;t detect &quot;{requestedConcept}&quot; — try again, another
-                          concept, or the brush.
-                        </p>
-                      )}
-                    </div>
-                  )}
-                  {!conceptLoading &&
-                    displayedResult &&
-                    displayedResult.concept === requestedConcept &&
-                    displayedResult.maskDataUrls.length === 0 && (
-                      <p role="status" className="text-xs text-stone-600">
-                        {buildConceptEmptyMessage(requestedConcept)}
-                      </p>
-                    )}
-                  {selectAllNotice && (
-                    <p role="status" className="text-xs text-stone-600">
-                      {selectAllNotice}
-                    </p>
-                  )}
-                </div>
-
-              {/* Issue #203 panel, fed since #229 by the concept toggles:
-                  appears once at least one detected instance has been
-                  toggled in. Thematic runs go through the shared
-                  single-run launcher; per-object plans execute sequentially
-                  with per-step progress and a retry affordance. The panel
-                  stays mounted across tab switches (hidden, not
-                  unmounted), so its prompts never reset (AC-L5). */}
-              {batchSelections.length > 0 && (
-                <BatchStagingPanel
-                  selections={batchSelections}
-                  maxObjects={MAX_BATCH_OBJECTS}
-                  disabled={isProcessing || conceptLoading}
-                  processing={isProcessing}
-                  activeBatch={activeBatch}
-                  onRun={handleBatchRun}
-                  onRetryRemaining={handleBatchRetry}
-                  onRemoveLast={handleRemoveLastSelection}
-                  onRemoveSelection={handleRemoveSelection}
-                  instanceLabels={instanceLabels}
-                  aesthetic={aesthetic}
-                />
-              )}
-            </div>
-          </div>
+            imageUrl={imageUrl}
+            isProcessing={isProcessing}
+            detectionArmed={detectionArmed}
+            onArmDetection={armDetectionForCurrentBase}
+            requestedConcept={requestedConcept}
+            conceptLoading={conceptLoading}
+            conceptStatus={conceptSegments.status}
+            conceptFailedReason={conceptSegments.failedReason}
+            displayedResult={displayedResult}
+            onConceptChange={handleConceptChange}
+            onConceptSubmit={handleConceptSubmit}
+            conceptInputId={conceptInputId}
+            conceptInput={conceptInput}
+            onConceptInputChange={setConceptInput}
+            conceptInputError={conceptInputError}
+            onConceptInputErrorChange={setConceptInputError}
+            onSelectAllDetected={handleSelectAllDetected}
+            onClearSelection={handleClearSelection}
+            detectedCount={detectedCount}
+            selectionCount={selectionCount}
+            selectAllNotice={selectAllNotice}
+            onSwitchToManualTab={() => setActiveTab("manual")}
+            batchSelections={batchSelections}
+            instanceLabels={instanceLabels}
+            aesthetic={aesthetic}
+            activeBatch={activeBatch}
+            onBatchRun={handleBatchRun}
+            onBatchRetry={handleBatchRetry}
+            onRemoveLastSelection={handleRemoveLastSelection}
+            onRemoveSelection={handleRemoveSelection}
+          />
           </div>
         </CollapsibleSection>
 
