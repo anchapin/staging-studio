@@ -66,6 +66,10 @@ npx prisma db push
 
 Re-run this after any change to `prisma/schema.prisma` (regenerate the client locally with `npm run db:generate`).
 
+### Vercel serverless timeout for PDF export
+
+`POST /api/export-pdf` needs more than Vercel's default 10-second serverless function timeout — Browserless fetch + auth/DB overhead comfortably fits under 90s. The route itself declares `export const maxDuration = 90`, but the **platform-level request timeout also needs to be raised**: set `maxDuration: 90` in `next.config.ts` under the `vercel` key (or at the top level — Next.js forwards it to Vercel). This requires **Vercel Pro or Enterprise**. Without it, every PDF export on a cold Vercel instance silently fails.
+
 ## Local development and PDF export
 
 The dev fallback for `NEXT_PUBLIC_APP_URL` is `http://localhost:3000`, which Browserless's cloud Chrome cannot reach — so PDF export is the one feature that does not work out of the box locally. The tell-tale symptom is a Browserless 403 with `"Navigation to \"http://localhost:3000/...\" is not allowed"` (their private-URL blocklist), which the API route surfaces as a generic export error.
