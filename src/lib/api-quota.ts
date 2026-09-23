@@ -22,7 +22,10 @@
  *   rides the in-process daily counter.
  * - `label` (OpenAI gpt-4o-mini vision, issue #263): same rationale as
  *   `copy` — billed per call with no persistent log table — so it rides
- *   the in-process daily counter alongside copy.
+ *   the in-process daily counter alongside copy. Batch room-type
+ *   detection (issue #681, `detectBatchRoomTypes`) is the same
+ *   gpt-4o-mini vision spend and rides the same `label` counter,
+ *   checked batch-at-a-time via `evaluateDailyBatchQuota`.
  *
  * KNOWN LIMITATION (in-process counter): on serverless platforms each
  * Lambda/instance keeps its own counter, so a cold start (or traffic
@@ -137,6 +140,35 @@ export type QuotaDecision =
  */
 export function evaluateDailyQuota(used: number, limit: number, now: Date = new Date()): QuotaDecision {
   if (used < limit) {
+    return { allowed: true, used, limit };
+  }
+  return {
+    allowed: false,
+    used,
+    limit,
+    resetsAt: dailyWindow(now).endAt.toISOString(),
+  };
+}
+
+/**
+ * Pure quota evaluation for a BATCH of `count` billable units on one
+ * surface (issue #681: `detectBatchRoomTypes` fires one gpt-4o-mini
+ * vision call per image and rides the `label` counter). A batch is
+ * allowed only when it fits entirely inside the remaining headroom
+ * (`used + count <= limit`) — unlike {@link evaluateDailyQuota}'s
+ * per-unit semantics, a batch that would straddle the boundary is
+ * rejected whole rather than partially served, so a single request can
+ * never overshoot the cap. The exactly-filling batch
+ * (`used + count === limit`) is served, mirroring "the limit-th call is
+ * still served".
+ */
+export function evaluateDailyBatchQuota(
+  used: number,
+  count: number,
+  limit: number,
+  now: Date = new Date()
+): QuotaDecision {
+  if (used + count <= limit) {
     return { allowed: true, used, limit };
   }
   return {

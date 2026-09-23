@@ -5,6 +5,16 @@ import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { revalidatePath } from "next/cache";
 import { createSupabaseRequestClient } from "@/lib/supabase";
+import { batchRoomTypesRequestSchema } from "@/lib/ai-route-schemas";
+import {
+  DEFAULT_DAILY_LABEL_LIMIT,
+  DAILY_LIMIT_ENV_VAR,
+  dailyQuotaExceededPayload,
+  evaluateDailyBatchQuota,
+  getDailyUsage,
+  recordDailyUsage,
+  resolveDailyLimit,
+} from "@/lib/api-quota";
 
 const ALLOWED_IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp"];
 
@@ -206,25 +216,86 @@ export async function getBatchRoomUploadUrls(
  * Server action: detects room types for a batch of uploaded images.
  * Returns an array of detected room type labels, parallel to the input URLs.
  *
- * @param imageUrls  Public URLs of uploaded room photos.
+ * Issue #681 hardening (parity with `/api/label-instances` and
+ * `/api/segment/furnishings`): the input is validated with
+ * `batchRoomTypesRequestSchema` (per-URL `aiImageUrlSchema` host
+ * allowlist + a hard cap of 20 URLs per call), the caller must own
+ * `projectId` before any AI work runs, and the batch rides the daily
+ * `label` quota surface — the same gpt-4o-mini vision spend pool as
+ * `/api/label-instances` (`DAILY_LABEL_LIMIT`), with the whole batch
+ * required to fit in the user's remaining headroom.
+ *
+ * @param projectId  Project the uploaded photos belong to (ownership check).
+ * @param imageUrls  Public URLs of uploaded room photos (max 20).
  */
 export async function detectBatchRoomTypes(
+  projectId: string,
   imageUrls: string[]
 ): Promise<{ success: true; roomTypes: string[] } | { success: false; error: string }> {
-  if (!Array.isArray(imageUrls) || imageUrls.length === 0) {
-    return { success: false, error: "No images provided" };
-  }
-
   const user = await getAuthedPrismaUser();
   if (!user) {
     return { success: false, error: "Not authenticated" };
   }
 
+  // Schema gate (pure): per-URL host allowlist plus the 20-URL cap,
+  // before any DB reads or paid AI work.
+  const parsed = batchRoomTypesRequestSchema.safeParse({ projectId, imageUrls });
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid request",
+    };
+  }
+
+  // Issue #681: daily label quota (in-process counter — see
+  // lib/api-quota.ts for the mechanism and its multi-instance
+  // limitation). Checked BEFORE any AI work so a user at their cap
+  // never reaches gpt-4o-mini; the whole batch must fit in headroom.
+  const labelLimit = resolveDailyLimit(
+    process.env[DAILY_LIMIT_ENV_VAR.label],
+    DEFAULT_DAILY_LABEL_LIMIT
+  );
+  const labelQuota = evaluateDailyBatchQuota(
+    getDailyUsage("label", user.id),
+    parsed.data.imageUrls.length,
+    labelLimit
+  );
+  if (!labelQuota.allowed) {
+    console.warn(
+      JSON.stringify({
+        event: "batch_room_types_daily_quota_exceeded",
+        userId: user.id,
+        used: labelQuota.used,
+        limit: labelQuota.limit,
+        requested: parsed.data.imageUrls.length,
+      })
+    );
+    return {
+      success: false,
+      error: dailyQuotaExceededPayload(labelQuota, "Please try again tomorrow.")
+        .message,
+    };
+  }
+
+  // Ownership: the project the photos belong to must be owned by the
+  // authenticated user — checked before any AI work.
+  const project = await prisma.project.findUnique({
+    where: { id: parsed.data.projectId, userId: user.id },
+    select: { id: true },
+  });
+  if (!project) {
+    return { success: false, error: "Project not found" };
+  }
+
   try {
     const roomTypes = await Promise.all(
-      imageUrls.map(async (url) => {
+      parsed.data.imageUrls.map(async (url) => {
         try {
-          return await detectRoomType(url);
+          const roomType = await detectRoomType(url);
+          // Bill only successful detections — a failed attempt costs at
+          // most a few rejected tokens (mirrors /api/label-instances).
+          recordDailyUsage("label", user.id);
+          return roomType;
         } catch {
           return "Other";
         }

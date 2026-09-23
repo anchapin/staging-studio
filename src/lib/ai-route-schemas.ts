@@ -256,6 +256,36 @@ export const visionLabelOutputSchema = z.object({
     .max(VISION_LABEL_MAX_CROPS),
 });
 
+/** Upper bound on room photos per `detectBatchRoomTypes` call (issue #681). */
+export const BATCH_ROOM_TYPE_MAX_IMAGES = 20;
+
+/**
+ * Zod schema for the `detectBatchRoomTypes` server-action input
+ * (issue #681): batched GPT-4o-mini room-type detection for freshly
+ * uploaded project photos.
+ *
+ * Contract: `projectId` scopes the batch to a project the caller owns
+ * (the action re-checks ownership server-side before any AI work);
+ * `imageUrls` are the uploaded room photos — each
+ * {@link aiImageUrlSchema} (HTTPS, host on `*.supabase.co` or
+ * `*.fal.ai`, matching where `getBatchRoomUploadUrls` signed-upload
+ * URLs land) — hard-capped at {@link BATCH_ROOM_TYPE_MAX_IMAGES} per
+ * call so a single request bounds OpenAI vision spend. `.strict()`
+ * rejects unknown keys so stale clients fail loudly.
+ * Side effects: none (pure validation); the OpenAI call happens in the
+ * action, gated by `assertOpenAIConfigured()`/`OPENAI_API_KEY` and the
+ * daily `label` quota (see `lib/api-quota.ts`).
+ */
+export const batchRoomTypesRequestSchema = z
+  .object({
+    projectId: z.string().min(1),
+    imageUrls: z
+      .array(aiImageUrlSchema)
+      .min(1)
+      .max(BATCH_ROOM_TYPE_MAX_IMAGES),
+  })
+  .strict();
+
 /**
  * Zod schema for the inpaint pre-flight quality gate output (issue #600).
  *
