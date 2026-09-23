@@ -58,9 +58,12 @@ test.describe("mask painting", () => {
     // paint tab; the editor opens on Auto detect (flag on).
     await openEditorTab(page, "Manual paint");
 
-    // "Apply Inpainting" is disabled until a mask exists — the UI state
-    // transition this flow hinges on.
-    const applyButton = page.getByRole("button", { name: "Apply Inpainting" });
+    // The Manual paint run button ("Generate" — renamed from "Apply
+    // Inpainting" when #629 moved it into the Inpaint operation mode
+    // tabs; exact: true so it never substring-matches "Generate Copy" or
+    // "Generate More Variations") is disabled until a mask exists — the
+    // UI state transition this flow hinges on.
+    const applyButton = page.getByRole("button", { name: "Generate", exact: true });
     await expect(applyButton).toBeDisabled();
 
     await paintMaskZigzag(page);
@@ -123,7 +126,7 @@ test.describe("mask painting", () => {
       "true"
     );
 
-    await expect(page.getByRole("button", { name: "Apply Inpainting" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Generate", exact: true })).toBeDisabled();
 
     // One click anywhere on the untouched canvas floods the connected
     // unpainted region — deterministic, near-total white coverage.
@@ -135,9 +138,9 @@ test.describe("mask painting", () => {
     const box = (await canvas.boundingBox())!;
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 
-    await expect(page.getByRole("button", { name: "Apply Inpainting" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Generate", exact: true })).toBeEnabled();
 
-    await page.getByRole("button", { name: "Apply Inpainting" }).click();
+    await page.getByRole("button", { name: "Generate", exact: true }).click();
     await expect(page.getByText("Inpainting completed successfully!")).toBeVisible({
       timeout: 20_000,
     });
@@ -156,7 +159,7 @@ test.describe("mask painting", () => {
     // paint tab; the editor opens on Auto detect (flag on).
     await openEditorTab(page, "Manual paint");
 
-    const applyButton = page.getByRole("button", { name: "Apply Inpainting" });
+    const applyButton = page.getByRole("button", { name: "Generate", exact: true });
     await expect(applyButton).toBeDisabled();
 
     await paintMaskZigzag(page);
@@ -238,7 +241,7 @@ test.describe("mask painting on high-DPI displays", () => {
     await page.mouse.move(cx + 3, cy, { steps: 2 });
     await page.mouse.up();
 
-    const applyButton = page.getByRole("button", { name: "Apply Inpainting" });
+    const applyButton = page.getByRole("button", { name: "Generate", exact: true });
     await expect(applyButton).toBeEnabled();
     await applyButton.click();
     await expect(page.getByText("Inpainting completed successfully!")).toBeVisible({
@@ -294,7 +297,7 @@ test.describe("mask painting on high-DPI displays", () => {
       fillBox.y + fillBox.height * 0.5
     );
 
-    const applyButton = page.getByRole("button", { name: "Apply Inpainting" });
+    const applyButton = page.getByRole("button", { name: "Generate", exact: true });
     await expect(applyButton).toBeEnabled();
     await applyButton.click();
     await expect(page.getByText("Inpainting completed successfully!")).toBeVisible({
@@ -342,10 +345,24 @@ test.describe("restage furnishings preset", () => {
       timeout: 20_000,
     });
 
-    // The detection call was room-scoped and targeted the source photo.
-    const detectionBody = detection.submitBody();
-    expect(detectionBody.roomId).toBe(E2E_EDITOR_ROOM_ID);
-    expect(String(detectionBody.imageUrl)).toContain("before-image.png");
+    // The PRESET's detection call was room-scoped and targeted the source
+    // photo. The editor fires several detections during this flow
+    // (issue #742): the editor-open auto-fire (#1), the preset's own
+    // fetch (#2), and — once the staged result persists — a refresh
+    // detection over the NEW staged image so instance overlays track
+    // the result (#3). submitBody() is last-call-wins, so assert
+    // against the ordered list instead.
+    const detectionBodies = detection.submitBodies();
+    expect(detection.requestCount()).toBeGreaterThanOrEqual(3);
+    const presetDetection = detectionBodies[1];
+    expect(presetDetection.roomId).toBe(E2E_EDITOR_ROOM_ID);
+    expect(String(presetDetection.imageUrl)).toContain("before-image.png");
+    // Pin the post-completion refresh too: it must target the freshly
+    // staged result (the base image the editor now shows), never the
+    // original photo.
+    const refreshDetection = detectionBodies[detectionBodies.length - 1];
+    expect(refreshDetection.roomId).toBe(E2E_EDITOR_ROOM_ID);
+    expect(String(refreshDetection.imageUrl)).toContain("staged-results/");
 
     // The run carries the furnishings-scoped directives and the hardened
     // negative prompt (architecture terms reintroduced — issue #223).

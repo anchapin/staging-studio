@@ -1524,7 +1524,9 @@ export default function InpaintEditor({
 
   const handleInpaint = useCallback(async () => {
     if (!promptDirectives.trim()) {
-      showError("Please fill in the \u201cStaging directives\u201d textarea in the right panel.");
+      showError(
+        "Please fill in the “Manual paint directives” textarea in the right panel (or “Staging directives” in Room Details — they stay in sync)."
+      );
       return;
     }
 
@@ -2127,14 +2129,20 @@ export default function InpaintEditor({
           >
             <div className="flex flex-col gap-3">
               {/* Issue #507: inline staging directives textarea — always visible
-                  in the right panel beside the Apply Inpainting button, so users
-                  can find it without scrolling the left pane. */}
+                  in the right panel beside the Generate button, so users
+                  can find it without scrolling the left pane. The label is
+                  deliberately distinct from the Room Details "Staging
+                  directives (required)" field it mirrors (same state, both
+                  editable): two controls on one page must never share an
+                  accessible name — screen readers announce them
+                  interchangeably and strict locators (e2e, AT automation)
+                  become ambiguous (issue #742). */}
               <div>
                 <label
                   htmlFor={`inpaint-directives-${roomId}`}
                   className="mb-1 font-jakarta block text-sm font-medium text-atelier-primary"
                 >
-                  Staging directives (required)
+                  Manual paint directives (required)
                 </label>
                 <textarea
                   id={`inpaint-directives-${roomId}`}

@@ -90,9 +90,12 @@ test.describe("editor layout", () => {
 
       await openEditorTab(page, "Manual paint");
       // The Manual paint tab exposes the single-object run affordance
-      // (AC-L7); the selection work is untouched by the switch.
+      // (AC-L7); the selection work is untouched by the switch. The
+      // button reads "Generate" since #629 moved it into the Inpaint
+      // operation mode tabs (exact: true — "Generate Copy" and
+      // "Generate More Variations" substring-match otherwise).
       await expect(
-        page.getByRole("button", { name: "Apply Inpainting" })
+        page.getByRole("button", { name: "Generate", exact: true })
       ).toBeVisible();
 
       await openEditorTab(page, "Auto detect");
@@ -123,7 +126,7 @@ test.describe("editor layout", () => {
       );
       await openEditorTab(page, "Manual paint");
       await paintMaskZigzag(page);
-      await page.getByRole("button", { name: "Apply Inpainting" }).click();
+      await page.getByRole("button", { name: "Generate", exact: true }).click();
       await expect(page.getByText("Inpainting completed successfully!")).toBeVisible({
         timeout: 20_000,
       });
