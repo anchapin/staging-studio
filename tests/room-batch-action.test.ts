@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockPrisma = {
   project: {
     findFirst: vi.fn(),
+    findUnique: vi.fn(),
   },
 };
 
@@ -89,6 +90,7 @@ describe("detectBatchRoomTypes", () => {
     vi.clearAllMocks();
     mockGetAuthedPrismaUser.mockResolvedValue(mockUser);
     mockPrisma.project.findFirst.mockResolvedValue(mockProject);
+    mockPrisma.project.findUnique.mockResolvedValue(mockProject);
   });
 
   it("rejects when daily label quota is exceeded (issue #790)", async () => {
@@ -110,10 +112,9 @@ describe("detectBatchRoomTypes", () => {
 
     expect(result).toEqual({
       success: false,
-      error: expect.stringContaining("Daily label quota exceeded"),
+      error: expect.stringContaining("today's limit"),
     });
 
-    // Verify project ownership check was NOT called (quota check short-circuits)
     expect(mockPrisma.project.findFirst).not.toHaveBeenCalled();
     // Verify no AI calls were made
     expect(mockDetectRoomType).not.toHaveBeenCalled();
