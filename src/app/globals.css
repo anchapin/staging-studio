@@ -11,8 +11,9 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
-  /* Issue #592/#613: Stitch terracotta bronze #8f4d20 */
-  --color-secondary: #8f4d20;
+  /* Issue #592/#613: Stitch terracotta bronze — value lives in :root as
+     --color-secondary, asserted by tests/color-tokens.test.ts (#719) */
+  --color-secondary: var(--color-secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
@@ -25,10 +26,11 @@
   --color-ring: var(--ring);
   --color-surface: var(--color-surface);
   --color-tertiary: var(--color-tertiary);
-  /* Atelier Canvas palette aliases (Issue #592) */
-  --color-canvas: #F8F6F2;
-  --color-taupe: #8C827A;
-  --color-cream: #fff8f8;
+  /* Atelier Canvas palette aliases (Issue #592; values live in :root and
+     are sourced from src/lib/color-tokens.ts — #719 consolidation) */
+  --color-canvas: var(--color-canvas);
+  --color-taupe: var(--color-taupe);
+  --color-cream: var(--color-cream);
   --color-outline-variant: var(--outline-variant);
   /* Issue #621: moodboard selector tokens (fixed tone, stable across
      light/dark modes; values moved to :root with the rest of #613) */
@@ -170,31 +172,36 @@
 
 @layer base {
   :root {
-    /* Issue #546/#613: Atelier Canvas design tokens */
+    /* Issue #546/#613: Atelier Canvas design tokens.
+       #719: hex literals appear here only as the canonical token
+       definitions (mirrored from src/lib/color-tokens.ts and pinned by
+       tests/color-tokens.test.ts); every other consumer of a token value
+       references it through var(). */
     /* Surface base: warm linen (spec background #fff8f4) */
     --background: #fff8f4;
-    --foreground: #181716;
-    --card: #fff8f4;
-    --card-foreground: #181716;
+    --foreground: var(--primary);
+    --card: var(--color-surface);
+    --card-foreground: var(--primary);
     /* Primary: charred walnut */
     --primary: #181716;
-    --primary-foreground: #ffffff;
-    /* Secondary: terracotta bronze (spec #8f4d20, Issue #613) */
-    --secondary: #8f4d20;
-    --secondary-foreground: #ffffff;
+    --primary-foreground: var(--color-on-primary);
+    /* Secondary: terracotta bronze (spec value rides --color-secondary,
+       Issue #613/#719) */
+    --secondary: var(--color-secondary);
+    --secondary-foreground: var(--color-on-secondary);
     /* Neutral: Honed Taupe */
-    --muted: #F8F6F2;
-    --muted-foreground: #8C827A;
-    --accent: #F8F6F2;
-    --accent-foreground: #181716;
+    --muted: var(--color-canvas);
+    --muted-foreground: var(--color-taupe);
+    --accent: var(--color-canvas);
+    --accent-foreground: var(--primary);
     --destructive: oklch(0.577 0.245 27.325);
     --destructive-foreground: 210 40% 98%;
     --border: oklch(0.922 0 0);
     --input: oklch(0.922 0 0);
     --ring: oklch(0.708 0 0);
     --radius: 0.625rem;
-    --popover: #fff8f4;
-    --popover-foreground: #181716;
+    --popover: var(--color-surface);
+    --popover-foreground: var(--primary);
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
@@ -207,25 +214,30 @@
     --warning-foreground: oklch(0.98 0.01 70.08);
     --info: oklch(0.546 0.245 252.149);
     --info-foreground: oklch(0.98 0.01 252.149);
-    /* Atelier Canvas sidebar */
-    --sidebar: #fff8f8;
-    --sidebar-foreground: #181716;
-    --sidebar-primary: #181716;
-    --sidebar-primary-foreground: #fff8f8;
-    --sidebar-accent: #F8F6F2;
-    --sidebar-accent-foreground: #181716;
+    /* Atelier Canvas sidebar (token values via #719 var() consolidation) */
+    --sidebar: var(--color-cream);
+    --sidebar-foreground: var(--primary);
+    --sidebar-primary: var(--primary);
+    --sidebar-primary-foreground: var(--color-cream);
+    --sidebar-accent: var(--color-canvas);
+    --sidebar-accent-foreground: var(--primary);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
 
     /* Atelier Canvas canvas background */
-    --canvas-background: #F8F6F2;
+    --canvas-background: var(--color-canvas);
 
     /* Issue #592/#613: Stitch design token aliases mapped to Atelier palette
        values. Tertiary is now the spec muted sage #5C6E58 (restoration/success
-       indicator), replacing the old warm-taupe #8C827A. */
+       indicator), replacing the old warm-taupe #8C827A. The pre-#613 legacy
+       aliases (canvas/taupe/cream) live here too since #719 consolidated
+       their globals.css literals into src/lib/color-tokens.ts. */
     --color-surface: #fff8f4;
     --color-secondary: #8f4d20;
     --color-tertiary: #5C6E58;
+    --color-canvas: #F8F6F2;
+    --color-taupe: #8C827A;
+    --color-cream: #fff8f8;
 
     /* Issue #624/#613: Stitch surface container tokens for gradient cards */
     /* Surface container: warm linen gradient hierarchy (spec values) */

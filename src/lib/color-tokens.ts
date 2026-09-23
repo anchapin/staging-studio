@@ -13,6 +13,11 @@
  * - `tests/color-tokens.test.ts` pins the table, the Tailwind wiring, the
  *   globals.css mirror, and WCAG AA contrast for every on-/container pair.
  *
+ * Issue #719: the pre-#613 legacy aliases (canvas/taupe/cream) that used to
+ * live only as raw literals in globals.css/tailwind.config.ts are now part
+ * of this table, so every `--color-*` hex in globals.css `@theme inline`/
+ * `:root` is generated from or asserted against this single source.
+ *
  * Spec deviations, both directed by the issue itself:
  * - `outline` is #8C827A (the issue corrects its draft value #7c766f to the
  *   Atelier taupe "per spec").
@@ -79,6 +84,16 @@ export const ATELIER_COLOR_TOKENS = {
   "on-error": "#ffffff",
   "error-container": "#ffdad6",
   "on-error-container": "#93000a",
+
+  // Legacy Atelier aliases (pre-#613, issue #592) — consolidated into this
+  // table by #719 so globals.css/tailwind.config.ts stop hardcoding them.
+  // Values are preserved verbatim: #719 is deduplication, not redesign.
+  // Note: cream (#fff8f8) is deliberately NOT snapped to surface (#fff8f4)
+  // — the one-character gap is suspicious (flagged in #719) but changing it
+  // would be a visual redesign, not consolidation.
+  canvas: "#F8F6F2",
+  taupe: "#8C827A",
+  cream: "#fff8f8",
 } as const;
 
 export type AtelierColorToken = keyof typeof ATELIER_COLOR_TOKENS;
