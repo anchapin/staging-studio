@@ -109,7 +109,7 @@ export async function POST(request: NextRequest) {
       DEFAULT_DAILY_SEGMENT_LIMIT
     );
     const segmentQuota = evaluateDailyQuota(
-      getDailyUsage("segment", user.id),
+      await getDailyUsage("segment", user.id),
       segmentLimit
     );
     if (!segmentQuota.allowed) {
@@ -192,7 +192,7 @@ export async function POST(request: NextRequest) {
     // Billing is recorded only for completed detections (the
     // segment_concept_timing console.log was removed as debug debris,
     // #720).
-    recordDailyUsage("segment", user.id);
+    await recordDailyUsage("segment", user.id);
 
     return NextResponse.json({
       concept: payload.prompt,

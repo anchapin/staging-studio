@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
       DEFAULT_DAILY_COPY_LIMIT
     );
     const copyQuota = evaluateDailyQuota(
-      getDailyUsage("copy", user.id),
+      await getDailyUsage("copy", user.id),
       copyLimit
     );
     if (!copyQuota.allowed) {
@@ -162,7 +162,7 @@ export async function POST(request: NextRequest) {
     // Count the billable generation only after the provider call resolves:
     // a failed/timeout attempt costs at most a few rejected tokens and does
     // not count against the user's daily cap.
-    recordDailyUsage("copy", user.id);
+    await recordDailyUsage("copy", user.id);
 
     // Issue #600: copy quality gate — evaluate generated copy quality before
     // persisting. Advisory only; warnings ride along with the saved copy.
