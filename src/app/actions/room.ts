@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import type { ChecklistItem } from "@/lib/checklist-schema";
 import {
+  generatedCopySchema,
   roomCopyEditSchema,
   type RoomCopyEditInput,
 } from "@/lib/room-copy-edit-schema";
@@ -59,7 +60,11 @@ function failure(error: string): { success: false; error: string } {
  * {@link GeneratedCopy}) to the `Room` AI columns: `observedChallenge`,
  * `recommendation`, `buyerPsychology`, and `checklistItems` (JSON).
  *
- * Contract: requires an authenticated session whose Prisma user owns the
+ * Contract: `copy` is validated here with `generatedCopySchema` —
+ * server actions receive client-controlled input, so only the four
+ * AI-copy fields (prose 1–2000 chars, valid checklist items) can ever
+ * reach Prisma (issue #703; invalid input fails fast, before the auth
+ * check). Requires an authenticated session whose Prisma user owns the
  * room's project — the update runs with an ownership `where` filter
  * (`id: roomId, project: { userId }`), so a foreign roomId silently
  * matches nothing and returns "Not authenticated" rather than throwing.
@@ -71,14 +76,24 @@ function failure(error: string): { success: false; error: string } {
  * `console.error`. No path revalidation (callers refresh locally).
  *
  * @param roomId ID of the room to update.
- * @param copy Generated copy to persist (all fields written verbatim).
+ * @param copy Generated copy to persist (all four fields required and
+ *   validated before the write).
  * @returns `{ success: true }` on write, or
- *   `{ success: false, error }` when unauthenticated or the update fails.
+ *   `{ success: false, error }` when the payload is invalid,
+ *   unauthenticated, or the update fails.
  */
 export async function saveRoomCopy(
   roomId: string,
   copy: GeneratedCopy
 ): Promise<{ success: boolean; error?: string }> {
+  const parsed = generatedCopySchema.safeParse(copy);
+  if (!parsed.success) {
+    return failure(
+      parsed.error.issues[0]?.message ?? "Invalid generated copy payload"
+    );
+  }
+  const validated = parsed.data;
+
   const ownershipWhere = await getOwnedRoomWhere(roomId);
   if (!ownershipWhere) {
     return failure("Not authenticated");
@@ -88,10 +103,10 @@ export async function saveRoomCopy(
     await prisma.room.update({
       where: ownershipWhere,
       data: {
-        observedChallenge: copy.observedChallenge,
-        recommendation: copy.recommendation,
-        buyerPsychology: copy.buyerPsychology,
-        checklistItems: copy.checklist,
+        observedChallenge: validated.observedChallenge,
+        recommendation: validated.recommendation,
+        buyerPsychology: validated.buyerPsychology,
+        checklistItems: validated.checklist,
       },
     });
     return { success: true };
@@ -111,9 +126,9 @@ export async function saveRoomCopy(
  * Purpose: writes only the fields the lookbook edit page sends — a
  * partial {@link RoomCopyEditInput} (subset of `observedChallenge`,
  * `recommendation`, `buyerPsychology`, `checklistItems`) produced by the
- * debounced autosave. Unlike {@link saveRoomCopy} (full verbatim write of
- * AI output), absent fields are left untouched so an autosave of one
- * field can never clobber the others.
+ * debounced autosave. Unlike {@link saveRoomCopy} (full write of all
+ * four AI-copy fields), absent fields are left untouched so an autosave
+ * of one field can never clobber the others.
  *
  * Contract: `edits` is validated here with `roomCopyEditSchema` —
  * server actions receive client-controlled input, so only the four
