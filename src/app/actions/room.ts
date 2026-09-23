@@ -8,6 +8,10 @@ import {
   type RoomCopyEditInput,
 } from "@/lib/room-copy-edit-schema";
 import {
+  roomMetadataSchema,
+  type RoomMetadataInput,
+} from "@/lib/metadata-schemas";
+import {
   resolveSelectionAfterDelete,
   touchUpCountsBySlot,
   type TouchUpRequestRow,
@@ -236,9 +240,14 @@ export async function saveVariantSelection(
  * Only the fields present in `roomData` are written; `undefined` values
  * are ignored by Prisma, never nulled out.
  *
- * Contract: requires an authenticated session owning the room's project;
- * ownership is enforced in the update's `where` filter. Failures are
- * caught and reported, never thrown.
+ * Contract: `roomData` is validated with `roomMetadataSchema` —
+ * server action arguments are client-controlled RPC payloads, so only
+ * the two editable fields (`name`, `rawDirectives`) can ever reach
+ * Prisma (`.strict()` rejects unknown keys like `projectId` or
+ * `selectedVariantIndex`, preventing re-parenting outside the
+ * ownership chain). Requires an authenticated session owning the room's
+ * project; ownership is enforced in the update's `where` filter.
+ * Failures are caught and reported, never thrown.
  *
  * Side effects: needs `DATABASE_URL` and a valid Supabase session
  * cookie; performs a Prisma `room.update`; logs failures to
@@ -248,15 +257,20 @@ export async function saveVariantSelection(
  * @param roomData Partial fields: `name` (display name) and/or
  *   `rawDirectives` (free-form staging instructions fed to the AI).
  * @returns `{ success: true }` on write, or
- *   `{ success: false, error }` when unauthenticated or the update fails.
+ *   `{ success: false, error }` when unauthenticated, the payload is
+ *   invalid, or the update fails.
  */
 export async function saveRoomMetadata(
   roomId: string,
-  roomData: {
-    name?: string;
-    rawDirectives?: string;
-  }
+  roomData: RoomMetadataInput
 ): Promise<{ success: boolean; error?: string }> {
+  const parsed = roomMetadataSchema.safeParse(roomData);
+  if (!parsed.success) {
+    return failure(
+      parsed.error.issues[0]?.message ?? "Invalid room metadata payload"
+    );
+  }
+
   const ownershipWhere = await getOwnedRoomWhere(roomId);
   if (!ownershipWhere) {
     return failure("Not authenticated");
@@ -265,7 +279,7 @@ export async function saveRoomMetadata(
   try {
     await prisma.room.update({
       where: ownershipWhere,
-      data: roomData,
+      data: parsed.data,
     });
     return { success: true };
   } catch (error) {
