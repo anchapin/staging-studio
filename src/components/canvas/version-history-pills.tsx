@@ -145,6 +145,7 @@ export default function VersionHistoryPills({
       activeResultUrl ?? null
     );
     if (!plan) return;
+    if (!window.confirm("Restore this version? This will update your current image.")) return;
     void runRestore(plan, version, stacks);
   };
 

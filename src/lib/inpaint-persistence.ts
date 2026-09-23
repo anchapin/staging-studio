@@ -41,4 +41,3 @@ export function decideInpaintPersistence(
 
   return { kind: "persist" };
 }
-export // Placeholder comment for PR to close #791
