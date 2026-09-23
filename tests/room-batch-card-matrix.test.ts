@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import type { StagedVariantPair } from "@/lib/staged-result";
-import type { RoomCardStatus, CameraLabel } from "@/components/canvas/room-batch-card-matrix";
+import {
+  cardBorderClasses,
+  resolveRoomStatus,
+  statusBadgeClasses,
+  statusLabel,
+} from "@/lib/room-batch-card-matrix";
+import type { RoomCardStatus } from "@/lib/room-batch-card-matrix";
 
 function makePairs(hasA: boolean, hasB: boolean): readonly [StagedVariantPair, StagedVariantPair] {
   return [
@@ -10,82 +16,88 @@ function makePairs(hasA: boolean, hasB: boolean): readonly [StagedVariantPair, S
   ];
 }
 
-function resolveRoomStatus(pairs: readonly [StagedVariantPair, StagedVariantPair]): RoomCardStatus {
-  const completeCount = [pairs[0], pairs[1]].filter((p) => p.after !== null).length;
-  if (completeCount === 2) return "staged";
-  if (completeCount === 1) return "in_progress";
-  return "pending";
-}
+/**
+ * Compile-time exhaustiveness guard: `Record<RoomCardStatus, …>` fixtures
+ * fail to typecheck if a new union member is added without extending them,
+ * so a new status can never silently miss coverage.
+ */
+const EXPECTED_LABELS: Record<RoomCardStatus, string> = {
+  pending: "Pending",
+  in_progress: "In Progress...",
+  staged: "Staged ✓",
+};
+
+const EXPECTED_BADGE_CLASSES: Record<RoomCardStatus, string> = {
+  pending: "bg-outline/20 text-outline",
+  in_progress: "bg-secondary/20 text-secondary",
+  staged: "bg-tertiary/20 text-tertiary",
+};
+
+const EXPECTED_BORDER_CLASSES: Record<RoomCardStatus, string> = {
+  pending: "border-outline-variant/40",
+  in_progress: "border-secondary/40",
+  staged: "border-tertiary/40",
+};
 
 describe("RoomBatchCardMatrix utilities", () => {
   describe("resolveRoomStatus", () => {
     it("returns pending when no variants are complete", () => {
-      const pairs = makePairs(false, false);
-      expect(resolveRoomStatus(pairs)).toBe("pending");
+      expect(resolveRoomStatus(makePairs(false, false))).toBe("pending");
     });
 
     it("returns in_progress when one variant is complete", () => {
-      const pairs = makePairs(true, false);
-      expect(resolveRoomStatus(pairs)).toBe("in_progress");
+      expect(resolveRoomStatus(makePairs(true, false))).toBe("in_progress");
     });
 
     it("returns in_progress when the second variant is complete", () => {
-      const pairs = makePairs(false, true);
-      expect(resolveRoomStatus(pairs)).toBe("in_progress");
+      expect(resolveRoomStatus(makePairs(false, true))).toBe("in_progress");
     });
 
     it("returns staged when both variants are complete", () => {
-      const pairs = makePairs(true, true);
-      expect(resolveRoomStatus(pairs)).toBe("staged");
+      expect(resolveRoomStatus(makePairs(true, true))).toBe("staged");
+    });
+
+    it("covers every RoomCardStatus member across the full input matrix", () => {
+      // All four (hasA, hasB) input combinations, each mapped to exactly one
+      // status: pending ← 1 combination, in_progress ← 2, staged ← 1. A deep
+      // equal against this tally fails if any union member stops being
+      // produced — or if an unknown status ever escapes the union.
+      const results = [
+        resolveRoomStatus(makePairs(false, false)),
+        resolveRoomStatus(makePairs(true, false)),
+        resolveRoomStatus(makePairs(false, true)),
+        resolveRoomStatus(makePairs(true, true)),
+      ];
+      const expectedTally: Record<RoomCardStatus, number> = {
+        pending: 1,
+        in_progress: 2,
+        staged: 1,
+      };
+      const tally = results.reduce<Record<string, number>>((acc, status) => {
+        acc[status] = (acc[status] ?? 0) + 1;
+        return acc;
+      }, {});
+      expect(tally).toEqual(expectedTally);
     });
   });
 
-  describe("CameraLabel type", () => {
-    it("accepts 'Cam A' as valid camera label", () => {
-      const label: CameraLabel = "Cam A";
-      expect(label).toBe("Cam A");
+  describe("status presentation tables", () => {
+    it("maps every RoomCardStatus to its literal badge label", () => {
+      for (const status of Object.keys(EXPECTED_LABELS) as RoomCardStatus[]) {
+        expect(statusLabel(status)).toBe(EXPECTED_LABELS[status]);
+      }
     });
 
-    it("accepts '360° Panoramic' as valid camera label", () => {
-      const label: CameraLabel = "360° Panoramic";
-      expect(label).toBe("360° Panoramic");
-    });
-  });
-
-  describe("RoomCardStatus type", () => {
-    it("accepts 'pending' as valid status", () => {
-      const status: RoomCardStatus = "pending";
-      expect(status).toBe("pending");
+    it("maps every RoomCardStatus to its literal badge classes", () => {
+      for (const status of Object.keys(EXPECTED_BADGE_CLASSES) as RoomCardStatus[]) {
+        expect(statusBadgeClasses(status)).toBe(EXPECTED_BADGE_CLASSES[status]);
+      }
     });
 
-    it("accepts 'in_progress' as valid status", () => {
-      const status: RoomCardStatus = "in_progress";
-      expect(status).toBe("in_progress");
-    });
-
-    it("accepts 'staged' as valid status", () => {
-      const status: RoomCardStatus = "staged";
-      expect(status).toBe("staged");
-    });
-  });
-
-  describe("variant count", () => {
-    it("counts zero completed variants correctly", () => {
-      const pairs = makePairs(false, false);
-      const count = [pairs[0], pairs[1]].filter((p) => p.after !== null).length;
-      expect(count).toBe(0);
-    });
-
-    it("counts one completed variant correctly", () => {
-      const pairs = makePairs(true, false);
-      const count = [pairs[0], pairs[1]].filter((p) => p.after !== null).length;
-      expect(count).toBe(1);
-    });
-
-    it("counts two completed variants correctly", () => {
-      const pairs = makePairs(true, true);
-      const count = [pairs[0], pairs[1]].filter((p) => p.after !== null).length;
-      expect(count).toBe(2);
+    it("maps every RoomCardStatus to its literal card border classes", () => {
+      for (const status of Object.keys(EXPECTED_BORDER_CLASSES) as RoomCardStatus[]) {
+        expect(cardBorderClasses(status)).toBe(EXPECTED_BORDER_CLASSES[status]);
+      }
     });
   });
 });
