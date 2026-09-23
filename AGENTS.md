@@ -65,7 +65,7 @@ scripts/dev-tunnel.sh        # local PDF export only: public tunnel (cloudflared
 
 ## Env vars
 
-All in `.env.example`, copied to `.env.local` (with `.env` symlinked to it — see the env-file note under Commands) — every key below is annotated there with reader, source, and required/optional status:
+All in `.env.example`, copied to `.env.local` (with `.env` symlinked to it — see the env-file note under Commands) — every key below is annotated there with reader, source, and required/optional status, and the two lists match 1:1. `NODE_ENV` is framework-provided (set by Next.js) and deliberately not listed.
 
 - `DATABASE_URL` — required. Supabase Postgres connection string, used by Prisma (`prisma/schema.prisma` datasource).
 - `NEXT_PUBLIC_SUPABASE_URL` — required. Supabase project URL; read by `middleware.ts`, `lib/supabase.ts`, `api/setup*`, `auth/callback`. Source: Supabase dashboard → Project Settings → API.
@@ -76,6 +76,12 @@ All in `.env.example`, copied to `.env.local` (with `.env` symlinked to it — s
 - `BROWSERLESS_API_KEY` — required for PDF export. Read by `api/export-pdf` (500 error when missing). Source: browserless.io → account API keys.
 - `NEXT_PUBLIC_APP_URL` — the app's public origin (not a PDF-export-only value); read by `api/export-pdf` to build the cookie-less preview URL its cloud browser fetches. Dev fallback `http://localhost:3000`; required and must be publicly reachable in production.
 - `PREVIEW_TOKEN_SECRET` — optional in dev (fixed public fallback when unset), required in production. HMAC-signs short-lived lookbook-preview tokens (`lib/preview-token.ts`); generate with `openssl rand -base64 32`.
+- `TYPESAFE_API_KEY` — Dana-rig only: NOT read by the app (zero consumers in `src/`/`middleware.ts`); consumed by `docs/dana-rig/` tooling (`triage.js`, `nightly.sh`, `nightly-compose.sh`) for offline Dana finding triage. Optional for the app; required only when running the Dana rig. Source: typesafe.ai.
+- `DAILY_INPAINT_LIMIT` — optional. Daily per-user fal.ai FLUX.1 Fill inpaint cap (default 20), read via `lib/api-quota.ts` and enforced in `api/inpaint` (exact: counted from `InpaintRequest` rows in Postgres). Set 0 to block the surface.
+- `DAILY_COPY_LIMIT` — optional. Daily per-user gpt-4o-mini copy-generation cap (default 50), read via `lib/api-quota.ts` and enforced in `api/generate-copy` (in-process counter). Set 0 to block the surface.
+- `DAILY_LABEL_LIMIT` — optional. Daily per-user gpt-4o-mini vision label-instance cap (default 50), read via `lib/api-quota.ts` and enforced in `api/label-instances` and the `room-batch` server action (in-process counter). Set 0 to block the surface.
+- `DAILY_EXPORT_LIMIT` — optional. Daily per-user Browserless PDF export cap (default 20), read via `lib/api-quota.ts` and enforced in `api/export-pdf` (in-process counter). Set 0 to block the surface.
+- `DAILY_SEGMENT_LIMIT` — optional. Daily per-user fal.ai SAM 3.1 segmentation cap (default 100), read via `lib/api-quota.ts` and enforced in `api/segment/furnishings` (in-process counter). Set 0 to block the surface.
 
 ## Toolchain quirks
 
