@@ -4,6 +4,10 @@ import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { createSupabaseRequestClient } from "@/lib/supabase";
 import { validateThumbnailDataUrl } from "@/lib/thumbnail-data-url";
+import {
+  fifoEvictionTake,
+  versionThumbnailStoragePath,
+} from "@/lib/inpaint-version-storage";
 import { revalidatePath } from "next/cache";
 
 const MAX_VERSIONS_PER_VARIANT = 20;
@@ -19,7 +23,9 @@ function failure(error: string): ActionFailure {
  *
  * On save: uploads the thumbnail to Supabase Storage, then creates the
  * InpaintVersion row. Enforces MAX_VERSIONS_PER_VARIANT (20) per slot using
- * FIFO: the oldest version is deleted when the cap is exceeded.
+ * FIFO: the oldest version is deleted when the cap is exceeded. The cap
+ * check and insert run inside one transaction, serialized per room by a
+ * SELECT … FOR UPDATE on the room row (issue #700).
  *
  * Contract: requires authenticated session owning the room's project.
  *
@@ -64,8 +70,11 @@ export async function saveInpaintVersion({
     if (!thumbnailCheck.ok) return failure(thumbnailCheck.error);
 
     const supabase = await createSupabaseRequestClient();
-    const ext = "jpg";
-    thumbnailStoragePath = `rooms/${roomId}/versions/${variantSlot}/${Date.now()}.${ext}`;
+    // Issue #700: the key ends in a random UUID, so two saves landing in the
+    // same millisecond can never overwrite each other's thumbnail object.
+    // Uploads are plain creates (upsert removed) — a key collision must be a
+    // loud error, not a silent overwrite of another version's image.
+    thumbnailStoragePath = versionThumbnailStoragePath(roomId, variantSlot);
 
     // Convert data URL to Blob
     const base64Response = await fetch(thumbnailDataUrl);
@@ -75,7 +84,6 @@ export async function saveInpaintVersion({
       .from("room-photos")
       .upload(thumbnailStoragePath, thumbnailBlob, {
         contentType: "image/jpeg",
-        upsert: true,
       });
 
     if (uploadError || !uploadData) {
@@ -89,65 +97,93 @@ export async function saveInpaintVersion({
     }
   }
 
-  // Enforce FIFO cap: count existing versions for this slot
-  const existingCount = await prisma.inpaintVersion.count({
-    where: { roomId, variantSlot },
-  });
+  // Issue #700: the FIFO cap check and the insert must run as ONE atomic
+  // read-modify-write. Previously count → deleteMany → create were separate
+  // queries, so two concurrent completions could both count 19/20 and both
+  // insert past the cap, or a failed create could leave the deleteMany
+  // committed — losing the oldest versions without recording the new one.
+  // The SELECT … FOR UPDATE on the room row serializes racing savers for the
+  // same room; the surrounding transaction keeps eviction + insert atomic.
+  try {
+    const { version, evicted } = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Room" WHERE id = ${roomId} FOR UPDATE`;
 
-  // Fetch oldest versions to delete if over cap
-  if (existingCount >= MAX_VERSIONS_PER_VARIANT) {
-    const oldestToDelete = await prisma.inpaintVersion.findMany({
-      where: { roomId, variantSlot },
-      orderBy: { createdAt: "asc" },
-      take: existingCount - MAX_VERSIONS_PER_VARIANT + 1,
-      select: { id: true, thumbnailUrl: true },
+      const existingCount = await tx.inpaintVersion.count({
+        where: { roomId, variantSlot },
+      });
+
+      let evicted: Array<{ id: string; thumbnailUrl: string | null }> = [];
+      const evictCount = fifoEvictionTake(
+        existingCount,
+        MAX_VERSIONS_PER_VARIANT
+      );
+
+      if (evictCount > 0) {
+        evicted = await tx.inpaintVersion.findMany({
+          where: { roomId, variantSlot },
+          orderBy: { createdAt: "asc" },
+          take: evictCount,
+          select: { id: true, thumbnailUrl: true },
+        });
+
+        await tx.inpaintVersion.deleteMany({
+          where: {
+            id: { in: evicted.map((v) => v.id) },
+          },
+        });
+      }
+
+      const version = await tx.inpaintVersion.create({
+        data: {
+          roomId,
+          variantSlot,
+          resultUrl,
+          thumbnailUrl: thumbnailPublicUrl,
+          seed: seed ?? null,
+          promptDirectives: promptDirectives ?? null,
+        },
+      });
+
+      return { version, evicted };
     });
 
-    // Delete oldest rows
-    await prisma.inpaintVersion.deleteMany({
-      where: {
-        id: { in: oldestToDelete.map((v) => v.id) },
-      },
-    });
+    // Best-effort cleanup of evicted thumbnails AFTER the transaction
+    // commits — storage failures must never lose the version rows.
+    if (evicted.length > 0) {
+      try {
+        const supabase = await createSupabaseRequestClient();
+        const pathsToDelete = evicted
+          .map((v) => v.thumbnailUrl)
+          .filter((url): url is string => Boolean(url))
+          .map((url) => {
+            try {
+              const u = new URL(url);
+              // Extract the storage path from the public URL
+              // Public URL format: https://xxx.supabase.co/storage/v1/object/public/room-photos/rooms/...
+              const pathParts = u.pathname.split("/storage/v1/object/public/");
+              return pathParts[1] ?? null;
+            } catch {
+              return null;
+            }
+          })
+          .filter((p): p is string => Boolean(p));
 
-    // Optionally delete thumbnail objects from storage (best-effort)
-    if (oldestToDelete.length > 0) {
-      const supabase = await createSupabaseRequestClient();
-      const pathsToDelete = oldestToDelete
-        .map((v) => v.thumbnailUrl)
-        .filter((url): url is string => Boolean(url))
-        .map((url) => {
-          try {
-            const u = new URL(url);
-            // Extract the storage path from the public URL
-            // Public URL format: https://xxx.supabase.co/storage/v1/object/public/room-photos/rooms/...
-            const pathParts = u.pathname.split("/storage/v1/object/public/");
-            return pathParts[1] ?? null;
-          } catch {
-            return null;
-          }
-        })
-        .filter((p): p is string => Boolean(p));
-
-      if (pathsToDelete.length > 0) {
-        await supabase.storage.from("room-photos").remove(pathsToDelete);
+        if (pathsToDelete.length > 0) {
+          await supabase.storage.from("room-photos").remove(pathsToDelete);
+        }
+      } catch (cleanupError) {
+        console.error(
+          "[inpaint-versions] evicted thumbnail cleanup failed:",
+          cleanupError
+        );
       }
     }
+
+    return { success: true, versionId: version.id };
+  } catch (error) {
+    console.error("[inpaint-versions] failed to save version:", error);
+    return failure("Failed to save version");
   }
-
-  // Create new version row
-  const version = await prisma.inpaintVersion.create({
-    data: {
-      roomId,
-      variantSlot,
-      resultUrl,
-      thumbnailUrl: thumbnailPublicUrl,
-      seed: seed ?? null,
-      promptDirectives: promptDirectives ?? null,
-    },
-  });
-
-  return { success: true, versionId: version.id };
 }
 
 /**
