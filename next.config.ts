@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Issue #783: Vercel Pro+ default serverless timeout is 10s, which is too
+  // short for PDF export (Browserless fetch + auth/DB overhead comfortably fit
+  // under 90s). The per-route `export const maxDuration = 90` in
+  // src/app/api/export-pdf/route.ts handles the lambda budget; this key handles
+  // the platform-level request timeout. Requires Vercel Pro or Enterprise.
+  maxDuration: 90,
   images: {
     // Issue #264: allow next/image optimizer to fetch from loopback private IPs
     // in the e2e harness. The mock Supabase storage runs on 127.0.0.1 and the
