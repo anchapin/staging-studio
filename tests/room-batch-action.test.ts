@@ -29,19 +29,15 @@ vi.mock("@/lib/room-type-detection", () => ({
   detectRoomType: mockDetectRoomType,
 }));
 
-vi.mock("@/lib/api-quota", () => ({
-  getDailyUsage: mockGetDailyUsage,
-  evaluateDailyBatchQuota: mockEvaluateDailyBatchQuota,
-  recordDailyUsage: mockRecordDailyUsage,
-  resolveDailyLimit: vi.fn(() => 20),
-  dailyQuotaExceededPayload: vi.fn((decision: { used: number; limit: number }, friendly: string) => ({
-    message: `Daily label quota exceeded. Used: ${decision.used}, Limit: ${decision.limit}. ${friendly}`,
-    used: decision.used,
-    limit: decision.limit,
-    remaining: Math.max(0, decision.limit - decision.used),
-  })),
-  DAILY_LIMIT_ENV_VAR: { label: "DAILY_LABEL_LIMIT" },
-}));
+vi.mock("@/lib/api-quota", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api-quota")>();
+  return {
+    ...actual,
+    getDailyUsage: mockGetDailyUsage,
+    evaluateDailyBatchQuota: mockEvaluateDailyBatchQuota,
+    recordDailyUsage: mockRecordDailyUsage,
+  };
+});
 
 // Re-import after mocks are set up
 const { detectBatchRoomTypes } = await import(
