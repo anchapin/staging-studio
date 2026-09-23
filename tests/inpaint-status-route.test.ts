@@ -107,3 +107,36 @@ describe("GET /api/inpaint/[requestId]/status — fal ERROR terminal state (issu
     expect(update).not.toHaveBeenCalled();
   });
 });
+
+describe("GET /api/inpaint/[requestId]/status — COMPLETED result-endpoint failure (issue #717)", () => {
+  it("logs inpaint_result_fetch_failed and responds with the retryable 500 when the result fetch fails", async () => {
+    falQueueStatus.mockResolvedValue({ status: "COMPLETED" });
+    const falQueueResult = fal.queue.result as unknown as Mock;
+    const resultError = new Error("fal result endpoint unavailable");
+    falQueueResult.mockRejectedValue(resultError);
+
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
+    const response = await callStatusRoute();
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body).toEqual({
+      error: "Processing incomplete",
+      message: "The image was processed but could not be retrieved. Please try again.",
+      retryable: true,
+    });
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    expect(consoleError).toHaveBeenCalledWith(
+      JSON.stringify({
+        event: "inpaint_result_fetch_failed",
+        requestId: REQUEST_ID,
+      }),
+      resultError
+    );
+
+    consoleError.mockRestore();
+  });
+});
