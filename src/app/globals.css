@@ -42,6 +42,100 @@
   --font-cinzel: var(--font-cinzel-google);
   --font-playfair: var(--font-playfair-google);
   --font-jakarta: var(--font-jakarta-google);
+  /* Issue #614: mono utility + Plus Jakarta Sans as the default sans body font */
+  --font-jetbrains: var(--font-jetbrains-google);
+  --font-sans: var(--font-jakarta-google);
+}
+
+/* Issue #614: Atelier Canvas typography tokens — combined utilities that
+   carry family + size + weight + line-height in a single class, exactly as
+   the Stitch spec table defines them. Values are pinned against
+   src/lib/typography-tokens.ts by tests/typography-tokens.test.ts.
+   Fonts: Playfair Display (display/headline editorial), Plus Jakarta Sans
+   (title/body/label UI), JetBrains Mono (code-inspector readouts). */
+@utility display-lg {
+  font-family: var(--font-playfair-google), Georgia, serif;
+  font-size: 3rem;
+  line-height: 3.5rem;
+  font-weight: 600;
+}
+@utility display-lg-mobile {
+  font-family: var(--font-playfair-google), Georgia, serif;
+  font-size: 3rem;
+  line-height: 3.5rem;
+  font-weight: 600;
+}
+@utility headline-lg {
+  font-family: var(--font-playfair-google), Georgia, serif;
+  font-size: 2rem;
+  line-height: 2.5rem;
+  font-weight: 500;
+}
+@utility headline-lg-mobile {
+  font-family: var(--font-playfair-google), Georgia, serif;
+  font-size: 2rem;
+  line-height: 2.5rem;
+  font-weight: 500;
+}
+@utility headline-md {
+  font-family: var(--font-playfair-google), Georgia, serif;
+  font-size: 1.5rem;
+  line-height: 2rem;
+  font-weight: 500;
+}
+@utility headline-sm {
+  font-family: var(--font-playfair-google), Georgia, serif;
+  font-size: 1.25rem;
+  line-height: 1.75rem;
+  font-weight: 600;
+}
+@utility title-md {
+  font-family: var(--font-jakarta-google), system-ui, sans-serif;
+  font-size: 1rem;
+  line-height: 1.5rem;
+  font-weight: 600;
+}
+@utility title-sm {
+  font-family: var(--font-jakarta-google), system-ui, sans-serif;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 600;
+}
+@utility body-lg {
+  font-family: var(--font-jakarta-google), system-ui, sans-serif;
+  font-size: 1rem;
+  line-height: 1.625rem;
+  font-weight: 400;
+}
+@utility body-md {
+  font-family: var(--font-jakarta-google), system-ui, sans-serif;
+  font-size: 0.875rem;
+  line-height: 1.375rem;
+  font-weight: 400;
+}
+@utility body-sm {
+  font-family: var(--font-jakarta-google), system-ui, sans-serif;
+  font-size: 0.8125rem;
+  line-height: 1.125rem;
+  font-weight: 400;
+}
+@utility label-md {
+  font-family: var(--font-jakarta-google), system-ui, sans-serif;
+  font-size: 0.75rem;
+  line-height: 1rem;
+  font-weight: 500;
+}
+@utility label-sm {
+  font-family: var(--font-jakarta-google), system-ui, sans-serif;
+  font-size: 0.6875rem;
+  line-height: 0.875rem;
+  font-weight: 600;
+}
+@utility code-inspector {
+  font-family: var(--font-jetbrains-google), ui-monospace, monospace;
+  font-size: 0.75rem;
+  line-height: 1rem;
+  font-weight: 400;
 }
 
 @layer base {
@@ -116,10 +210,20 @@
 
     /* Hairline divider token (Issue #640) */
     --outline-variant: #8C827A;
+
+    /* Issue #614: font stack aliases — canonical vars are minted by next/font
+       in src/app/layout.tsx; these aliases give every var(--font-*) consumer
+       (legacy CSS, tailwind aliases) a resolvable target. */
+    --font-cinzel: var(--font-cinzel-google);
+    --font-playfair: var(--font-playfair-google);
+    --font-jakarta: var(--font-jakarta-google);
+    --font-jetbrains: var(--font-jetbrains-google);
   }
   .theme {
-    --font-heading: var(--font-sans);
-    --font-sans: var(--font-sans);
+    /* Issue #614: both vars used to resolve to themselves (an invalid CSS
+       cycle); resolve them through the canonical Jakarta variable instead. */
+    --font-heading: var(--font-jakarta-google);
+    --font-sans: var(--font-jakarta-google);
   }
   .dark {
     --background: oklch(0.145 0 0);

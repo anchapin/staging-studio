@@ -201,8 +201,7 @@ export function SignatureCanvas({ onSave, clientName, disabled }: SignatureCanva
               onChange={(e) => setTypedName(e.target.value)}
               disabled={disabled}
               placeholder="Type your full name"
-              className="w-full px-4 py-3 font-playfair text-3xl italic text-center text-stone-800 bg-transparent outline-none disabled:opacity-50"
-              style={{ fontFamily: '"Playfair Display", Georgia, serif', fontStyle: "italic" }}
+              className="font-playfair w-full px-4 py-3 text-3xl italic text-center text-stone-800 bg-transparent outline-none disabled:opacity-50"
             />
             <canvas
               ref={canvasRef}

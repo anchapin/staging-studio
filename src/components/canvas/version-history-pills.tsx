@@ -225,16 +225,15 @@ export default function VersionHistoryPills({
                 key={version.id}
                 type="button"
                 onClick={() => handlePillClick(version, actualIndex)}
+                title={`Pass ${actualIndex + 1} — ${formatRelativeTime(version.createdAt)}`}
                 className={`
-                  relative h-7 px-2.5 rounded-full text-xs font-semibold transition-all
+                  relative h-7 px-2.5 rounded-full font-mono text-xs font-semibold transition-all
                   ${isActive
                     ? "bg-primary text-primary-foreground"
                     : "bg-transparent text-muted-foreground hover:bg-muted"
                   }
                   ${animatingPill && i === visibleVersions.length - 1 ? "animate-new-pill" : ""}
                 `}
-                title={`Pass ${actualIndex + 1} — ${formatRelativeTime(version.createdAt)}`}
-                style={{ fontFamily: "var(--font-jetbrains), monospace" }}
               >
                 v{actualIndex + 1}
               </button>

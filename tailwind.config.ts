@@ -1,5 +1,23 @@
 import type { Config } from "tailwindcss";
 
+import {
+  TYPOGRAPHY_FONTS,
+  TYPOGRAPHY_TOKEN_FAMILIES,
+  type TypographyToken,
+} from "./src/lib/typography-tokens";
+
+/**
+ * Issue #614: the 14 typography token → font-family mappings, generated from
+ * the shared token tables in src/lib/typography-tokens.ts (so `font-display-lg`
+ * … `font-code-inspector` all exist as utilities).
+ */
+const tokenFontFamilies = Object.fromEntries(
+  Object.entries(TYPOGRAPHY_TOKEN_FAMILIES).map(([token, family]) => [
+    token,
+    TYPOGRAPHY_FONTS[family].stack,
+  ]),
+) as Record<TypographyToken, string>;
+
 const config: Config = {
   darkMode: "selector",
   content: [
@@ -8,21 +26,27 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
+        ...tokenFontFamilies,
         // Atelier Canvas semantic aliases
-        display: ["var(--font-playfair)", "serif"],
-        heading: ["var(--font-playfair)", "serif"],
-        body: ["var(--font-plus-jakarta)", "sans-serif"],
-        sans: ["var(--font-plus-jakarta)", "sans-serif"],
+        display: [TYPOGRAPHY_FONTS.playfair.stack],
+        heading: [TYPOGRAPHY_FONTS.playfair.stack],
+        body: [TYPOGRAPHY_FONTS.jakarta.stack],
+        sans: [TYPOGRAPHY_FONTS.jakarta.stack],
         // Component-level aliases
-        cinzel: ["var(--font-cinzel)", "serif"],
-        playfair: ["var(--font-playfair)", "serif"],
-        jakarta: ["var(--font-plus-jakarta)", "sans-serif"],
-        jetbrains: ["var(--font-jetbrains)", "monospace"],
-        mono: ["var(--font-jetbrains)", "monospace"],
+        cinzel: [TYPOGRAPHY_FONTS.cinzel.stack],
+        playfair: [TYPOGRAPHY_FONTS.playfair.stack],
+        jakarta: [TYPOGRAPHY_FONTS.jakarta.stack],
+        jetbrains: [TYPOGRAPHY_FONTS.jetbrains.stack],
+        mono: [TYPOGRAPHY_FONTS.jetbrains.stack],
       },
       fontSize: {
         // Display (editorial hero headings)
         "display-lg": [
+          "3rem",
+          { lineHeight: "3.5rem", fontWeight: "600", letterSpacing: "-0.02em" },
+        ],
+        // Issue #614: mobile variants mirror desktop (spec defines no separate size)
+        "display-lg-mobile": [
           "3rem",
           { lineHeight: "3.5rem", fontWeight: "600", letterSpacing: "-0.02em" },
         ],
@@ -33,6 +57,11 @@ const config: Config = {
         "display-sm": ["2rem", { lineHeight: "2.5rem", fontWeight: "600" }],
         // Headlines (section titles, room names)
         "headline-lg": [
+          "2rem",
+          { lineHeight: "2.5rem", fontWeight: "500", letterSpacing: "-0.01em" },
+        ],
+        // Issue #614: mobile variant mirrors desktop (spec defines no separate size)
+        "headline-lg-mobile": [
           "2rem",
           { lineHeight: "2.5rem", fontWeight: "500", letterSpacing: "-0.01em" },
         ],
@@ -86,25 +115,21 @@ const config: Config = {
           },
         ],
         // Code / Technical (seed codes, coordinates)
+        // Note: font pairing comes from the `font-mono` / `font-code-inspector`
+        // utilities — Tailwind's fontSize scale only emits size/weight/spacing.
         "code-lg": [
           "0.875rem",
-          {
-            lineHeight: "1.25rem",
-            fontWeight: "400",
-            fontFamily: "var(--font-jetbrains)",
-          },
+          { lineHeight: "1.25rem", fontWeight: "400" },
         ],
         "code-md": [
           "0.75rem",
-          {
-            lineHeight: "1rem",
-            fontWeight: "400",
-            fontFamily: "var(--font-jetbrains)",
-          },
+          { lineHeight: "1rem", fontWeight: "400" },
         ],
-        "code-sm": [
-          "0.6875rem",
-          { lineHeight: "0.875rem", fontFamily: "var(--font-jetbrains)" },
+        "code-sm": ["0.6875rem", { lineHeight: "0.875rem" }],
+        // Issue #614: technical readout token (12px / 400 / 16px, JetBrains Mono)
+        "code-inspector": [
+          "0.75rem",
+          { lineHeight: "1rem", fontWeight: "400" },
         ],
       },
       colors: {
