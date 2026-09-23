@@ -105,14 +105,16 @@ export async function getCachedVisionLabels(params: {
   imageUrl: string;
   concept: string;
   instanceIndices: number[];
+  userId?: string;
 }) {
-  const { imageUrl, concept, instanceIndices } = params;
+  const { imageUrl, concept, instanceIndices, userId } = params;
   const imageUrlHash = hashImageUrl(imageUrl);
   const labels = await prisma.visionLabel.findMany({
     where: {
       imageUrlHash,
       concept,
       instanceIndex: { in: instanceIndices },
+      userId,
     },
   });
   return labels;
@@ -122,8 +124,9 @@ export async function upsertVisionLabels(params: {
   imageUrl: string;
   concept: string;
   results: Array<{ instanceIndex: number; label: string; score?: number }>;
+  userId?: string;
 }) {
-  const { imageUrl, concept, results } = params;
+  const { imageUrl, concept, results, userId } = params;
   const imageUrlHash = hashImageUrl(imageUrl);
   await prisma.visionLabel.createMany({
     data: results.map((r) => ({
@@ -132,6 +135,7 @@ export async function upsertVisionLabels(params: {
       instanceIndex: r.instanceIndex,
       label: r.label,
       score: r.score,
+      userId,
     })),
     skipDuplicates: true,
   });

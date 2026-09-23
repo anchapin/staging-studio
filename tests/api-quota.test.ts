@@ -84,6 +84,7 @@ describe("evaluateDailyQuota", () => {
       allowed: true,
       used: 0,
       limit: 20,
+      remaining: 20,
     });
     expect(evaluateDailyQuota(19, 20, midDay).allowed).toBe(true);
   });
@@ -291,7 +292,7 @@ describe("default limits and env var names", () => {
 describe("evaluateDailyBatchQuota (batch room-type detection, issue #681)", () => {
   it("allows a batch that fits entirely in the remaining headroom", () => {
     const decision = evaluateDailyBatchQuota(45, 5, 50);
-    expect(decision).toEqual({ allowed: true, used: 45, limit: 50 });
+    expect(decision).toEqual({ allowed: true, used: 45, limit: 50, remaining: 5 });
   });
 
   it("allows the exactly-filling batch (used + count === limit)", () => {

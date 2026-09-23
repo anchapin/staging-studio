@@ -105,7 +105,7 @@ model InpaintRequest {
                        // overwrites its "after" slot in place (selection untouched).
                        // Persisted so a pendingRequestId resume can apply the same
                        // result-persistence semantics as the original submit.
-  status      String   // mirrors fal queue status: IN_QUEUE | IN_PROGRESS | COMPLETED | ERROR
+  status      String   // mirrors fal queue status: IN_QUEUE | IN_PROGRESS | COMPLETED | ERROR | PERSISTENCE_FAILED
   resultUrl   String?  // filled when status is COMPLETED
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -133,6 +133,8 @@ model InpaintVersion {
 
 // VisionLabel model: caches GPT-4o-mini vision labels for detected instances
 // so re-opening the editor does not re-bill (issue #266).
+// userId scopes cache entries per-user so one user's billed labels are not
+// served to another user at no cost (issue #774).
 model VisionLabel {
   id             String   @id @default(cuid())
   imageUrlHash   String   // hash of imageUrl (stable identifier)
@@ -140,9 +142,10 @@ model VisionLabel {
   instanceIndex  Int
   label          String   // GPT-4o-mini's label text
   score          Float?
+  userId         String?  // optional: scopes cache to the user who paid
   createdAt      DateTime @default(now())
 
-  @@unique([imageUrlHash, concept, instanceIndex])
+  @@unique([imageUrlHash, concept, instanceIndex, userId])
 }
 
 // SelectionLog model: durable log of every instance toggle for the training

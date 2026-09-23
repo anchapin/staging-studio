@@ -10,6 +10,7 @@ import {
   RotateCcw,
   X,
 } from "lucide-react";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast";
 import { formatRelativeTime } from "@/lib/relative-time";
 import { useVersionHistory, type InpaintVersion } from "./use-version-history";
@@ -38,6 +39,7 @@ export default function VersionHistoryPanel({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewVersion, setPreviewVersion] = useState<InpaintVersion | null>(null);
   const [isRestoring, setIsRestoring] = useState(false);
+  const [pendingRestoreVersion, setPendingRestoreVersion] = useState<InpaintVersion | null>(null);
   const { showSuccess, showError } = useToast();
 
   useEffect(() => {
@@ -234,7 +236,7 @@ export default function VersionHistoryPanel({
             <div className="flex items-center justify-between gap-2">
               <button
                 type="button"
-                onClick={() => void handleRestore(previewVersion)}
+                onClick={() => setPendingRestoreVersion(previewVersion)}
                 disabled={isRestoring || activeResultUrl === previewVersion.resultUrl}
                 className="flex items-center gap-2 rounded-md bg-stone-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
               >
@@ -251,6 +253,21 @@ export default function VersionHistoryPanel({
           </div>
         </button>
       )}
+
+      <ConfirmDialog
+        open={pendingRestoreVersion !== null}
+        onCancel={() => setPendingRestoreVersion(null)}
+        onConfirm={() => {
+          if (pendingRestoreVersion) {
+            void handleRestore(pendingRestoreVersion);
+          }
+          setPendingRestoreVersion(null);
+        }}
+        title="Restore this version?"
+        message="This will overwrite the current version with this historical version. This action cannot be undone."
+        cancelLabel="Cancel"
+        confirmLabel="Restore"
+      />
     </>
   );
 }

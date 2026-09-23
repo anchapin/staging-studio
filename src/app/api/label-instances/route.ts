@@ -127,7 +127,7 @@ export async function POST(request: NextRequest) {
 
     // Issue #266: check the persistent cache before billing GPT-4o-mini.
     const instanceIndices = crops.map((c: { instanceIndex: number }) => c.instanceIndex);
-    const cached = await getCachedVisionLabels({ imageUrl, concept, instanceIndices });
+    const cached = await getCachedVisionLabels({ imageUrl, concept, instanceIndices, userId: user.id });
     if (cached.length > 0) {
       const labels = cached.map((row: { instanceIndex: number; label: string }) => ({
         instanceIndex: row.instanceIndex,
@@ -197,6 +197,7 @@ export async function POST(request: NextRequest) {
             label: l.label,
           })
         ),
+        userId: user.id,
       });
     }
 

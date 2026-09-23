@@ -43,21 +43,18 @@ describe("nextDelay", () => {
   });
 
   it("doubles delay after each call (statistical)", () => {
-    const check = (expectedMultiplier: number, op: "<" | ">") => {
-      const samples: [number, number][] = [];
-      for (let run = 0; run < 100; run++) {
-        const state = createBackoff(OPTS);
-        const d1 = nextDelay(state, OPTS);
-        const d2 = nextDelay(state, OPTS);
-        samples.push([d1, d2]);
-      }
-      // After doubling + jitter: mean(d2) ≈ 2× mean(d1), but d2 may be < d1 due to variance
-      // Check that d2 is statistically larger via sign test: count how often d2 > d1
-      const wins = samples.filter(([d1, d2]) => d2 > d1).length;
-      // With deterministic jitter, d2 is always > d1; with random jitter, d2 > d1 ~75% of the time
-      expect(wins).toBeGreaterThan(50); // majority should satisfy d2 > d1
-    };
-    check(2, ">");
+    const samples: [number, number][] = [];
+    for (let run = 0; run < 100; run++) {
+      const state = createBackoff(OPTS);
+      const d1 = nextDelay(state, OPTS);
+      const d2 = nextDelay(state, OPTS);
+      samples.push([d1, d2]);
+    }
+    // After doubling + jitter: mean(d2) ≈ 2× mean(d1), but d2 may be < d1 due to variance
+    // Check that d2 is statistically larger via sign test: count how often d2 > d1
+    const wins = samples.filter(([d1, d2]) => d2 > d1).length;
+    // With deterministic jitter, d2 is always > d1; with random jitter, d2 > d1 ~75% of the time
+    expect(wins).toBeGreaterThan(50); // majority should satisfy d2 > d1
   });
 
   it("caps at maxIntervalMs", () => {

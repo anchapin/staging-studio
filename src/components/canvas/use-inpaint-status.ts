@@ -51,7 +51,7 @@ async function _pollWithBackoff(
     let outcome: StatusOutcome;
     try {
       const response = await fetchStatus(requestId, signal);
-      outcome = classifyStatusResponse(response);
+      outcome = classifyStatusResponse(response.ok, response.httpStatus, response.body);
     } catch (error) {
       if (signal?.aborted) return { imageUrl: "", persisted: false };
       if (error instanceof InpaintPollError) throw error;
@@ -64,11 +64,11 @@ async function _pollWithBackoff(
     if (outcome.kind === "completed") {
       return { imageUrl: outcome.imageUrl, persisted: outcome.persisted };
     }
-    if (outcome.kind === "error") {
+    if (outcome.kind === "terminal") {
       throw new InpaintPollError("terminal", outcome.message);
     }
 
-    onProgress?.(outcome.message);
+    onProgress?.(outcome.kind === "retryable" ? outcome.message : outcome.status);
     const state = _getBackoff(requestId);
     const delayMs = nextDelay(state, _pollBackoffOptions);
     await new Promise((resolve) => setTimeout(resolve, delayMs));

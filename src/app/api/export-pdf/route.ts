@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
+// Browserless fetch + auth/DB overhead comfortably fit under 90s.
+// Default App Router limit is 10s, which is too short for PDF export.
+export const maxDuration = 90;
+
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { PREVIEW_TOKEN_QUERY_PARAM, signPreviewToken } from "@/lib/preview-token";

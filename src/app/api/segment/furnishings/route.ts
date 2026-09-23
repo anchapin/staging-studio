@@ -183,10 +183,9 @@ export async function POST(request: NextRequest) {
       throw new Error("Detection response did not include mask images");
     }
 
-    const maskDataUrls: string[] = [];
-    for (const maskUrl of detection.maskUrls) {
-      maskDataUrls.push(await fetchMaskAsDataUrl(maskUrl));
-    }
+    const maskDataUrls = await Promise.all(
+      detection.maskUrls.map((maskUrl) => fetchMaskAsDataUrl(maskUrl))
+    );
 
     // An empty maskDataUrls list is a VALID result ("no {concept} found"
     // is presentable, not an error) — the response succeeds either way.
