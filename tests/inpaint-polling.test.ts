@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   classifyStatusResponse,
+  pollInpaintStatus,
+  type FetchInpaintStatus,
   type InpaintStatusResponse,
 } from "@/lib/inpaint-polling";
 
@@ -91,6 +93,59 @@ describe("classifyStatusResponse", () => {
       expect(
         classifyStatusResponse(false, 503, { error: "down", retryable: false })
       ).toEqual({ kind: "terminal", message: "down" });
+    });
+  });
+
+  describe("terminal ERROR status (issue #686)", () => {
+    it("treats an ok ERROR response as terminal", () => {
+      expect(
+        classifyStatusResponse(true, 200, {
+          status: "ERROR",
+          message: "The image editing process encountered an error. Please try again.",
+          retryable: false,
+        })
+      ).toEqual({
+        kind: "terminal",
+        message: "The image editing process encountered an error. Please try again.",
+      });
+    });
+
+    it("treats a non-ok ERROR response as terminal even without retryable: false", () => {
+      expect(
+        classifyStatusResponse(false, 500, { status: "ERROR", error: "boom" })
+      ).toEqual({ kind: "terminal", message: "boom" });
+    });
+
+    it("falls back to a generic message when ERROR carries none", () => {
+      expect(classifyStatusResponse(true, 200, { status: "ERROR" })).toEqual({
+        kind: "terminal",
+        message: "The image editing process encountered an error. Please try again.",
+      });
+    });
+
+    it("stops polling immediately on a terminal ERROR response", async () => {
+      const fetchStatus = vi.fn().mockResolvedValue({
+        ok: false,
+        httpStatus: 500,
+        body: {
+          status: "ERROR",
+          error: "Inpainting failed",
+          message: "The image editing process encountered an error. Please try again.",
+          retryable: false,
+        },
+      });
+
+      await expect(
+        pollInpaintStatus(fetchStatus as unknown as FetchInpaintStatus, "req-1", {
+          sleep: vi.fn(),
+        })
+      ).rejects.toMatchObject({
+        name: "InpaintPollError",
+        reason: "terminal",
+        message: "The image editing process encountered an error. Please try again.",
+      });
+
+      expect(fetchStatus).toHaveBeenCalledTimes(1);
     });
   });
 });

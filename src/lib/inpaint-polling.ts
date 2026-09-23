@@ -1,6 +1,9 @@
 /** Parsed status payload returned by the inpainting status endpoint. */
 export interface InpaintStatusResponse {
-  /** Queue status (e.g. `"completed"` while processing, per the API route). */
+  /**
+   * Queue status (e.g. `"completed"` while processing, per the API route);
+   * `"ERROR"` is the terminal failure marker (issue #686).
+   */
   status?: string;
   /** Final staged image URL, present only on successful completion. */
   imageUrl?: string;
@@ -124,7 +127,8 @@ function ensureNotAborted(signal?: AbortSignal): void {
  * Purpose: pure decision core of the polling loop, so the rules are
  * testable without HTTP. Rules: 2xx + `"completed"` + non-empty
  * `imageUrl` → `completed`; 2xx + `"completed"` without a URL →
- * `retryable`; other 2xx → `pending`; non-2xx → `retryable` when
+ * `retryable`; any response with `status === "ERROR"` → `terminal`
+ * (issue #686); other 2xx → `pending`; non-2xx → `retryable` when
  * `body.retryable === true` OR (HTTP ≥ 500 AND `body.retryable !==
  * false`), else `terminal`.
  *
@@ -143,6 +147,19 @@ export function classifyStatusResponse(
       kind: "retryable",
       message:
         body.message || body.error || "The image was processed but could not be retrieved.",
+    };
+  }
+
+  // fal ERROR mirrors "completed"'s special-casing: the status marker alone
+  // is authoritative and terminal (issue #686), regardless of the HTTP
+  // status or an absent retryable hint — a dead job must stop the poller.
+  if (body.status === "ERROR") {
+    return {
+      kind: "terminal",
+      message:
+        body.message ||
+        body.error ||
+        "The image editing process encountered an error. Please try again.",
     };
   }
 

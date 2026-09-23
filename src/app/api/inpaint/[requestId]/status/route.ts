@@ -18,6 +18,16 @@ const INPAINT_STATUS_ERROR_COPY = {
   },
 };
 
+// Terminal payload for a permanently failed inpaint job (fal ERROR).
+// `retryable: false` + `status: "ERROR"` are both read as terminal by the
+// client's polling classifier (src/lib/inpaint-polling.ts).
+const INPAINT_TERMINAL_ERROR_BODY = {
+  status: "ERROR",
+  error: "Inpainting failed",
+  message: "The image editing process encountered an error. Please try again.",
+  retryable: false,
+};
+
 interface FalStatusResult {
   status: string;
   images?: Array<{ url: string }>;
@@ -104,19 +114,38 @@ export async function GET(
       });
     }
 
+    // Terminal durability (issue #686): an ERROR row is a permanently dead
+    // job — serve the terminal payload immediately without calling fal.
+    // This also covers resumed polls after a refresh, so they fail fast
+    // instead of burning the full poll budget against a dead requestId.
+    if (inpaintRequest.status === "ERROR") {
+      return NextResponse.json(INPAINT_TERMINAL_ERROR_BODY, { status: 500 });
+    }
+
     const falQueueStatus = fal.queue.status as FalQueueStatusFunction;
     const falQueueResult = fal.queue.result as FalQueueResultFunction;
     const statusResponse = await falQueueStatus(FAL_FLUX_FILL_MODEL, { requestId });
 
     if (statusResponse.status === "ERROR") {
-      return NextResponse.json(
-        {
-          error: "Inpainting failed",
-          message: "The image editing process encountered an error. Please try again.",
-          retryable: true,
-        },
-        { status: 500 }
-      );
+      // Persist the terminal state so subsequent and resumed polls
+      // short-circuit above. Best-effort: a failed write must not flip the
+      // terminal response back into a retryable one.
+      try {
+        await prisma.inpaintRequest.update({
+          where: { id: requestId },
+          data: { status: "ERROR" },
+        });
+      } catch (recordError) {
+        console.error(
+          JSON.stringify({
+            event: "inpaint_error_record_failed",
+            requestId,
+          }),
+          recordError
+        );
+      }
+
+      return NextResponse.json(INPAINT_TERMINAL_ERROR_BODY, { status: 500 });
     }
 
     if (statusResponse.status === "COMPLETED") {
