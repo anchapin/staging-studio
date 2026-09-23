@@ -1,6 +1,5 @@
 "use server";
 
-import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { revalidatePath } from "next/cache";
@@ -19,10 +18,7 @@ import {
   recordDailyUsage,
   resolveDailyLimit,
 } from "@/lib/api-quota";
-import {
-  ROOM_TYPE_SYSTEM_PROMPT,
-  detectRoomType,
-} from "@/lib/room-type-detection";
+import { detectRoomType } from "@/lib/room-type-detection";
 
 
 export interface BatchRoomEntry {
