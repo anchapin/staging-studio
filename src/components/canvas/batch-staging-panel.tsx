@@ -15,6 +15,7 @@ import {
 } from "@/lib/multi-select-batch";
 import { buildPrefill } from "@/lib/prompt-prefill";
 import { resolveRegionLabel } from "@/lib/vision-labels";
+import { sliderFillStyle } from "@/lib/precision-slider";
 import { paletteCssColor } from "./inpaint-mask-canvas";
 import { getAestheticChips } from "@/lib/aesthetic-chips";
 import {
@@ -322,7 +323,8 @@ export default function BatchStagingPanel({
                 value={declutterIntensity}
                 onChange={(event) => setDeclutterIntensity(Number(event.target.value) as DeclutterIntensity)}
                 aria-label="Declutter intensity"
-                className="mt-2 w-full accent-orange-500"
+                className="atelier-slider mt-2 w-full"
+                style={sliderFillStyle(declutterIntensity, 1, 5)}
               />
               <div className="mt-1 flex justify-between text-xs text-orange-600 dark:text-orange-400">
                 <span>Light</span>

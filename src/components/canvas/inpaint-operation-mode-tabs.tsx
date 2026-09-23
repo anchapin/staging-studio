@@ -14,6 +14,8 @@ import {
   Check,
 } from "lucide-react";
 
+import { sliderFillStyle } from "@/lib/precision-slider";
+
 // ---------------------------------------------------------------------------
 // Issue #629: Inpaint Operation Mode tabs — a secondary tab strip that switches
 // between different AI inpaint operations (Inpaint Zone, Restore Original,
@@ -215,7 +217,8 @@ export default function InpaintOperationModeTabs({
                   value={strength}
                   onChange={(e) => onStrengthChange(Number(e.target.value))}
                   aria-label="Inpaint strength"
-                  className="flex-1 accent-atelier-primary"
+                  className="atelier-slider flex-1"
+                  style={sliderFillStyle(strength, 0, 100)}
                 />
                 <span className="w-10 text-right tabular-nums font-medium text-atelier-taupe">
                   {strength}%
@@ -233,7 +236,8 @@ export default function InpaintOperationModeTabs({
                   value={guidanceScale}
                   onChange={(e) => onGuidanceScaleChange(Number(e.target.value))}
                   aria-label="Guidance scale"
-                  className="flex-1 accent-atelier-primary"
+                  className="atelier-slider flex-1"
+                  style={sliderFillStyle(guidanceScale, 1, 20)}
                 />
                 <span className="w-10 text-right tabular-nums font-medium text-atelier-taupe">
                   {guidanceScale}
@@ -358,7 +362,8 @@ export default function InpaintOperationModeTabs({
                   value={relightIntensity}
                   onChange={(e) => onRelightIntensityChange(Number(e.target.value))}
                   aria-label="Light intensity"
-                  className="flex-1 accent-atelier-primary"
+                  className="atelier-slider flex-1"
+                  style={sliderFillStyle(relightIntensity, 0, 100)}
                 />
                 <span className="w-10 text-right tabular-nums font-medium text-atelier-taupe">
                   {relightIntensity}%
@@ -375,7 +380,8 @@ export default function InpaintOperationModeTabs({
                   value={relightTemperature}
                   onChange={(e) => onRelightTemperatureChange(Number(e.target.value))}
                   aria-label="Color temperature"
-                  className="flex-1 accent-atelier-primary"
+                  className="atelier-slider flex-1"
+                  style={sliderFillStyle(relightTemperature, 0, 100)}
                 />
                 <span className="w-14 text-right tabular-nums font-medium text-atelier-taupe text-xs">
                   {relightTemperature < 33

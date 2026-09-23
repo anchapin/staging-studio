@@ -8,6 +8,7 @@ import {
   WORKBENCH_DIRECTIVE_GRID_CLASSES,
   WORKBENCH_TOPBAR_SURFACE_CLASSES,
 } from "@/lib/workbench-layout";
+import { sliderFillStyle } from "@/lib/precision-slider";
 
 /** Card chrome shared by the four directive cards (issue #620). */
 const DIRECTIVE_CARD_CLASSES =
@@ -155,6 +156,7 @@ export default function GlobalStagingDirectivesBar({
               value={realismValue}
               onChange={(e) => onRealismChange(Number(e.target.value))}
               className="atelier-slider w-24"
+              style={sliderFillStyle(realismValue, 0, 100)}
               aria-label="Realism and lighting slider"
             />
             <span className="font-mono text-xs text-foreground tabular-nums" aria-live="polite">
