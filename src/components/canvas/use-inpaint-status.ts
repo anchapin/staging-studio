@@ -32,7 +32,12 @@ const fetchInpaintStatus: FetchInpaintStatus = async (requestId, signal) => {
 export type StartInpaint = (signal: AbortSignal) => Promise<string>;
 
 export interface UseInpaintStatusCallbacks {
-  onCompleted?: (resultImageUrl: string) => void;
+  /**
+   * Fired when a run completes. `persisted` is `false` when the image URL
+   * is an expiring fal CDN URL that was not saved to durable storage
+   * (issue #687) — consumers must warn and skip persisting it.
+   */
+  onCompleted?: (resultImageUrl: string, persisted: boolean) => void;
   showSuccess: (message: string) => void;
   showError: (
     message: string,
@@ -83,7 +88,7 @@ export function useInpaintStatus(
       if (signal.aborted) return;
       setStatusText("Processing image...");
 
-      const resultImageUrl = await pollInpaintStatus(fetchInpaintStatus, requestId, {
+      const result = await pollInpaintStatus(fetchInpaintStatus, requestId, {
         ...POLL_OPTIONS,
         signal,
         onProgress: (status) => setStatusText(`Processing: ${status}`),
@@ -97,8 +102,13 @@ export function useInpaintStatus(
       }
       if (signal.aborted) return;
 
-      callbacksRef.current.showSuccess("Inpainting completed successfully!");
-      callbacksRef.current.onCompleted?.(resultImageUrl);
+      // Issue #687: a non-durable completion (expiring fal URL) is not a
+      // success — suppress the generic success toast so the completion
+      // warning is the only signal the user sees.
+      if (result.persisted) {
+        callbacksRef.current.showSuccess("Inpainting completed successfully!");
+      }
+      callbacksRef.current.onCompleted?.(result.imageUrl, result.persisted);
       setIsProcessing(false);
       setStatusText("");
     } catch (error) {

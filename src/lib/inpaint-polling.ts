@@ -13,6 +13,12 @@ export interface InpaintStatusResponse {
   message?: string;
   /** Explicit retry hint; `true` forces retryable, `false` forces terminal. */
   retryable?: boolean;
+  /**
+   * Whether the completed image was persisted to durable storage
+   * (issue #687). `false` means `imageUrl` is an expiring fal CDN URL;
+   * absent means durable.
+   */
+  persisted?: boolean;
 }
 
 /** Transport-level result of one status fetch: HTTP outcome plus parsed body. */
@@ -66,10 +72,22 @@ export class InpaintPollError extends Error {
 
 /** Classification of one status response ({@link classifyStatusResponse}). */
 export type StatusOutcome =
-  | { kind: "completed"; imageUrl: string }
+  | { kind: "completed"; imageUrl: string; persisted: boolean }
   | { kind: "pending"; status: string }
   | { kind: "retryable"; message: string }
   | { kind: "terminal"; message: string };
+
+/**
+ * Successful result of {@link pollInpaintStatus}: the final image URL plus
+ * whether it was persisted to durable storage (issue #687 — an expiring
+ * fal URL arrives with `persisted: false`).
+ */
+export interface InpaintPollResult {
+  /** Final staged image URL. */
+  imageUrl: string;
+  /** Whether the URL is durable storage (`false` = expiring fal CDN URL). */
+  persisted: boolean;
+}
 
 /**
  * Tuning knobs for {@link pollInpaintStatus}; every field is optional and
@@ -126,7 +144,9 @@ function ensureNotAborted(signal?: AbortSignal): void {
  *
  * Purpose: pure decision core of the polling loop, so the rules are
  * testable without HTTP. Rules: 2xx + `"completed"` + non-empty
- * `imageUrl` → `completed`; 2xx + `"completed"` without a URL →
+ * `imageUrl` → `completed` (normalizing `persisted` so only an explicit
+ * `false` marks the URL as a non-durable fal CDN URL — issue #687);
+ * 2xx + `"completed"` without a URL →
  * `retryable`; any response with `status === "ERROR"` → `terminal`
  * (issue #686); other 2xx → `pending`; non-2xx → `retryable` when
  * `body.retryable === true` OR (HTTP ≥ 500 AND `body.retryable !==
@@ -141,7 +161,11 @@ export function classifyStatusResponse(
 ): StatusOutcome {
   if (ok && body.status === "completed") {
     if (typeof body.imageUrl === "string" && body.imageUrl.length > 0) {
-      return { kind: "completed", imageUrl: body.imageUrl };
+      return {
+        kind: "completed",
+        imageUrl: body.imageUrl,
+        persisted: body.persisted !== false,
+      };
     }
     return {
       kind: "retryable",
@@ -198,16 +222,17 @@ export function classifyStatusResponse(
  * @param fetchStatus Injectable status fetcher (see
  *   {@link FetchInpaintStatus}).
  * @param requestId The `InpaintRequest.id` being polled.
- * @param options Optional tuning/signals (see {@link PollOptions}).
- * @returns The completed staged image URL.
- * @throws {@link InpaintPollError} with `reason` `"aborted"`,
- *   `"terminal"`, `"timeout"`, or `"max-attempts"`.
- */
+   * @param options Optional tuning/signals (see {@link PollOptions}).
+   * @returns The completed staged image URL plus its durability flag
+   *   (issue #687: `persisted: false` marks an expiring fal CDN URL).
+   * @throws {@link InpaintPollError} with `reason` `"aborted"`,
+   *   `"terminal"`, `"timeout"`, or `"max-attempts"`.
+   */
 export async function pollInpaintStatus(
   fetchStatus: FetchInpaintStatus,
   requestId: string,
   options: PollOptions = {}
-): Promise<string> {
+): Promise<InpaintPollResult> {
   const intervalMs = options.intervalMs ?? DEFAULT_INTERVAL_MS;
   const maxIntervalMs = options.maxIntervalMs ?? DEFAULT_MAX_INTERVAL_MS;
   const maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
@@ -258,7 +283,7 @@ export async function pollInpaintStatus(
 
     switch (outcome.kind) {
       case "completed":
-        return outcome.imageUrl;
+        return { imageUrl: outcome.imageUrl, persisted: outcome.persisted };
       case "pending":
         options.onProgress?.(outcome.status);
         break;

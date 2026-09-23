@@ -18,7 +18,31 @@ describe("classifyStatusResponse", () => {
       expect(classifyStatusResponse(true, 200, body)).toEqual({
         kind: "completed",
         imageUrl: "https://example.supabase.co/storage/v1/object/public/out.png",
+        persisted: true,
       });
+    });
+
+    it("carries persisted:false through so consumers can reject expiring fal URLs (issue #687)", () => {
+      expect(
+        classifyStatusResponse(true, 200, {
+          status: "completed",
+          imageUrl: "https://fal.media/flux/tmp/expiring.png",
+          persisted: false,
+        })
+      ).toEqual({
+        kind: "completed",
+        imageUrl: "https://fal.media/flux/tmp/expiring.png",
+        persisted: false,
+      });
+    });
+
+    it("normalizes an absent persisted flag to true (durable by default)", () => {
+      expect(
+        classifyStatusResponse(true, 200, {
+          status: "completed",
+          imageUrl: "https://example.supabase.co/storage/v1/object/public/out.png",
+        })
+      ).toMatchObject({ kind: "completed", persisted: true });
     });
 
     it("returns retryable when status is completed but imageUrl is missing", () => {
@@ -146,6 +170,50 @@ describe("classifyStatusResponse", () => {
       });
 
       expect(fetchStatus).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+describe("pollInpaintStatus completion result", () => {
+  it("resolves with the imageUrl and persisted:true for a durable completion", async () => {
+    const fetchStatus = vi.fn().mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      body: {
+        status: "completed",
+        imageUrl: "https://example.supabase.co/storage/v1/object/public/out.png",
+        persisted: true,
+      },
+    });
+
+    await expect(
+      pollInpaintStatus(fetchStatus as unknown as FetchInpaintStatus, "req-1", {
+        sleep: vi.fn(),
+      })
+    ).resolves.toEqual({
+      imageUrl: "https://example.supabase.co/storage/v1/object/public/out.png",
+      persisted: true,
+    });
+  });
+
+  it("resolves with persisted:false for a non-durable completion (issue #687)", async () => {
+    const fetchStatus = vi.fn().mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      body: {
+        status: "completed",
+        imageUrl: "https://fal.media/flux/tmp/expiring.png",
+        persisted: false,
+      },
+    });
+
+    await expect(
+      pollInpaintStatus(fetchStatus as unknown as FetchInpaintStatus, "req-1", {
+        sleep: vi.fn(),
+      })
+    ).resolves.toEqual({
+      imageUrl: "https://fal.media/flux/tmp/expiring.png",
+      persisted: false,
     });
   });
 });

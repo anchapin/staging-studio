@@ -32,6 +32,10 @@ import {
   type InspectorRailActionId,
 } from "@/lib/inspector-panel";
 import {
+  shouldPersistResult,
+  INPAINT_NOT_PERSISTED_WARNING,
+} from "@/lib/inpaint-completion";
+import {
   entireRoomTabVisible,
   inpaintSourceLabel,
   inpaintSourcesEqual,
@@ -990,7 +994,22 @@ export default function InpaintEditor({
   // and failures are captured for the panel's retry affordance instead of
   // the toast's own single-step retry.
   const { isProcessing, statusText, start } = useInpaintStatus({
-    onCompleted: (resultImageUrl) => {
+    onCompleted: (resultImageUrl, persisted) => {
+      // Issue #687: `persisted: false` means the completion carries an
+      // expiring fal CDN URL — never write it into the room variant slot
+      // (onInpaintComplete) or an InpaintVersion row (saveInpaintVersion);
+      // both would rot when the link dies. Warn instead: single runs get a
+      // persistent error toast, batch steps route the message to the
+      // panel's failure affordance (the toast path is suppressed in batch
+      // mode, mirroring showError below).
+      const persistDecision = shouldPersistResult({ imageUrl: resultImageUrl, persisted });
+      if (!persistDecision.persist) {
+        batchFailureRef.current = INPAINT_NOT_PERSISTED_WARNING;
+        if (!batchActiveRef.current) {
+          showError(INPAINT_NOT_PERSISTED_WARNING);
+        }
+        return;
+      }
       batchOutcomeRef.current = { kind: "completed", url: resultImageUrl };
       // Update the active result URL for the version history panel (issue #561)
       setActiveResultUrl(resultImageUrl);
