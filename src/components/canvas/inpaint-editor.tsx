@@ -50,6 +50,14 @@ import BatchStagingPanel from "./batch-staging-panel";
 import { useConceptSegments } from "./use-segment-prewarm";
 import { SegmentCache, type SegmentCacheEntry } from "@/lib/segment-cache";
 import {
+  armForCurrentBase,
+  initialSegmentRefreshState,
+  isSegmentDetectionArmed,
+  markCompletionRebase,
+  markUserSourceNavigation,
+  resolveBaseImageChange,
+} from "@/lib/segment-refresh-policy";
+import {
   buildConceptEmptyMessage,
   buildSelectionLoggedEvent,
   CONCEPT_CHIPS,
@@ -646,6 +654,14 @@ export default function InpaintEditor({
   // batch panel's structure, cap, and dispatch are unchanged. There is no
   // other selection source (the old per-click SAM path is gone).
   const [requestedConcept, setRequestedConcept] = useState<string>(DEFAULT_CONCEPT);
+  // Issue #748: refresh-detection billing policy — detection is armed per
+  // base image. Post-completion rebases onto the staged result land LAZY
+  // (the billed SAM call fires only on an explicit user refresh). Pure
+  // machine in lib/segment-refresh-policy.ts, pinned 1:1 in tests/.
+  const [segmentRefresh, setSegmentRefresh] = useState(() =>
+    initialSegmentRefreshState(imageUrl)
+  );
+  const detectionArmed = isSegmentDetectionArmed(segmentRefresh, imageUrl);
   const [displayedResult, setDisplayedResult] = useState<SegmentCacheEntry | null>(null);
   const [decodedInstances, setDecodedInstances] = useState<
     Array<DecodedInstance | null> | null
@@ -723,8 +739,11 @@ export default function InpaintEditor({
   // `warm: true` ping is gone; one call per (image, concept) returns every
   // instance, so there is nothing cheaper to warm with). Chip switches
   // reuse this machinery; the SegmentCache serves repeats without a fetch.
+  // Issue #748: `enabled` is the lazy-refresh gate — the hook only fires
+  // for a base the user authorized (editor open, user source switch, or
+  // an explicit refresh), never for a bare post-completion rebase.
   const conceptSegments = useConceptSegments({
-    enabled: true,
+    enabled: detectionArmed,
     roomId,
     imageUrl: imageUrl || null,
     imageWidth: imageDims?.width ?? null,
@@ -736,6 +755,28 @@ export default function InpaintEditor({
     ),
   });
   const conceptLoading = conceptSegments.status === "warming";
+
+  // Issue #748: resolve the refresh policy whenever the base image (or
+  // the policy state itself) changes. A completion rebase — the parent
+  // persists the staged result and switches the editor onto it — lands
+  // LAZY: no billed refresh fires, and the stale per-image detection
+  // state below is cleared so masks from the previous photo never tint
+  // the new base. User-driven source switches arm the new base instead
+  // (the #202/#228 auto-fire lifecycle; their own reset lives in
+  // handleSourceChange).
+  useEffect(() => {
+    const outcome = resolveBaseImageChange(segmentRefresh, imageUrl);
+    if (outcome.nextState) setSegmentRefresh(outcome.nextState);
+    if (!outcome.resetStaleDetection) return;
+    setRequestedConcept(DEFAULT_CONCEPT);
+    setDisplayedResult(null);
+    setDecodedInstances(null);
+    setInstanceLabels(null);
+    setSelectedInstanceIndices([]);
+    setBatchSelections([]);
+    setConceptInputError(null);
+    setSelectAllNotice(null);
+  }, [imageUrl, segmentRefresh]);
 
   // Install fetched results into the cache so re-selecting the concept
   // later is free (the hook itself never writes the cache). The fetched
@@ -860,6 +901,9 @@ export default function InpaintEditor({
   // fall through to the hook's fetch above.
   const handleConceptChange = useCallback(
     (concept: string) => {
+      // Issue #748: picking a concept on a lazily-detected base IS the
+      // explicit refresh — arm before the concept key change fires.
+      setSegmentRefresh((state) => armForCurrentBase(state, imageUrl));
       setRequestedConcept(concept);
       setConceptInputError(null);
       setDisplayedResult(segmentCacheRef.current?.get(imageUrl, concept) ?? null);
@@ -888,6 +932,31 @@ export default function InpaintEditor({
     setConceptInput("");
     handleConceptChange(candidate);
   };
+
+  // Issue #748: the explicit refresh affordances. Activating the
+  // detection surface on the current base — the Auto detect tab, the
+  // Select Regions tool, a concept chip (via handleConceptChange), or
+  // the refresh button in the detect panel — authorizes (and fires) the
+  // billed SAM call for a base that landed lazy.
+  const armDetectionForCurrentBase = useCallback(() => {
+    setSegmentRefresh((state) => armForCurrentBase(state, imageUrl));
+  }, [imageUrl]);
+
+  const handleTabSelect = useCallback(
+    (tab: EditorTabId) => {
+      setActiveTab(tab);
+      if (tab === "detect") armDetectionForCurrentBase();
+    },
+    [armDetectionForCurrentBase]
+  );
+
+  const handleStudioToolChange = useCallback(
+    (tool: StudioTool) => {
+      setStudioActiveTool(tool);
+      if (tool === "select") armDetectionForCurrentBase();
+    },
+    [armDetectionForCurrentBase]
+  );
 
   // Decode the displayed result's alpha cutouts into hit-test grids (at
   // the mask-canvas resolution — click points arrive in that space) plus
@@ -1006,6 +1075,10 @@ export default function InpaintEditor({
       batchOutcomeRef.current = { kind: "completed", url: resultImageUrl };
       // Update the active result URL for the version history panel (issue #561)
       setActiveResultUrl(resultImageUrl);
+      // Issue #748: the parent is about to rebase this editor onto the
+      // staged result — mark the rebase so the new base lands LAZY (no
+      // billed refresh detection; only an explicit user refresh fires).
+      setSegmentRefresh(markCompletionRebase);
       onInpaintComplete?.(resultImageUrl, runSourceRef.current);
       // Issue #561: save the completed version to the history. Thumbnail
       // generation requires browser canvas, so run it here. Errors are
@@ -1314,6 +1387,9 @@ export default function InpaintEditor({
       setSelectedInstanceIndices([]);
       setConceptInputError(null);
       setSelectAllNotice(null);
+      // Issue #748: a USER-driven source switch pre-authorizes detection
+      // for the base the parent is about to resolve (#202/#228 auto-fire).
+      setSegmentRefresh(markUserSourceNavigation);
       onSourceChange?.(next);
     },
     [source, onSourceChange]
@@ -1337,6 +1413,8 @@ export default function InpaintEditor({
     setSelectedInstanceIndices([]);
     setConceptInputError(null);
     setSelectAllNotice(null);
+    // Issue #748: undo is a user-driven source switch — arm the restored base.
+    setSegmentRefresh(markUserSourceNavigation);
     onSourceChange?.(prev);
   }, [source, onSourceChange]);
 
@@ -1782,7 +1860,7 @@ export default function InpaintEditor({
     (actionId: InspectorRailActionId) => {
       const target = resolveInspectorRailTarget(actionId);
       inspectorPanel.setIsCollapsed(false);
-      setActiveTab(target.tab);
+      handleTabSelect(target.tab);
       // Issue #692: only switch to modes with a shipped backend — the
       // Relight rail action still expands the inspector and lands on the
       // Manual paint tab, but never activates a disabled mode.
@@ -1793,7 +1871,7 @@ export default function InpaintEditor({
         setOperationMode(target.operationMode);
       }
     },
-    [inspectorPanel]
+    [inspectorPanel, handleTabSelect]
   );
 
   return (
@@ -1922,6 +2000,7 @@ export default function InpaintEditor({
           onBrushSizeChange={zenMode ? setZenBrushSize : undefined}
           activeTool={zenMode ? zenActiveTool : undefined}
           onActiveToolChange={zenMode ? setZenActiveTool : undefined}
+          onSelectRegionsActivate={armDetectionForCurrentBase}
         />
 
         {/* Issue #560: expand selection and floor shadow controls hidden in Zen Mode */}
@@ -2083,7 +2162,7 @@ export default function InpaintEditor({
             <EditorTabBar
               tabs={editorTabs}
               activeTab={effectiveTab}
-              onSelectTab={setActiveTab}
+              onSelectTab={handleTabSelect}
               idBase={tabIdBase}
             />
           </div>
@@ -2181,6 +2260,28 @@ export default function InpaintEditor({
             hidden={effectiveTab !== "detect"}
           >
             <div className="flex flex-col gap-3">
+              {/* Issue #748: the base was rebased (a run completed) and
+                  refresh detection landed LAZY — no SAM call was billed
+                  for the new image. This button is the explicit refresh;
+                  concept chips and the Select Regions tool arm too. */}
+              {!detectionArmed && imageUrl && (
+                <div
+                  role="status"
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-atelier-taupe/40 bg-atelier-canvas px-3 py-2"
+                >
+                  <p className="font-jakarta text-xs text-atelier-primary">
+                    New staged image — furnishings detection is paused to save quota.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={armDetectionForCurrentBase}
+                    disabled={isProcessing}
+                    className="px-2.5 py-1 font-jakarta text-xs rounded-md border border-atelier-primary bg-white text-atelier-primary hover:bg-atelier-canvas transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Detect furnishings
+                  </button>
+                </div>
+              )}
               {/* Issue #228: concept chips + validated free text. Chips
                   enforce single-concept by construction; free text is
                   validated with isValidConceptName (the server schema's
@@ -2371,6 +2472,9 @@ export default function InpaintEditor({
               // canvas — typically by calling onInpaintComplete or updating
               // the active result URL.
               setSelectedVariationId(variation.id);
+              // Issue #748: applying a variation rebases the editor onto a
+              // new base — land it lazy like any other completion rebase.
+              setSegmentRefresh(markCompletionRebase);
               onInpaintComplete?.(variation.resultUrl, source);
             }}
           />
@@ -2407,7 +2511,7 @@ export default function InpaintEditor({
         <div className="fixed left-6 top-6 z-50 flex flex-col items-start gap-3">
           <BrushToolRail
             activeTool={studioActiveTool}
-            onToolChange={setStudioActiveTool}
+            onToolChange={handleStudioToolChange}
           />
           {studioActiveTool === "brush" && (
             <BrushParameterFlyout

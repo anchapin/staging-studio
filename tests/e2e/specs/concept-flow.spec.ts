@@ -263,15 +263,21 @@ test.describe("sam 3.1 concept find-and-replace flow", () => {
       instanceIndex: 1,
     });
 
-    // ---- 8. Cache-served chip return: furniture is already warm ---------
+    // ---- 8. Chip click on the staged base: the explicit lazy refresh ---
     await page.getByRole("button", { name: "furniture" }).click();
-    // The SegmentCache serves the repeat concept without a fetch — the
-    // effect would have fired synchronously on an uncached switch. The
-    // call ledger: three concept detections (auto-fire furniture, sofa,
-    // normalized rug) plus TWO post-completion refresh detections the
-    // editor fires over each freshly staged batch result so instance
-    // overlays re-sync to the new base image (issue #742 behavior). The
-    // cache-served furniture return adds none of them.
-    expect(detection.requestCount()).toBe(5);
+    // Issue #748: refresh detection is LAZY — the two batch completions
+    // above billed NO refresh detections over the staged results. The
+    // chip click IS the explicit refresh: one billed furniture detection
+    // over the freshly staged base (the SegmentCache never saw that URL),
+    // which in turn bills its one batched vision-labeling call.
+    await expect
+      .poll(() => detection.requestCount(), { timeout: 15_000 })
+      .toBe(4);
+    const refreshBody = detection.submitBody();
+    expect(refreshBody.concept).toBe("furniture");
+    expect(String(refreshBody.imageUrl)).toContain("staged-results/");
+    await expect
+      .poll(() => labeling.requestCount(), { timeout: 15_000 })
+      .toBe(4);
   });
 });

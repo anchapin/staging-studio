@@ -144,6 +144,12 @@ interface InpaintMaskCanvasProps {
   activeTool?: MaskTool;
   /** Issue #560: callback when active tool changes (Zen Mode). */
   onActiveToolChange?: (tool: MaskTool) => void;
+  /**
+   * Issue #748: fired when the user activates the Select Regions tool.
+   * Refresh detection is lazy after a completion rebase — the parent
+   * arms (and bills) the SAM call for the current base on this signal.
+   */
+  onSelectRegionsActivate?: () => void;
   /** Issue #560: when true, hides the toolbar and non-essential chrome. */
   zenMode?: boolean;
   /** Natural aspect ratio (width / height) of the source photo; sizes the mask canvas to match it. */
@@ -246,6 +252,7 @@ export default function InpaintMaskCanvas({
   detectingConcept,
   activeTool: externalActiveTool,
   onActiveToolChange,
+  onSelectRegionsActivate,
   zenMode = false,
 }: InpaintMaskCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -1650,6 +1657,9 @@ export default function InpaintMaskCanvas({
                 } else {
                   setInternalActiveTool("select");
                 }
+                // Issue #748: activating Select Regions is an explicit
+                // refresh signal for a lazily-detected base.
+                onSelectRegionsActivate?.();
               }}
               className={
                 activeTool === "select"

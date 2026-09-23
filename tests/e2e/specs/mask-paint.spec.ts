@@ -346,23 +346,20 @@ test.describe("restage furnishings preset", () => {
     });
 
     // The PRESET's detection call was room-scoped and targeted the source
-    // photo. The editor fires several detections during this flow
-    // (issue #742): the editor-open auto-fire (#1), the preset's own
-    // fetch (#2), and — once the staged result persists — a refresh
-    // detection over the NEW staged image so instance overlays track
-    // the result (#3). submitBody() is last-call-wins, so assert
-    // against the ordered list instead.
+    // photo. Issue #748 made refresh detection LAZY: the only billed
+    // calls are the user-driven ones — the editor-open auto-fire (#1,
+    // issue #228) and the preset's own click-scoped fetch (#2). The
+    // completion above must NOT have billed a SAM call over the staged
+    // result; detection stays paused until an explicit refresh.
+    expect(detection.requestCount()).toBe(2);
     const detectionBodies = detection.submitBodies();
-    expect(detection.requestCount()).toBeGreaterThanOrEqual(3);
     const presetDetection = detectionBodies[1];
     expect(presetDetection.roomId).toBe(E2E_EDITOR_ROOM_ID);
     expect(String(presetDetection.imageUrl)).toContain("before-image.png");
-    // Pin the post-completion refresh too: it must target the freshly
-    // staged result (the base image the editor now shows), never the
-    // original photo.
-    const refreshDetection = detectionBodies[detectionBodies.length - 1];
-    expect(refreshDetection.roomId).toBe(E2E_EDITOR_ROOM_ID);
-    expect(String(refreshDetection.imageUrl)).toContain("staged-results/");
+    for (const body of detectionBodies) {
+      // No detection ever targeted the freshly staged image.
+      expect(String(body.imageUrl)).not.toContain("staged-results/");
+    }
 
     // The run carries the furnishings-scoped directives and the hardened
     // negative prompt (architecture terms reintroduced — issue #223).
