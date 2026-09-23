@@ -73,12 +73,16 @@ test.describe("rehearsal drill", () => {
     await expect(page.getByRole("button", { name: "All rooms" })).toBeVisible();
 
     // ---- Directives + mask --------------------------------------------
+    // ("Staging directives (required)" is the Room Details field — the
+    // Manual paint panel's inline mirror carries a distinct label since
+    // issue #742, so this locator stays unique.)
     await page.getByLabel("Staging directives (required)").fill(DIRECTIVES);
     await paintMaskZigzag(page);
     // Issue #252: the single-object run affordance lives in the Manual
-    // paint tab; the editor opens on Auto detect (flag on).
+    // paint tab; the editor opens on Auto detect (flag on). The run
+    // button reads "Generate" since #629's operation mode tabs.
     await openEditorTab(page, "Manual paint");
-    const applyButton = page.getByRole("button", { name: "Apply Inpainting" });
+    const applyButton = page.getByRole("button", { name: "Generate", exact: true });
     await expect(applyButton).toBeEnabled();
 
     // ---- Inpaint (fal.ai simulated) ------------------------------------
@@ -112,9 +116,13 @@ test.describe("rehearsal drill", () => {
     await expect(page.getByRole("button", { name: "All rooms" })).toBeVisible();
 
     // ---- Copy (OpenAI simulated) ---------------------------------------
+    // Copy generation reads the room's shared staging directives — the
+    // Room copy section no longer carries its own directives box (its
+    // hint now points at the Room Details field), so seed the copy run
+    // through that field (issue #742).
     const copyForm = page.locator('section[aria-label="Room copy"]');
-    await copyForm
-      .getByLabel("Staging Directives")
+    await page
+      .getByLabel("Staging directives (required)")
       .fill("Key priorities: brighten, declutter, and define a seating area.");
     await copyForm.getByRole("button", { name: "Generate Copy" }).click();
     await expect(page.getByText("Copy generated successfully!")).toBeVisible({
@@ -162,17 +170,26 @@ test.describe("rehearsal drill", () => {
 
     await login(page);
     await page.goto(REHEARSAL_PROJECT);
+
+    // The drill needs an image + mask. Upload from the all-rooms grid
+    // BEFORE entering the focused editor: since #450 the focused editor
+    // shows its own source-image canvas (RoomCanvas is hidden while the
+    // InpaintEditor is active), so the room card's upload/replace
+    // affordance only exists in the grid view.
+    await uploadRoomPhotoViaUi(
+      page,
+      {
+        name: "rehearsal-photo.png",
+        mimeType: "image/png",
+        buffer: roomPhotoFixture(),
+      },
+      "Rehearsal Room"
+    );
+
     await page
       .locator(".space-y-3", { hasText: "Rehearsal Room" })
       .getByRole("button", { name: "Edit staging" })
       .click();
-
-    // The drill needs an image + mask; upload first.
-    await uploadRoomPhotoViaUi(page, {
-      name: "rehearsal-photo.png",
-      mimeType: "image/png",
-      buffer: roomPhotoFixture(),
-    });
 
     await page.getByLabel("Staging directives (required)").fill(DIRECTIVES);
     await paintMaskZigzag(page);
@@ -180,7 +197,7 @@ test.describe("rehearsal drill", () => {
     // paint tab; the editor opens on Auto detect (flag on).
     await openEditorTab(page, "Manual paint");
 
-    await page.getByRole("button", { name: "Apply Inpainting" }).click();
+    await page.getByRole("button", { name: "Generate", exact: true }).click();
 
     // The submit itself succeeds (interception), then polling reports the
     // terminal failure — the fallback reveal must name the problem and

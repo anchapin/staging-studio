@@ -995,13 +995,26 @@ export default function InpaintMaskCanvas({
       setIsSelecting(false);
       const startPoint = selectionDragStartRef.current;
       selectionDragStartRef.current = null;
-      // Normalize rect so width/height are always positive
-      if (selectionRect) {
+      // A plain click (press + release with no movement while pressed)
+      // never sets selectionRect — handleMove's drag branch only runs
+      // once the pointer moves with the button held. Treat that null
+      // case as a zero-size rect at the start point so the tiny-movement
+      // branch below routes the click to the instance toggle (issue
+      // #228) instead of silently dropping it. Pixel-exact clicks
+      // (automation, keyboard-adjacent input) have zero mid-press
+      // movement and were previously lost here (issue #742).
+      const rawRect =
+        selectionRect ??
+        (startPoint
+          ? { x: startPoint.x, y: startPoint.y, width: 0, height: 0 }
+          : null);
+      if (rawRect) {
+        // Normalize rect so width/height are always positive
         const normalized = {
-          x: selectionRect.width < 0 ? selectionRect.x + selectionRect.width : selectionRect.x,
-          y: selectionRect.height < 0 ? selectionRect.y + selectionRect.height : selectionRect.y,
-          width: Math.abs(selectionRect.width),
-          height: Math.abs(selectionRect.height),
+          x: rawRect.width < 0 ? rawRect.x + rawRect.width : rawRect.x,
+          y: rawRect.height < 0 ? rawRect.y + rawRect.height : rawRect.y,
+          width: Math.abs(rawRect.width),
+          height: Math.abs(rawRect.height),
         };
         // Tiny movement = treat as an instance click (issue #228) if overlays exist;
         // otherwise treat as a cancelled selection.

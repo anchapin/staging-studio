@@ -34,8 +34,16 @@ test.describe("lookbook page access (issue #250)", () => {
     const response = await page.goto(LOOKBOOK_URL);
     expect(response?.status()).toBe(200);
 
-    // Cover page content…
-    await expect(page.getByText(SEEDED_ADDRESS).first()).toBeVisible();
+    // Cover page content… The address assertion is scoped to the main
+    // landmark: the dashboard sidebar also renders the project address
+    // (a truncated span, hidden while the rail is collapsed) EARLIER in
+    // DOM order, so an unscoped `.first()` pins that hidden span
+    // instead of the lookbook's own cover text (issue #742). The
+    // /preview/[id] route has no sidebar, hence its unscoped twin below
+    // still passes.
+    await expect(
+      page.getByRole("main").getByText(SEEDED_ADDRESS).first()
+    ).toBeVisible();
     // …and the room spread heading, proving room data reached the view.
     await expect(page.getByRole("heading", { name: SEEDED_ROOM })).toBeVisible();
   });
@@ -211,11 +219,18 @@ test.describe("preview page Edit Lookbook link (issue #250)", () => {
     await login(page);
     await page.goto(PREVIEW_URL);
 
-    const editLink = page.getByRole("link", { name: "Edit Lookbook" });
-    await expect(editLink).toBeVisible();
-    await editLink.click();
+    // The edit affordance became a dropdown button in the #250
+    // follow-up redesign (EditLookbookDropdown): opening it reveals
+    // per-section menu links that deep-link into the edit page via
+    // #anchors, so the URL assertion tolerates a trailing fragment.
+    const editButton = page.getByRole("button", { name: "Edit Lookbook" });
+    await expect(editButton).toBeVisible();
+    await editButton.click();
+    const editCover = page.getByRole("menuitem", { name: "Edit Cover" });
+    await expect(editCover).toBeVisible();
+    await editCover.click();
     await expect(page).toHaveURL(
-      new RegExp(`/projects/${E2E_REHEARSAL_PROJECT_ID}/lookbook$`)
+      new RegExp(`/projects/${E2E_REHEARSAL_PROJECT_ID}/lookbook(#.*)?$`)
     );
   });
 
@@ -229,6 +244,11 @@ test.describe("preview page Edit Lookbook link (issue #250)", () => {
     await expect(page.getByText("303 Rehearsal Road").first()).toBeVisible();
     await expect(
       page.getByRole("link", { name: "Edit Lookbook" })
+    ).toHaveCount(0);
+    // The dropdown BUTTON is equally owner-only — the capture path must
+    // not surface any edit affordance at all.
+    await expect(
+      page.getByRole("button", { name: "Edit Lookbook" })
     ).toHaveCount(0);
   });
 });
@@ -246,7 +266,12 @@ test.describe("lookbook page UX feedback (issue #250 follow-ups)", () => {
     await expect(page).toHaveURL(
       new RegExp(`/projects/${E2E_REHEARSAL_PROJECT_ID}/lookbook$`)
     );
-    await expect(page.getByText("303 Rehearsal Road").first()).toBeVisible();
+    // Scoped to the main landmark — the collapsed dashboard sidebar's
+    // truncated address span precedes the lookbook content in DOM order
+    // and an unscoped .first() would pin that hidden span (issue #742).
+    await expect(
+      page.getByRole("main").getByText("303 Rehearsal Road").first()
+    ).toBeVisible();
 
     // Default mode is Preview: paper rendering, not editors.
     await expect(page.getByRole("button", { name: "Edit" })).toBeVisible();

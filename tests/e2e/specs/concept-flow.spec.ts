@@ -208,9 +208,15 @@ test.describe("sam 3.1 concept find-and-replace flow", () => {
     expect(bodies[1].promptDirectives).toBe("Replace the sofa with a walnut side table.");
     // The first object edits the original photo; the second CHAINS from the
     // first object's staged result — per-object results stack into the
-    // same variant, so step 2's source is step 1's output.
+    // same variant, so step 2's source is step 1's output. The fixture's
+    // persisted staged URL lives on the mock storage host (its own
+    // e2e-fixture.supabase.co marker host was dropped during the
+    // buildout so /_next/image could fetch it server-side), so identity
+    // is asserted via the staged-results object path (issue #742).
     expect(bodies[0].imageUrl).toContain(`/rooms/${E2E_CONCEPT_ROOM_ID}/before-image.png`);
-    expect(bodies[1].imageUrl).toContain("e2e-fixture.supabase.co");
+    expect(bodies[1].imageUrl).toContain(
+      "/storage/v1/object/public/staged-results/e2e-staged.png"
+    );
     for (const body of bodies) {
       expect(body.roomId).toBe(E2E_CONCEPT_ROOM_ID);
       expect(body.variantSlot).toBe(0);
@@ -260,8 +266,12 @@ test.describe("sam 3.1 concept find-and-replace flow", () => {
     // ---- 8. Cache-served chip return: furniture is already warm ---------
     await page.getByRole("button", { name: "furniture" }).click();
     // The SegmentCache serves the repeat concept without a fetch — the
-    // effect would have fired synchronously on an uncached switch. (The
-    // three billed calls so far: auto-fire furniture, sofa, normalized rug.)
-    expect(detection.requestCount()).toBe(3);
+    // effect would have fired synchronously on an uncached switch. The
+    // call ledger: three concept detections (auto-fire furniture, sofa,
+    // normalized rug) plus TWO post-completion refresh detections the
+    // editor fires over each freshly staged batch result so instance
+    // overlays re-sync to the new base image (issue #742 behavior). The
+    // cache-served furniture return adds none of them.
+    expect(detection.requestCount()).toBe(5);
   });
 });
