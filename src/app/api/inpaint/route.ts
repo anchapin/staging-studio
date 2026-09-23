@@ -61,6 +61,51 @@ type FalQueueSubmitFunction = (
   options: { input: Record<string, unknown> }
 ) => Promise<{ request_id: string }>;
 
+// Issue #688: by the time the requestId → room row is written, the fal
+// job is already queued and billed. A transient DB failure there must
+// NOT surface as a 500 — the client's retry would submit a brand-new
+// paid job while the first run stays orphaned. Bounded retry with
+// backoff is the primary defense; if every attempt fails, the response
+// degrades (see the response-shape comment below).
+const INPAINT_CREATE_ATTEMPTS = 3;
+const INPAINT_CREATE_RETRY_DELAY_MS = 200;
+
+interface InpaintRecordCreateData {
+  id: string;
+  roomId: string;
+  variantSlot: number;
+  sourceSlot: number | null;
+  status: "IN_QUEUE";
+}
+
+async function createInpaintRequestWithRetry(
+  data: InpaintRecordCreateData
+): Promise<void> {
+  for (let attempt = 1; attempt <= INPAINT_CREATE_ATTEMPTS; attempt += 1) {
+    try {
+      await prisma.inpaintRequest.create({ data });
+      return;
+    } catch (error) {
+      if (attempt === INPAINT_CREATE_ATTEMPTS) {
+        throw error;
+      }
+      console.error(
+        JSON.stringify({
+          event: "inpaint_record_create_retry",
+          requestId: data.id,
+          roomId: data.roomId,
+          attempt,
+          attempts: INPAINT_CREATE_ATTEMPTS,
+        }),
+        error
+      );
+      await new Promise((resolve) =>
+        setTimeout(resolve, INPAINT_CREATE_RETRY_DELAY_MS)
+      );
+    }
+  }
+}
+
 export async function POST(request: NextRequest) {
   // Hoisted so the catch block can correlate failures with the room even
   // when the error fires before/after the request body is parsed.
@@ -186,19 +231,48 @@ export async function POST(request: NextRequest) {
 
     // Persist the requestId → room mapping before responding so the status
     // route can attribute requests and a refresh can resume polling.
-    await prisma.inpaintRequest.create({
-      data: {
+    // Issue #688: the paid fal job is already queued at this point, so a
+    // DB blip must not 500 (the client's retry would submit a second
+    // paid job). Retry with backoff; if every attempt fails, degrade the
+    // response instead of erroring.
+    let recordDegraded = false;
+    try {
+      await createInpaintRequestWithRetry({
         id: submission.request_id,
         roomId: room.id,
         variantSlot,
         sourceSlot,
         status: "IN_QUEUE",
-      },
-    });
+      });
+    } catch (recordError) {
+      recordDegraded = true;
+      console.error(
+        JSON.stringify({
+          event: "inpaint_record_create_failed",
+          requestId: submission.request_id,
+          roomId: room.id,
+          attempts: INPAINT_CREATE_ATTEMPTS,
+          degraded: true,
+        }),
+        recordError
+      );
+    }
 
+    // Response shape (issue #688): `{ requestId, qualityWarnings }` on the
+    // happy path; `{ requestId, qualityWarnings, degraded: true }` when the
+    // paid fal job was submitted but the mapping row could not be persisted
+    // after INPAINT_CREATE_ATTEMPTS attempts. Residual gap (accepted for
+    // #688, documented rather than widened): with no row,
+    // `GET /api/inpaint/[requestId]/status` 404s — it cannot attribute an
+    // unknown requestId to this caller without weakening the ownership
+    // check — so a fully degraded run is not pollable; the flag lets the
+    // client suppress a duplicate paid re-submit (#698) and the
+    // `inpaint_record_create_failed` log line anchors recovery of the
+    // billed requestId.
     return NextResponse.json({
       requestId: submission.request_id,
       qualityWarnings,
+      ...(recordDegraded ? { degraded: true } : {}),
     });
   } catch (error) {
     console.error(
