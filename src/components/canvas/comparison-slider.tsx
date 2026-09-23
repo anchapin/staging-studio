@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import {
+  SLIDER_REVEAL_TARGET_PERCENT,
   nudgeSliderPercent,
+  sliderClipPath,
   sliderPercentFromClientX,
 } from "@/lib/comparison-slider-geometry";
 import { ComparisonPill } from "./comparison-pill";
@@ -62,7 +64,7 @@ export default function ComparisonSlider({
     // Small delay to let the image render first
     const animTimer = setTimeout(() => {
       setRevealed(true);
-      setSliderPosition(50);
+      setSliderPosition(SLIDER_REVEAL_TARGET_PERCENT);
       // Show tooltip briefly after animation completes
       const tooltipTimer = setTimeout(() => {
         setTooltipVisible(true);
@@ -225,7 +227,7 @@ export default function ComparisonSlider({
       <div
         className="absolute inset-0"
         style={{
-          clipPath: `inset(0 ${100 - sliderPosition}% 0 0)`,
+          clipPath: sliderClipPath(sliderPosition),
           // Issue #623: passive reveal animation — animate from 0% to 50%
           transition: revealed
             ? "clip-path 0s"

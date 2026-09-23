@@ -9,8 +9,9 @@
  * tests/comparison-slider.test.ts (repo pattern: pure logic in
  * `src/lib/<name>.ts`, never test components directly).
  *
- * Deliberately minimal — issue #708 tracks fuller geometry extraction;
- * extend this module rather than duplicating it.
+ * Issue #693 extracted the pointer clamp and keyboard nudge; issue #708
+ * completed the extraction with the clip-path split and the passive
+ * reveal target. All position geometry for this component lives here.
  *
  * Distinct from lib/split-comparison-canvas.ts (issue #618 studio canvas,
  * whose clamps fall back to a 42% initial split): this component has no
@@ -22,6 +23,13 @@ export const MAX_SLIDER_PERCENT = 100;
 
 /** Percentage moved per ArrowLeft / ArrowRight keypress. */
 export const SLIDER_KEYBOARD_STEP = 5;
+
+/**
+ * Position the report-mode passive reveal animation lands on (issue #623:
+ * the 0 → 50% sweep over 800ms that advertises the comparison on first
+ * load). Exact center, so neither side starts favored.
+ */
+export const SLIDER_REVEAL_TARGET_PERCENT = 50;
 
 /** Clamp a slider percentage to the valid 0–100 range. */
 export function clampSliderPercent(value: number): number {
@@ -47,4 +55,15 @@ export function sliderPercentFromClientX(
  */
 export function nudgeSliderPercent(percent: number, direction: 1 | -1): number {
   return clampSliderPercent(percent + direction * SLIDER_KEYBOARD_STEP);
+}
+
+/**
+ * clip-path that reveals the after (top-layer) image up to `percent`,
+ * clipping from the right edge: at 0% the after image is fully hidden,
+ * at 100% fully shown. `percent` is clamped so a stray out-of-range
+ * value can never produce a negative (expanding) inset. Inverse of the
+ * handle position: the visible width equals the slider percentage.
+ */
+export function sliderClipPath(percent: number): string {
+  return `inset(0 ${MAX_SLIDER_PERCENT - clampSliderPercent(percent)}% 0 0)`;
 }

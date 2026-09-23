@@ -3,20 +3,23 @@ import {
   MAX_SLIDER_PERCENT,
   MIN_SLIDER_PERCENT,
   SLIDER_KEYBOARD_STEP,
+  SLIDER_REVEAL_TARGET_PERCENT,
   clampSliderPercent,
   nudgeSliderPercent,
+  sliderClipPath,
   sliderPercentFromClientX,
 } from "@/lib/comparison-slider-geometry";
 
 /**
- * Issue #623 / #693: before/after comparison slider geometry.
+ * Issue #623 / #693 / #708: before/after comparison slider geometry.
  *
  * Pins the pure slider math in lib/comparison-slider-geometry.ts 1:1 —
- * the clientX→percent clamp and keyboard ±5 nudge that drive the
- * clip-path split, handle position, and mobile progress bar in
- * src/components/canvas/comparison-slider.tsx. (Replaces the pre-#693
- * tautology test that asserted its own inline class-string literals,
- * including hard-coded hex tokens that duplicated color-tokens.ts.)
+ * the clientX→percent clamp, keyboard ±5 nudge, and clip-path split
+ * that drive the reveal in src/components/canvas/comparison-slider.tsx.
+ * (Replaces the pre-#693 tautology test that asserted its own inline
+ * class-string literals, including hard-coded hex tokens that duplicated
+ * color-tokens.ts. Issue #708 completed the extraction with the
+ * clip-path inset and the passive reveal target.)
  */
 
 describe("clampSliderPercent", () => {
@@ -107,5 +110,51 @@ describe("slider geometry constants", () => {
     expect(MIN_SLIDER_PERCENT).toBe(0);
     expect(MAX_SLIDER_PERCENT).toBe(100);
     expect(SLIDER_KEYBOARD_STEP).toBe(5);
+  });
+
+  it("reveals at the exact center so neither side starts favored", () => {
+    expect(SLIDER_REVEAL_TARGET_PERCENT).toBe(50);
+    expect(SLIDER_REVEAL_TARGET_PERCENT).toBeGreaterThanOrEqual(MIN_SLIDER_PERCENT);
+    expect(SLIDER_REVEAL_TARGET_PERCENT).toBeLessThanOrEqual(MAX_SLIDER_PERCENT);
+  });
+});
+
+describe("sliderClipPath — clip-path split for the after image", () => {
+  it("fully hides the after image at 0%", () => {
+    expect(sliderClipPath(0)).toBe("inset(0 100% 0 0)");
+  });
+
+  it("fully shows the after image at 100%", () => {
+    expect(sliderClipPath(100)).toBe("inset(0 0% 0 0)");
+  });
+
+  it("splits at the midpoint for 50%", () => {
+    expect(sliderClipPath(50)).toBe("inset(0 50% 0 0)");
+  });
+
+  it("inverts the slider position: visible width equals the percentage", () => {
+    expect(sliderClipPath(25)).toBe("inset(0 75% 0 0)");
+    expect(sliderClipPath(75)).toBe("inset(0 25% 0 0)");
+  });
+
+  it("handles fractional positions without formatting drift", () => {
+    expect(sliderClipPath(62.5)).toBe("inset(0 37.5% 0 0)");
+  });
+
+  it("clamps out-of-range positions instead of emitting a negative inset", () => {
+    expect(sliderClipPath(120)).toBe("inset(0 0% 0 0)");
+    expect(sliderClipPath(-5)).toBe("inset(0 100% 0 0)");
+  });
+
+  it("matches the reveal target's split at the animation's landing position", () => {
+    expect(sliderClipPath(SLIDER_REVEAL_TARGET_PERCENT)).toBe("inset(0 50% 0 0)");
+  });
+
+  it("round-trips against sliderPercentFromClientX at the same rect point", () => {
+    // Pointer at the rect's left edge: 0% → after image hidden.
+    const rect = { left: 100, width: 400 };
+    expect(sliderClipPath(sliderPercentFromClientX(100, rect))).toBe("inset(0 100% 0 0)");
+    // Pointer at the rect's right edge: 100% → after image fully shown.
+    expect(sliderClipPath(sliderPercentFromClientX(500, rect))).toBe("inset(0 0% 0 0)");
   });
 });
