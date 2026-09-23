@@ -73,7 +73,7 @@ interface LookbookPreviewViewProps {
 }
 
 /**
- * Pure lookbook renderer for `/projects/:id/preview`. Server-safe (no
+ * Pure lookbook renderer for `/preview/:id`. Server-safe (no
  * hooks, no client fetch): the page's server component loads the project
  * and passes it in, so the full lookbook markup is present in the initial
  * HTML response — required for the cookie-less Browserless PDF capture.

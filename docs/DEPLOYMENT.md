@@ -6,12 +6,12 @@ Coming from a fresh clone? [docs/SUPABASE-SETUP.md](SUPABASE-SETUP.md) is the co
 
 ## The one thing to get right: `NEXT_PUBLIC_APP_URL`
 
-PDF export (`POST /api/export-pdf`, `src/app/api/export-pdf/route.ts`) does not render the lookbook itself. It hands a URL to Browserless.io's **cloud-hosted headless Chrome**, which fetches the printable lookbook page (`/projects/[id]/preview`) and prints it to PDF. That cloud browser is a separate machine: it has no access to `localhost`, your dev machine, or any private network.
+PDF export (`POST /api/export-pdf`, `src/app/api/export-pdf/route.ts`) does not render the lookbook itself. It hands a URL to Browserless.io's **cloud-hosted headless Chrome**, which fetches the printable lookbook page (`/preview/[id]`) and prints it to PDF. That cloud browser is a separate machine: it has no access to `localhost`, your dev machine, or any private network.
 
 The URL it is told to fetch is built by prefixing `NEXT_PUBLIC_APP_URL`:
 
 ```
-${NEXT_PUBLIC_APP_URL}/projects/${projectId}/preview?token=...
+${NEXT_PUBLIC_APP_URL}/preview/${projectId}?token=...
 ```
 
 The consequences:

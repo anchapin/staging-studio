@@ -23,12 +23,10 @@ describe("buildBrowserlessPdfUrl", () => {
 
 describe("buildBrowserlessPdfBody", () => {
   it("pins the exact request body shape for the paid PDF render", () => {
-    expect(
-      buildBrowserlessPdfBody(
-        "https://stagingstudio.example.com/projects/cabc123/preview?token=t"
-      )
-    ).toEqual({
-      url: "https://stagingstudio.example.com/projects/cabc123/preview?token=t",
+    const previewUrl =
+      "https://stagingstudio.example.com/preview/cabc123?token=t";
+    expect(buildBrowserlessPdfBody(previewUrl)).toEqual({
+      url: previewUrl,
       gotoOptions: {
         waitUntil: "networkidle0",
       },
