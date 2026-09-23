@@ -25,12 +25,10 @@ import {
   INSPECTOR_PANEL_STORAGE_KEY,
   resolveInspectorPanelView,
   resolveInspectorRailTarget,
-  resolveInspectorShortcut,
   type InspectorRailActionId,
 } from "@/lib/inspector-panel";
 import {
   entireRoomTabVisible,
-  inpaintSourceLabel,
   inpaintSourcesEqual,
   type InpaintSource,
 } from "@/lib/inpaint-source";
@@ -42,13 +40,13 @@ import EntireTabPanel from "./entire-tab-panel";
 import ManualTabPanel from "./manual-tab-panel";
 import DetectTabPanel from "./detect-tab-panel";
 import { useConceptDetection } from "./use-concept-detection";
+import { useWorkspaceShortcuts } from "./use-workspace-shortcuts";
+import SourceSelectorFieldset from "./source-selector-fieldset";
+import InspectorFooterPanels from "./inspector-footer-panels";
 import { useSelectionMaskComposer } from "./use-selection-mask-composer";
 import { useInpaintRuns } from "./use-inpaint-runs";
 import { batchProgressText, hasFailedStep } from "@/lib/multi-select-batch";
-import VersionHistoryPanel from "./version-history-panel";
-import GeneratedVariationGrid, {
-  type GeneratedVariation,
-} from "./generated-variation-grid";
+import { type GeneratedVariation } from "./generated-variation-grid";
 import VersionHistoryPills from "./version-history-pills";
 
 interface InpaintEditorProps {
@@ -359,73 +357,19 @@ export default function InpaintEditor({
 
   const aspectRatio = imageDims ? imageDims.width / imageDims.height : null;
 
-  // Issue #560: keyboard shortcuts for Zen Mode — Z toggles, Escape exits.
-  // Issue #638: keyboard shortcut for Focus Canvas Mode — F toggles, Escape exits.
-  // Issue #588: backtick (`) toggles all collapsible panels.
-  // Issue #617: Cmd/Ctrl+B toggles the right inspector panel; F is classified
-  // by the same resolver so modifier combos (Cmd/Ctrl+F stays browser Find)
-  // never trigger Focus Canvas Mode.
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      const isInput =
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable;
-
-      if (e.key === "z" || e.key === "Z") {
-        if (!isInput) {
-          e.preventDefault();
-          setZenMode((prev) => !prev);
-        }
-      }
-
-      // Issue #617/#638: inspector + focus-mode shortcut resolution
-      // (pure, pinned by tests/inspector-panel.test.ts).
-      const shortcut = resolveInspectorShortcut({
-        key: e.key,
-        metaKey: e.metaKey,
-        ctrlKey: e.ctrlKey,
-        altKey: e.altKey,
-        isTextEntry: isInput,
-      });
-      if (shortcut === "toggle-inspector") {
-        e.preventDefault();
-        inspectorPanel.toggle();
-      }
-      if (shortcut === "toggle-focus-mode") {
-        e.preventDefault();
-        setFocusMode((prev) => !prev);
-      }
-
-      if (e.key === "Escape" && (zenMode || focusMode)) {
-        e.preventDefault();
-        setZenMode(false);
-        setFocusMode(false);
-      }
-
-      // Issue #588: backtick toggles all workspace panels
-      if (e.key === "`" && !isInput) {
-        e.preventDefault();
-        const allCollapsed =
-          brushPanel.isCollapsed && promptPanel.isCollapsed && variantPanel.isCollapsed && generatedVariationsPanel.isCollapsed;
-        if (allCollapsed) {
-          brushPanel.setIsCollapsed(false);
-          promptPanel.setIsCollapsed(false);
-          variantPanel.setIsCollapsed(false);
-          generatedVariationsPanel.setIsCollapsed(false);
-        } else {
-          brushPanel.setIsCollapsed(true);
-          promptPanel.setIsCollapsed(true);
-          variantPanel.setIsCollapsed(true);
-          generatedVariationsPanel.setIsCollapsed(true);
-        }
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [zenMode, focusMode, brushPanel, promptPanel, variantPanel, generatedVariationsPanel, inspectorPanel]);
+  // Issue #560/#588/#617/#638 workspace keyboard shortcuts (Z / Escape /
+  // backtick / Cmd+B / F) — the listener lives in use-workspace-shortcuts.
+  useWorkspaceShortcuts({
+    zenMode,
+    setZenMode,
+    focusMode,
+    setFocusMode,
+    brushPanel,
+    promptPanel,
+    variantPanel,
+    generatedVariationsPanel,
+    inspectorPanel,
+  });
 
   // Switching source swaps the image being edited — any existing mask was
   // drawn for the previous image and must not leak into the next run. The
@@ -731,40 +675,16 @@ export default function InpaintEditor({
             }`}
           >
             {sourceOptions.length > 1 && (
-            <fieldset className="shrink-0 rounded-md border border-atelier-taupe/30 p-3">
-              <legend className="px-1 font-jakarta text-sm font-medium text-atelier-primary">
-                Edit from
-              </legend>
-              <div className="flex flex-wrap gap-x-4 gap-y-2">
-                {sourceOptions.map((option) => (
-                  <label
-                    key={inpaintSourceLabel(option)}
-                    className="inline-flex cursor-pointer items-center gap-2 font-jakarta text-sm text-atelier-primary"
-                  >
-                    <input
-                      type="radio"
-                      name={`inpaint-source-${roomId}`}
-                      value={inpaintSourceLabel(option)}
-                      checked={inpaintSourcesEqual(option, source)}
-                      disabled={isProcessing}
-                      onChange={() => handleSourceChange(option)}
-                      className="h-4 w-4 accent-atelier-primary"
-                    />
-                    {inpaintSourceLabel(option)}
-                  </label>
-                ))}
-              </div>
-              {canUndoSource && (
-                <button
-                  type="button"
-                  onClick={handleUndoSource}
-                  className="mt-2 text-xs text-atelier-taupe underline hover:text-atelier-primary"
-                >
-                  Undo source change
-                </button>
-              )}
-            </fieldset>
-          )}
+              <SourceSelectorFieldset
+                roomId={roomId}
+                sourceOptions={sourceOptions}
+                source={source}
+                disabled={isProcessing}
+                onSelectSource={handleSourceChange}
+                canUndoSource={canUndoSource}
+                onUndoSource={handleUndoSource}
+              />
+            )}
 
           <div className="sticky top-0 z-10 bg-atelier-canvas pb-1">
             <EditorTabBar
@@ -850,59 +770,38 @@ export default function InpaintEditor({
           </div>
         </CollapsibleSection>
 
-        {/* Issue #630: Generated Variation Grid — 4-column grid of AI-generated
-            inpainting variations the user can select and apply to the canvas. */}
-        <CollapsibleSection
-          id="generatedVariationsPanel"
-          title="Generated Variations"
-          isCollapsed={generatedVariationsPanel.isCollapsed}
-          onToggle={generatedVariationsPanel.toggle}
-        >
-          <GeneratedVariationGrid
-            roomName={roomName ?? "Room"}
-            variations={generatedVariations}
-            selectedId={selectedVariationId}
-            isGenerating={isGeneratingVariations}
-            generationProgress={variationProgress}
-            onSelect={setSelectedVariationId}
-            onGenerateMore={() => {
-              // Issue #630: the parent is responsible for calling the inpaint
-              // API multiple times to produce new variations and updating
-              // generatedVariations / isGeneratingVariations / variationProgress.
-              // Placeholder handler — replace with actual generation logic.
-              setIsGeneratingVariations(true);
-              setVariationProgress("Generating variation 1 of 4…");
-            }}
-            onUse={(variation) => {
-              // Issue #630: apply the selected variation's result URL to the
-              // canvas — typically by calling onInpaintComplete or updating
-              // the active result URL.
-              setSelectedVariationId(variation.id);
-              // Issue #748: applying a variation rebases the editor onto a
-              // new base — land it lazy like any other completion rebase.
-              markRunCompletionRebase();
-              onInpaintComplete?.(variation.resultUrl, source);
-            }}
-          />
-        </CollapsibleSection>
-
-        {/* Issue #561: Version History — collapsible panel at the bottom of the
-            right pane, showing thumbnails of previous inpaint results. */}
-        <CollapsibleSection
-          id="variantPanel"
-          title="Version History"
-          isCollapsed={variantPanel.isCollapsed}
-          onToggle={variantPanel.toggle}
-        >
-          <VersionHistoryPanel
-            roomId={roomId}
-            variantSlot={variantSlot}
-            activeResultUrl={activeResultUrl}
-            onRestored={(resultUrl) => {
-              setActiveResultUrl(resultUrl);
-            }}
-          />
-        </CollapsibleSection>
+        <InspectorFooterPanels
+          roomId={roomId}
+          roomName={roomName}
+          variantSlot={variantSlot}
+          generatedVariations={generatedVariations}
+          selectedVariationId={selectedVariationId}
+          onSelectVariation={setSelectedVariationId}
+          isGeneratingVariations={isGeneratingVariations}
+          variationProgress={variationProgress}
+          onGenerateMore={() => {
+            // Issue #630: the parent is responsible for calling the inpaint
+            // API multiple times to produce new variations and updating
+            // generatedVariations / isGeneratingVariations / variationProgress.
+            // Placeholder handler — replace with actual generation logic.
+            setIsGeneratingVariations(true);
+            setVariationProgress("Generating variation 1 of 4…");
+          }}
+          onUseVariation={(variation) => {
+            // Issue #630: apply the selected variation's result URL to the
+            // canvas — typically by calling onInpaintComplete or updating
+            // the active result URL.
+            setSelectedVariationId(variation.id);
+            // Issue #748: applying a variation rebases the editor onto a
+            // new base — land it lazy like any other completion rebase.
+            markRunCompletionRebase();
+            onInpaintComplete?.(variation.resultUrl, source);
+          }}
+          activeResultUrl={activeResultUrl}
+          onActiveResultUrlChange={setActiveResultUrl}
+          generatedVariationsPanel={generatedVariationsPanel}
+          variantPanel={variantPanel}
+        />
         </div>
           </>
         )}
