@@ -46,6 +46,16 @@ export const E2E_REHEARSAL_ROOM_ID = "e2erehearsalroom0000000000room";
  */
 export const E2E_LOOKBOOK_ROOM_ID = "e2elookbookroom00000000000room";
 
+/**
+ * Dedicated unsigned project for the client signoff spec (issue #695).
+ * The project id is deliberately cuid-shaped (matches the
+ * /^c[a-z0-9]{24}$/ pattern signProjectRequestSchema enforces, issue
+ * #684) — /api/sign-project would reject the e2e…-prefixed seed ids
+ * with a 400 before the token check ever runs.
+ */
+export const E2E_SIGNOFF_PROJECT_ID = "ce2esignoff00000000000000";
+export const E2E_SIGNOFF_ROOM_ID = "e2esignoffroom00000000000000room";
+
 /** Port/host for the mock Supabase (GoTrue auth + Storage). */
 export const MOCK_SUPABASE_PORT = 39911;
 export const MOCK_SUPABASE_HOST = "127.0.0.1";
