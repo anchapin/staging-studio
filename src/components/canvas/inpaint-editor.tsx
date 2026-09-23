@@ -117,6 +117,9 @@ export default function InpaintEditor({
   // Updated on inpaint completion; also initialized from prop when provided.
   const [activeResultUrl, setActiveResultUrl] = useState<string | null>(currentResultUrl ?? null);
 
+  // Issue #781: before/after comparison toggle — shows original when true, staged result when false
+  const [showBefore, setShowBefore] = useState(true);
+
   // Concept detection + selection set (issue #691 extraction): the whole
   // #228/#229/#249/#252/#748 cluster — requested concept, refresh policy,
   // SegmentCache, decoded instances, vision labels, and the toggle/select
@@ -394,7 +397,10 @@ export default function InpaintEditor({
         focusMode={focusMode}
         onToggleFocusMode={() => setFocusMode((prev) => !prev)}
         onToggleZenMode={() => setZenMode((prev) => !prev)}
+        showBefore={showBefore}
+        onToggleShowBefore={() => setShowBefore((prev) => !prev)}
         imageUrl={imageUrl}
+        activeResultUrl={activeResultUrl}
         aspectRatio={aspectRatio}
         naturalWidth={imageDims?.width ?? null}
         naturalHeight={imageDims?.height ?? null}
