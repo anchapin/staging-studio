@@ -12,6 +12,8 @@ import {
   E2E_REHEARSAL_PROJECT_ID,
   E2E_REHEARSAL_ROOM_ID,
   E2E_LOOKBOOK_ROOM_ID,
+  E2E_SIGNOFF_PROJECT_ID,
+  E2E_SIGNOFF_ROOM_ID,
   E2E_UPLOAD_PROJECT_ID,
   E2E_UPLOAD_ROOM_ID,
   E2E_USER_ID,
@@ -242,7 +244,29 @@ async function seed(): Promise<void> {
                         category: "DIY/Declutter",
                         priority: "Critical",
                       },
-                    ],
+                     ],
+                   },
+                 ],
+               },
+             },
+            {
+              // Issue #695: unsigned project for the client signoff spec.
+              // Its id is cuid-shaped because /api/sign-project (issue
+              // #684) validates projectId against Prisma's cuid pattern
+              // before anything else — the e2e…-style seed ids would 400.
+              // No room photos: the signoff flow never touches them, and
+              // their absence keeps the preview page static (no image-load
+              // reflow while the spec draws on the signature canvas).
+              id: E2E_SIGNOFF_PROJECT_ID,
+              propertyAddress: "505 Signature Way",
+              clientName: "Signoff Client",
+              targetBuyer: "relocating executives",
+              stagingAesthetic: "Organic Modern Luxury",
+              rooms: {
+                create: [
+                  {
+                    id: E2E_SIGNOFF_ROOM_ID,
+                    name: "Signoff Room",
                   },
                 ],
               },
