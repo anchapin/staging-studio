@@ -9,6 +9,8 @@ const mockPrisma = {
 
 const mockGetAuthedPrismaUser = vi.fn();
 
+const mockGetDailyUsage = vi.fn();
+
 const mockDetectRoomType = vi.fn();
 
 const mockEvaluateDailyBatchQuota = vi.fn();
@@ -28,8 +30,16 @@ vi.mock("@/lib/room-type-detection", () => ({
 }));
 
 vi.mock("@/lib/api-quota", () => ({
+  getDailyUsage: mockGetDailyUsage,
   evaluateDailyBatchQuota: mockEvaluateDailyBatchQuota,
   recordDailyUsage: mockRecordDailyUsage,
+  resolveDailyLimit: vi.fn(() => 20),
+  dailyQuotaExceededPayload: vi.fn((decision: { used: number; limit: number }, friendly: string) => ({
+    message: `Daily label quota exceeded. Used: ${decision.used}, Limit: ${decision.limit}. ${friendly}`,
+    used: decision.used,
+    limit: decision.limit,
+    remaining: Math.max(0, decision.limit - decision.used),
+  })),
 }));
 
 // Re-import after mocks are set up
@@ -99,10 +109,7 @@ describe("detectBatchRoomTypes", () => {
       remaining: 0,
     });
 
-    const result = await detectBatchRoomTypes({
-      projectId: mockProject.id,
-      imageUrls,
-    });
+    const result = await detectBatchRoomTypes(mockProject.id, imageUrls);
 
     expect(result).toEqual({
       success: false,
@@ -131,10 +138,7 @@ describe("detectBatchRoomTypes", () => {
     mockDetectRoomType.mockResolvedValue("Living Room");
     mockRecordDailyUsage.mockResolvedValue(6); // returns updated used count
 
-    const result = await detectBatchRoomTypes({
-      projectId: mockProject.id,
-      imageUrls,
-    });
+    const result = await detectBatchRoomTypes(mockProject.id, imageUrls);
 
     expect(result).toEqual({
       success: true,
