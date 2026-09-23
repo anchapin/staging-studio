@@ -25,9 +25,8 @@ import { describe, expect, it } from "vitest";
 
 /** Test files that legitimately import no module, with the reason each is pending removal. */
 const ALLOWED_NO_MODULE_IMPORTS: readonly Record<string, string>[] = [
-  // Tautology test owned by sibling issue #694 (mask undo-stack
-  // extraction). Remove this entry when #694 lands its real pin.
-  { "inpaint-undo.test.ts": "pending #694 — extract mask undo-stack module" },
+  // Empty since #694 landed: inpaint-undo.test.ts was replaced by
+  // mask-undo-stack.test.ts, which imports the real @/lib module.
 ];
 
 const TESTS_DIR = path.dirname(new URL(import.meta.url).pathname);
