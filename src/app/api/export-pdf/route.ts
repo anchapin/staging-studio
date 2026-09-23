@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
       DEFAULT_DAILY_EXPORT_LIMIT
     );
     const exportQuota = evaluateDailyQuota(
-      getDailyUsage("export", user.id),
+      await getDailyUsage("export", user.id),
       exportLimit
     );
     if (!exportQuota.allowed) {
@@ -259,7 +259,7 @@ export async function POST(req: NextRequest) {
     // Count the billable export only once a verified PDF is about to be
     // delivered: Browserless errors and non-PDF payloads do not count
     // against the user's daily cap.
-    recordDailyUsage("export", user.id);
+    await recordDailyUsage("export", user.id);
 
     return new NextResponse(pdfBuffer, {
       status: 200,

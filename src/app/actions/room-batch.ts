@@ -240,7 +240,7 @@ export async function detectBatchRoomTypes(
     DEFAULT_DAILY_LABEL_LIMIT
   );
   const labelQuota = evaluateDailyBatchQuota(
-    getDailyUsage("label", user.id),
+    await getDailyUsage("label", user.id),
     parsed.data.imageUrls.length,
     labelLimit
   );
@@ -278,7 +278,7 @@ export async function detectBatchRoomTypes(
           const roomType = await detectRoomType(url);
           // Bill only successful detections — a failed attempt costs at
           // most a few rejected tokens (mirrors /api/label-instances).
-          recordDailyUsage("label", user.id);
+          await recordDailyUsage("label", user.id);
           return roomType;
         } catch {
           return "Other";

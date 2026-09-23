@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
       DEFAULT_DAILY_LABEL_LIMIT
     );
     const labelQuota = evaluateDailyQuota(
-      getDailyUsage("label", user.id),
+      await getDailyUsage("label", user.id),
       labelLimit
     );
     if (!labelQuota.allowed) {
@@ -184,7 +184,7 @@ export async function POST(request: NextRequest) {
     // Count the billable generation only after the provider call resolves:
     // a failed/timeout attempt costs at most a few rejected tokens and does
     // not count against the user's daily cap.
-    recordDailyUsage("label", user.id);
+    await recordDailyUsage("label", user.id);
 
     // Issue #266: persist successful labels so re-opening the editor skips billing.
     if (labels.length > 0) {

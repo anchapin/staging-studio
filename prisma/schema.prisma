@@ -203,3 +203,18 @@ model ProcurementItem {
 
   @@index([projectId])
 }
+
+// DailyApiUsage model: Postgres-backed daily counter for copy/export/segment/label
+// surfaces, replacing the in-process Map that had multi-instance race conditions
+// on serverless platforms (issue #784).
+model DailyApiUsage {
+  id        String   @id @default(cuid())
+  userId    String
+  surface   String
+  dayKey    String
+  count     Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, surface, dayKey])
+  @@index([userId, surface, dayKey])
+}
