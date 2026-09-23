@@ -3,6 +3,7 @@
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { createSupabaseRequestClient } from "@/lib/supabase";
+import { validateThumbnailDataUrl } from "@/lib/thumbnail-data-url";
 import { revalidatePath } from "next/cache";
 
 const MAX_VERSIONS_PER_VARIANT = 20;
@@ -59,6 +60,9 @@ export async function saveInpaintVersion({
   let thumbnailPublicUrl: string | null = null;
 
   if (thumbnailDataUrl) {
+    const thumbnailCheck = validateThumbnailDataUrl(thumbnailDataUrl);
+    if (!thumbnailCheck.ok) return failure(thumbnailCheck.error);
+
     const supabase = await createSupabaseRequestClient();
     const ext = "jpg";
     thumbnailStoragePath = `rooms/${roomId}/versions/${variantSlot}/${Date.now()}.${ext}`;
