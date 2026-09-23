@@ -17,6 +17,7 @@ import {
   dilateMaskGridDirectional,
 } from "@/lib/mask-dilation";
 import { fillHoles } from "@/lib/mask-postprocess";
+import { sliderFillStyle } from "@/lib/precision-slider";
 
 /** Tools for building the mask: freehand paint, flood-fill, or concept select. */
 export type MaskTool = "brush" | "fill" | "select";
@@ -1669,7 +1670,9 @@ export default function InpaintMaskCanvas({
                   setInternalBrushSize(next);
                 }
               }}
-              className="atelier-slider w-24 md:w-32"
+              className="atelier-slider atelier-slider-tooltip w-24 md:w-32"
+              style={sliderFillStyle(brushSize, 1, 100)}
+              data-slider-tooltip={`${brushSize}px`}
               aria-label="Brush size"
             />
           </div>

@@ -4,6 +4,7 @@ import Image from "next/image";
 import { MoreHorizontal, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { StagedVariantPair } from "@/lib/staged-result";
+import { sliderFillStyle } from "@/lib/precision-slider";
 
 /** Camera label types */
 export type CameraLabel = "Cam A" | "360° Panoramic";
@@ -167,6 +168,7 @@ export function RoomBatchCard({
           onChange={handleSliderChange}
           disabled={disabled || status === "staged"}
           className="atelier-slider w-full"
+          style={sliderFillStyle(stagingIntensity, 0, 100)}
           aria-label="Staging intensity"
         />
         <div className="flex justify-between text-[10px] text-muted-foreground">

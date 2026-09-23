@@ -37,6 +37,7 @@ import {
   inpaintSourcesEqual,
   type InpaintSource,
 } from "@/lib/inpaint-source";
+import { sliderFillStyle } from "@/lib/precision-slider";
 import {
   DEFAULT_MASK_EXPANSION_RADIUS,
   MAX_MASK_EXPANSION_RADIUS,
@@ -1936,6 +1937,7 @@ export default function InpaintEditor({
               onChange={(e) => setMaskExpansion(Number(e.target.value))}
               aria-describedby="mask-expansion-hint"
               className="atelier-slider w-32"
+              style={sliderFillStyle(maskExpansion, 0, MAX_MASK_EXPANSION_RADIUS)}
             />
             <span className="w-10 text-right tabular-nums font-medium">{maskExpansion}px</span>
           </label>

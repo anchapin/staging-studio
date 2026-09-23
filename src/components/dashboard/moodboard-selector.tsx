@@ -15,6 +15,7 @@ import {
   type MoodboardTheme,
   type MoodboardThemeId,
 } from "@/lib/moodboard-themes";
+import { sliderFillStyle } from "@/lib/precision-slider";
 
 function MoodboardThemeCard({
   theme,
@@ -136,6 +137,7 @@ function MicroParameterSlider({
         disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))}
         className="atelier-slider w-full accent-secondary disabled:cursor-not-allowed disabled:opacity-50"
+        style={sliderFillStyle(value, 0, 100)}
         aria-label={label}
       />
     </div>

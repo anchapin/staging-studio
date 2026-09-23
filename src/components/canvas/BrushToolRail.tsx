@@ -15,6 +15,7 @@ import {
   Maximize2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { sliderFillStyle } from "@/lib/precision-slider";
 import {
   TOOL_RAIL_TOOLS,
   TOOL_RAIL_SURFACE_CLASSES,
@@ -179,9 +180,21 @@ function Slider({
         max={max}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="atelier-slider w-full"
+        className="atelier-slider atelier-slider-tooltip w-full"
+        style={sliderFillStyle(value, min, max)}
+        data-slider-tooltip={`${value}${unit}`}
         aria-label={`${label}: ${value}${unit}`}
       />
+      <div className="flex justify-between font-mono text-[10px] text-stone-400/70" aria-hidden="true">
+        <span>
+          {min}
+          {unit}
+        </span>
+        <span>
+          {max}
+          {unit}
+        </span>
+      </div>
     </div>
   );
 }

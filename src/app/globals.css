@@ -271,10 +271,13 @@
   background: white;
 }
 
-/* Issue #549: Atelier Canvas spec Precision Inspector slider styling */
-/* Custom minimalist track: 2px height with neutral warm gray */
+/* Issue #615 (extends #549): Atelier Canvas spec Precision Inspector slider */
+/* Custom minimalist track: 2px height in warm taupe rgba(140,130,122,0.25) */
 /* Active fill track: 2px height in charred walnut #181716 */
-/* Thumb: 12px solid #181716 disc with inner 2px white core */
+/* Thumb: 12px solid #181716 disc with inner 2px white core, free of heavy
+   drop shadows; expands to 14px on hover/active. Firefox renders the fill
+   natively via ::-moz-range-progress; WebKit uses the --atelier-fill custom
+   property set per call site from lib/precision-slider. */
 .atelier-slider {
   -webkit-appearance: none;
   appearance: none;
@@ -286,13 +289,23 @@
 
 .atelier-slider::-webkit-slider-runnable-track {
   height: 2px;
-  background: rgba(140, 130, 122, 0.25);
   border-radius: 1px;
+  background: linear-gradient(
+    to right,
+    #181716 var(--atelier-fill, 50%),
+    rgba(140, 130, 122, 0.25) var(--atelier-fill, 50%)
+  );
 }
 
 .atelier-slider::-moz-range-track {
   height: 2px;
   background: rgba(140, 130, 122, 0.25);
+  border-radius: 1px;
+}
+
+.atelier-slider::-moz-range-progress {
+  height: 2px;
+  background: #181716;
   border-radius: 1px;
 }
 
@@ -305,42 +318,71 @@
   border-radius: 50%;
   border: 2px solid white;
   margin-top: -5px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-  transition: transform 0.1s ease;
+  box-shadow: none;
+  transition: width 150ms ease, height 150ms ease, box-shadow 150ms ease;
 }
 
 .atelier-slider::-moz-range-thumb {
+  box-sizing: border-box;
   width: 12px;
   height: 12px;
   background: #181716;
   border-radius: 50%;
   border: 2px solid white;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-  transition: transform 0.1s ease;
+  box-shadow: none;
+  transition: width 150ms ease, height 150ms ease, box-shadow 150ms ease;
 }
 
-.atelier-slider:hover::-webkit-slider-thumb {
-  transform: scale(1.17);
+.atelier-slider:hover::-webkit-slider-thumb,
+.atelier-slider:active::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+  margin-top: -6px;
 }
 
-.atelier-slider:hover::-moz-range-thumb {
-  transform: scale(1.17);
+.atelier-slider:hover::-moz-range-thumb,
+.atelier-slider:active::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
 }
 
 .atelier-slider:focus {
   outline: none;
 }
 
-.atelier-slider:focus::-webkit-slider-thumb {
+.atelier-slider:focus-visible::-webkit-slider-thumb {
   box-shadow: 0 0 0 2px rgba(24, 23, 22, 0.2);
 }
 
-.atelier-slider:active::-webkit-slider-thumb {
-  transform: scale(1.17);
+.atelier-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 2px rgba(24, 23, 22, 0.2);
 }
 
-.atelier-slider:active::-moz-range-thumb {
-  transform: scale(1.17);
+/* Issue #615: numeric tooltip shown on thumb hover/active (brush parameter
+   sliders). Content comes from data-slider-tooltip; the tooltip follows the
+   thumb via the --atelier-fill custom property. */
+.atelier-slider-tooltip {
+  position: relative;
+}
+
+.atelier-slider-tooltip:hover::after,
+.atelier-slider-tooltip:active::after,
+.atelier-slider-tooltip:focus-visible::after {
+  content: attr(data-slider-tooltip);
+  position: absolute;
+  left: var(--atelier-fill, 50%);
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #181716;
+  color: #ffffff;
+  font-family: var(--font-jetbrains, ui-monospace, monospace);
+  font-size: 10px;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 30;
 }
 
 /* Issue #560: Zen Mode styles
