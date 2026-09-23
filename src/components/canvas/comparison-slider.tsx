@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import {
+  nudgeSliderPercent,
+  sliderPercentFromClientX,
+} from "@/lib/comparison-slider-geometry";
 import { ComparisonPill } from "./comparison-pill";
 
 interface ComparisonSliderProps {
@@ -101,9 +105,7 @@ export default function ComparisonSlider({
   const handleMove = useCallback(
     (clientX: number) => {
       if (!containerRect) return;
-      const x = clientX - containerRect.left;
-      const percent = Math.max(0, Math.min(100, (x / containerRect.width) * 100));
-      setSliderPosition(percent);
+      setSliderPosition(sliderPercentFromClientX(clientX, containerRect));
     },
     [containerRect]
   );
@@ -129,10 +131,10 @@ export default function ComparisonSlider({
     (e: React.KeyboardEvent) => {
       if (e.key === "ArrowLeft") {
         e.preventDefault();
-        setSliderPosition((p) => Math.max(0, p - 5));
+        setSliderPosition((p) => nudgeSliderPercent(p, -1));
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
-        setSliderPosition((p) => Math.min(100, p + 5));
+        setSliderPosition((p) => nudgeSliderPercent(p, 1));
       }
     },
     []
