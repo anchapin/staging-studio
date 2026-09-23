@@ -54,12 +54,8 @@ import {
   buildConceptEmptyMessage,
   CONCEPT_CHIPS,
 } from "@/lib/concept-chips";
-import { MERGE_PROXIMITY_PX } from "@/lib/mask-postprocess";
-import {
-  composeRegionMaskDataUrl,
-  composeUnionMaskDataUrl,
-} from "./mask-composition";
 import { useConceptDetection } from "./use-concept-detection";
+import { useSelectionMaskComposer } from "./use-selection-mask-composer";
 import { type DeclutterIntensity } from "@/lib/holistic-prompt";
 import {
   MAX_BATCH_OBJECTS,
@@ -240,15 +236,6 @@ export default function InpaintEditor({
   // Updated on inpaint completion; also initialized from prop when provided.
   const [activeResultUrl, setActiveResultUrl] = useState<string | null>(currentResultUrl ?? null);
 
-  // Issue #203: selection-set union mask + canvas reset (composed by the
-  // selection-mask composer below).
-  const [unionMaskDataUrl, setUnionMaskDataUrl] = useState<string | null>(null);
-  const [selectionReset, setSelectionReset] = useState<{
-    id: number;
-    maskDataUrl: string | null;
-  } | null>(null);
-  const selectionResetIdRef = useRef(0);
-
   // Issue #378: source change undo state
   const previousSourceRef = useRef<InpaintSource | null>(null);
   const [canUndoSource, setCanUndoSource] = useState(false);
@@ -308,6 +295,15 @@ export default function InpaintEditor({
     markRunCompletionRebase,
   } = concept;
 
+  // Issue #203: selection-set union mask + canvas reset (composed by the
+  // selection-mask composer, issue #691 extraction).
+  const { unionMaskDataUrl, selectionReset, clearRegionMaskCache } =
+    useSelectionMaskComposer({
+      batchSelections,
+      setBatchSelections,
+      decodedInstances,
+      imageDims,
+    });
   const handleTabSelect = useCallback(
     (tab: EditorTabId) => {
       setActiveTab(tab);
@@ -523,10 +519,10 @@ export default function InpaintEditor({
       // detection/selection session reset (incl. the #748 user-switch
       // arming) lives in the concept hook.
       resetForUserSourceSwitch();
-      regionMaskCacheRef.current.clear();
+      clearRegionMaskCache();
       onSourceChange?.(next);
     },
-    [source, onSourceChange, resetForUserSourceSwitch]
+    [source, onSourceChange, resetForUserSourceSwitch, clearRegionMaskCache]
   );
 
   // Issue #378: undo source change by restoring the previous source
@@ -540,99 +536,9 @@ export default function InpaintEditor({
     // Undo is a user-driven source switch — same session reset, then arm
     // the restored base (issue #748).
     resetForUserSourceSwitch();
-    regionMaskCacheRef.current.clear();
+    clearRegionMaskCache();
     onSourceChange?.(prev);
-  }, [source, onSourceChange, resetForUserSourceSwitch]);
-
-  // Issue #203 (simplified by #229): keep the union mask (for thematic
-  // runs + the batch panel) and the canvas's selection reset in lockstep
-  // with the batch selection set — since #229 the toggled concept
-  // instances ARE that set, so one source drives everything. The reset
-  // carries an incrementing id so every change applies exactly once; an
-  // empty set resets the grid to black (Clear Mask semantics). Concept
-  // masks arrive as white-on-black data URLs at the photo's natural
-  // dimensions, the same geometry the batch set is normalized to, so
-  // `composeUnionMaskDataUrl` takes them unchanged.
-  useEffect(() => {
-    if (!imageDims) return;
-    let cancelled = false;
-    const compose = async () => {
-      const unionUrl =
-        batchSelections.length > 0
-          ? await composeUnionMaskDataUrl(
-              batchSelections.map((selection) => selection.maskDataUrl),
-              imageDims.width,
-              imageDims.height
-            )
-          : null;
-      if (cancelled) return;
-      setUnionMaskDataUrl(unionUrl);
-      selectionResetIdRef.current += 1;
-      setSelectionReset({ id: selectionResetIdRef.current, maskDataUrl: unionUrl });
-    };
-    void compose();
-    return () => {
-      cancelled = true;
-    };
-  }, [batchSelections, imageDims]);
-
-  // Issue #252 D2: keep merged regions' masks composed from their members —
-  // union → closing → hole fill at the photo's natural dimensions (WYSIWYG:
-  // the canvas tint, the dispatched per-region mask, and the thematic union
-  // all agree). Single-instance regions keep their decoded white mask, so
-  // only multi-member regions are recomposed here. The cache is keyed by
-  // id + membership, so a merge that later gains another member recomposes
-  // exactly once.
-  const regionMaskCacheRef = useRef(new Map<string, string>());
-  useEffect(() => {
-    if (!imageDims) return;
-    const pending = batchSelections.filter((selection) => {
-      const members = selection.memberInstanceIndices;
-      if (!members || members.length <= 1) return false;
-      const key = `${selection.id}:${members.join(",")}`;
-      return regionMaskCacheRef.current.get(key) !== selection.maskDataUrl;
-    });
-    if (pending.length === 0) return;
-    let cancelled = false;
-    void (async () => {
-      const gridEntry = decodedInstances?.find((instance) => instance) ?? null;
-      const naturalLong = Math.max(imageDims.width, imageDims.height);
-      const gridLong = gridEntry
-        ? Math.max(gridEntry.width, gridEntry.height)
-        : naturalLong;
-      // MERGE_PROXIMITY_PX is defined in mask-canvas grid pixels; scale it
-      // to the natural-dimension space the region masks live in.
-      const closeRadius = Math.max(1, Math.round(MERGE_PROXIMITY_PX * (naturalLong / gridLong)));
-      for (const selection of pending) {
-        const members = selection.memberInstanceIndices ?? [];
-        const memberUrls = members
-          .map((index) => decodedInstances?.[index]?.whiteMaskDataUrl)
-          .filter((url): url is string => Boolean(url));
-        if (memberUrls.length !== members.length) continue;
-        const url = await composeRegionMaskDataUrl(
-          memberUrls,
-          imageDims.width,
-          imageDims.height,
-          closeRadius
-        );
-        if (cancelled) return;
-        if (!url) continue;
-        const key = `${selection.id}:${members.join(",")}`;
-        regionMaskCacheRef.current.set(key, url);
-        setBatchSelections((previous) =>
-          previous.map((candidate) =>
-            candidate.id === selection.id &&
-            (candidate.memberInstanceIndices ?? []).join(",") === members.join(",")
-              ? { ...candidate, maskDataUrl: url }
-              : candidate
-          )
-        );
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [batchSelections, imageDims, decodedInstances, setBatchSelections]);
+  }, [source, onSourceChange, resetForUserSourceSwitch, clearRegionMaskCache]);
 
   // Issue #203: a selection-set change invalidates a finished (e.g.
   // failed) batch's plan — drop it so the panel never offers a retry
