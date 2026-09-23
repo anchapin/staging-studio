@@ -114,7 +114,7 @@ export async function getCachedVisionLabels(params: {
       imageUrlHash,
       concept,
       instanceIndex: { in: instanceIndices },
-      userId,
+      ...(userId !== undefined ? { userId } : {}),
     },
   });
   return labels;
