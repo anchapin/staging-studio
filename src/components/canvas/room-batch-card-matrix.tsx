@@ -122,14 +122,14 @@ export function RoomBatchCard({
 
         {/* Room info */}
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <h3 className="title-md truncate font-semibold text-foreground" style={{ fontFamily: "var(--font-plus-jakarta), sans-serif" }}>
+          <h3 className="title-md truncate font-semibold text-foreground">
             {roomName}
           </h3>
 
           {/* Badges row */}
           <div className="flex flex-wrap items-center gap-1.5">
             {cameraLabel && (
-              <span className="label-sm rounded bg-surface-container px-1.5 py-0.5 font-semibold uppercase tracking-wide text-muted-foreground" style={{ fontFamily: "var(--font-plus-jakarta), sans-serif" }}>
+              <span className="label-sm rounded bg-surface-container px-1.5 py-0.5 font-semibold uppercase tracking-wide text-muted-foreground">
                 {cameraLabel}
               </span>
             )}
@@ -153,10 +153,10 @@ export function RoomBatchCard({
       {/* Middle Row - Staging Intensity Slider */}
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
-          <span className="label-sm text-muted-foreground" style={{ fontFamily: "var(--font-plus-jakarta), sans-serif" }}>
+          <span className="label-sm text-muted-foreground">
             Staging Intensity
           </span>
-          <span className="font-mono text-xs tabular-nums text-foreground" style={{ fontFamily: "var(--font-jetbrains), monospace" }}>
+          <span className="font-mono text-xs tabular-nums text-foreground">
             {stagingIntensity}%
           </span>
         </div>
@@ -185,8 +185,7 @@ export function RoomBatchCard({
           placeholder="Inject additional staging directives..."
           disabled={disabled}
           rows={2}
-          className="min-h-[3.5rem] w-full resize-y rounded-lg border border-outline-variant/40 bg-surface-container px-3 py-2 body-sm placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
-          style={{ fontFamily: "var(--font-plus-jakarta), sans-serif" }}
+          className="body-sm min-h-[3.5rem] w-full resize-y rounded-lg border border-outline-variant/40 bg-surface-container px-3 py-2 placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
           aria-label="Prompt injection"
         />
       </div>
@@ -194,10 +193,10 @@ export function RoomBatchCard({
       {/* Bottom Row - Variant Strip */}
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
-          <span className="label-sm text-muted-foreground" style={{ fontFamily: "var(--font-plus-jakarta), sans-serif" }}>
+          <span className="label-sm text-muted-foreground">
             Variations:
           </span>
-          <span className="label-sm text-muted-foreground" style={{ fontFamily: "var(--font-plus-jakarta), sans-serif" }}>
+          <span className="label-sm text-muted-foreground">
             {variantCount}/3
           </span>
         </div>
@@ -315,16 +314,16 @@ export function RoomBatchCardMatrix({
     <div className={cn("flex flex-col gap-5", className)}>
       {/* Summary Row */}
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <span className="font-medium text-foreground" style={{ fontFamily: "var(--font-plus-jakarta), sans-serif" }}>
+        <span className="font-jakarta font-medium text-foreground">
           {totalRooms} Room{totalRooms !== 1 ? "s" : ""}
         </span>
         <span>·</span>
-        <span className="font-medium text-foreground" style={{ fontFamily: "var(--font-plus-jakarta), sans-serif" }}>
+        <span className="font-jakarta font-medium text-foreground">
           {readyRooms} Ready
         </span>
         <span>·</span>
-        <span className="font-medium text-foreground" style={{ fontFamily: "var(--font-plus-jakarta), sans-serif" }}>
-          {totalVariants} Total Variants
+        <span className="font-jakarta font-medium text-foreground">
+          {totalVariants} Total Variations
         </span>
       </div>
 

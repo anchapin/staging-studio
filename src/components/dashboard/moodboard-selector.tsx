@@ -117,15 +117,11 @@ function MicroParameterSlider({
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
         <span
-          className="text-xs font-medium text-muted-foreground"
-          style={{ fontFamily: "var(--font-jakarta), sans-serif" }}
+          className="font-jakarta text-xs font-medium text-muted-foreground"
         >
           {label}
         </span>
-        <span
-          className="font-mono text-xs tabular-nums text-foreground"
-          style={{ fontFamily: "var(--font-jetbrains), monospace" }}
-        >
+        <span className="font-mono text-xs tabular-nums text-foreground">
           {value}%
         </span>
       </div>
@@ -236,8 +232,7 @@ export function MoodboardSelector({
       <div className="rounded-xl border border-outline-variant/40 bg-surface-container-low p-5">
         <div className="mb-4 flex items-center justify-between gap-3">
           <span
-            className="text-xs font-medium uppercase tracking-wider text-muted-foreground"
-            style={{ fontFamily: "var(--font-jakarta), sans-serif" }}
+            className="font-jakarta text-xs font-medium uppercase tracking-wider text-muted-foreground"
           >
             AI Micro-Parameters
           </span>

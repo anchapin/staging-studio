@@ -13,6 +13,8 @@ const cinzel = Cinzel({
 const playfair = Playfair_Display({
   subsets: ["latin"],
   variable: "--font-playfair-google",
+  // Issue #614: editorial italic axis (spec loads ital 400/500)
+  style: ["normal", "italic"],
   display: "swap",
 });
 
