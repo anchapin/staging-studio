@@ -6,6 +6,7 @@ import {
   projectMetadataSchema,
   type ProjectMetadataInput,
 } from "@/lib/metadata-schemas";
+import { signProjectPayloadSchema } from "@/lib/sign-project-schema";
 import { revalidatePath } from "next/cache";
 
 /**
@@ -78,17 +79,31 @@ export async function saveProjectMetadata(
  * status is set to "Signed".
  *
  * Contract: requires an authenticated session; ownership is enforced by the
- * Prisma `where` filter (`id: projectId, userId: user.id`).
+ * Prisma `where` filter (`id: projectId, userId: user.id`). The payload is
+ * validated with `signProjectPayloadSchema` (issue #684) — the same
+ * validator the session-less `/api/sign-project` route uses — so a
+ * malformed projectId, non-PNG data URL, or oversized signature (over
+ * ~1 MB) can never reach Prisma from either write path.
  *
  * @param projectId ID of the project to sign off.
  * @param signatureDataUrl PNG data URL of the signature canvas.
  * @returns `{ success: true }` on write, or
- *   `{ success: false, error }` when unauthenticated or the save fails.
+ * `{ success: false, error }` when unauthenticated, the payload is
+ * invalid, or the save fails.
  */
 export async function saveProjectSignature(
   projectId: string,
   signatureDataUrl: string
 ): Promise<{ success: boolean; error?: string }> {
+  const parsed = signProjectPayloadSchema.safeParse({ projectId, signatureDataUrl });
+  if (!parsed.success) {
+    return {
+      success: false,
+      error:
+        parsed.error.issues[0]?.message ?? "Invalid signature payload",
+    };
+  }
+
   const user = await getAuthedPrismaUser();
   if (!user) {
     return { success: false, error: "Not authenticated" };
@@ -96,9 +111,9 @@ export async function saveProjectSignature(
 
   try {
     await prisma.project.update({
-      where: { id: projectId, userId: user.id },
+      where: { id: parsed.data.projectId, userId: user.id },
       data: {
-        clientSignature: signatureDataUrl,
+        clientSignature: parsed.data.signatureDataUrl,
         clientSignatureStatus: "Signed",
         clientSignatureTimestamp: new Date(),
       },
