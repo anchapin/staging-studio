@@ -184,7 +184,7 @@ function BudgetSlider({
           width: 18px;
           height: 18px;
           border-radius: 50%;
-          background: #1c1917;
+          background: var(--primary);
           border: 2px solid #fff;
           box-shadow: 0 1px 3px rgba(0,0,0,0.3);
           cursor: pointer;
@@ -193,7 +193,7 @@ function BudgetSlider({
           width: 18px;
           height: 18px;
           border-radius: 50%;
-          background: #1c1917;
+          background: var(--primary);
           border: 2px solid #fff;
           box-shadow: 0 1px 3px rgba(0,0,0,0.3);
           cursor: pointer;
