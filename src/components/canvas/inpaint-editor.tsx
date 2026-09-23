@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef, useId } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo, useId } from "react";
 import type { ReactNode } from "react";
 import InpaintMaskCanvas, { type MaskTool } from "./inpaint-mask-canvas";
 import CollapsibleSection, {
@@ -17,7 +17,6 @@ import InpaintOperationModeTabs, {
 } from "./inpaint-operation-mode-tabs";
 import { useToast, ToastContainer } from "@/components/ui/toast";
 import { Expand, Home, Info, Loader2, Maximize2, Minimize2, PanelRightClose } from "lucide-react";
-import { useInpaintStatus } from "./use-inpaint-status";
 
 import BrushToolRail, {
   BrushParameterFlyout,
@@ -32,10 +31,6 @@ import {
   resolveInspectorShortcut,
   type InspectorRailActionId,
 } from "@/lib/inspector-panel";
-import {
-  shouldPersistResult,
-  INPAINT_NOT_PERSISTED_WARNING,
-} from "@/lib/inpaint-completion";
 import {
   entireRoomTabVisible,
   inpaintSourceLabel,
@@ -56,26 +51,17 @@ import {
 } from "@/lib/concept-chips";
 import { useConceptDetection } from "./use-concept-detection";
 import { useSelectionMaskComposer } from "./use-selection-mask-composer";
-import { type DeclutterIntensity } from "@/lib/holistic-prompt";
+import { useInpaintRuns } from "./use-inpaint-runs";
 import {
   MAX_BATCH_OBJECTS,
-  advanceBatchProgress,
   batchProgressText,
-  buildBatchPlan,
   hasFailedStep,
-  initialBatchProgress,
-  type BatchProgress,
-  type BatchPromptMode,
-  type PerObjectBatchPlan,
 } from "@/lib/multi-select-batch";
-import VersionHistoryPanel, {
-  generateThumbnailFromUrl,
-} from "./version-history-panel";
+import VersionHistoryPanel from "./version-history-panel";
 import GeneratedVariationGrid, {
   type GeneratedVariation,
 } from "./generated-variation-grid";
 import VersionHistoryPills from "./version-history-pills";
-import { saveInpaintVersion } from "@/app/actions/inpaint-versions";
 
 interface InpaintEditorProps {
   roomId: string;
@@ -240,18 +226,6 @@ export default function InpaintEditor({
   const previousSourceRef = useRef<InpaintSource | null>(null);
   const [canUndoSource, setCanUndoSource] = useState(false);
 
-  // Issue #203: per-object batch execution state. `activeBatch` holds the
-  // running (or failed, awaiting retry) plan + progress; the refs carry
-  // run outcomes out of the polling hook (which swallows errors into
-  // callbacks) and guard against concurrent batches.
-  const [activeBatch, setActiveBatch] = useState<{
-    plan: PerObjectBatchPlan;
-    progress: BatchProgress;
-  } | null>(null);
-  const batchActiveRef = useRef(false);
-  const batchOutcomeRef = useRef<{ kind: "completed"; url: string } | null>(null);
-  const batchFailureRef = useRef<string | null>(null);
-
   // Concept detection + selection set (issue #691 extraction): the whole
   // #228/#229/#249/#252/#748 cluster — requested concept, refresh policy,
   // SegmentCache, decoded instances, vision labels, and the toggle/select
@@ -304,6 +278,49 @@ export default function InpaintEditor({
       decodedInstances,
       imageDims,
     });
+
+  // Inpaint runs (issue #691 extraction): status-hook wiring, the shared
+  // submit path, and the per-object batch runner live in use-inpaint-runs.ts.
+  // Issue #558 guidance memo: keeps the hook's callback identity stable
+  // across renders that don't touch the guidance params.
+  const runGuidance = useMemo(
+    () => ({
+      promptStrength,
+      maskBlur,
+      seed,
+      creativeMode,
+      lockSeed,
+    }),
+    [promptStrength, maskBlur, seed, creativeMode, lockSeed]
+  );
+  const {
+    isProcessing,
+    statusText,
+    beginInpaintRun,
+    handleBatchRun,
+    handleBatchRetry,
+    activeBatch,
+  } = useInpaintRuns({
+    roomId,
+    variantSlot,
+    imageUrl,
+    aesthetic,
+    promptDirectives,
+    globalDirectives,
+    source,
+    pendingRequestId,
+    pendingSource,
+    guidance: runGuidance,
+    showError,
+    showSuccess,
+    onInpaintComplete,
+    setActiveResultUrl,
+    markRunCompletionRebase,
+    batchSelections,
+    unionMaskDataUrl,
+    setBatchSelections,
+    setSelectedInstanceIndices,
+  });
   const handleTabSelect = useCallback(
     (tab: EditorTabId) => {
       setActiveTab(tab);
@@ -319,75 +336,6 @@ export default function InpaintEditor({
     },
     [armDetectionForCurrentBase]
   );
-
-  // The source in effect for the CURRENT run, captured at start time so the
-  // completion callback reports the right one even if the selector (or the
-  // pending-request props) change while a run is in flight.
-  const runSourceRef = useRef<InpaintSource>(pendingSource ?? source);
-
-  // Issue #203: the status hook routes success/failure through these
-  // callbacks, and `start()` itself never throws — so batch steps report
-  // outcomes through refs. While a per-object batch is active, the generic
-  // success toast is suppressed (the batch panel shows per-step progress)
-  // and failures are captured for the panel's retry affordance instead of
-  // the toast's own single-step retry.
-  const { isProcessing, statusText, start } = useInpaintStatus({
-    onCompleted: (resultImageUrl, persisted) => {
-      // Issue #687: `persisted: false` means the completion carries an
-      // expiring fal CDN URL — never write it into the room variant slot
-      // (onInpaintComplete) or an InpaintVersion row (saveInpaintVersion);
-      // both would rot when the link dies. Warn instead: single runs get a
-      // persistent error toast, batch steps route the message to the
-      // panel's failure affordance (the toast path is suppressed in batch
-      // mode, mirroring showError below).
-      const persistDecision = shouldPersistResult({ imageUrl: resultImageUrl, persisted });
-      if (!persistDecision.persist) {
-        batchFailureRef.current = INPAINT_NOT_PERSISTED_WARNING;
-        if (!batchActiveRef.current) {
-          showError(INPAINT_NOT_PERSISTED_WARNING);
-        }
-        return;
-      }
-      batchOutcomeRef.current = { kind: "completed", url: resultImageUrl };
-      // Update the active result URL for the version history panel (issue #561)
-      setActiveResultUrl(resultImageUrl);
-      // Issue #748: the parent is about to rebase this editor onto the
-      // staged result — mark the rebase so the new base lands LAZY (no
-      // billed refresh detection; only an explicit user refresh fires).
-      markRunCompletionRebase();
-      onInpaintComplete?.(resultImageUrl, runSourceRef.current);
-      // Issue #561: save the completed version to the history. Thumbnail
-      // generation requires browser canvas, so run it here. Errors are
-      // non-fatal — the version row is best-effort.
-      if (typeof window !== "undefined" && resultImageUrl) {
-        void (async () => {
-          try {
-            const thumbnailDataUrl = await generateThumbnailFromUrl(resultImageUrl, 200);
-            await saveInpaintVersion({
-              roomId,
-              variantSlot,
-              resultUrl: resultImageUrl,
-              thumbnailDataUrl,
-              seed: undefined,
-              promptDirectives,
-            });
-          } catch (err) {
-            console.error("[inpaint-editor] failed to save inpaint version:", err);
-          }
-        })();
-      }
-    },
-    showSuccess: (message) => {
-      if (!batchActiveRef.current) showSuccess(message);
-    },
-    showError: (message, retryable, onRetry, retryLabel) => {
-      if (batchActiveRef.current) {
-        batchFailureRef.current = message;
-        return;
-      }
-      showError(message, retryable, onRetry, retryLabel);
-    },
-  });
 
   // Issue #228 guards (run status lives here, the handlers in the concept
   // hook): toggles and bulk selects are ignored while a run is in flight.
@@ -491,17 +439,6 @@ export default function InpaintEditor({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [zenMode, focusMode, brushPanel, promptPanel, variantPanel, generatedVariationsPanel, inspectorPanel]);
 
-  // Resume an in-flight job (e.g. after a refresh): skip the submit and go
-  // straight to polling the persisted requestId. The run's source comes from
-  // the persisted row so completion persists with the original run's
-  // semantics (issue #170).
-  useEffect(() => {
-    if (!pendingRequestId) return;
-    runSourceRef.current = pendingSource ?? source;
-    void start(async () => pendingRequestId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- resume once per requestId, matching the pre-#170 behavior
-  }, [pendingRequestId, start]);
-
   // Switching source swaps the image being edited — any existing mask was
   // drawn for the previous image and must not leak into the next run. The
   // segment cache is dropped with it (issue #202/#228 lifecycle: one
@@ -539,98 +476,6 @@ export default function InpaintEditor({
     clearRegionMaskCache();
     onSourceChange?.(prev);
   }, [source, onSourceChange, resetForUserSourceSwitch, clearRegionMaskCache]);
-
-  // Issue #203: a selection-set change invalidates a finished (e.g.
-  // failed) batch's plan — drop it so the panel never offers a retry
-  // against masks that are no longer selected. Active batches keep theirs.
-  useEffect(() => {
-    if (!batchActiveRef.current) {
-      setActiveBatch(null);
-    }
-  }, [batchSelections]);
-
-  // Shared submit path for brush runs, holistic spike runs (issue #190),
-  // and batch runs (issue #203): all post the same body to /api/inpaint;
-  // holistic runs add the negativePrompt override and swap mask/directives
-  // for the strategy-generated ones. Batch steps pass `sourceUrl` (the
-  // previous step's persisted result) so per-object results stack into the
-  // same variant slot; omitted = the editor's current source image.
-  // Issue #562: globalDirectives are merged with room directives for AI prompts.
-  const beginInpaintRun = useCallback(
-    async (run: {
-      maskUrl: string;
-      promptDirectives: string;
-      negativePrompt?: string;
-      sourceUrl?: string;
-      globalDirectives?: string;
-      // Issue #558: AI guidance
-      promptStrength?: number;
-      maskBlur?: number;
-      seed?: number;
-      creativeMode?: boolean;
-      lockSeed?: boolean;
-    }) => {
-      // Issue #562: merge global + room directives for AI
-      const mergedDirectives = (() => {
-        const global = (run.globalDirectives ?? globalDirectives ?? "").trim();
-        const room = run.promptDirectives.trim();
-        if (!global) return room;
-        if (!room) return global;
-        return `${global}\n\nRoom-specific: ${room}`;
-      })();
-
-      if (!mergedDirectives) {
-        showError("No staging directives available.");
-        return;
-      }
-      if (!imageUrl) {
-        showError("No image available to edit.");
-        return;
-      }
-
-      runSourceRef.current = source;
-      // Issue #203: each run reports its outcome through this ref (the
-      // status hook swallows errors into callbacks). Reset per run so a
-      // stale completion can never be attributed to the next one.
-      batchOutcomeRef.current = null;
-      batchFailureRef.current = null;
-
-      // Issue #558: resolve effective seed — use explicit seed only when lockSeed is true
-      const effectiveSeed = run.lockSeed ? run.seed : undefined;
-
-      await start(async (signal) => {
-        const startResponse = await fetch("/api/inpaint", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            imageUrl: run.sourceUrl ?? imageUrl,
-            maskUrl: run.maskUrl,
-            promptDirectives: mergedDirectives,
-            negativePrompt: run.negativePrompt,
-            aesthetic,
-            roomId,
-            variantSlot,
-            sourceSlot: source.kind === "variant" ? source.slot : null,
-            // Issue #558: AI guidance params
-            promptStrength: run.promptStrength,
-            maskBlur: run.maskBlur,
-            seed: effectiveSeed,
-            creativeMode: run.creativeMode,
-          }),
-          signal,
-        });
-
-        const startData = await startResponse.json();
-
-        if (!startResponse.ok) {
-          throw new Error(startData.message || startData.error || "Failed to start inpainting");
-        }
-
-        return startData.requestId as string;
-      });
-    },
-    [imageUrl, aesthetic, roomId, variantSlot, source, start, showError, globalDirectives]
-  );
 
   const handleInpaint = useCallback(async () => {
     if (!promptDirectives.trim()) {
@@ -677,144 +522,6 @@ export default function InpaintEditor({
     },
     [beginInpaintRun, promptStrength, maskBlur, seed, creativeMode, lockSeed]
   );
-
-  // Issue #203: sequential per-object batch runner. Steps run ONE AT A
-  // TIME through the shared submit path (never parallel — fal queue
-  // handling, polling, and persistence stay exactly as-is), each pairing
-  // an object's mask with its prompt and writing into the same variant
-  // slot. Step N+1 edits step N's persisted result URL, so results stack.
-  //
-  // Atomicity (deliberately simple): every step is a complete, fully
-  // persisted inpaint run. On a failed step the loop stops, keeping
-  // earlier steps' results in the variant; the panel offers "Retry
-  // remaining", which resumes from the first unfinished step and chains
-  // again from the last completed result. No rollbacks, no transactions.
-  const runPerObjectBatch = useCallback(
-    async (plan: PerObjectBatchPlan, startProgress?: BatchProgress) => {
-      if (batchActiveRef.current) return;
-      batchActiveRef.current = true;
-      let progress = startProgress ?? initialBatchProgress(plan.steps);
-      setActiveBatch({ plan, progress });
-      let sourceUrl: string | undefined;
-
-      try {
-        for (let index = 0; index < plan.steps.length; index++) {
-          const step = progress.steps[index];
-          if (step.status === "completed") {
-            // Retry pass: resume chaining from the last persisted result.
-            sourceUrl = step.resultUrl ?? sourceUrl;
-            continue;
-          }
-
-          progress = advanceBatchProgress(progress, { kind: "start", index });
-          setActiveBatch({ plan, progress });
-
-          await beginInpaintRun({
-            maskUrl: plan.steps[index].maskDataUrl,
-            promptDirectives: plan.steps[index].promptDirectives,
-            sourceUrl,
-            globalDirectives,
-            promptStrength,
-            maskBlur,
-            seed,
-            creativeMode,
-            lockSeed,
-          });
-
-          const outcome = batchOutcomeRef.current;
-          if (outcome?.kind === "completed") {
-            sourceUrl = outcome.url;
-            progress = advanceBatchProgress(progress, {
-              kind: "complete",
-              index,
-              resultUrl: outcome.url,
-            });
-            setActiveBatch({ plan, progress });
-            continue;
-          }
-
-          progress = advanceBatchProgress(progress, {
-            kind: "fail",
-            index,
-            message: batchFailureRef.current ?? "Inpainting failed for this object.",
-          });
-          setActiveBatch({ plan, progress });
-          return; // earlier results stay; unfinished steps await retry
-        }
-
-        batchActiveRef.current = false;
-        setActiveBatch(null);
-        setBatchSelections([]);
-        setSelectedInstanceIndices([]);
-        showSuccess(
-          `Batch complete — ${plan.steps.length} ${
-            plan.steps.length === 1 ? "region" : "regions"
-          } staged.`
-        );
-      } finally {
-        batchActiveRef.current = false;
-      }
-    },
-    [beginInpaintRun, showSuccess, globalDirectives, promptStrength, maskBlur, seed, creativeMode, lockSeed, setBatchSelections, setSelectedInstanceIndices]
-  );
-
-  // Issue #203: batch entry point from the panel. Builds the validated
-  // plan (pure logic in multi-select-batch.ts), then either runs the
-  // thematic single run (union mask + one prompt through the shared
-  // launcher) or kicks off the sequential per-object runner.
-  const handleBatchRun = useCallback(
-    (input: {
-      mode: BatchPromptMode;
-      thematicPrompt: string;
-      perObjectPrompts: string[];
-      declutterMode: boolean;
-      declutterIntensity: DeclutterIntensity;
-    }) => {
-      const built = buildBatchPlan({
-        selections: batchSelections,
-        mode: input.mode,
-        thematicPrompt: input.thematicPrompt,
-        perObjectPrompts: input.perObjectPrompts,
-        unionMaskDataUrl,
-        declutterMode: input.declutterMode,
-        declutterIntensity: input.declutterIntensity,
-      });
-      if (!built.ok) {
-        showError(built.error);
-        return;
-      }
-      const plan = built.plan;
-      if (plan.kind === "thematic") {
-        void beginInpaintRun({
-          maskUrl: plan.maskDataUrl,
-          promptDirectives: plan.promptDirectives,
-          globalDirectives,
-          promptStrength,
-          maskBlur,
-          seed,
-          creativeMode,
-          lockSeed,
-        }).then(() => {
-          // A thematic batch is one ordinary run — consume the selection
-          // set only when it actually completed (outcome ref is set by
-          // onCompleted; beginInpaintRun resets it per run). The tinted
-          // instance indices follow the set (issue #229 lockstep).
-          if (batchOutcomeRef.current?.kind === "completed") {
-            setBatchSelections([]);
-            setSelectedInstanceIndices([]);
-          }
-        });
-        return;
-      }
-      void runPerObjectBatch(plan);
-    },
-    [batchSelections, unionMaskDataUrl, beginInpaintRun, runPerObjectBatch, showError, globalDirectives, promptStrength, maskBlur, seed, creativeMode, lockSeed, setBatchSelections, setSelectedInstanceIndices]
-  );
-
-  const handleBatchRetry = useCallback(() => {
-    if (!activeBatch) return;
-    void runPerObjectBatch(activeBatch.plan, activeBatch.progress);
-  }, [activeBatch, runPerObjectBatch]);
 
   // Issue #252 D5: control-panel tab state — purely presentational, so
   // switching never touches staging state (AC-L5). The default is the
