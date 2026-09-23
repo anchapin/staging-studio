@@ -35,12 +35,12 @@ interface GlobalStagingDirectivesBarProps {
   renderingCount: number;
   /** Whether GPU/cluster is active */
   gpuActive: boolean;
-  /** Called when Start Batch is clicked */
-  onStartBatch: () => void;
-  /** Called when Auto-Regenerate All is clicked */
-  onAutoRegenerateAll: () => void;
-  /** Called when Export Batch is clicked */
-  onExportBatch: () => void;
+  /** Called when Start Batch is clicked. Omit to render it disabled as "coming soon" (issue #692). */
+  onStartBatch?: () => void;
+  /** Called when Auto-Regenerate All is clicked. Omit to render it disabled as "coming soon" (issue #692). */
+  onAutoRegenerateAll?: () => void;
+  /** Called when Export Batch is clicked. Omit to render it disabled as "coming soon" (issue #692). */
+  onExportBatch?: () => void;
 }
 
 export default function GlobalStagingDirectivesBar({
@@ -189,36 +189,60 @@ export default function GlobalStagingDirectivesBar({
                 : `${roomCount} room${roomCount !== 1 ? "s" : ""}`}
             </span>
           </div>
+          {/* Issue #692: batch actions without a handler render disabled with
+              visible "Coming soon" copy — no interactive dead-ends, no toasts. */}
           <Button
             variant="secondary"
             size="sm"
             onClick={onStartBatch}
+            disabled={!onStartBatch}
+            title={onStartBatch ? undefined : "Batch rendering — coming soon"}
             className="rounded-lg px-4 text-sm"
           >
             Start Batch
           </Button>
+          {!onStartBatch && (
+            <span className="text-xs text-muted-foreground">Coming soon</span>
+          )}
         </div>
       </div>
 
-      {/* Right-side actions — below the directive grid, aligned right */}
+      {/* Right-side actions — below the directive grid, aligned right.
+          Issue #692: handler-less actions render disabled + "Coming soon". */}
       <div className="flex flex-wrap items-center justify-end gap-2">
         <button
           type="button"
           onClick={onAutoRegenerateAll}
-          className="inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-surface-container hover:text-foreground"
+          disabled={!onAutoRegenerateAll}
+          title={onAutoRegenerateAll ? undefined : "Auto-regenerate — coming soon"}
+          className={`inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground ${
+            onAutoRegenerateAll
+              ? "hover:bg-surface-container hover:text-foreground"
+              : "cursor-not-allowed opacity-50"
+          }`}
         >
           <RotateCw className="h-3.5 w-3.5" aria-hidden="true" />
           Auto-Regenerate All
         </button>
+        {!onAutoRegenerateAll && (
+          <span className="text-xs text-muted-foreground">Coming soon</span>
+        )}
         <button
           type="button"
           onClick={onExportBatch}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant/40 bg-surface-container px-3 py-2 text-sm font-medium text-foreground hover:bg-surface-container-low"
+          disabled={!onExportBatch}
+          title={onExportBatch ? undefined : "Batch PDF export — coming soon"}
           aria-label="Export batch"
+          className={`inline-flex items-center gap-1.5 rounded-lg border border-outline-variant/40 bg-surface-container px-3 py-2 text-sm font-medium text-foreground ${
+            onExportBatch ? "hover:bg-surface-container-low" : "cursor-not-allowed opacity-50"
+          }`}
         >
           <Download className="h-4 w-4" aria-hidden="true" />
           Export Batch
         </button>
+        {!onExportBatch && (
+          <span className="text-xs text-muted-foreground">Coming soon</span>
+        )}
       </div>
     </div>
   );

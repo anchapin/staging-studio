@@ -11,8 +11,6 @@ import EditorTabBar, {
 } from "./editor-tab-bar";
 import InpaintOperationModeTabs, {
   type InpaintOperationModeId,
-  type LightDirection,
-  type MaterialCategory,
 } from "./inpaint-operation-mode-tabs";
 import { useToast, ToastContainer } from "@/components/ui/toast";
 import { ChevronDown, ChevronUp, Expand, Home, Info, Loader2, Maximize2, Minimize2, PanelRightClose } from "lucide-react";
@@ -42,6 +40,7 @@ import {
   type InpaintSource,
 } from "@/lib/inpaint-source";
 import { sliderFillStyle } from "@/lib/precision-slider";
+import { isOperationModeAvailable } from "@/lib/operation-mode-availability";
 import {
   DEFAULT_MASK_EXPANSION_RADIUS,
   MAX_MASK_EXPANSION_RADIUS,
@@ -580,17 +579,11 @@ export default function InpaintEditor({
   const [lockSeed] = useState(false);
   const [seed, setSeed] = useState<number | undefined>(undefined);
 
-  // Issue #629: Inpaint Operation Mode — secondary tab strip inside Manual paint panel
+  // Issue #629: Inpaint Operation Mode — secondary tab strip inside Manual paint panel.
+  // Issue #692: only Inpaint Zone is wired; the other tabs render disabled with a
+  // "Coming soon" badge (availability map lives in lib/operation-mode-availability).
   const [operationMode, setOperationMode] = useState<InpaintOperationModeId>("inpaint-zone");
   const [guidanceScale, setGuidanceScale] = useState(7.5);
-  // Relight controls
-  const [lightDirection, setLightDirection] = useState<LightDirection>("up");
-  const [relightIntensity, setRelightIntensity] = useState(50);
-  const [relightTemperature, setRelightTemperature] = useState(50);
-  // Material swap controls
-  const [materialCategory, setMaterialCategory] = useState<MaterialCategory>("wood");
-  // Tracks in-flight Restore/Relight/Material Swap operations
-  const [isApplyingOperation, setIsApplyingOperation] = useState(false);
   // Issue #460: comparison now via staged result image click in secondary pane
   const { toasts, showError, showSuccess, dismissToast } = useToast();
 
@@ -1552,26 +1545,6 @@ export default function InpaintEditor({
     });
   }, [maskDataUrl, promptDirectives, beginInpaintRun, showError, globalDirectives, promptStrength, maskBlur, seed, creativeMode, lockSeed]);
 
-  // Issue #629: placeholder handler for Restore Original / Relight / Material Swap.
-  // These operation modes are UI-ready; the actual API endpoints (relight,
-  // material-swap, restore-original) are a future enhancement.
-  const handleApplyOperation = useCallback(
-    async (mode: InpaintOperationModeId) => {
-      if (!maskDataUrl) {
-        showError("Please draw a mask on the image first.");
-        return;
-      }
-      setIsApplyingOperation(true);
-      try {
-        // TODO (#629 follow-up): wire up /api/relight, /api/material-swap, /api/restore-original
-        showError(`${mode.replace("-", " ").replace(/^\w/, (c) => c.toUpperCase())} is not yet connected to an API endpoint.`);
-      } finally {
-        setIsApplyingOperation(false);
-      }
-    },
-    [maskDataUrl, showError]
-  );
-
   // Holistic spike entry (issue #190): the panel builds the full-room
   // mask + aesthetic-derived directives; this just forwards them into
   // the shared run launcher. The one-click preset (issue #191) reuses
@@ -1808,7 +1781,13 @@ export default function InpaintEditor({
       const target = resolveInspectorRailTarget(actionId);
       inspectorPanel.setIsCollapsed(false);
       setActiveTab(target.tab);
-      if (target.operationMode) {
+      // Issue #692: only switch to modes with a shipped backend — the
+      // Relight rail action still expands the inspector and lands on the
+      // Manual paint tab, but never activates a disabled mode.
+      if (
+        target.operationMode &&
+        isOperationModeAvailable(target.operationMode)
+      ) {
         setOperationMode(target.operationMode);
       }
     },
@@ -2167,8 +2146,10 @@ export default function InpaintEditor({
                 />
               </div>
               {/* Issue #629: Inpaint Operation Mode tabs — secondary tab strip for AI
-                  inpaint operations (Inpaint Zone, Restore Original, Relight, Material Swap).
-                  The brush / Fill / Select Region toggles live in the canvas toolbar. */}
+                  inpaint operations. Issue #692: Relight / Restore / Material render
+                  visibly disabled ("Coming soon") until their endpoints exist; their
+                  parameter panels are inert. The brush / Fill / Select Region toggles
+                  live in the canvas toolbar. */}
               <InpaintOperationModeTabs
                 activeMode={operationMode}
                 onModeChange={setOperationMode}
@@ -2181,16 +2162,6 @@ export default function InpaintEditor({
                 onGenerate={handleInpaint}
                 isGenerating={isProcessing}
                 hasMask={!!maskDataUrl}
-                lightDirection={lightDirection}
-                onLightDirectionChange={setLightDirection}
-                relightIntensity={relightIntensity}
-                onRelightIntensityChange={setRelightIntensity}
-                relightTemperature={relightTemperature}
-                onRelightTemperatureChange={setRelightTemperature}
-                materialCategory={materialCategory}
-                onMaterialCategoryChange={setMaterialCategory}
-                onApplyMaterial={handleApplyOperation}
-                isApplyingMaterial={isApplyingOperation}
               />
             </div>
           </div>
