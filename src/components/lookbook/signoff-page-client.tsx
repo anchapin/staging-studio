@@ -4,6 +4,7 @@ import { useState } from "react";
 import { SignoffPage } from "./signoff-page";
 import { SignatureCanvas } from "./signature-canvas";
 import type { LookbookRoomData } from "./types";
+import { formatLongDate } from "@/lib/relative-time";
 
 interface SignoffPageClientProps {
   user: LookbookRoomData["user"];
@@ -101,11 +102,7 @@ export function SignoffPageClient({ user, project, rooms, previewToken }: Signof
               Date
             </p>
             <p className="font-jakarta text-base text-foreground">
-              {new Date().toLocaleDateString("en-US", {
-                year: "numeric",
-                month: "long",
-                day: "numeric",
-              })}
+              {formatLongDate(new Date())}
             </p>
           </div>
 

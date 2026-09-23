@@ -1,6 +1,7 @@
 import Image from "next/image";
 import { LookbookRoomData } from "./types";
 import { ProposalFooter } from "./proposal-footer";
+import { formatLongDate } from "@/lib/relative-time";
 
 interface SignoffPageProps {
   user: LookbookRoomData["user"];
@@ -63,11 +64,7 @@ export function SignoffPage({ user, project, rooms }: SignoffPageProps) {
                 {project.clientSignatureTimestamp && (
                   <p className="font-jakarta text-sm text-muted-foreground">
                     Signed{" "}
-                    {new Date(project.clientSignatureTimestamp).toLocaleDateString("en-US", {
-                      year: "numeric",
-                      month: "long",
-                      day: "numeric",
-                    })}
+                    {formatLongDate(project.clientSignatureTimestamp)}
                   </p>
                 )}
               </div>

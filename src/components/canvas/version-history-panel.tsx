@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import {
   ChevronDown,
@@ -10,17 +10,9 @@ import {
   RotateCcw,
   X,
 } from "lucide-react";
-import { getInpaintVersions, restoreInpaintVersion } from "@/app/actions/inpaint-versions";
 import { useToast } from "@/components/ui/toast";
-
-interface InpaintVersion {
-  id: string;
-  resultUrl: string;
-  thumbnailUrl: string | null;
-  seed: string | null;
-  promptDirectives: string | null;
-  createdAt: Date;
-}
+import { formatRelativeTime } from "@/lib/relative-time";
+import { useVersionHistory, type InpaintVersion } from "./use-version-history";
 
 interface VersionHistoryPanelProps {
   roomId: string;
@@ -32,20 +24,6 @@ interface VersionHistoryPanelProps {
   onRestored?: (resultUrl: string) => void;
 }
 
-function formatRelativeTime(date: Date): string {
-  const now = Date.now();
-  const diff = now - new Date(date).getTime();
-  const seconds = Math.floor(diff / 1000);
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  return new Date(date).toLocaleDateString();
-}
-
 export default function VersionHistoryPanel({
   roomId,
   variantSlot,
@@ -53,24 +31,14 @@ export default function VersionHistoryPanel({
   onRestored,
 }: VersionHistoryPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [versions, setVersions] = useState<InpaintVersion[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const { versions, isLoading, loadVersions, restoreVersion } = useVersionHistory(
+    roomId,
+    variantSlot
+  );
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewVersion, setPreviewVersion] = useState<InpaintVersion | null>(null);
   const [isRestoring, setIsRestoring] = useState(false);
   const { showSuccess, showError } = useToast();
-
-  const loadVersions = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const result = await getInpaintVersions(roomId, variantSlot);
-      if (result.success) {
-        setVersions(result.versions as InpaintVersion[]);
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, [roomId, variantSlot]);
 
   useEffect(() => {
     if (isOpen) {
@@ -81,7 +49,7 @@ export default function VersionHistoryPanel({
   const handleRestore = async (version: InpaintVersion) => {
     setIsRestoring(true);
     try {
-      const result = await restoreInpaintVersion(version.id);
+      const result = await restoreVersion(version.id);
       if (result.success) {
         showSuccess("Version restored successfully");
         onRestored?.(version.resultUrl);
