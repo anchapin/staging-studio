@@ -151,10 +151,22 @@ export async function GET(
     if (statusResponse.status === "COMPLETED") {
       // The queue status payload does not include the generated image —
       // fetch it from the result endpoint (fal serves it right after the
-      // status flips to COMPLETED).
+      // status flips to COMPLETED). A failure here must not crash the
+      // route, but it must be logged (issue #717) so a fal result-endpoint
+      // outage is correlatable in production instead of surfacing only as
+      // unexplained retryable 500s.
       const falResult = await falQueueResult(FAL_FLUX_FILL_MODEL, {
         requestId,
-      }).catch(() => null);
+      }).catch((resultError: unknown) => {
+        console.error(
+          JSON.stringify({
+            event: "inpaint_result_fetch_failed",
+            requestId,
+          }),
+          resultError
+        );
+        return null;
+      });
       const falImageUrl = falResult?.images?.[0]?.url;
 
       if (!falImageUrl) {
