@@ -30,11 +30,11 @@ export function ComparisonPill({
   const base =
     "inline-flex items-center gap-1.5 rounded-full px-3 py-1 label-sm font-semibold uppercase tracking-wider";
   const studio =
-    "bg-primary text-primary-foreground"; /* #181716 bg, #fff8f8 text */
+    "bg-primary text-primary-foreground"; /* #181716 bg, #ffffff text */
   const report =
-    "bg-[#fff8f4] text-[#8C827A] border border-[#8C827A]/30";
+    "bg-surface text-outline border border-outline/30"; /* #fff8f4 bg, #8C827A text */
   /* After pill: terracotta secondary */
-  const after = "bg-secondary text-secondary-foreground"; /* #C47847 bg, #fff8f8 text */
+  const after = "bg-secondary text-secondary-foreground"; /* #8f4d20 bg, #ffffff text */
 
   return (
     <span

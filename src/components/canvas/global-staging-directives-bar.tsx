@@ -172,8 +172,8 @@ export default function GlobalStagingDirectivesBar({
           <div className="flex items-center gap-1.5">
             {gpuActive ? (
               <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#8C827A] opacity-75" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-[#8C827A]" />
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-outline opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-outline" />
               </span>
             ) : (
               <span className="relative flex h-2 w-2">

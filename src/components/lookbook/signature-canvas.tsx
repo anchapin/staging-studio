@@ -3,6 +3,8 @@
 import { useRef, useState, useCallback, useEffect } from "react";
 import { Loader2 } from "lucide-react";
 
+import { ATELIER_COLOR_TOKENS } from "@/lib/color-tokens";
+
 interface SignatureCanvasProps {
   onSave: (dataUrl: string) => Promise<void>;
   clientName: string;
@@ -33,7 +35,7 @@ export function SignatureCanvas({ onSave, clientName, disabled }: SignatureCanva
     ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
 
     // Style
-    ctx.strokeStyle = "#1c1917";
+    ctx.strokeStyle = ATELIER_COLOR_TOKENS.primary;
     ctx.lineWidth = 2;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
@@ -116,7 +118,7 @@ export function SignatureCanvas({ onSave, clientName, disabled }: SignatureCanva
         ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.font = `italic 48px "Playfair Display", Georgia, serif`;
-        ctx.fillStyle = "#1c1917";
+        ctx.fillStyle = ATELIER_COLOR_TOKENS.primary;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(typedName, rect.width / 2, rect.height / 2);

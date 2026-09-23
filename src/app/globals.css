@@ -11,7 +11,7 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
-  /* Issue #592: Stitch terracotta bronze #8f4d20 (distinct from --secondary: #C47847) */
+  /* Issue #592/#613: Stitch terracotta bronze #8f4d20 */
   --color-secondary: #8f4d20;
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -30,14 +30,44 @@
   --color-taupe: #8C827A;
   --color-cream: #fff8f8;
   --color-outline-variant: var(--outline-variant);
-  /* Issue #621: moodboard selector tokens */
-  /* Fixed tone — Atelier terracotta #C47847, stable across light/dark modes */
-  --color-secondary-fixed: #C47847;
-  /* Surface container utilities (values defined in :root, Issue #624) */
+  /* Issue #621: moodboard selector tokens (fixed tone, stable across
+     light/dark modes; values moved to :root with the rest of #613) */
+  --color-secondary-fixed: var(--color-secondary-fixed);
+  --color-secondary-fixed-dim: var(--color-secondary-fixed-dim);
+  --color-on-secondary-fixed: var(--color-on-secondary-fixed);
+  --color-on-secondary-fixed-variant: var(--color-on-secondary-fixed-variant);
+  /* Surface container utilities (values defined in :root, Issue #624/#613) */
   --color-surface-container: var(--color-surface-container);
   --color-surface-container-low: var(--color-surface-container-low);
   /* Issue #620: lowest tier — workbench top bar, active sidebar rows, dock */
   --color-surface-container-lowest: var(--color-surface-container-lowest);
+  /* Issue #613: full Atelier Canvas warm token system
+     (single source of truth: src/lib/color-tokens.ts; values in :root) */
+  --color-surface-dim: var(--color-surface-dim);
+  --color-surface-bright: var(--color-surface-bright);
+  --color-surface-container-high: var(--color-surface-container-high);
+  --color-surface-container-highest: var(--color-surface-container-highest);
+  --color-surface-variant: var(--color-surface-variant);
+  --color-surface-tint: var(--color-surface-tint);
+  --color-on-surface: var(--color-on-surface);
+  --color-on-surface-variant: var(--color-on-surface-variant);
+  --color-inverse-surface: var(--color-inverse-surface);
+  --color-inverse-on-surface: var(--color-inverse-on-surface);
+  --color-inverse-primary: var(--color-inverse-primary);
+  --color-on-primary: var(--color-on-primary);
+  --color-primary-container: var(--color-primary-container);
+  --color-on-primary-container: var(--color-on-primary-container);
+  --color-on-secondary: var(--color-on-secondary);
+  --color-secondary-container: var(--color-secondary-container);
+  --color-on-secondary-container: var(--color-on-secondary-container);
+  --color-on-tertiary: var(--color-on-tertiary);
+  --color-tertiary-container: var(--color-tertiary-container);
+  --color-on-tertiary-container: var(--color-on-tertiary-container);
+  --color-outline: var(--color-outline);
+  --color-error: var(--color-error);
+  --color-on-error: var(--color-on-error);
+  --color-error-container: var(--color-error-container);
+  --color-on-error-container: var(--color-on-error-container);
   --radius: var(--radius);
   --font-cinzel: var(--font-cinzel-google);
   --font-playfair: var(--font-playfair-google);
@@ -140,18 +170,18 @@
 
 @layer base {
   :root {
-    /* Issue #546: Atelier Canvas design tokens */
-    /* Surface base: warm cream */
-    --background: #fff8f8;
+    /* Issue #546/#613: Atelier Canvas design tokens */
+    /* Surface base: warm linen (spec background #fff8f4) */
+    --background: #fff8f4;
     --foreground: #181716;
-    --card: #fff8f8;
+    --card: #fff8f4;
     --card-foreground: #181716;
     /* Primary: charred walnut */
     --primary: #181716;
-    --primary-foreground: #fff8f8;
-    /* Secondary: terracotta bronze */
-    --secondary: #C47847;
-    --secondary-foreground: #fff8f8;
+    --primary-foreground: #ffffff;
+    /* Secondary: terracotta bronze (spec #8f4d20, Issue #613) */
+    --secondary: #8f4d20;
+    --secondary-foreground: #ffffff;
     /* Neutral: Honed Taupe */
     --muted: #F8F6F2;
     --muted-foreground: #8C827A;
@@ -163,7 +193,7 @@
     --input: oklch(0.922 0 0);
     --ring: oklch(0.708 0 0);
     --radius: 0.625rem;
-    --popover: #fff8f8;
+    --popover: #fff8f4;
     --popover-foreground: #181716;
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
@@ -190,26 +220,60 @@
     /* Atelier Canvas canvas background */
     --canvas-background: #F8F6F2;
 
-    /* Issue #592: Stitch design token aliases mapped to Atelier palette values */
-    /* --color-surface: warm cream #fff8f4 */
-    /* --color-secondary: Stitch terracotta bronze #8f4d20 (distinct from --secondary #C47847) */
-    /* --color-tertiary: warm taupe #8C827A */
+    /* Issue #592/#613: Stitch design token aliases mapped to Atelier palette
+       values. Tertiary is now the spec muted sage #5C6E58 (restoration/success
+       indicator), replacing the old warm-taupe #8C827A. */
     --color-surface: #fff8f4;
     --color-secondary: #8f4d20;
-    --color-tertiary: #8C827A;
+    --color-tertiary: #5C6E58;
 
-    /* Issue #624: Stitch surface container tokens for gradient cards */
-    /* Surface container: warm cream gradient hierarchy */
-    --color-surface-container: #fff8f4;
-    --color-surface-container-low: #F8F6F2;
-    --color-surface-container-lowest: #F0EDE8;
+    /* Issue #624/#613: Stitch surface container tokens for gradient cards */
+    /* Surface container: warm linen gradient hierarchy (spec values) */
+    --color-surface-container: #f9ece2;
+    --color-surface-container-low: #fef1e8;
+    --color-surface-container-lowest: #ffffff;
 
     /* Atelier Canvas inpaint mask overlay (Issue #546) */
     --inpaint-mask-overlay: rgba(0, 245, 160, 0.35);
     --inpaint-laser-rim: rgba(0, 245, 160, 0.8);
 
-    /* Hairline divider token (Issue #640) */
-    --outline-variant: #8C827A;
+    /* Hairline divider token (Issue #640/#613: spec outline-variant #ccc5bd) */
+    --outline-variant: #ccc5bd;
+
+    /* Issue #613: remaining Atelier Canvas color tokens (single source of
+       truth: src/lib/color-tokens.ts; pinned by tests/color-tokens.test.ts).
+       Fixed/neutral tones intentionally NOT overridden in .dark. */
+    --color-surface-dim: #e4d8ce;
+    --color-surface-bright: #fff8f4;
+    --color-surface-container-high: #f3e6dc;
+    --color-surface-container-highest: #ede0d7;
+    --color-surface-variant: #ede0d7;
+    --color-surface-tint: #605e5c;
+    --color-on-surface: #201a15;
+    --color-on-surface-variant: #4a4640;
+    --color-inverse-surface: #362f29;
+    --color-inverse-on-surface: #fceee5;
+    --color-inverse-primary: #cac6c4;
+    --color-on-primary: #ffffff;
+    --color-primary-container: #1c1b1a;
+    /* spec draft #868382 failed AA on the dark container; issue #613 directs
+       the warm off-white instead */
+    --color-on-primary-container: #fff8f4;
+    --color-on-secondary: #ffffff;
+    --color-secondary-container: #fda772;
+    --color-on-secondary-container: #773b0e;
+    --color-secondary-fixed: #ffdbc8;
+    --color-secondary-fixed-dim: #ffb68b;
+    --color-on-secondary-fixed: #321300;
+    --color-on-secondary-fixed-variant: #713609;
+    --color-on-tertiary: #ffffff;
+    --color-tertiary-container: #d4e8cd;
+    --color-on-tertiary-container: #3a4b37;
+    --color-outline: #8C827A;
+    --color-error: #ba1a1a;
+    --color-on-error: #ffffff;
+    --color-error-container: #ffdad6;
+    --color-on-error-container: #93000a;
 
     /* Issue #614: font stack aliases — canonical vars are minted by next/font
        in src/app/layout.tsx; these aliases give every var(--font-*) consumer

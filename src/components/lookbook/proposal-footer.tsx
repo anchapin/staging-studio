@@ -21,8 +21,8 @@ export function ProposalFooter({ pageNumber }: ProposalFooterProps) {
         {/* Left: Atelier Canvas wordmark + tagline */}
         <div className="space-y-0.5">
           <p className="font-playfair text-base leading-none">
-            <span className="italic text-[#C47847]">Atelier</span>
-            <span className="text-[#181716]"> Canvas</span>
+            <span className="italic text-secondary">Atelier</span>
+            <span className="text-primary"> Canvas</span>
           </p>
           <p className="font-jakarta text-xs text-muted-foreground">
             AI-Powered Home Staging

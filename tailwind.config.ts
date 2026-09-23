@@ -1,5 +1,6 @@
 import type { Config } from "tailwindcss";
 
+import { ATELIER_COLOR_TOKENS, CIRCLE_RADIUS, PILL_RADIUS } from "./src/lib/color-tokens";
 import {
   TYPOGRAPHY_FONTS,
   TYPOGRAPHY_TOKEN_FAMILIES,
@@ -176,13 +177,15 @@ const config: Config = {
         },
         /* Hairline divider token (Issue #640) */
         "outline-variant": "hsl(var(--outline-variant))",
-        /* Atelier Canvas palette (Issue #546) */
+        /* Atelier Canvas palette (Issue #546) + full Stitch token system
+         * (Issue #613). The spec tokens come from src/lib/color-tokens.ts;
+         * canvas/taupe/cream are legacy Atelier aliases kept for existing
+         * call sites (atelier-canvas, atelier-taupe). */
         atelier: {
           canvas: "#F8F6F2",
-          primary: "#181716",
-          secondary: "#C47847",
           taupe: "#8C827A",
           cream: "#fff8f8",
+          ...ATELIER_COLOR_TOKENS,
         },
       },
       borderRadius: {
@@ -195,9 +198,9 @@ const config: Config = {
         xl: "0.75rem", // 12px — modals, large cards
         "2xl": "1rem", // 16px — inspector panel, drawers
         "3xl": "1.5rem", // 24px — large containers
-        // Pill / full radius
-        pill: "0.75rem", // NOT 9999px — the Stitch spec uses 12px (0.75rem) for pill shapes
-        full: "9999px", // True full circle for avatars
+        // Pill / full radius (Issue #613 task 5)
+        pill: PILL_RADIUS, // 0.75rem — NOT 9999px; the Stitch spec uses 12px for pill shapes
+        full: CIRCLE_RADIUS, // true full circle for avatars/dots (rounded-full stays circular)
       },
       boxShadow: {
         // Warm shadow tokens — warm-toned rgba(48, 40, 34, ...) gives shadows a linen/terracotta tint
