@@ -23,9 +23,13 @@ import { stagedResultFixture, stagedResultFixtureB } from "./fixtures";
  *   GET  /auth/v1/user                          → user object directly
  *   POST /auth/v1/logout                        → 204
  *
- * Storage: serves the signed-upload flow used by `room-photos` uploads:
+ * Storage: serves both upload flows the app uses:
  *   POST /storage/v1/object/upload/sign/<bucket>/<path> → { url: "...?token=..." }
  *   PUT  /storage/v1/object/upload/sign/<bucket>/<path>?token=… → stores bytes
+ *   POST /storage/v1/object/<bucket>/<path>             → stores bytes (plain
+ *        upload — the saveInpaintVersion thumbnail path, issue #747; supabase-js
+ *        wraps Blob bodies in a multipart/form-data envelope, so the file
+ *        part is unwrapped before storing)
  *   GET  /storage/v1/object/public/<bucket>/<path>      → stored bytes
  * Received objects are hashed so specs can prove the browser PUT body and
  * the stored object are byte-identical (the PoC bug stored 0-byte objects).
@@ -126,6 +130,46 @@ async function readBody(req: IncomingMessage): Promise<Buffer> {
     chunks.push(chunk as Buffer);
   }
   return Buffer.concat(chunks);
+}
+
+/**
+ * Extracts the file part from the multipart/form-data envelope supabase-js
+ * (storage-js ≥2.x) wraps Blob uploads in: fields `cacheControl` and `""`
+ * (the file itself). Node's `Request.formData()` silently drops `name=""`
+ * parts, so the envelope is parsed binary-safely off the raw body instead.
+ * Returns null when the body is not multipart, letting callers treat the
+ * request as a raw-byte upload.
+ */
+function unwrapMultipartFile(
+  contentTypeHeader: string,
+  body: Buffer
+): { bytes: Buffer; contentType: string } | null {
+  const boundaryMatch = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(contentTypeHeader);
+  if (!contentTypeHeader.includes("multipart/form-data") || !boundaryMatch) {
+    return null;
+  }
+  const delimiter = Buffer.from(`--${(boundaryMatch[1] ?? boundaryMatch[2]).trim()}`);
+  let cursor = body.indexOf(delimiter);
+  while (cursor !== -1) {
+    const next = body.indexOf(delimiter, cursor + delimiter.length);
+    if (next === -1) break;
+    // Each part sits between two delimiter lines: skip the \r\n after the
+    // opening delimiter and trim the \r\n that precedes the next one.
+    const part = body.subarray(cursor + delimiter.length + 2, next - 2);
+    const headerEnd = part.indexOf("\r\n\r\n");
+    if (headerEnd !== -1) {
+      const partHeaders = part.subarray(0, headerEnd).toString("utf8");
+      if (/name=""/.test(partHeaders)) {
+        const typeMatch = /content-type:\s*([^\r\n]+)/i.exec(partHeaders);
+        return {
+          bytes: Buffer.from(part.subarray(headerEnd + 4)),
+          contentType: typeMatch?.[1].trim() ?? "application/octet-stream",
+        };
+      }
+    }
+    cursor = next;
+  }
+  return null;
 }
 
 export class MockSupabase {
@@ -282,6 +326,7 @@ export class MockSupabase {
     // parts: [storage, v1, object, <mode>, ...]
     //   public:       [object, public, <bucket>, ...<path>]
     //   upload/sign:  [object, upload, sign, <bucket>, ...<path>]
+    //   plain upload: [object, <bucket>, ...<path>] (POST)
     const mode = parts[3];
 
     // Signed upload URL mint: the client builds `signedUrl = url + data.url`
@@ -300,6 +345,16 @@ export class MockSupabase {
     // The signed PUT itself: capture bytes + hash for the byte-identity spec.
     if (mode === "upload" && parts[4] === "sign" && req.method === "PUT") {
       void this.handleSignedPut(req, res, parts[5], parts.slice(6).join("/"));
+      return;
+    }
+
+    // Plain upload (issue #747): saveInpaintVersion uploads version-history
+    // thumbnails with supabase-js `.upload()`, which services as a plain
+    // POST /object/<bucket>/<path>. Blob bodies arrive wrapped in a
+    // multipart/form-data envelope (unlike the browser's raw-byte PUT to
+    // signed URLs above), so the handler unwraps the file part.
+    if (req.method === "POST" && mode !== "upload" && mode !== "public") {
+      void this.handlePlainUpload(req, res, mode, parts.slice(4).join("/"));
       return;
     }
 
@@ -329,16 +384,49 @@ export class MockSupabase {
     objectPath: string
   ): Promise<void> {
     const bytes = await readBody(req);
-    const contentType = req.headers["content-type"] ?? "application/octet-stream";
-    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    const contentType = String(req.headers["content-type"] ?? "application/octet-stream");
+    this.storeObject(bucket, objectPath, bytes, contentType);
+    this.ackObject(res, bucket, objectPath);
+  }
+
+  /**
+   * Plain-object upload body: unwrap the file part when the client sent
+   * the multipart envelope supabase-js uses for Blob bodies; otherwise
+   * store the raw bytes as-is.
+   */
+  private async handlePlainUpload(
+    req: IncomingMessage,
+    res: ServerResponse,
+    bucket: string,
+    objectPath: string
+  ): Promise<void> {
+    const body = await readBody(req);
+    const contentTypeHeader = String(
+      req.headers["content-type"] ?? "application/octet-stream"
+    );
+    const file = unwrapMultipartFile(contentTypeHeader, body);
+    this.storeObject(bucket, objectPath, file?.bytes ?? body, file?.contentType ?? contentTypeHeader);
+    this.ackObject(res, bucket, objectPath);
+  }
+
+  private storeObject(
+    bucket: string,
+    objectPath: string,
+    bytes: Buffer,
+    contentType: string
+  ): void {
     this.objects.set(`${bucket}/${objectPath}`, {
       bucket,
       path: objectPath,
       bytes,
       contentType,
       size: bytes.length,
-      sha256,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
     });
+  }
+
+  /** 200 ack shaped like Supabase's `{ Key }` upload response. */
+  private ackObject(res: ServerResponse, bucket: string, objectPath: string): void {
     res.statusCode = 200;
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify({ Key: `${bucket}/${objectPath}` }));
