@@ -1,13 +1,10 @@
-import { generateObject } from "ai";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { fal } from "@/lib/fal";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
-import {
-  inpaintRequestSchema,
-  inpaintQualityGateSchema,
-} from "@/lib/ai-route-schemas";
+import { inpaintRequestSchema } from "@/lib/ai-route-schemas";
+import { evaluateInpaintQualityGate } from "@/lib/inpaint-quality-gate";
 import { classifyIntegrationError } from "@/lib/error-classify";
 import {
   DEFAULT_DAILY_INPAINT_LIMIT,
@@ -22,7 +19,6 @@ import {
   buildFalFillPayload,
   buildInpaintPrompt,
 } from "@/lib/prompts";
-import { aiModel, assertOpenAIConfigured } from "@/lib/ai";
 
 const INPAINT_ERROR_COPY = {
   auth: {
@@ -163,39 +159,14 @@ export async function POST(request: NextRequest) {
     // Issue #600: inpaint pre-flight quality gate — evaluate directive quality
     // before spending fal.ai budget. Runs after quota check + validation, before
     // fal.queue.submit. Advisory only; warnings ride along with the submission.
-    const qualityWarnings: string[] = [];
-    if (parsed.data.maskCoverageRatio !== undefined) {
-      assertOpenAIConfigured();
-      const { object: qg } = await generateObject({
-        model: aiModel,
-        schema: inpaintQualityGateSchema,
-        messages: [
-          {
-            role: "user",
-            content: [
-              `You are a staging quality auditor. Evaluate the inpaint directive for a room named "${room.name}".`,
-              "",
-              `Mask coverage ratio: ${(parsed.data.maskCoverageRatio * 100).toFixed(1)}% of the canvas is masked for regeneration.`,
-              "",
-              `Directives: "${promptDirectives}"`,
-              "",
-              "Evaluate:",
-              "1. specificity (0–3): 0=completely generic/vague, 3=highly specific and concrete",
-              "2. architecture_risk: if the directives mention changing walls, flooring, windows, trim, doors, or ceiling AND the mask does not cover those areas, explain the risk",
-              "3. mentions_furnishings: if the directives describe what the mask actually covers (the furnishings/objects being staged), note that the alignment is positive",
-              "",
-              "Return a JSON object with: specificity (number 0-3), architecture_risk (string only if risk exists), mentions_furnishings (string only if positive), qualityWarnings (array of distinct warning strings).",
-            ].join("\n"),
-          },
-        ],
-      });
-      if (qg.architecture_risk) {
-        qualityWarnings.push(qg.architecture_risk);
-      }
-      if (qg.qualityWarnings) {
-        qualityWarnings.push(...qg.qualityWarnings);
-      }
-    }
+    // Issue #685: the gate is failure-tolerant — ANY evaluator failure (OpenAI
+    // outage, rate limit, timeout, missing key) or omitted maskCoverageRatio
+    // skips the gate with empty warnings instead of failing the submission.
+    const qualityWarnings = await evaluateInpaintQualityGate({
+      roomName: room.name,
+      maskCoverageRatio: parsed.data.maskCoverageRatio,
+      promptDirectives,
+    });
 
     // Fire-and-forget submit: returns as soon as the job is queued (~2s),
     // instead of holding the request open for the full generation.
