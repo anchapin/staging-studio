@@ -20,6 +20,7 @@ import { useInpaintStatus } from "./use-inpaint-status";
 
 import BrushToolRail, {
   BrushParameterFlyout,
+  CanvasZoomHud,
   type StudioTool,
 } from "./BrushToolRail";
 import InspectorCollapsedRail from "./inspector-collapsed-rail";
@@ -2399,9 +2400,11 @@ export default function InpaintEditor({
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
 
-      {/* Issue #627: Brush Tool Rail — shown when Zen Mode is active */}
+      {/* Issue #616: Floating glassmorphic canvas tool rail — left-anchored
+          stack (1.5rem from viewport edges) with the tool strip, brush
+          parameter flyout, and zoom HUD. Shown when Zen Mode is active. */}
       {zenMode && (
-        <>
+        <div className="fixed left-6 top-6 z-50 flex flex-col items-start gap-3">
           <BrushToolRail
             activeTool={studioActiveTool}
             onToolChange={setStudioActiveTool}
@@ -2417,7 +2420,8 @@ export default function InpaintEditor({
               onClose={() => setStudioActiveTool("select")}
             />
           )}
-        </>
+          <CanvasZoomHud />
+        </div>
       )}
 
       {/* Issue #631: Version History Pills — floating bar at bottom-center of canvas
