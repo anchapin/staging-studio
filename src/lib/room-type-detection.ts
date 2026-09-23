@@ -1,27 +1,14 @@
 /**
  * Room type detection via GPT-4o-mini vision (issue #788).
  *
- * Extracted from room-batch.ts so the prompt can be reviewed and tested
- * in isolation, matching the pattern used for other vision prompt modules.
+ * The ROOM_TYPE_SYSTEM_PROMPT is defined in prompts.ts (issue #788) and
+ * re-exported here for backward compatibility. The function itself is
+ * tested in isolation, matching the pattern used for other vision prompt modules.
  */
 
 import { z } from "zod";
 import { aiModel, assertOpenAIConfigured } from "@/lib/ai";
-
-/** System prompt sent to GPT-4o-mini for room type classification. */
-export const ROOM_TYPE_SYSTEM_PROMPT = `You are an expert interior design assistant. Given a room photo, identify the room type from this list:
-- Primary Bedroom
-- Secondary Bedroom
-- Living Room
-- Dining Room
-- Kitchen
-- Bathroom
-- Home Office
-- Garage
-- Outdoor/Patio
-- Other
-
-Respond with ONLY the room type name. If uncertain, respond with the most likely option.`;
+import { ROOM_TYPE_SYSTEM_PROMPT } from "@/lib/prompts";
 
 /**
  * Detects the room type of an image using GPT-4o-mini vision.
