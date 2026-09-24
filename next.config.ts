@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // @ts-expect-error maxDuration is a valid Next.js config key but may not be in the published types yet
+  maxDuration: 90,
   images: {
     // Issue #264: allow next/image optimizer to fetch from loopback private IPs
     // in the e2e harness. The mock Supabase storage runs on 127.0.0.1 and the

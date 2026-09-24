@@ -90,7 +90,22 @@ export default async function RoomsStudioPage({ params }: RoomsPageProps) {
           activeRequestCount: room.inpaintRequests.filter(
             (request) =>
               request.status === "IN_QUEUE" || request.status === "IN_PROGRESS"
-          ).length,
+            ).length,
+          stagingStatus:
+            room.inpaintRequests.length === 0
+              ? "idle"
+              : room.inpaintRequests.some(
+                  (r) => r.status === "ERROR" || r.status === "PERSISTENCE_FAILED"
+                )
+              ? "failed"
+              : room.inpaintRequests.some(
+                  (r) =>
+                    r.status === "IN_QUEUE" || r.status === "IN_PROGRESS"
+                )
+              ? "in_progress"
+              : room.inpaintRequests.every((r) => r.status === "COMPLETED")
+              ? "done"
+              : "pending",
         })),
       }}
     />

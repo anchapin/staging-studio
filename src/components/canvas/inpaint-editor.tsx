@@ -3,14 +3,12 @@
 import { useState, useCallback, useMemo } from "react";
 import { useAutoSaveStatus } from "@/lib/autosave-controller";
 import { DEFAULT_MASK_EXPANSION_RADIUS } from "@/lib/mask-dilation";
-import CollapsibleSection, {
+import {
   useCollapsiblePanel,
 } from "./collapsible-section";
-import EditorTabBar from "./editor-tab-bar";
 import { type InpaintOperationModeId } from "./inpaint-operation-mode-tabs";
 import { useToast, ToastContainer } from "@/components/ui/toast";
 
-import InspectorCollapsedRail from "./inspector-collapsed-rail";
 import {
   INSPECTOR_PANEL_STORAGE_KEY,
   resolveInspectorPanelView,
@@ -19,11 +17,7 @@ import {
 } from "@/lib/inspector-panel";
 import { isOperationModeAvailable } from "@/lib/operation-mode-availability";
 import FocusRestorePill from "./focus-restore-pill";
-import EntireTabPanel from "./entire-tab-panel";
-import ManualTabPanel from "./manual-tab-panel";
-import DetectTabPanel from "./detect-tab-panel";
 import EditorCanvasPane from "./editor-canvas-pane";
-import InspectorHeader from "./inspector-header";
 import ZenToolRail from "./zen-tool-rail";
 import { useEditorTabs } from "./use-editor-tabs";
 import { useImageDimensions } from "./use-image-dimensions";
@@ -31,8 +25,7 @@ import { useZenWorkspace } from "./use-zen-workspace";
 import { useSourceSelection } from "./use-source-selection";
 import { useConceptDetection } from "./use-concept-detection";
 import { useWorkspaceShortcuts } from "./use-workspace-shortcuts";
-import SourceSelectorFieldset from "./source-selector-fieldset";
-import InspectorFooterPanels from "./inspector-footer-panels";
+import { EditorInspectorColumn } from "./editor-inspector-column";
 import { useSelectionMaskComposer } from "./use-selection-mask-composer";
 import { useInpaintRuns } from "./use-inpaint-runs";
 import { type GeneratedVariation } from "./generated-variation-grid";
@@ -434,203 +427,96 @@ export default function InpaintEditor({
       {/* Issue #617: collapsible right inspector — the 380px panel and the
           48px rail share this column; `transition-all duration-300` on the
           column animates the width between them.
-          Issue #560: right panel hidden in Zen Mode.
-          Issue #638: right panel hidden in Focus Canvas Mode (the restore
-          pill owns the way back — no rail in either mode). */}
-      <div
-        data-inspector-column=""
-        className={`no-print transition-all duration-300 ${
-          inspectorView === "hidden"
-            ? "zen-mode-hidden"
-            : inspectorView === "rail"
-              ? `w-full ${fullWidth ? "lg:w-12 lg:shrink-0" : ""}`
-              : `flex w-full flex-col gap-3 ${fullWidth ? "lg:min-h-0 lg:w-[380px] lg:shrink-0" : ""}`
-        }`}
-      >
-        {inspectorView === "rail" ? (
-          <InspectorCollapsedRail onExpand={handleInspectorRailExpand} />
-        ) : (
-          <>
-        {/* Issue #617: Active Inpaint Zone header with the collapse toggle.
-            The five inspector sections live below: operation mode tabs +
-            targeted prompt editor + AI guidance sliders (Manual paint tab,
-            via #629/#558) and the generated variation grid (#630). */}
-        <div
-          id="inspector-panel-content"
-          className="flex w-full min-h-0 flex-1 flex-col gap-3"
-        >
-        <InspectorHeader
-          onToggleCollapse={inspectorPanel.toggle}
-          isExpanded={inspectorView === "expanded"}
-          activeBatch={activeBatch}
-        />
-        <CollapsibleSection
-          id="brushPanel"
-          title="Editor Controls"
-          isCollapsed={brushPanel.isCollapsed}
-          onToggle={brushPanel.toggle}
-        >
-          <div
-            className={`flex flex-col gap-4 ${
-              fullWidth ? "md:min-h-0 md:flex-1 md:overflow-visible lg:min-h-0 lg:flex-1 lg:overflow-y-auto" : ""
-            }`}
-          >
-            {sourceOptions.length > 1 && (
-              <SourceSelectorFieldset
-                roomId={roomId}
-                sourceOptions={sourceOptions}
-                source={source}
-                disabled={isProcessing}
-                onSelectSource={handleSourceChange}
-                canUndoSource={canUndoSource}
-                onUndoSource={handleUndoSource}
-              />
-            )}
-
-          <div className="sticky top-0 z-10 bg-atelier-canvas pb-1">
-            <div className="flex items-center justify-between">
-              <EditorTabBar
-                tabs={editorTabs}
-                activeTab={effectiveTab}
-                onSelectTab={handleTabSelect}
-                idBase={tabIdBase}
-              />
-              {saveStatus === "saving" || saveStatus === "dirty" ? (
-                <span className="text-xs text-muted-foreground animate-pulse">
-                  Saving...
-                </span>
-              ) : saveStatus === "saved" ? (
-                <span className="text-xs text-green-600 flex items-center gap-1">
-                  <svg
-                    className="w-3 h-3"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M5 13l4 4L19 7"
-                    />
-                  </svg>
-                  Saved
-                </span>
-              ) : null}
-            </div>
-          </div>
-
-          {/* Tab panels stay MOUNTED (hidden, not unmounted) so tab
-              switching performs zero state transitions — the batch
-              panel's prompts and mode survive round-trips (AC-L5). */}
-          <EntireTabPanel
+          {/* Issue #787: extracted inspector column into separate component */}
+          <EditorInspectorColumn
+            fullWidth={fullWidth}
+            inspectorView={inspectorView}
+            inspectorPanel={inspectorPanel}
+            handleInspectorRailExpand={handleInspectorRailExpand}
+            brushPanel={brushPanel}
+            sourceOptions={sourceOptions}
+            source={source}
+            isProcessing={isProcessing}
+            handleSourceChange={handleSourceChange}
+            canUndoSource={canUndoSource}
+            handleUndoSource={handleUndoSource}
+            editorTabs={editorTabs}
+            effectiveTab={effectiveTab}
+            handleTabSelect={handleTabSelect}
             tabIdBase={tabIdBase}
-            hidden={effectiveTab !== "entire"}
+            saveStatus={saveStatus}
             roomId={roomId}
             imageUrl={imageUrl}
             aesthetic={aesthetic}
-            imageWidth={imageDims?.width ?? null}
-            imageHeight={imageDims?.height ?? null}
-            disabled={isProcessing || conceptLoading}
-            processing={isProcessing}
-            statusText={statusText}
-            onRun={handleHolisticRun}
-            onError={showError}
-          />
-
-          <ManualTabPanel
-            tabIdBase={tabIdBase}
-            hidden={effectiveTab !== "manual"}
-            roomId={roomId}
+            imageDims={imageDims}
             directivesValue={directivesValue}
             promptDirectives={promptDirectives}
             onDirectivesChange={onDirectivesChange}
             operationMode={operationMode}
-            onOperationModeChange={setOperationMode}
+            setOperationMode={setOperationMode}
             promptStrength={promptStrength}
-            onPromptStrengthChange={setPromptStrength}
+            setPromptStrength={setPromptStrength}
             guidanceScale={guidanceScale}
-            onGuidanceScaleChange={setGuidanceScale}
+            setGuidanceScale={setGuidanceScale}
             seed={seed}
-            onSeedChange={setSeed}
-            onGenerate={handleInpaint}
-            isGenerating={isProcessing}
-            hasMask={!!maskDataUrl}
-          />
-
-          <DetectTabPanel
-            tabIdBase={tabIdBase}
-            hidden={effectiveTab !== "detect"}
-            imageUrl={imageUrl}
-            isProcessing={isProcessing}
+            setSeed={setSeed}
+            handleInpaint={handleInpaint}
+            maskDataUrl={maskDataUrl}
             detectionArmed={detectionArmed}
-            onArmDetection={armDetectionForCurrentBase}
+            armDetectionForCurrentBase={armDetectionForCurrentBase}
             requestedConcept={requestedConcept}
+            conceptSegments={conceptSegments}
             conceptLoading={conceptLoading}
-            conceptStatus={conceptSegments.status}
-            conceptFailedReason={conceptSegments.failedReason}
             displayedResult={displayedResult}
-            onConceptChange={handleConceptChange}
-            onConceptSubmit={handleConceptSubmit}
+            handleConceptChange={handleConceptChange}
+            handleConceptSubmit={handleConceptSubmit}
             conceptInputId={conceptInputId}
             conceptInput={conceptInput}
-            onConceptInputChange={setConceptInput}
+            setConceptInput={setConceptInput}
             conceptInputError={conceptInputError}
-            onConceptInputErrorChange={setConceptInputError}
-            onSelectAllDetected={handleSelectAllDetected}
-            onClearSelection={handleClearSelection}
+            setConceptInputError={setConceptInputError}
+            handleSelectAllDetected={handleSelectAllDetected}
+            handleClearSelection={handleClearSelection}
             detectedCount={detectedCount}
             selectionCount={selectionCount}
             selectAllNotice={selectAllNotice}
-            onSwitchToManualTab={() => setActiveTab("manual")}
+            setActiveTab={setActiveTab}
             batchSelections={batchSelections}
             instanceLabels={instanceLabels}
-            aesthetic={aesthetic}
             activeBatch={activeBatch}
-            onBatchRun={handleBatchRun}
-            onBatchRetry={handleBatchRetry}
-            onRemoveLastSelection={handleRemoveLastSelection}
-            onRemoveSelection={handleRemoveSelection}
+            handleBatchRun={handleBatchRun}
+            handleBatchRetry={handleBatchRetry}
+            handleRemoveLastSelection={handleRemoveLastSelection}
+            handleRemoveSelection={handleRemoveSelection}
+            roomName={roomName}
+            variantSlot={variantSlot}
+            generatedVariations={generatedVariations}
+            selectedVariationId={selectedVariationId}
+            setSelectedVariationId={setSelectedVariationId}
+            isGeneratingVariations={isGeneratingVariations}
+            variationProgress={variationProgress}
+            setIsGeneratingVariations={setIsGeneratingVariations}
+            setVariationProgress={setVariationProgress}
+            activeResultUrl={activeResultUrl}
+            setActiveResultUrl={setActiveResultUrl}
+            generatedVariationsPanel={generatedVariationsPanel}
+            variantPanel={variantPanel}
+            statusText={statusText}
+            handleHolisticRun={handleHolisticRun}
+            showError={showError}
+            markRunCompletionRebase={markRunCompletionRebase}
+            onInpaintComplete={onInpaintComplete}
+            onGenerateMore={() => {
+              setIsGeneratingVariations(true);
+              setVariationProgress("Generating variation 1 of 4…");
+            }}
+            /* eslint-disable @typescript-eslint/no-explicit-any */
+            onUseVariation={(variation: any) => {
+              setSelectedVariationId(variation.id);
+              markRunCompletionRebase();
+              onInpaintComplete?.(variation.resultUrl, source);
+            }}
           />
-          </div>
-        </CollapsibleSection>
-
-        <InspectorFooterPanels
-          roomId={roomId}
-          roomName={roomName}
-          variantSlot={variantSlot}
-          generatedVariations={generatedVariations}
-          selectedVariationId={selectedVariationId}
-          onSelectVariation={setSelectedVariationId}
-          isGeneratingVariations={isGeneratingVariations}
-          variationProgress={variationProgress}
-          onGenerateMore={() => {
-            // Issue #630: the parent is responsible for calling the inpaint
-            // API multiple times to produce new variations and updating
-            // generatedVariations / isGeneratingVariations / variationProgress.
-            // Placeholder handler — replace with actual generation logic.
-            setIsGeneratingVariations(true);
-            setVariationProgress("Generating variation 1 of 4…");
-          }}
-          onUseVariation={(variation) => {
-            // Issue #630: apply the selected variation's result URL to the
-            // canvas — typically by calling onInpaintComplete or updating
-            // the active result URL.
-            setSelectedVariationId(variation.id);
-            // Issue #748: applying a variation rebases the editor onto a
-            // new base — land it lazy like any other completion rebase.
-            markRunCompletionRebase();
-            onInpaintComplete?.(variation.resultUrl, source);
-          }}
-          activeResultUrl={activeResultUrl}
-          onActiveResultUrlChange={setActiveResultUrl}
-          generatedVariationsPanel={generatedVariationsPanel}
-          variantPanel={variantPanel}
-        />
-        </div>
-          </>
-        )}
-      </div>
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
 

@@ -116,7 +116,7 @@ export function useInpaintRuns({
   // success toast is suppressed (the batch panel shows per-step progress)
   // and failures are captured for the panel's retry affordance instead of
   // the toast's own single-step retry.
-  const { isProcessing, statusText, start } = useInpaintStatus({
+  const { isProcessing, statusText, start, retryPoll } = useInpaintStatus({
     onCompleted: (resultImageUrl, persisted) => {
       // Issue #687: `persisted: false` means the completion carries an
       // expiring fal CDN URL — never write it into the room variant slot
@@ -129,7 +129,7 @@ export function useInpaintRuns({
       if (!persistDecision.persist) {
         batchFailureRef.current = INPAINT_NOT_PERSISTED_WARNING;
         if (!batchActiveRef.current) {
-          showError(INPAINT_NOT_PERSISTED_WARNING);
+          showError(INPAINT_NOT_PERSISTED_WARNING, true, retryPoll, "Retry save");
         }
         return;
       }
