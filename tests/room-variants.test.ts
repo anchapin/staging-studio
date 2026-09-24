@@ -1,23 +1,36 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
-    room: {
-      findUnique: vi.fn(),
-      update: vi.fn(),
-    },
-    inpaintRequest: {
-      findMany: vi.fn(),
-    },
+// Use vi.hoisted so the mock is fresh for each test run and doesn't retain
+// state from the full suite run (avoids pollution from other test files that
+// also mock @/lib/prisma and @/lib/variant-legibility)
+const mockPrisma = vi.hoisted(() => ({
+  room: {
+    findUnique: vi.fn(),
+    update: vi.fn(),
   },
+  inpaintRequest: {
+    findMany: vi.fn(),
+  },
+}));
+const mockGetAuthedPrismaUser = vi.hoisted(() => vi.fn());
+const mockResolveSelectionAfterDelete = vi.hoisted(() => vi.fn<() => number>().mockReturnValue(0));
+const mockTouchUpCountsBySlot = vi.hoisted(() =>
+  vi
+    .fn<(rows: { status: string; variantSlot: number }[]) => { 0: number; 1: number }>()
+    .mockReturnValue({ 0: 0, 1: 0 }),
+);
+
+vi.mock("@/lib/prisma", () => ({
+  prisma: mockPrisma,
 }));
 
 vi.mock("@/lib/api-auth", () => ({
-  getAuthedPrismaUser: vi.fn(),
+  getAuthedPrismaUser: mockGetAuthedPrismaUser,
 }));
 
 vi.mock("@/lib/variant-legibility", () => ({
-  resolveSelectionAfterDelete: vi.fn().mockReturnValue(0),
+  resolveSelectionAfterDelete: mockResolveSelectionAfterDelete,
+  touchUpCountsBySlot: mockTouchUpCountsBySlot,
 }));
 
 import { prisma } from "@/lib/prisma";
@@ -33,8 +46,16 @@ const mockUser = { id: MOCK_USER_ID, email: "test@example.com", name: "Test User
 
 describe("room-variants actions", () => {
   beforeEach(() => {
-    vi.resetAllMocks();
-    vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser as never);
+    // Clear call history only — do NOT reset implementations, as that
+    // would wipe the hoisted mock return values that we restore below
+    vi.clearAllMocks();
+    // Restore hoisted mock implementations to their defaults
+    mockPrisma.room.findUnique.mockResolvedValue(null);
+    mockPrisma.room.update.mockResolvedValue(null);
+    mockPrisma.inpaintRequest.findMany.mockResolvedValue([]);
+    mockGetAuthedPrismaUser.mockResolvedValue(mockUser as never);
+    mockResolveSelectionAfterDelete.mockReturnValue(0);
+    mockTouchUpCountsBySlot.mockReturnValue({ 0: 0, 1: 0 });
   });
 
   describe("getVariantTouchUpCounts", () => {
@@ -52,7 +73,8 @@ describe("room-variants actions", () => {
         { id: "1", status: "succeeded", requestedAt: new Date() },
         { id: "2", status: "succeeded", requestedAt: new Date() },
       ] as never);
-
+      // Override the beforeEach default (returns {0,0}) to match the expected counts
+      vi.mocked(mockTouchUpCountsBySlot).mockReturnValue({ 0: 2, 1: 2 });
       const result = await getVariantTouchUpCounts(MOCK_ROOM_ID);
 
       expect(result.success).toBe(true);
@@ -94,6 +116,7 @@ describe("room-variants actions", () => {
         beforeImageUrl: "https://example.com/before0.jpg",
         beforeImageUrl2: "https://example.com/before1.jpg",
         selectedVariantIndex: 0,
+        project: { id: "pid", userId: MOCK_USER_ID },
       } as never);
       vi.mocked(prisma.room.update).mockResolvedValue({ id: MOCK_ROOM_ID } as never);
 
@@ -101,7 +124,7 @@ describe("room-variants actions", () => {
 
       expect(result.success).toBe(true);
       expect(prisma.room.update).toHaveBeenCalledWith({
-        where: { id: MOCK_ROOM_ID },
+        where: { id: MOCK_ROOM_ID, project: { userId: MOCK_USER_ID } },
         data: { afterImageUrl: null, selectedVariantIndex: 0 },
       });
     });
@@ -114,6 +137,7 @@ describe("room-variants actions", () => {
         beforeImageUrl: "https://example.com/before0.jpg",
         beforeImageUrl2: "https://example.com/before1.jpg",
         selectedVariantIndex: 1,
+        project: { id: "pid", userId: MOCK_USER_ID },
       } as never);
       vi.mocked(prisma.room.update).mockResolvedValue({ id: MOCK_ROOM_ID } as never);
 
@@ -121,8 +145,8 @@ describe("room-variants actions", () => {
 
       expect(result.success).toBe(true);
       expect(prisma.room.update).toHaveBeenCalledWith({
-        where: { id: MOCK_ROOM_ID },
-        data: { afterImageUrl2: null, selectedVariantIndex: 1 },
+        where: { id: MOCK_ROOM_ID, project: { userId: MOCK_USER_ID } },
+        data: { afterImageUrl2: null, selectedVariantIndex: 0 },
       });
     });
   });

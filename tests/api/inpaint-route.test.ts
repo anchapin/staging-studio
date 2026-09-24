@@ -19,7 +19,7 @@ import type { NextRequest } from "next/server";
 import { POST } from "@/app/api/inpaint/route";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
-import { fal } from "@/lib/fal";
+import { fal, falQueueSubmitWithCircuitBreaker } from "@/lib/fal";
 import { evaluateInpaintQualityGate } from "@/lib/inpaint-quality-gate";
 import { resolveDailyLimit, evaluateDailyQuota } from "@/lib/api-quota";
 import { buildInpaintPrompt } from "@/lib/prompts";
@@ -118,6 +118,7 @@ vi.mock("@/lib/prisma", () => ({
     inpaintRequest: { count: vi.fn(), create: vi.fn(), findFirst: vi.fn() },
     room: { findFirst: vi.fn() },
     userUsage: { findFirst: vi.fn(), upsert: vi.fn() },
+    dailyApiUsage: { findFirst: vi.fn(), upsert: vi.fn() },
   },
 }));
 
@@ -127,6 +128,7 @@ vi.mock("@/lib/fal", () => ({
       submit: vi.fn(),
     },
   },
+  falQueueSubmitWithCircuitBreaker: vi.fn(),
   assertFalConfigured: vi.fn(),
 }));
 
@@ -195,6 +197,7 @@ describe("POST /api/inpaint", () => {
     vi.mocked(prisma.dailyApiUsage.upsert).mockResolvedValue({} as never);
     vi.mocked(evaluateInpaintQualityGate).mockResolvedValue([]);
     vi.mocked(fal.queue.submit).mockResolvedValue({ request_id: "fal-req-123" });
+    vi.mocked(falQueueSubmitWithCircuitBreaker).mockResolvedValue({ request_id: "fal-req-123" });
     vi.mocked(buildInpaintPrompt).mockReturnValue("replace sofa with leather sofa");
     vi.mocked(resolveDailyLimit).mockReturnValue(20);
     vi.mocked(evaluateDailyQuota).mockReturnValue({ allowed: true, used: 0, limit: 20, remaining: 20 });
@@ -396,6 +399,10 @@ describe("POST /api/inpaint", () => {
     vi.mocked(fal.queue.submit).mockReset();
     vi.mocked(fal.queue.submit).mockImplementation(
       () => Promise.reject(new Error("Fal AI network error"))
+    );
+    vi.mocked(falQueueSubmitWithCircuitBreaker).mockReset();
+    vi.mocked(falQueueSubmitWithCircuitBreaker).mockRejectedValue(
+      new Error("Fal AI network error")
     );
 
     const res = await POST(

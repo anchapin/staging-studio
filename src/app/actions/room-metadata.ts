@@ -33,6 +33,11 @@ export async function saveRoomMetadata(
     return failure("Not authenticated");
   }
 
+  const room = await prisma.room.findFirst({ where: ownershipWhere });
+  if (!room) {
+    return failure("Room not found");
+  }
+
   try {
     await prisma.room.update({
       where: ownershipWhere,

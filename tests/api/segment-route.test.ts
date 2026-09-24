@@ -90,7 +90,7 @@ describe("POST /api/segment", () => {
     });
   });
 
-  it.skip("returns 404 when room not found", async () => {
+  it("returns 404 when room not found", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue({
       id: "user-1",
       email: "test@test.com",
@@ -110,8 +110,8 @@ describe("POST /api/segment", () => {
 
     expect(response.status).toBe(404);
     expect(json).toMatchObject({
-      error: "Not found",
-      code: "not-found",
+      error: "Room not found",
+      code: "room-not-found",
     });
   });
 

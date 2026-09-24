@@ -1,16 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
-    room: {
-      findFirst: vi.fn(),
-      update: vi.fn(),
-    },
+// Use vi.hoisted so the mock is fresh for each test run and doesn't retain
+// state from the full suite run
+const mockPrisma = vi.hoisted(() => ({
+  room: {
+    findFirst: vi.fn(),
+    update: vi.fn(),
   },
 }));
 
+const mockGetAuthedPrismaUser = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/prisma", () => ({
+  prisma: mockPrisma,
+}));
+
 vi.mock("@/lib/api-auth", () => ({
-  getAuthedPrismaUser: vi.fn(),
+  getAuthedPrismaUser: mockGetAuthedPrismaUser,
 }));
 
 vi.mock("next/cache", () => ({
@@ -28,7 +34,10 @@ const mockUser = { id: MOCK_USER_ID, email: "test@example.com", name: "Test User
 describe("room-metadata actions", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser as never);
+    // Restore hoisted mock implementations after reset
+    vi.mocked(mockPrisma.room.findFirst).mockReset().mockResolvedValue(null);
+    vi.mocked(mockPrisma.room.update).mockReset().mockResolvedValue(null);
+    vi.mocked(mockGetAuthedPrismaUser).mockReset().mockResolvedValue(mockUser as never);
   });
 
   describe("saveRoomMetadata", () => {
@@ -51,7 +60,11 @@ describe("room-metadata actions", () => {
     });
 
     it("updates metadata and returns success for valid input", async () => {
-      vi.mocked(prisma.room.findFirst).mockResolvedValue({ id: MOCK_ROOM_ID, projectId: "pid" } as never);
+      vi.mocked(prisma.room.findFirst).mockResolvedValue({
+        id: MOCK_ROOM_ID,
+        projectId: "pid",
+        project: { id: "pid", userId: MOCK_USER_ID },
+      } as never);
       vi.mocked(prisma.room.update).mockResolvedValue({ id: MOCK_ROOM_ID } as never);
 
       const result = await saveRoomMetadata(MOCK_ROOM_ID, {
@@ -61,7 +74,7 @@ describe("room-metadata actions", () => {
 
       expect(result.success).toBe(true);
       expect(prisma.room.update).toHaveBeenCalledWith({
-        where: { id: MOCK_ROOM_ID },
+        where: { id: MOCK_ROOM_ID, project: { userId: MOCK_USER_ID } },
         data: {
           name: "Living Room",
           rawDirectives: "Stage this room for first-time buyers",

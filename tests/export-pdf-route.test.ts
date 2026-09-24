@@ -23,6 +23,11 @@ function buildRequest(body: unknown): NextRequest {
   } as unknown as NextRequest;
 }
 
+// Use vi.hoisted so the mock is fresh for each test run and doesn't retain
+// state from the full suite run (avoids fetchBrowserlessPdfWithCircuitBreaker
+// pollution from api/export-pdf-route.test.ts)
+const mockFetchBrowserless = vi.hoisted(() => vi.fn());
+
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
 }));
@@ -44,6 +49,7 @@ vi.mock("@/lib/browserless", () => ({
   buildBrowserlessPdfUrl: vi.fn(() => "https://browserless.example.com/pdf"),
   buildBrowserlessPdfBody: vi.fn(() => ({ url: "https://example.com/preview" })),
   BROWSERLESS_TIMEOUT_MS: 60000,
+  fetchBrowserlessPdfWithCircuitBreaker: mockFetchBrowserless,
 }));
 
 vi.mock("@/lib/api-quota", () => ({
@@ -66,6 +72,12 @@ vi.mock("@/lib/api-quota", () => ({
 describe("POST /api/export-pdf", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    // Reset the hoisted mock and give it a default implementation that delegates to
+    // global.fetch (so per-test global.fetch assignments work). Tests that need a
+    // different fetch behaviour override mockFetchBrowserless.mockResolvedValue themselves.
+    vi.mocked(mockFetchBrowserless).mockReset().mockImplementation(
+      (url: string, opts?: RequestInit) => global.fetch(url, opts) as Promise<Response>,
+    );
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser as never);
     vi.mocked(getDailyUsage).mockResolvedValue(0);
     vi.mocked(evaluateDailyQuota).mockReturnValue({

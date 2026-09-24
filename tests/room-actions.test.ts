@@ -6,6 +6,7 @@ vi.mock("@/lib/prisma", () => ({
       findUnique: vi.fn(),
     },
     room: {
+      findFirst: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn(),
     },
@@ -34,6 +35,24 @@ const mockUser = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default: findFirst returns a valid room so saveRoomMetadata proceeds to update
+  vi.mocked(prisma.room.findFirst).mockResolvedValue({
+    id: "room-1",
+    projectId: "proj-1",
+    name: "Living Room",
+    beforeImageUrl: null,
+    beforeImageUrl2: null,
+    afterImageUrl: null,
+    afterImageUrl2: null,
+    selectedVariantIndex: 0,
+    sortOrder: 0,
+    rawDirectives: null,
+    observedChallenge: null,
+    recommendation: null,
+    buyerPsychology: null,
+    checklistItems: null,
+    createdAt: new Date(),
+  });
 });
 
 import { saveRoomMetadata } from "@/app/actions/room";

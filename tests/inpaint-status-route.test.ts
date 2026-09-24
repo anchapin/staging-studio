@@ -68,6 +68,7 @@ describe("GET /api/inpaint/[requestId]/status — fal ERROR terminal state (issu
     expect(response.status).toBe(500);
     expect(body).toEqual({
       status: "ERROR",
+      code: "inpaint-terminal-error",
       error: "Inpainting failed",
       message: "The image editing process encountered an error. Please try again.",
       retryable: false,
@@ -99,6 +100,7 @@ describe("GET /api/inpaint/[requestId]/status — fal ERROR terminal state (issu
     expect(response.status).toBe(500);
     expect(body).toEqual({
       status: "ERROR",
+      code: "inpaint-terminal-error",
       error: "Inpainting failed",
       message: "The image editing process encountered an error. Please try again.",
       retryable: false,

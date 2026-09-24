@@ -121,7 +121,7 @@ describe("POST /api/label-instances", () => {
       const response = await POST(
         buildRequest({
           concept: "sofa",
-          crops: [{ instanceIndex: 0, cropDataUrl: "https://crop.supabase.co/img.jpg" }],
+          crops: [{ instanceIndex: 0, cropDataUrl: "data:image/jpeg;base64,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==" }],
           imageUrl: "https://room.supabase.co/room.jpg",
         })
       );
@@ -136,7 +136,7 @@ describe("POST /api/label-instances", () => {
         buildRequest({
           roomId: MOCK_ROOM_ID,
           concept: "",
-          crops: [{ instanceIndex: 0, cropDataUrl: "https://crop.supabase.co/img.jpg" }],
+          crops: [{ instanceIndex: 0, cropDataUrl: "data:image/jpeg;base64,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==" }],
           imageUrl: "https://room.supabase.co/room.jpg",
         })
       );
@@ -166,7 +166,7 @@ describe("POST /api/label-instances", () => {
         buildRequest({
           roomId: MOCK_ROOM_ID,
           concept: "a".repeat(201),
-          crops: [{ instanceIndex: 0, cropDataUrl: "https://crop.supabase.co/img.jpg" }],
+          crops: [{ instanceIndex: 0, cropDataUrl: "data:image/jpeg;base64,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==" }],
           imageUrl: "https://room.supabase.co/room.jpg",
         })
       );
@@ -196,7 +196,7 @@ describe("POST /api/label-instances", () => {
         buildRequest({
           roomId: MOCK_ROOM_ID,
           concept: "sofa",
-          crops: [{ instanceIndex: 0, cropDataUrl: "https://crop.supabase.co/img.jpg" }],
+          crops: [{ instanceIndex: 0, cropDataUrl: "data:image/jpeg;base64,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==" }],
           imageUrl: "not-a-url",
         })
       );
@@ -211,7 +211,7 @@ describe("POST /api/label-instances", () => {
         buildRequest({
           roomId: MOCK_ROOM_ID,
           concept: "sofa",
-          crops: [{ instanceIndex: 0, cropDataUrl: "https://crop.supabase.co/img.jpg" }],
+          crops: [{ instanceIndex: 0, cropDataUrl: "data:image/jpeg;base64,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==" }],
           imageUrl: "https://evil.com/room.jpg",
         })
       );
@@ -241,7 +241,7 @@ describe("POST /api/label-instances", () => {
         buildRequest({
           roomId: MOCK_ROOM_ID,
           concept: "sofa",
-          crops: [{ instanceIndex: 0, cropDataUrl: "https://crop.supabase.co/img.jpg" }],
+          crops: [{ instanceIndex: 0, cropDataUrl: "data:image/jpeg;base64,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==" }],
           imageUrl: "https://room.supabase.co/room.jpg",
           unknownField: "should be rejected",
         })
@@ -262,7 +262,7 @@ describe("POST /api/label-instances", () => {
         buildRequest({
           roomId: MOCK_ROOM_ID,
           concept: "sofa",
-          crops: [{ instanceIndex: 0, cropDataUrl: "https://crop.fal.ai/img.jpg" }],
+          crops: [{ instanceIndex: 0, cropDataUrl: "data:image/jpeg;base64,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==" }],
           imageUrl: "https://room.fal.ai/room.jpg",
         })
       );
@@ -279,7 +279,7 @@ describe("POST /api/label-instances", () => {
         buildRequest({
           roomId: "nonexistent-room",
           concept: "sofa",
-          crops: [{ instanceIndex: 0, cropDataUrl: "https://crop.supabase.co/img.jpg" }],
+          crops: [{ instanceIndex: 0, cropDataUrl: "data:image/jpeg;base64,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==" }],
           imageUrl: "https://room.supabase.co/room.jpg",
         })
       );
@@ -297,7 +297,7 @@ describe("POST /api/label-instances", () => {
         buildRequest({
           roomId: MOCK_ROOM_ID,
           concept: "sofa",
-          crops: [{ instanceIndex: 0, cropDataUrl: "https://crop.supabase.co/img.jpg" }],
+          crops: [{ instanceIndex: 0, cropDataUrl: "data:image/jpeg;base64,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==" }],
           imageUrl: "https://room.supabase.co/room.jpg",
         })
       );
@@ -325,8 +325,8 @@ describe("POST /api/label-instances", () => {
           roomId: MOCK_ROOM_ID,
           concept: "sofa",
           crops: [
-            { instanceIndex: 0, cropDataUrl: "https://crop.supabase.co/img0.jpg" },
-            { instanceIndex: 1, cropDataUrl: "https://crop.supabase.co/img1.jpg" },
+            { instanceIndex: 0, cropDataUrl: "data:image/jpeg;base64,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==" },
+            { instanceIndex: 1, cropDataUrl: "data:image/jpeg;base64,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==" },
           ],
           imageUrl: "https://room.supabase.co/room.jpg",
         })
@@ -348,7 +348,7 @@ describe("POST /api/label-instances", () => {
         buildRequest({
           roomId: MOCK_ROOM_ID,
           concept: "sofa",
-          crops: [{ instanceIndex: 0, cropDataUrl: "https://crop.supabase.co/img.jpg" }],
+          crops: [{ instanceIndex: 0, cropDataUrl: "data:image/jpeg;base64,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==" }],
           imageUrl: "https://room.supabase.co/room.jpg",
         })
       );
@@ -356,7 +356,7 @@ describe("POST /api/label-instances", () => {
 
       expect(response.status).toBe(500);
       expect(body.error).toBe("Internal server error");
-      expect(body.message).toBe("OpenAI API error");
+      expect(body.message).toBe("Could not label the detected instances. Please try again.");
     });
   });
 });
