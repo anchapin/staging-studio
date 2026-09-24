@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useMemo } from "react";
+import { useAutoSaveStatus } from "@/lib/autosave-controller";
 import { DEFAULT_MASK_EXPANSION_RADIUS } from "@/lib/mask-dilation";
 import {
   useCollapsiblePanel,
@@ -209,6 +210,8 @@ export default function InpaintEditor({
     }),
     [promptStrength, maskBlur, seed, creativeMode, lockSeed]
   );
+  const saveStatus = useAutoSaveStatus(roomId);
+
   const {
     isProcessing,
     statusText,
@@ -441,6 +444,7 @@ export default function InpaintEditor({
             effectiveTab={effectiveTab}
             handleTabSelect={handleTabSelect}
             tabIdBase={tabIdBase}
+            saveStatus={saveStatus}
             roomId={roomId}
             imageUrl={imageUrl}
             aesthetic={aesthetic}
