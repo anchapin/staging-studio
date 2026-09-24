@@ -45,7 +45,24 @@ const DEV_FALLBACK_SECRET =
 
 function getSecret(): string {
   const secret = process.env.PREVIEW_TOKEN_SECRET;
-  if (secret && secret.trim() !== "") return secret;
+  if (secret && secret.trim() !== "") {
+    if (
+      process.env.NODE_ENV === "production" &&
+      secret === DEV_FALLBACK_SECRET
+    ) {
+      throw new Error(
+        "PREVIEW_TOKEN_SECRET is set to the known DEV-ONLY fallback value. " +
+          "Generate a real secret with: openssl rand -base64 32"
+      );
+    }
+    return secret;
+  }
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "PREVIEW_TOKEN_SECRET is not set. " +
+        "Generate a real secret with: openssl rand -base64 32"
+    );
+  }
   return DEV_FALLBACK_SECRET;
 }
 
