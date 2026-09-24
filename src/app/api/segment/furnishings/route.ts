@@ -18,6 +18,13 @@ import {
   buildFurnishingDetectionPayload,
   parseFurnishingDetectionResponse,
 } from "@/lib/furnishing-detection";
+import {
+  API_ERROR_UNAUTHORIZED,
+  API_ERROR_RATE_LIMIT_EXCEEDED,
+  API_ERROR_INVALID_REQUEST,
+  API_ERROR_INVALID_CONCEPT,
+  API_ERROR_ROOM_NOT_FOUND,
+} from "@/lib/api-errors";
 
 const FURNISHINGS_ERROR_COPY = {
   auth: {
@@ -90,6 +97,7 @@ export async function POST(request: NextRequest) {
         {
           error: "Unauthorized",
           message: "You must be signed in to detect furnishings.",
+          code: API_ERROR_UNAUTHORIZED,
         },
         { status: 401 }
       );
@@ -117,7 +125,10 @@ export async function POST(request: NextRequest) {
         })
       );
       return NextResponse.json(
-        dailyQuotaExceededPayload(segmentQuota, "Please try again tomorrow."),
+        {
+          ...dailyQuotaExceededPayload(segmentQuota, "Please try again tomorrow."),
+          code: API_ERROR_RATE_LIMIT_EXCEEDED,
+        },
         { status: 429 }
       );
     }
@@ -137,6 +148,7 @@ export async function POST(request: NextRequest) {
             : "Please provide a valid roomId and imageUrl.",
           retryable: false,
           issues: parsed.error.issues,
+          code: conceptInvalid ? API_ERROR_INVALID_CONCEPT : API_ERROR_INVALID_REQUEST,
         },
         { status: 400 }
       );
@@ -154,6 +166,7 @@ export async function POST(request: NextRequest) {
         {
           error: "Room not found",
           message: "The requested room could not be found.",
+          code: API_ERROR_ROOM_NOT_FOUND,
         },
         { status: 404 }
       );
@@ -206,6 +219,7 @@ export async function POST(request: NextRequest) {
         error: classified.error,
         message: classified.message,
         retryable: classified.retryable,
+        code: classified.code,
       },
       { status: classified.status }
     );

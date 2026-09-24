@@ -22,6 +22,13 @@ import {
   resolveDailyLimit,
 } from "@/lib/api-quota";
 import { saveRoomCopy, type GeneratedCopy } from "@/app/actions/room";
+import {
+  API_ERROR_UNAUTHORIZED,
+  API_ERROR_RATE_LIMIT_EXCEEDED,
+  API_ERROR_INVALID_REQUEST,
+  API_ERROR_ROOM_NOT_FOUND,
+  API_ERROR_SAVE_FAILED,
+} from "@/lib/api-errors";
 
 const COPY_OUTPUT_ERROR_COPY = {
   rateLimit: {
@@ -61,6 +68,7 @@ export async function POST(request: NextRequest) {
           success: false,
           error: "Unauthorized",
           message: "You must be signed in to generate copy.",
+          code: API_ERROR_UNAUTHORIZED,
         },
         { status: 401 }
       );
@@ -91,6 +99,7 @@ export async function POST(request: NextRequest) {
         {
           success: false,
           ...dailyQuotaExceededPayload(copyQuota, "Please try again tomorrow."),
+          code: API_ERROR_RATE_LIMIT_EXCEEDED,
         },
         { status: 429 }
       );
@@ -124,6 +133,7 @@ export async function POST(request: NextRequest) {
           success: false,
           error: "Room not found",
           message: "Room not found.",
+          code: API_ERROR_ROOM_NOT_FOUND,
         },
         { status: 404 }
       );
@@ -137,8 +147,8 @@ export async function POST(request: NextRequest) {
         {
           success: false,
           error: "Missing staging directives",
-          message:
-            "Add staging directives at the project or room level before generating copy.",
+          message: "Add staging directives at the project or room level before generating copy.",
+          code: API_ERROR_INVALID_REQUEST,
         },
         { status: 400 }
       );
@@ -242,6 +252,7 @@ export async function POST(request: NextRequest) {
           retryable: true,
           copy: generatedCopy,
           qualityWarnings,
+          code: API_ERROR_SAVE_FAILED,
         },
         { status: 502 }
       );
@@ -285,6 +296,7 @@ export async function POST(request: NextRequest) {
           success: false,
           error: "Invalid request",
           message: "Some required information is missing or invalid. Please check your inputs.",
+          code: API_ERROR_INVALID_REQUEST,
         },
         { status: 400 }
       );
@@ -298,6 +310,7 @@ export async function POST(request: NextRequest) {
         error: classified.error,
         message: classified.message,
         retryable: classified.retryable,
+        code: classified.code,
       },
       { status: classified.status }
     );

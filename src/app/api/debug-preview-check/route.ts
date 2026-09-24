@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { verifyPreviewToken, signPreviewToken } from "@/lib/preview-token";
 import { withErrorHandler } from "@/lib/api-error-handler";
+import { API_ERROR_UNAUTHORIZED } from "@/lib/api-errors";
 
 const _get = async (request: NextRequest): Promise<Response> => {
   // Issue #702: diagnostic-only self-test — must not exist in production,
@@ -16,6 +17,7 @@ const _get = async (request: NextRequest): Promise<Response> => {
       {
         error: "Unauthorized",
         message: "You must be signed in to run the preview-token self-test.",
+        code: API_ERROR_UNAUTHORIZED,
       },
       { status: 401 }
     );

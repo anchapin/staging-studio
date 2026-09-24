@@ -6,6 +6,14 @@ import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { decideInpaintPersistence } from "@/lib/inpaint-persistence";
 import { classifyIntegrationError } from "@/lib/error-classify";
 import { FAL_FLUX_FILL_MODEL } from "@/lib/prompts";
+import {
+  API_ERROR_UNAUTHORIZED,
+  API_ERROR_TOO_MANY_REQUESTS,
+  API_ERROR_INVALID_REQUEST,
+  API_ERROR_REQUEST_NOT_FOUND,
+  API_ERROR_INPAINT_STATUS_FAILED,
+  API_ERROR_INPAINT_TERMINAL,
+} from "@/lib/api-errors";
 
 const INPAINT_STATUS_RATE_LIMIT = 60;
 const INPAINT_STATUS_RATE_WINDOW_MS = 60_000;
@@ -33,10 +41,12 @@ const INPAINT_STATUS_ERROR_COPY = {
   notFound: {
     error: "Request not found",
     message: "This image processing request could not be found. It may have expired.",
+    code: API_ERROR_REQUEST_NOT_FOUND,
   },
   unknown: {
     error: "Status check failed",
     message: "Unable to check image processing status. Please try again.",
+    code: API_ERROR_INPAINT_STATUS_FAILED,
   },
 };
 
@@ -48,6 +58,7 @@ const INPAINT_TERMINAL_ERROR_BODY = {
   error: "Inpainting failed",
   message: "The image editing process encountered an error. Please try again.",
   retryable: false,
+  code: API_ERROR_INPAINT_TERMINAL,
 };
 
 interface FalStatusResult {
@@ -80,6 +91,7 @@ export async function GET(
         {
           error: "Unauthorized",
           message: "You must be signed in to check inpainting status.",
+          code: API_ERROR_UNAUTHORIZED,
         },
         { status: 401 }
       );
@@ -91,6 +103,7 @@ export async function GET(
         {
           error: "Too many requests",
           message: `Rate limit exceeded. Please wait ${rateLimit.retryAfterMs} seconds before trying again.`,
+          code: API_ERROR_TOO_MANY_REQUESTS,
         },
         {
           status: 429,
@@ -111,6 +124,7 @@ export async function GET(
         {
           error: "Missing requestId",
           message: "Request ID is required to check status",
+          code: API_ERROR_INVALID_REQUEST,
         },
         { status: 400 }
       );
@@ -131,8 +145,8 @@ export async function GET(
       return NextResponse.json(
         {
           error: "Request not found",
-          message:
-            "This image processing request could not be found or you don't have access to it.",
+          message: "This image processing request could not be found or you don't have access to it.",
+          code: API_ERROR_REQUEST_NOT_FOUND,
         },
         { status: 404 }
       );
@@ -402,6 +416,7 @@ export async function GET(
         error: classified.error,
         message: classified.message,
         retryable: classified.retryable,
+        code: classified.code,
       },
       { status: classified.status }
     );

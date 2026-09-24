@@ -23,23 +23,35 @@ import {
   buildBrowserlessPdfUrl,
   fetchBrowserlessPdfWithCircuitBreaker,
 } from "@/lib/browserless";
+import {
+  API_ERROR_UNAUTHORIZED,
+  API_ERROR_PROJECT_NOT_FOUND,
+  API_ERROR_RATE_LIMIT_EXCEEDED,
+  API_ERROR_PDF_AUTHENTICATION_FAILED,
+  API_ERROR_PDF_GENERATION_FAILED,
+  API_ERROR_EXPORT_FAILED,
+} from "@/lib/api-errors";
 
 const EXPORT_PDF_ERROR_COPY = {
   auth: {
     error: "Authentication failed",
     message: "PDF export service authentication failed. Please contact support.",
+    code: API_ERROR_PDF_AUTHENTICATION_FAILED,
   },
   timeout: {
     error: "PDF export timed out",
     message: "PDF generation took too long. Please try again in a moment.",
+    code: API_ERROR_PDF_GENERATION_FAILED,
   },
   network: {
     error: "Network error",
     message: "Unable to reach the PDF export service. Please check your connection and try again.",
+    code: API_ERROR_EXPORT_FAILED,
   },
   unknown: {
     error: "PDF export failed",
     message: "An unexpected error occurred while generating the PDF. Please try again.",
+    code: API_ERROR_EXPORT_FAILED,
   },
 };
 
@@ -60,6 +72,7 @@ export async function POST(req: NextRequest) {
         {
           error: "Unauthorized",
           message: "You must be signed in to export a PDF",
+          code: API_ERROR_UNAUTHORIZED,
         },
         { status: 401 }
       );
@@ -87,7 +100,10 @@ export async function POST(req: NextRequest) {
         })
       );
       return NextResponse.json(
-        dailyQuotaExceededPayload(exportQuota, "Please try again tomorrow."),
+        {
+          ...dailyQuotaExceededPayload(exportQuota, "Please try again tomorrow."),
+          code: API_ERROR_RATE_LIMIT_EXCEEDED,
+        },
         { status: 429 }
       );
     }
@@ -99,10 +115,11 @@ export async function POST(req: NextRequest) {
     if (typeof projectId !== "string" || !PROJECT_ID_PATTERN.test(projectId)) {
       return NextResponse.json(
         {
-          error: "Invalid projectId",
-          message: "Project ID is required to generate PDF",
+          error: "Project not found",
+          message: "Project does not exist",
+          code: API_ERROR_PROJECT_NOT_FOUND,
         },
-        { status: 400 }
+        { status: 404 }
       );
     }
 
@@ -201,8 +218,8 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
           {
             error: "Authentication failed",
-            message:
-              "PDF export service authentication failed. Please contact support.",
+            message: "PDF export service authentication failed. Please contact support.",
+            code: API_ERROR_PDF_AUTHENTICATION_FAILED,
           },
           { status: chromeResponse.status }
         );
@@ -212,9 +229,9 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
           {
             error: "Rate limit exceeded",
-            message:
-              "PDF export service is busy. Please wait a moment and try again.",
+            message: "PDF export service is busy. Please wait a moment and try again.",
             retryable: true,
+            code: API_ERROR_RATE_LIMIT_EXCEEDED,
           },
           { status: 429 }
         );
@@ -225,6 +242,7 @@ export async function POST(req: NextRequest) {
           error: "PDF generation failed",
           message: "Unable to generate PDF at this time. Please try again.",
           retryable: true,
+          code: API_ERROR_PDF_GENERATION_FAILED,
         },
         { status: chromeResponse.status }
       );
@@ -255,6 +273,7 @@ export async function POST(req: NextRequest) {
           error: "PDF generation failed",
           message: "Unable to generate PDF at this time. Please try again.",
           retryable: true,
+          code: API_ERROR_PDF_GENERATION_FAILED,
         },
         { status: 502 }
       );
@@ -288,6 +307,7 @@ export async function POST(req: NextRequest) {
         error: classified.error,
         message: classified.message,
         retryable: classified.retryable,
+        code: classified.code,
       },
       { status: classified.status }
     );
