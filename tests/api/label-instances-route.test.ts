@@ -10,18 +10,39 @@ import type { NextRequest } from "next/server";
 import { POST } from "@/app/api/label-instances/route";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
-import { generateWithRetry } from "@/lib/ai";
+import { generateWithCircuitBreaker } from "@/lib/ai";
 
 const MOCK_USER_ID = "cuser12345678901234567890";
 const MOCK_ROOM_ID = "croom12345678901234567890";
 
-const mockUser = { id: MOCK_USER_ID, email: "test@example.com", name: "Test User" };
+const mockUser = {
+  id: MOCK_USER_ID,
+  email: "test@example.com",
+  firmName: "Test Firm",
+  ownerName: "Test Owner",
+  logoUrl: null,
+  psychologyPageContent: null,
+  signoffContent: null,
+  darkMode: false,
+  createdAt: new Date(),
+};
 
 const mockRoom = {
   id: MOCK_ROOM_ID,
   name: "Living Room",
   projectId: "cproj123456789012345678",
+  beforeImageUrl: null,
+  beforeImageUrl2: null,
   afterImageUrl: "https://assets.example.com/room.jpg",
+  afterImageUrl2: null,
+  selectedVariantIndex: 0,
+  rawDirectives: null,
+  observedChallenge: null,
+  recommendation: null,
+  buyerPsychology: null,
+  checklistItems: null,
+  sortOrder: 0,
+  createdAt: new Date(),
 };
 
 function buildRequest(body: Record<string, unknown>): NextRequest {
@@ -53,7 +74,7 @@ vi.mock("@/lib/api-quota", async (importOriginal) => {
 
 vi.mock("@/lib/ai", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/ai")>()),
-  generateWithRetry: vi.fn(),
+  generateWithCircuitBreaker: vi.fn(),
   assertOpenAIConfigured: vi.fn(),
 }));
 
@@ -76,7 +97,7 @@ describe("POST /api/label-instances", () => {
     vi.mocked(prisma.dailyApiUsage.findUnique).mockResolvedValue(null);
     vi.mocked(prisma.dailyApiUsage.update).mockResolvedValue({} as never);
     vi.mocked(prisma.dailyApiUsage.upsert).mockResolvedValue({} as never);
-    vi.mocked(generateWithRetry).mockImplementation(() =>
+    vi.mocked(generateWithCircuitBreaker).mockImplementation(() =>
       Promise.resolve({
         object: [{ instanceIndex: 0, label: "Modern Grey Sofa", confidence: 0.97 }],
       })
@@ -232,7 +253,7 @@ describe("POST /api/label-instances", () => {
     });
 
     it("accepts fal.ai URLs in crops and imageUrl fields", async () => {
-      vi.mocked(generateWithRetry).mockImplementation(() =>
+      vi.mocked(generateWithCircuitBreaker).mockImplementation(() =>
       Promise.resolve({ object: [] })
     );
 
@@ -288,7 +309,7 @@ describe("POST /api/label-instances", () => {
 
   describe("AI success", () => {
     it("returns 200 with labels array when AI call succeeds", async () => {
-    vi.mocked(generateWithRetry).mockImplementation(() =>
+    vi.mocked(generateWithCircuitBreaker).mockImplementation(() =>
       Promise.resolve({
         object: [
           { instanceIndex: 0, label: "Modern Grey Sofa", confidence: 0.97 },
@@ -318,8 +339,8 @@ describe("POST /api/label-instances", () => {
   });
 
   describe("Error handling", () => {
-    it("returns 500 when generateWithRetry throws", async () => {
-      vi.mocked(generateWithRetry).mockRejectedValue(new Error("OpenAI API error"));
+    it("returns 500 when generateWithCircuitBreaker throws", async () => {
+      vi.mocked(generateWithCircuitBreaker).mockRejectedValue(new Error("OpenAI API error"));
 
       const response = await POST(
         buildRequest({

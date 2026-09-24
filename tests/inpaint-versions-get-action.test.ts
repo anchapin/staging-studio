@@ -15,7 +15,17 @@ vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
 }));
 
-const mockUser = { id: "user-1", email: "test@example.com", firmName: "Test Firm", firmLogoUrl: null, pageTemplate: null, darkMode: false };
+const mockUser = {
+  id: "user-1",
+  email: "test@example.com",
+  firmName: "Test Firm",
+  ownerName: "Test Owner",
+  logoUrl: null,
+  psychologyPageContent: null,
+  signoffContent: null,
+  darkMode: false,
+  createdAt: new Date(),
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -45,10 +55,12 @@ describe("getInpaintVersions", () => {
 
   it("returns versions for given room and variant slot", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.room.findFirst).mockResolvedValue({ id: "room-1" });
+    vi.mocked(prisma.room.findFirst).mockResolvedValue({ id: "room-1" } as any);
     const mockVersions = [
       {
         id: "v-1",
+        roomId: "room-1",
+        variantSlot: 0,
         resultUrl: "https://storage.supabase.co/v1/result1.jpg",
         thumbnailUrl: "https://storage.supabase.co/v1/thumb1.jpg",
         seed: "12345",
@@ -57,6 +69,8 @@ describe("getInpaintVersions", () => {
       },
       {
         id: "v-2",
+        roomId: "room-1",
+        variantSlot: 0,
         resultUrl: "https://storage.supabase.co/v1/result2.jpg",
         thumbnailUrl: "https://storage.supabase.co/v1/thumb2.jpg",
         seed: "67890",
@@ -69,23 +83,23 @@ describe("getInpaintVersions", () => {
     const result = await getInpaintVersions("room-1", 0);
 
     expect(result.success).toBe(true);
-    expect(result.versions).toHaveLength(2);
+    expect((result as any).versions).toHaveLength(2);
   });
 
   it("returns empty array when no versions exist", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.room.findFirst).mockResolvedValue({ id: "room-1" });
+    vi.mocked(prisma.room.findFirst).mockResolvedValue({ id: "room-1" } as any);
     vi.mocked(prisma.inpaintVersion.findMany).mockResolvedValue([]);
 
     const result = await getInpaintVersions("room-1", 0);
 
     expect(result.success).toBe(true);
-    expect(result.versions).toEqual([]);
+    expect((result as any).versions).toEqual([]);
   });
 
   it("throws when database query fails", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.room.findFirst).mockResolvedValue({ id: "room-1" });
+    vi.mocked(prisma.room.findFirst).mockResolvedValue({ id: "room-1" } as any);
     vi.mocked(prisma.inpaintVersion.findMany).mockRejectedValue(new Error("Connection lost"));
 
     await expect(getInpaintVersions("room-1", 0)).rejects.toThrow("Connection lost");

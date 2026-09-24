@@ -21,7 +21,17 @@ vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));
 
-const mockUser = { id: "user-1", email: "test@example.com", firmName: "Test Firm", firmLogoUrl: null, pageTemplate: null, darkMode: false };
+const mockUser = {
+  id: "user-1",
+  email: "test@example.com",
+  firmName: "Test Firm",
+  ownerName: "Test Owner",
+  logoUrl: null,
+  psychologyPageContent: null,
+  signoffContent: null,
+  darkMode: false,
+  createdAt: new Date(),
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -60,7 +70,7 @@ describe("saveMaterialSwatch", () => {
 
   it("creates material swatch on success", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: projectId });
+    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: projectId } as any);
     vi.mocked(prisma.materialSwatch.create).mockResolvedValue({
       id: "swatch-1",
       projectId,
@@ -71,10 +81,6 @@ describe("saveMaterialSwatch", () => {
       vendor: null,
       sku: null,
       sortOrder: 0,
-      imageUrl: "",
-      roomId: "",
-      createdAt: new Date(),
-      updatedAt: new Date(),
     });
 
     const result = await saveMaterialSwatch(projectId, validSwatch);
@@ -96,7 +102,7 @@ describe("saveMaterialSwatch", () => {
 
   it("propagates database errors", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: projectId });
+    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: projectId } as any);
     vi.mocked(prisma.materialSwatch.create).mockRejectedValue(new Error("DB error"));
 
     const result = await saveMaterialSwatch(projectId, validSwatch);
@@ -128,7 +134,7 @@ describe("deleteMaterialSwatch", () => {
 
   it("deletes swatch and revalidates path on success", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: projectId });
+    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: projectId } as any);
     vi.mocked(prisma.materialSwatch.delete).mockResolvedValue({
       id: swatchId,
       projectId,
@@ -139,10 +145,6 @@ describe("deleteMaterialSwatch", () => {
       vendor: null,
       sku: null,
       sortOrder: 0,
-      imageUrl: "",
-      roomId: "",
-      createdAt: new Date(),
-      updatedAt: new Date(),
     });
 
     const result = await deleteMaterialSwatch(projectId, swatchId);
@@ -156,7 +158,7 @@ describe("deleteMaterialSwatch", () => {
 
   it("propagates database errors", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: projectId });
+    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: projectId } as any);
     vi.mocked(prisma.materialSwatch.delete).mockRejectedValue(new Error("DB error"));
 
     const result = await deleteMaterialSwatch(projectId, swatchId);

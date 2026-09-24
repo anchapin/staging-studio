@@ -182,10 +182,9 @@ describe("API Route Error Responses", () => {
       // Test the dailyQuotaExceededPayload function
       const decision: QuotaDecision = {
         allowed: false,
-        reason: "daily_limit" as const,
         limit: 20,
         used: 20,
-        resetsAt: new Date(Date.now() + 86400000),
+        resetsAt: new Date(Date.now() + 86400000).toISOString(),
       };
 
       const payload = dailyQuotaExceededPayload(decision, "inpaint");
@@ -195,21 +194,21 @@ describe("API Route Error Responses", () => {
       expect(payload.retryable).toBe(true);
       expect(payload.limit).toBe(20);
       expect(payload.used).toBe(20);
-      expect(payload.resetsAt instanceof Date).toBe(true);
+      expect(typeof payload.resetsAt).toBe("string");
+      expect(new Date(payload.resetsAt).getTime()).toBeGreaterThan(Date.now());
     });
 
     it("should include resets-at timestamp in rate limit response", async () => {
       const decision: QuotaDecision = {
         allowed: false,
-        reason: "daily_limit" as const,
         limit: 20,
         used: 20,
-        resetsAt: new Date(Date.now() + 86400000),
+        resetsAt: new Date(Date.now() + 86400000).toISOString(),
       };
 
       const payload = dailyQuotaExceededPayload(decision, "inpaint");
-      expect(payload.resetsAt instanceof Date).toBe(true);
-      expect(payload.resetsAt.getTime()).toBeGreaterThan(Date.now());
+      expect(typeof payload.resetsAt).toBe("string");
+      expect(new Date(payload.resetsAt).getTime()).toBeGreaterThan(Date.now());
     });
   });
 
@@ -397,10 +396,9 @@ describe("API Route Error Responses", () => {
     it("should have consistent error payload structure for quota errors", async () => {
       const decision: QuotaDecision = {
         allowed: false,
-        reason: "daily_limit" as const,
         limit: 20,
         used: 20,
-        resetsAt: new Date(Date.now() + 86400000),
+        resetsAt: new Date(Date.now() + 86400000).toISOString(),
       };
 
       const payload = dailyQuotaExceededPayload(decision, "inpaint");
@@ -419,7 +417,7 @@ describe("API Route Error Responses", () => {
       expect(typeof payload.retryable).toBe("boolean");
       expect(typeof payload.limit).toBe("number");
       expect(typeof payload.used).toBe("number");
-      expect(payload.resetsAt instanceof Date).toBe(true);
+      expect(typeof payload.resetsAt).toBe("string");
     });
   });
 });

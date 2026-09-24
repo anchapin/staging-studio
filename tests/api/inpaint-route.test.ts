@@ -23,7 +23,6 @@ import { fal } from "@/lib/fal";
 import { evaluateInpaintQualityGate } from "@/lib/inpaint-quality-gate";
 import { resolveDailyLimit, evaluateDailyQuota } from "@/lib/api-quota";
 import { buildInpaintPrompt } from "@/lib/prompts";
-import { INPAINT_ERROR_COPY } from "@/lib/error-classify";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -32,7 +31,17 @@ import { INPAINT_ERROR_COPY } from "@/lib/error-classify";
 const MOCK_USER_ID = "cuser12345678901234567890";
 const MOCK_ROOM_ID = "croom12345678901234567890";
 
-const mockUser = { id: MOCK_USER_ID, emailAddress: "test@example.com" };
+const mockUser = {
+  id: MOCK_USER_ID,
+  email: "test@example.com",
+  firmName: "Test Firm",
+  ownerName: "Test Owner",
+  logoUrl: null,
+  psychologyPageContent: null,
+  signoffContent: null,
+  darkMode: false,
+  createdAt: new Date(),
+};
 
 // Room with both variant slots populated so source-slot validation can be tested
 const mockRoom = {
@@ -160,22 +169,16 @@ vi.mock("@/lib/error-classify", () => ({
   classifyIntegrationError: vi.fn((_ctx, err) => {
       const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
       if (msg.includes("rate") || msg.includes("limit") || msg.includes("quota")) {
-        return { type: "quota_exceeded" as const, message: INPAINT_ERROR_COPY.QUOTA_EXCEEDED, status: 429, error: "QuotaExceeded", retryable: true };
+        return { type: "quota_exceeded" as const, message: "Daily inpaint limit reached. Please try again tomorrow.", status: 429, error: "QuotaExceeded", retryable: true };
       }
       if (msg.includes("timeout") || msg.includes("timed out")) {
-        return { type: "timeout" as const, message: INPAINT_ERROR_COPY.TIMEOUT, status: 408, error: "Timeout", retryable: true };
+        return { type: "timeout" as const, message: "AI service timed out. Please try again.", status: 408, error: "Timeout", retryable: true };
       }
       if (msg.includes("network") || msg.includes("fetch") || msg.includes("econnrefused") || msg.includes("enotfound") || msg.includes("etimedout")) {
-        return { type: "network" as const, message: INPAINT_ERROR_COPY.SERVICE_UNAVAILABLE, status: 503, error: "ServiceUnavailable", retryable: true };
+        return { type: "network" as const, message: "AI service temporarily unavailable. Please try again later.", status: 503, error: "ServiceUnavailable", retryable: true };
       }
-      return { type: "unknown" as const, message: INPAINT_ERROR_COPY.UNKNOWN, status: 500, error: "UnknownError", retryable: true };
+      return { type: "unknown" as const, message: "An unexpected error occurred. Please try again.", status: 500, error: "UnknownError", retryable: true };
     }),
-  INPAINT_ERROR_COPY: {
-    QUOTA_EXCEEDED: "Daily inpaint limit reached. Please try again tomorrow.",
-    RATE_LIMITED: "Too many requests. Please wait a moment and try again.",
-    SERVICE_UNAVAILABLE: "AI service temporarily unavailable. Please try again later.",
-    UNKNOWN: "An unexpected error occurred. Please try again.",
-  },
 }));
 
 // ---------------------------------------------------------------------------
@@ -188,13 +191,13 @@ describe("POST /api/inpaint", () => {
     vi.mocked(prisma.room.findFirst).mockResolvedValue(mockRoom as never);
     vi.mocked(prisma.inpaintRequest.count).mockResolvedValue(0);
     vi.mocked(prisma.inpaintRequest.create).mockResolvedValue(mockInpaintRequest());
-    vi.mocked(prisma.userUsage.findFirst).mockResolvedValue(null);
-    vi.mocked(prisma.userUsage.upsert).mockResolvedValue({} as never);
+    vi.mocked(prisma.dailyApiUsage.findFirst).mockResolvedValue(null);
+    vi.mocked(prisma.dailyApiUsage.upsert).mockResolvedValue({} as never);
     vi.mocked(evaluateInpaintQualityGate).mockResolvedValue([]);
     vi.mocked(fal.queue.submit).mockResolvedValue({ request_id: "fal-req-123" });
     vi.mocked(buildInpaintPrompt).mockReturnValue("replace sofa with leather sofa");
     vi.mocked(resolveDailyLimit).mockReturnValue(20);
-    vi.mocked(evaluateDailyQuota).mockReturnValue({ allowed: true, used: 0, limit: 20 });
+    vi.mocked(evaluateDailyQuota).mockReturnValue({ allowed: true, used: 0, limit: 20, remaining: 20 });
   });
 
   // -------------------------------------------------------------------------
@@ -389,7 +392,7 @@ describe("POST /api/inpaint", () => {
     vi.mocked(prisma.inpaintRequest.count).mockResolvedValue(0);
     vi.mocked(evaluateInpaintQualityGate).mockResolvedValue([]);
     vi.mocked(evaluateDailyQuota).mockReset();
-    vi.mocked(evaluateDailyQuota).mockReturnValue({ allowed: true, used: 0, limit: 20 });
+    vi.mocked(evaluateDailyQuota).mockReturnValue({ allowed: true, used: 0, limit: 20, remaining: 20 });
     vi.mocked(fal.queue.submit).mockReset();
     vi.mocked(fal.queue.submit).mockImplementation(
       () => Promise.reject(new Error("Fal AI network error"))

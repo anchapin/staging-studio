@@ -32,7 +32,7 @@ export async function bulkUpdateRoomAesthetic(
 
     await prisma.project.updateMany({
       where: { id: { in: projectIds } },
-      data: { aesthetic },
+      data: { stagingAesthetic: aesthetic },
     });
 
     for (const room of rooms) {

@@ -20,7 +20,17 @@ vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));
 
-const mockUser = { id: "user-1", email: "test@example.com", firmName: "Test Firm", firmLogoUrl: null, pageTemplate: null, darkMode: false };
+const mockUser = {
+  id: "user-1",
+  email: "test@example.com",
+  firmName: "Test Firm",
+  ownerName: "Test Owner",
+  logoUrl: null,
+  psychologyPageContent: null,
+  signoffContent: null,
+  darkMode: false,
+  createdAt: new Date(),
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -59,7 +69,7 @@ describe("saveProcurementItems", () => {
 
   it("deletes existing items and creates new ones on success", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: projectId });
+    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: projectId } as any);
 
     const result = await saveProcurementItems(projectId, validItems);
 
@@ -80,7 +90,7 @@ describe("saveProcurementItems", () => {
 
   it("returns error when database operation fails", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: projectId });
+    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: projectId } as any);
     vi.mocked(prisma.procurementItem.deleteMany).mockRejectedValue(new Error("DB error"));
 
     const result = await saveProcurementItems(projectId, validItems);
@@ -90,9 +100,9 @@ describe("saveProcurementItems", () => {
 
   it("returns error for invalid item data", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: projectId });
+    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: projectId } as any);
 
-    const result = await saveProcurementItems(projectId, [{ item: "" }]);
+    const result = await saveProcurementItems(projectId, [{ item: "", category: "Seating" }]);
 
     expect(result.success).toBe(false);
   });

@@ -42,4 +42,13 @@ const eslintConfig = [
   },
 ];
 
-export default eslintConfig;
+export default [
+  ...eslintConfig,
+  // Test files use `as any` for mock return types — this is intentional for test ergonomics.
+  {
+    files: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+    },
+  },
+];

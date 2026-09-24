@@ -8,7 +8,17 @@ import { fal } from "@/lib/fal";
 const MOCK_USER_ID = "cuser12345678901234567890";
 const MOCK_ROOM_ID = "croom12345678901234567890";
 
-const mockUser = { id: MOCK_USER_ID, email: "test@example.com", name: "Test User" };
+const mockUser = {
+  id: MOCK_USER_ID,
+  email: "test@example.com",
+  firmName: "Test Firm",
+  ownerName: "Test Owner",
+  logoUrl: null,
+  psychologyPageContent: null,
+  signoffContent: null,
+  darkMode: false,
+  createdAt: new Date(),
+};
 
 function buildRequest(body: unknown): NextRequest {
   return {
@@ -39,7 +49,7 @@ describe("POST /api/segment", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.room.findFirst).mockResolvedValue({ id: MOCK_ROOM_ID });
+    vi.mocked(prisma.room.findFirst).mockResolvedValue({ id: MOCK_ROOM_ID } as any);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -68,7 +78,7 @@ describe("POST /api/segment", () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue({
       id: "user-1",
       email: "test@test.com",
-    });
+    } as any);
 
     const response = await POST(buildRequest({}));
     const json = await response.json();
@@ -84,7 +94,7 @@ describe("POST /api/segment", () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue({
       id: "user-1",
       email: "test@test.com",
-    });
+    } as any);
     vi.mocked(prisma.room.findFirst).mockResolvedValue(null);
 
     const response = await POST(
