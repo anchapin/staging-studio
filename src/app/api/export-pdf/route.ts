@@ -25,11 +25,11 @@ import {
 } from "@/lib/browserless";
 import {
   API_ERROR_UNAUTHORIZED,
-  API_ERROR_PROJECT_NOT_FOUND,
   API_ERROR_RATE_LIMIT_EXCEEDED,
   API_ERROR_PDF_AUTHENTICATION_FAILED,
   API_ERROR_PDF_GENERATION_FAILED,
   API_ERROR_EXPORT_FAILED,
+  API_ERROR_INVALID_REQUEST,
 } from "@/lib/api-errors";
 
 const EXPORT_PDF_ERROR_COPY = {
@@ -115,11 +115,11 @@ export async function POST(req: NextRequest) {
     if (typeof projectId !== "string" || !PROJECT_ID_PATTERN.test(projectId)) {
       return NextResponse.json(
         {
-          error: "Project not found",
-          message: "Project does not exist",
-          code: API_ERROR_PROJECT_NOT_FOUND,
+          error: "Invalid projectId",
+          message: "projectId must be a valid CUID",
+          code: API_ERROR_INVALID_REQUEST,
         },
-        { status: 404 }
+        { status: 400 }
       );
     }
 

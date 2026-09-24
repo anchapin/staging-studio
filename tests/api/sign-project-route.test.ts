@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import { POST } from "@/app/api/sign-project/route";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { verifyPreviewToken } from "@/lib/preview-token";
 import { prisma } from "@/lib/prisma";
 
 const MOCK_USER_ID = "cuser12345678901234567890";
@@ -39,7 +40,7 @@ vi.mock("@/lib/preview-token", () => ({
 
 describe("POST /api/sign-project", () => {
   beforeEach(() => {
-    vi.resetAllMocks();
+    vi.clearAllMocks();
   });
 
   it("rejects unauthenticated requests with 401", async () => {
@@ -53,13 +54,14 @@ describe("POST /api/sign-project", () => {
     expect((json as { error: string }).error).toBe("Unauthorized");
   });
 
-  it.skip("rejects authenticated user who does not own the project with 403", async () => {
+  it("rejects authenticated user who does not own the project with 403", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser as never);
     vi.mocked(prisma.project.findUnique).mockResolvedValue({
       id: MOCK_PROJECT_ID,
       userId: MOCK_OTHER_USER_ID,
       clientSignatureStatus: "Pending",
     } as never);
+    vi.mocked(verifyPreviewToken).mockResolvedValue({ valid: true, projectId: MOCK_PROJECT_ID });
 
     const req = buildRequest({ projectId: MOCK_PROJECT_ID, signatureDataUrl: MOCK_SIGNATURE, token: MOCK_TOKEN });
     const res = await POST(req);
@@ -69,9 +71,10 @@ describe("POST /api/sign-project", () => {
     expect(json.error).toBe("Forbidden");
   });
 
-  it.skip("returns 404 when project does not exist", async () => {
+  it("returns 404 when project does not exist", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser as never);
     vi.mocked(prisma.project.findUnique).mockResolvedValue(null);
+    vi.mocked(verifyPreviewToken).mockResolvedValue({ valid: true, projectId: MOCK_PROJECT_ID });
 
     const req = buildRequest({ projectId: MOCK_PROJECT_ID, signatureDataUrl: MOCK_SIGNATURE, token: MOCK_TOKEN });
     const res = await POST(req);
@@ -79,7 +82,7 @@ describe("POST /api/sign-project", () => {
     expect(res.status).toBe(404);
   });
 
-  it.skip("returns 409 when project is already signed", async () => {
+  it("returns 409 when project is already signed", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser as never);
     vi.mocked(prisma.project.findUnique).mockResolvedValue({
       id: MOCK_PROJECT_ID,
@@ -93,8 +96,9 @@ describe("POST /api/sign-project", () => {
     expect(res.status).toBe(409);
   });
 
-  it.skip("saves signature and returns 200 for valid authenticated request", async () => {
+  it("saves signature and returns 200 for valid authenticated request", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser as never);
+    vi.mocked(verifyPreviewToken).mockResolvedValue({ valid: true, projectId: MOCK_PROJECT_ID });
     vi.mocked(prisma.project.findUnique).mockResolvedValue({
       id: MOCK_PROJECT_ID,
       userId: MOCK_USER_ID,
@@ -113,7 +117,7 @@ describe("POST /api/sign-project", () => {
 
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.success).toBe(true);
+    expect(json).toEqual({ success: true });
     expect(prisma.project.update).toHaveBeenCalledWith({
       where: { id: MOCK_PROJECT_ID },
       data: {

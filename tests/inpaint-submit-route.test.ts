@@ -4,11 +4,12 @@ import type { NextRequest } from "next/server";
 import { POST } from "@/app/api/inpaint/route";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { evaluateInpaintQualityGate } from "@/lib/inpaint-quality-gate";
-import { fal } from "@/lib/fal";
+import { falQueueSubmitWithCircuitBreaker } from "@/lib/fal";
 import { prisma } from "@/lib/prisma";
 
 vi.mock("@/lib/fal", () => ({
   fal: { queue: { submit: vi.fn() } },
+  falQueueSubmitWithCircuitBreaker: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -26,7 +27,7 @@ vi.mock("@/lib/inpaint-quality-gate", () => ({
   evaluateInpaintQualityGate: vi.fn(),
 }));
 
-const falQueueSubmit = fal.queue.submit as unknown as Mock;
+const falQueueSubmit = falQueueSubmitWithCircuitBreaker as unknown as Mock;
 const create = prisma.inpaintRequest.create as unknown as Mock;
 const findFirst = prisma.room.findFirst as unknown as Mock;
 const count = prisma.inpaintRequest.count as unknown as Mock;

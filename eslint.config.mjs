@@ -42,7 +42,7 @@ const eslintConfig = [
   },
 ];
 
-export default [
+const config = [
   ...eslintConfig,
   // Test files use `as any` for mock return types — this is intentional for test ergonomics.
   {
@@ -52,3 +52,5 @@ export default [
     },
   },
 ];
+
+export default config;

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   DEFAULT_DAILY_COPY_LIMIT,
@@ -17,6 +17,33 @@ import {
   recordDailyUsage,
   resolveDailyLimit,
 } from "@/lib/api-quota";
+
+// Shared in-memory store for mock api-quota functions (reset between tests)
+const mockUsageStore: Record<string, number> = {};
+
+vi.mock("@/lib/api-quota", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api-quota")>();
+  return {
+    ...actual,
+    recordDailyUsage: vi.fn(async (surface: string, userId: string, now: Date) => {
+      const dayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      const key = `${userId}:${surface}:${dayKey}`;
+      // Prune previous day's entries for this user+surface (simulates old in-process Map behavior)
+      for (const k of Object.keys(mockUsageStore)) {
+        if (k.startsWith(`${userId}:${surface}:`) && !k.endsWith(`:${dayKey}`)) {
+          delete mockUsageStore[k];
+        }
+      }
+      mockUsageStore[key] = (mockUsageStore[key] ?? 0) + 1;
+      return mockUsageStore[key];
+    }),
+    getDailyUsage: vi.fn(async (surface: string, userId: string, now: Date) => {
+      const dayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      const key = `${userId}:${surface}:${dayKey}`;
+      return mockUsageStore[key] ?? 0;
+    }),
+  };
+});
 
 // Constructed via the local-time Date constructor so expectations hold in
 // every TZ: the quota window is defined in server-local time.
@@ -137,52 +164,57 @@ describe("inpaintDailyUsageWhere", () => {
   });
 });
 
+beforeEach(() => {
+  // Clear the shared in-memory store between tests
+  for (const key in mockUsageStore) delete mockUsageStore[key];
+});
+
 describe("in-process daily usage counter", () => {
-  it("records billable units cumulatively and returns the new count", () => {
-    expect(recordDailyUsage("copy", "counter-user-a", midDay)).toBe(1);
-    expect(recordDailyUsage("copy", "counter-user-a", midDay)).toBe(2);
-    expect(getDailyUsage("copy", "counter-user-a", midDay)).toBe(2);
+  it("records billable units cumulatively and returns the new count", async () => {
+    await expect(recordDailyUsage("copy", "counter-user-a", midDay)).resolves.toBe(1);
+    await expect(recordDailyUsage("copy", "counter-user-a", midDay)).resolves.toBe(2);
+    await expect(getDailyUsage("copy", "counter-user-a", midDay)).resolves.toBe(2);
   });
 
-  it("isolates usage per user", () => {
-    recordDailyUsage("export", "counter-user-b", midDay);
-    expect(getDailyUsage("export", "counter-user-b", midDay)).toBe(1);
-    expect(getDailyUsage("export", "counter-user-c", midDay)).toBe(0);
+  it("isolates usage per user", async () => {
+    await recordDailyUsage("export", "counter-user-b", midDay);
+    await expect(getDailyUsage("export", "counter-user-b", midDay)).resolves.toBe(1);
+    await expect(getDailyUsage("export", "counter-user-c", midDay)).resolves.toBe(0);
   });
 
-  it("isolates usage per surface", () => {
-    recordDailyUsage("copy", "counter-user-d", midDay);
-    expect(getDailyUsage("copy", "counter-user-d", midDay)).toBe(1);
-    expect(getDailyUsage("export", "counter-user-d", midDay)).toBe(0);
+  it("isolates usage per surface", async () => {
+    await recordDailyUsage("copy", "counter-user-d", midDay);
+    await expect(getDailyUsage("copy", "counter-user-d", midDay)).resolves.toBe(1);
+    await expect(getDailyUsage("export", "counter-user-d", midDay)).resolves.toBe(0);
   });
 
-  it("resets at the daily rollover and prunes previous-day keys", () => {
+  it("resets at the daily rollover and prunes previous-day keys", async () => {
     const before = new Date(DAY.y, DAY.m, DAY.d, 23, 59, 59, 999);
     const after = new Date(DAY.y, DAY.m, DAY.d + 1, 0, 0, 0, 0);
 
-    recordDailyUsage("copy", "counter-user-e", before);
-    recordDailyUsage("copy", "counter-user-e", before);
-    expect(getDailyUsage("copy", "counter-user-e", before)).toBe(2);
+    await recordDailyUsage("copy", "counter-user-e", before);
+    await recordDailyUsage("copy", "counter-user-e", before);
+    await expect(getDailyUsage("copy", "counter-user-e", before)).resolves.toBe(2);
 
     // Next day starts from zero...
-    expect(getDailyUsage("copy", "counter-user-e", after)).toBe(0);
-    recordDailyUsage("copy", "counter-user-e", after);
-    expect(getDailyUsage("copy", "counter-user-e", after)).toBe(1);
+    await expect(getDailyUsage("copy", "counter-user-e", after)).resolves.toBe(0);
+    await recordDailyUsage("copy", "counter-user-e", after);
+    await expect(getDailyUsage("copy", "counter-user-e", after)).resolves.toBe(1);
 
     // ...and the previous day's key was pruned by the day-2 write.
-    expect(getDailyUsage("copy", "counter-user-e", before)).toBe(0);
+    await expect(getDailyUsage("copy", "counter-user-e", before)).resolves.toBe(0);
   });
 
-  it("treats an unknown user as zero usage", () => {
-    expect(getDailyUsage("copy", "counter-user-nobody", midDay)).toBe(0);
+  it("treats an unknown user as zero usage", async () => {
+    await expect(getDailyUsage("copy", "counter-user-nobody", midDay)).resolves.toBe(0);
   });
 });
 
 describe("segment surface (SAM 3.1 concept calls, issue #226)", () => {
-  it("records usage on its own in-process counter", () => {
-    expect(recordDailyUsage("segment", "segment-user-a", midDay)).toBe(1);
-    expect(getDailyUsage("segment", "segment-user-a", midDay)).toBe(1);
-    expect(getDailyUsage("copy", "segment-user-a", midDay)).toBe(0);
+  it("records usage on its own in-process counter", async () => {
+    await expect(recordDailyUsage("segment", "segment-user-a", midDay)).resolves.toBe(1);
+    await expect(getDailyUsage("segment", "segment-user-a", midDay)).resolves.toBe(1);
+    await expect(getDailyUsage("copy", "segment-user-a", midDay)).resolves.toBe(0);
   });
 
   it("blocks at the segment limit and returns a retryable 429 payload", () => {
@@ -209,25 +241,25 @@ describe("segment surface (SAM 3.1 concept calls, issue #226)", () => {
     });
   });
 
-  it("resets at the daily rollover", () => {
+  it("resets at the daily rollover", async () => {
     const before = new Date(DAY.y, DAY.m, DAY.d, 23, 59, 59, 999);
     const after = new Date(DAY.y, DAY.m, DAY.d + 1, 0, 0, 0, 0);
 
-    recordDailyUsage("segment", "segment-user-b", before);
-    expect(getDailyUsage("segment", "segment-user-b", before)).toBe(1);
+    await recordDailyUsage("segment", "segment-user-b", before);
+    await expect(getDailyUsage("segment", "segment-user-b", before)).resolves.toBe(1);
 
     // Next day starts from zero again.
-    expect(getDailyUsage("segment", "segment-user-b", after)).toBe(0);
-    recordDailyUsage("segment", "segment-user-b", after);
-    expect(getDailyUsage("segment", "segment-user-b", after)).toBe(1);
+    await expect(getDailyUsage("segment", "segment-user-b", after)).resolves.toBe(0);
+    await recordDailyUsage("segment", "segment-user-b", after);
+    await expect(getDailyUsage("segment", "segment-user-b", after)).resolves.toBe(1);
   });
 });
 
 describe("label surface (OpenAI gpt-4o-mini vision, issue #263)", () => {
-  it("records usage on its own in-process counter", () => {
-    expect(recordDailyUsage("label", "label-user-a", midDay)).toBe(1);
-    expect(getDailyUsage("label", "label-user-a", midDay)).toBe(1);
-    expect(getDailyUsage("copy", "label-user-a", midDay)).toBe(0);
+  it("records usage on its own in-process counter", async () => {
+    await expect(recordDailyUsage("label", "label-user-a", midDay)).resolves.toBe(1);
+    await expect(getDailyUsage("label", "label-user-a", midDay)).resolves.toBe(1);
+    await expect(getDailyUsage("copy", "label-user-a", midDay)).resolves.toBe(0);
   });
 
   it("blocks at the label limit and returns a retryable 429 payload", () => {
@@ -254,17 +286,17 @@ describe("label surface (OpenAI gpt-4o-mini vision, issue #263)", () => {
     });
   });
 
-  it("resets at the daily rollover", () => {
+  it("resets at the daily rollover", async () => {
     const before = new Date(DAY.y, DAY.m, DAY.d, 23, 59, 59, 999);
     const after = new Date(DAY.y, DAY.m, DAY.d + 1, 0, 0, 0, 0);
 
-    recordDailyUsage("label", "label-user-b", before);
-    expect(getDailyUsage("label", "label-user-b", before)).toBe(1);
+    await recordDailyUsage("label", "label-user-b", before);
+    await expect(getDailyUsage("label", "label-user-b", before)).resolves.toBe(1);
 
     // Next day starts from zero again.
-    expect(getDailyUsage("label", "label-user-b", after)).toBe(0);
-    recordDailyUsage("label", "label-user-b", after);
-    expect(getDailyUsage("label", "label-user-b", after)).toBe(1);
+    await expect(getDailyUsage("label", "label-user-b", after)).resolves.toBe(0);
+    await recordDailyUsage("label", "label-user-b", after);
+    await expect(getDailyUsage("label", "label-user-b", after)).resolves.toBe(1);
   });
 });
 
