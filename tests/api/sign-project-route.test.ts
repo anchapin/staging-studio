@@ -3,7 +3,6 @@ import type { NextRequest } from "next/server";
 import { POST } from "@/app/api/sign-project/route";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
-import { signPreviewToken } from "@/lib/preview-token";
 
 const MOCK_USER_ID = "cuser12345678901234567890";
 const MOCK_OTHER_USER_ID = "cuser22345678901234567890";
