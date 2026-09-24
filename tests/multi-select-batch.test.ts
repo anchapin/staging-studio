@@ -4,7 +4,6 @@ import {
   MAX_BATCH_OBJECTS,
   advanceBatchProgress,
   batchProgressText,
-  batchStepLabel,
   buildBatchPlan,
   hasFailedStep,
   initialBatchProgress,
@@ -14,6 +13,7 @@ import {
   type BatchSelection,
   type BatchStepProgress,
 } from "@/lib/multi-select-batch";
+import { batchStepLabel } from "@/lib/batch-progress";
 
 const MASK_A = "data:image/png;base64,AAAA";
 const MASK_B = "data:image/png;base64,BBBBBBBB";
