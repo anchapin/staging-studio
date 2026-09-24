@@ -2,6 +2,8 @@ export const BROWSERLESS_PDF_ENDPOINT = "https://chrome.browserless.io/pdf";
 
 export const BROWSERLESS_TIMEOUT_MS = 60_000;
 
+import { getCircuitBreaker } from "@/lib/circuit-breaker";
+
 export interface BrowserlessPdfBody {
   url: string;
   gotoOptions: { waitUntil: "networkidle0" };
@@ -60,4 +62,83 @@ export function buildBrowserlessPdfBody(previewUrl: string): BrowserlessPdfBody 
       },
     },
   };
+}
+
+const RETRY_MAX_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 1_000;
+const RETRY_MAX_DELAY_MS = 10_000;
+
+function jitter(delayMs: number): number {
+  return delayMs * (0.5 + Math.random() * 0.5);
+}
+
+function isTransientResponse(response: Response): boolean {
+  return response.status === 429 ||
+         response.status === 500 ||
+         response.status === 502 ||
+         response.status === 503 ||
+         response.status === 504;
+}
+
+function isTransientError(error: unknown): boolean {
+  if (error instanceof Error) {
+    if (error.name === "AbortError") return true;
+    if (error instanceof TypeError && error.message.includes("fetch")) return true;
+  }
+  return false;
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit & { signal?: AbortSignal }
+): Promise<Response> {
+  let lastError: unknown;
+  let delayMs = RETRY_BASE_DELAY_MS;
+
+  for (let attempt = 0; attempt < RETRY_MAX_ATTEMPTS; attempt++) {
+    if (attempt > 0) {
+      const jitterDelay = jitter(delayMs);
+      await sleep(jitterDelay);
+      delayMs = Math.min(delayMs * 2, RETRY_MAX_DELAY_MS);
+    }
+
+    try {
+      const response = await fetch(url, options);
+
+      if (response.ok) {
+        return response;
+      }
+
+      if (isTransientResponse(response)) {
+        lastError = new Error(`Browserless transient error: ${response.status}`);
+        response.body?.cancel();
+        continue;
+      }
+
+      return response;
+    } catch (error) {
+      if (isTransientError(error)) {
+        lastError = error;
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw lastError ?? new Error("Browserless fetch failed after retries");
+}
+
+export async function fetchBrowserlessPdfWithCircuitBreaker(
+  url: string,
+  options: RequestInit & { signal?: AbortSignal }
+): Promise<Response> {
+  const cb = getCircuitBreaker("browserless", {
+    failureThreshold: 3,
+    cooldownMs: 30_000,
+  });
+  return cb.execute(() => fetchWithRetry(url, options));
 }

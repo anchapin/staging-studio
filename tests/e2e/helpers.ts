@@ -241,6 +241,8 @@ export function interceptInpaint(page: Page): InpaintInterception {
 
 interface FurnishingsDetectionCaptureState {
   submitPayload: Record<string, unknown> | null;
+  /** Every captured POST body, in request order (issue #742). */
+  submitPayloads: Array<Record<string, unknown>>;
   requestCount: number;
   mode: "success" | "empty" | "failure";
   /**
@@ -254,6 +256,15 @@ interface FurnishingsDetectionCaptureState {
 export interface FurnishingsDetectionInterception {
   /** Captured JSON body of the browser's POST /api/segment/furnishings. */
   submitBody(): Record<string, unknown>;
+  /**
+   * Every captured POST /api/segment/furnishings body, in submission
+   * order (issue #742). The editor now fires several detections per
+   * visit (editor-open auto-fire, per-concept fetches, and a
+   * post-completion refresh over the staged result), so assertions
+   * about a SPECIFIC call must index into this list instead of relying
+   * on the last-call-wins `submitBody()`.
+   */
+  submitBodies(): Array<Record<string, unknown>>;
   /** How many detection requests the browser has issued so far. */
   requestCount(): number;
   /** Switches responses to an empty detection (no objects found). */
@@ -295,6 +306,7 @@ export function interceptFurnishingsDetection(
 ): FurnishingsDetectionInterception {
   const state: FurnishingsDetectionCaptureState = {
     submitPayload: null,
+    submitPayloads: [],
     requestCount: 0,
     mode: "success",
     successMasks: null,
@@ -310,6 +322,7 @@ export function interceptFurnishingsDetection(
       string,
       unknown
     >;
+    state.submitPayloads.push(state.submitPayload);
     if (state.mode === "failure") {
       void route.fulfill({
         status: 500,
@@ -348,6 +361,9 @@ export function interceptFurnishingsDetection(
         throw new Error("POST /api/segment/furnishings was never captured");
       }
       return state.submitPayload;
+    },
+    submitBodies() {
+      return [...state.submitPayloads];
     },
     requestCount() {
       return state.requestCount;

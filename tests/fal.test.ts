@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 
-import { assertFalConfigured } from "@/lib/fal";
+import { assertFalConfigured, falSubscribeWithCircuitBreaker } from "@/lib/fal";
 import { MissingEnvVarsError } from "@/lib/env";
 
 describe("assertFalConfigured", () => {
@@ -52,5 +52,72 @@ describe("assertFalConfigured", () => {
     } finally {
       process.env.FAL_KEY = original;
     }
+  });
+});
+
+describe("falSubscribeWithCircuitBreaker", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("calls the circuit breaker execute method with fal.subscribe", async () => {
+    const mockExecute = vi.fn().mockResolvedValue({ data: "test result" });
+    vi.mock("@/lib/circuit-breaker", () => ({
+      getCircuitBreaker: vi.fn().mockReturnValue({
+        execute: mockExecute,
+      }),
+    }));
+
+    const { falSubscribeWithCircuitBreaker: subscribe } = await import("@/lib/fal");
+    const result = await subscribe("fal-ai/flux-fill", {
+      input: { prompt: "test" },
+    });
+
+    expect(mockExecute).toHaveBeenCalledTimes(1);
+    expect(mockExecute).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.any(Object)
+    );
+  });
+
+  it("passes through the result from the circuit breaker", async () => {
+    const expectedResult = { data: "image-url" };
+    const mockExecute = vi.fn().mockResolvedValue(expectedResult);
+    vi.mock("@/lib/circuit-breaker", () => ({
+      getCircuitBreaker: vi.fn().mockReturnValue({
+        execute: mockExecute,
+      }),
+    }));
+
+    const { falSubscribeWithCircuitBreaker: subscribe } = await import("@/lib/fal");
+    const result = await subscribe("fal-ai/flux-fill", {
+      input: { prompt: "test" },
+    });
+
+    expect(result).toEqual(expectedResult);
+  });
+
+  it("passes modelId and options to fal.subscribe", async () => {
+    let capturedArgs: unknown[] = [];
+    const mockExecute = vi.fn().mockImplementation(async (fn: () => Promise<unknown>) => {
+      capturedArgs = (fn as () => Promise<unknown>).toString().includes("fal") ? ["fal-subscribe-call"] : [];
+      return { data: "test" };
+    });
+    
+    vi.mock("@/lib/circuit-breaker", () => ({
+      getCircuitBreaker: vi.fn().mockReturnValue({
+        execute: mockExecute,
+      }),
+    }));
+
+    const { falSubscribeWithCircuitBreaker: subscribe } = await import("@/lib/fal");
+    await subscribe("fal-ai/flux-fill", {
+      input: { prompt: "a beautiful landscape" },
+    });
+
+    expect(mockExecute).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.any(Object)
+    );
   });
 });

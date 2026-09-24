@@ -2,17 +2,17 @@
  * Minimal HMAC-signed, short-lived preview tokens.
  *
  * Purpose: the PDF exporter (Browserless headless Chrome) is a cookie-less
- * browser, so `/projects/:id/preview` would redirect it to /login and the
- * exported PDF would capture the login page. The export route instead mints
- * a token scoped to one projectId with a 5-minute TTL, appends it to the
- * preview URL, and both the root middleware and the preview page verify it
- * before granting access.
+ * browser, so it cannot authenticate with a session and the printable
+ * lookbook page (`/preview/:id`) would deny it access (it grants access
+ * only to an owning session or a valid token). The export route instead
+ * mints a token scoped to one projectId with a 5-minute TTL, appends it
+ * to the preview URL, and the preview page verifies it (via
+ * src/lib/preview-access.ts) before granting access.
  *
  * Runtime note: sign/verify use the Web Crypto API (`crypto.subtle`) rather
- * than `node:crypto` because the root middleware runs on the Edge runtime,
- * where Node built-ins are unavailable. Web Crypto behaves identically in
- * the Edge runtime, the Node server runtime, and the vitest node environment
- * (Node >= 18 exposes `globalThis.crypto`).
+ * than `node:crypto`, keeping the module runtime-agnostic — Web Crypto
+ * behaves identically in the Edge runtime, the Node server runtime, and
+ * the vitest node environment (Node >= 18 exposes `globalThis.crypto`).
  *
  * Secret: `PREVIEW_TOKEN_SECRET`. When the variable is unset or empty, a
  * fixed DEV-ONLY fallback value is used so local development and CI (which
@@ -25,8 +25,9 @@
  * - Tokens expire (embedded `exp`, default 5 minutes) — `verify` rejects
  *   expired tokens and never throws on malformed input.
  * - Tokens are scoped: `verify` returns the signed projectId; callers
- *   (middleware, preview page) MUST compare it to the URL's own projectId,
- *   so a token minted for project A cannot unlock project B.
+ *   (the preview page, via src/lib/preview-access.ts) MUST compare it to
+ *   the URL's own projectId, so a token minted for project A cannot
+ *   unlock project B.
  */
 
 /** Query param the signed token travels in on the preview URL. */
@@ -44,7 +45,24 @@ const DEV_FALLBACK_SECRET =
 
 function getSecret(): string {
   const secret = process.env.PREVIEW_TOKEN_SECRET;
-  if (secret && secret.trim() !== "") return secret;
+  if (secret && secret.trim() !== "") {
+    if (
+      process.env.NODE_ENV === "production" &&
+      secret === DEV_FALLBACK_SECRET
+    ) {
+      throw new Error(
+        "PREVIEW_TOKEN_SECRET is set to the known DEV-ONLY fallback value. " +
+          "Generate a real secret with: openssl rand -base64 32"
+      );
+    }
+    return secret;
+  }
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "PREVIEW_TOKEN_SECRET is not set. " +
+        "Generate a real secret with: openssl rand -base64 32"
+    );
+  }
   return DEV_FALLBACK_SECRET;
 }
 

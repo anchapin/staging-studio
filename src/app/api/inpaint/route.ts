@@ -4,6 +4,7 @@ import { fal } from "@/lib/fal";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { inpaintRequestSchema } from "@/lib/ai-route-schemas";
+import { evaluateInpaintQualityGate } from "@/lib/inpaint-quality-gate";
 import { classifyIntegrationError } from "@/lib/error-classify";
 import {
   DEFAULT_DAILY_INPAINT_LIMIT,
@@ -49,12 +50,61 @@ const inpaintSubmitSchema = inpaintRequestSchema.extend({
     .refine((value) => value === 0 || value === 1)
     .nullable()
     .optional(),
+  // Issue #600: mask coverage ratio computed client-side via
+  // `estimateMaskCoverage` — passed up so the quality gate can evaluate
+  // whether the mask aligns with the stated directive intent.
+  maskCoverageRatio: z.number().min(0).max(1).optional(),
 });
 
 type FalQueueSubmitFunction = (
   id: string,
   options: { input: Record<string, unknown> }
 ) => Promise<{ request_id: string }>;
+
+// Issue #688: by the time the requestId → room row is written, the fal
+// job is already queued and billed. A transient DB failure there must
+// NOT surface as a 500 — the client's retry would submit a brand-new
+// paid job while the first run stays orphaned. Bounded retry with
+// backoff is the primary defense; if every attempt fails, the response
+// degrades (see the response-shape comment below).
+const INPAINT_CREATE_ATTEMPTS = 3;
+const INPAINT_CREATE_RETRY_DELAY_MS = 200;
+
+interface InpaintRecordCreateData {
+  id: string;
+  roomId: string;
+  variantSlot: number;
+  sourceSlot: number | null;
+  status: "IN_QUEUE";
+}
+
+async function createInpaintRequestWithRetry(
+  data: InpaintRecordCreateData
+): Promise<void> {
+  for (let attempt = 1; attempt <= INPAINT_CREATE_ATTEMPTS; attempt += 1) {
+    try {
+      await prisma.inpaintRequest.create({ data });
+      return;
+    } catch (error) {
+      if (attempt === INPAINT_CREATE_ATTEMPTS) {
+        throw error;
+      }
+      console.error(
+        JSON.stringify({
+          event: "inpaint_record_create_retry",
+          requestId: data.id,
+          roomId: data.roomId,
+          attempt,
+          attempts: INPAINT_CREATE_ATTEMPTS,
+        }),
+        error
+      );
+      await new Promise((resolve) =>
+        setTimeout(resolve, INPAINT_CREATE_RETRY_DELAY_MS)
+      );
+    }
+  }
+}
 
 export async function POST(request: NextRequest) {
   // Hoisted so the catch block can correlate failures with the room even
@@ -121,7 +171,7 @@ export async function POST(request: NextRequest) {
 
     const room = await prisma.room.findFirst({
       where: { id: roomId, project: { userId: user.id } },
-      select: { id: true, afterImageUrl: true, afterImageUrl2: true },
+      select: { id: true, name: true, afterImageUrl: true, afterImageUrl2: true },
     });
     if (!room) {
       return NextResponse.json(
@@ -151,6 +201,18 @@ export async function POST(request: NextRequest) {
 
     const prompt = buildInpaintPrompt(aesthetic, promptDirectives);
 
+    // Issue #600: inpaint pre-flight quality gate — evaluate directive quality
+    // before spending fal.ai budget. Runs after quota check + validation, before
+    // fal.queue.submit. Advisory only; warnings ride along with the submission.
+    // Issue #685: the gate is failure-tolerant — ANY evaluator failure (OpenAI
+    // outage, rate limit, timeout, missing key) or omitted maskCoverageRatio
+    // skips the gate with empty warnings instead of failing the submission.
+    const qualityWarnings = await evaluateInpaintQualityGate({
+      roomName: room.name,
+      maskCoverageRatio: parsed.data.maskCoverageRatio,
+      promptDirectives,
+    });
+
     // Fire-and-forget submit: returns as soon as the job is queued (~2s),
     // instead of holding the request open for the full generation.
     const falQueueSubmit = fal.queue.submit as FalQueueSubmitFunction;
@@ -169,17 +231,49 @@ export async function POST(request: NextRequest) {
 
     // Persist the requestId → room mapping before responding so the status
     // route can attribute requests and a refresh can resume polling.
-    await prisma.inpaintRequest.create({
-      data: {
+    // Issue #688: the paid fal job is already queued at this point, so a
+    // DB blip must not 500 (the client's retry would submit a second
+    // paid job). Retry with backoff; if every attempt fails, degrade the
+    // response instead of erroring.
+    let recordDegraded = false;
+    try {
+      await createInpaintRequestWithRetry({
         id: submission.request_id,
         roomId: room.id,
         variantSlot,
         sourceSlot,
         status: "IN_QUEUE",
-      },
-    });
+      });
+    } catch (recordError) {
+      recordDegraded = true;
+      console.error(
+        JSON.stringify({
+          event: "inpaint_record_create_failed",
+          requestId: submission.request_id,
+          roomId: room.id,
+          attempts: INPAINT_CREATE_ATTEMPTS,
+          degraded: true,
+        }),
+        recordError
+      );
+    }
 
-    return NextResponse.json({ requestId: submission.request_id });
+    // Response shape (issue #688): `{ requestId, qualityWarnings }` on the
+    // happy path; `{ requestId, qualityWarnings, degraded: true }` when the
+    // paid fal job was submitted but the mapping row could not be persisted
+    // after INPAINT_CREATE_ATTEMPTS attempts. Residual gap (accepted for
+    // #688, documented rather than widened): with no row,
+    // `GET /api/inpaint/[requestId]/status` 404s — it cannot attribute an
+    // unknown requestId to this caller without weakening the ownership
+    // check — so a fully degraded run is not pollable; the flag lets the
+    // client suppress a duplicate paid re-submit (#698) and the
+    // `inpaint_record_create_failed` log line anchors recovery of the
+    // billed requestId.
+    return NextResponse.json({
+      requestId: submission.request_id,
+      qualityWarnings,
+      ...(recordDegraded ? { degraded: true } : {}),
+    });
   } catch (error) {
     console.error(
       JSON.stringify({ event: "inpaint_submit_failed", roomId: roomId ?? null }),

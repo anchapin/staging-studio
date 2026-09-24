@@ -13,27 +13,10 @@
  *   but its row not yet written) is not counted, so the cap can be
  *   overshot by in-flight submissions. Acceptable for a guardrail, not an
  *   accounting ledger.
- * - `copy` (OpenAI) and `export` (Browserless): no log table exists and
- *   the production DB must not be touched (no Prisma schema change), so
- *   usage is tracked with a dependency-free IN-PROCESS daily counter
- *   (module-level Map) via `recordDailyUsage`/`getDailyUsage`.
- * - `segment` (fal.ai SAM 3.1 concept calls, issue #226): same rationale
- *   as `copy`/`export` — no log table and no schema change — so it also
- *   rides the in-process daily counter.
- * - `label` (OpenAI gpt-4o-mini vision, issue #263): same rationale as
- *   `copy` — billed per call with no persistent log table — so it rides
- *   the in-process daily counter alongside copy.
- *
- * KNOWN LIMITATION (in-process counter): on serverless platforms each
- * Lambda/instance keeps its own counter, so a cold start (or traffic
- * splitting across warm instances) can under-count and let a user exceed
- * the configured limit by up to (limit × concurrent instances) requests
- * per day. The counter also resets on every deploy. This is a deliberate
- * trade-off: the guardrail bounds the blast radius of runaway spend (the
- * bill incident it exists to prevent) without a database migration; a
- * durable counter would need a new table + db:push, which is explicitly
- * out of scope. Single-instance deployments (single firm owner, low
- * traffic) get exact enforcement.
+ * - `copy`, `export`, `segment`, `label` (OpenAI + Browserless + fal.ai
+ *   SAM 3.1): tracked via the `DailyApiUsage` Postgres table using
+ *   atomic upserts — survives serverless cold starts and multi-instance
+ *   traffic splitting (issue #784).
  *
  * Window semantics: a "day" is the server-local calendar day (local
  * midnight → next local midnight, wall clock of the machine running the
@@ -49,6 +32,8 @@
  * Worst case per user ≈ $0.75/day (~$22/month at the cap every single
  * day) — compare against the providers' dashboard spend alerts.
  */
+
+import { prisma } from "@/lib/prisma";
 
 export type QuotaSurface = "copy" | "export" | "label" | "segment";
 
@@ -121,7 +106,7 @@ export function resolveDailyLimit(raw: string | undefined, fallback: number): nu
 }
 
 export type QuotaDecision =
-  | { allowed: true; used: number; limit: number }
+  | { allowed: true; used: number; limit: number; remaining: number }
   | {
       allowed: false;
       used: number;
@@ -137,7 +122,36 @@ export type QuotaDecision =
  */
 export function evaluateDailyQuota(used: number, limit: number, now: Date = new Date()): QuotaDecision {
   if (used < limit) {
-    return { allowed: true, used, limit };
+    return { allowed: true, used, limit, remaining: limit - used };
+  }
+  return {
+    allowed: false,
+    used,
+    limit,
+    resetsAt: dailyWindow(now).endAt.toISOString(),
+  };
+}
+
+/**
+ * Pure quota evaluation for a BATCH of `count` billable units on one
+ * surface (issue #681: `detectBatchRoomTypes` fires one gpt-4o-mini
+ * vision call per image and rides the `label` counter). A batch is
+ * allowed only when it fits entirely inside the remaining headroom
+ * (`used + count <= limit`) — unlike {@link evaluateDailyQuota}'s
+ * per-unit semantics, a batch that would straddle the boundary is
+ * rejected whole rather than partially served, so a single request can
+ * never overshoot the cap. The exactly-filling batch
+ * (`used + count === limit`) is served, mirroring "the limit-th call is
+ * still served".
+ */
+export function evaluateDailyBatchQuota(
+  used: number,
+  count: number,
+  limit: number,
+  now: Date = new Date()
+): QuotaDecision {
+  if (used + count <= limit) {
+    return { allowed: true, used, limit, remaining: limit - used };
   }
   return {
     allowed: false,
@@ -194,51 +208,43 @@ export function inpaintDailyUsageWhere(
 }
 
 // ---------------------------------------------------------------------------
-// In-process daily usage counter (OpenAI + Browserless surfaces).
-// Keyed by `surface:userId:dayKey`; keys from previous days are pruned on
-// every write so the map cannot grow unbounded across long-lived
-// long-running processes.
+// Postgres-backed daily usage counter (copy/export/segment/label surfaces).
+// Replaces the in-process Map which had a known multi-instance race condition
+// on serverless platforms (issue #784).  The `inpaint` surface still uses
+// InpaintRequest.count() via `inpaintDailyUsageWhere` — it has its own
+// persisted row and does not need this table.
 // ---------------------------------------------------------------------------
 
-const usageCounts = new Map<string, number>();
-
-function counterKey(surface: QuotaSurface, userId: string, dayKey: string): string {
-  return `${surface}:${userId}:${dayKey}`;
-}
-
 /**
- * Reads today's recorded usage for a user on an in-process-counted
- * surface. Returns 0 on a cold start (see module header limitation).
+ * Reads today's recorded usage for a user on a Postgres-counted surface.
  */
-export function getDailyUsage(
+export async function getDailyUsage(
   surface: QuotaSurface,
   userId: string,
   now: Date = new Date()
-): number {
+): Promise<number> {
   const { dayKey } = dailyWindow(now);
-  return usageCounts.get(counterKey(surface, userId, dayKey)) ?? 0;
+  const record = await prisma.dailyApiUsage.findUnique({
+    where: { userId_surface_dayKey: { userId, surface, dayKey } },
+  });
+  return record?.count ?? 0;
 }
 
 /**
- * Records one billable unit for a user on an in-process-counted surface
- * and prunes counter keys belonging to previous days. Returns the new
- * usage count for the current day.
+ * Records one billable unit for a user on a Postgres-counted surface.
+ * Uses upsert so concurrent requests for the same user+surface+dayKey are
+ * safe. Returns the new usage count for the current day.
  */
-export function recordDailyUsage(
+export async function recordDailyUsage(
   surface: QuotaSurface,
   userId: string,
   now: Date = new Date()
-): number {
+): Promise<number> {
   const { dayKey } = dailyWindow(now);
-  const key = counterKey(surface, userId, dayKey);
-  const next = (usageCounts.get(key) ?? 0) + 1;
-  usageCounts.set(key, next);
-
-  for (const existing of usageCounts.keys()) {
-    if (!existing.endsWith(`:${dayKey}`)) {
-      usageCounts.delete(existing);
-    }
-  }
-
-  return next;
+  const record = await prisma.dailyApiUsage.upsert({
+    where: { userId_surface_dayKey: { userId, surface, dayKey } },
+    create: { userId, surface, dayKey, count: 1 },
+    update: { count: { increment: 1 } },
+  });
+  return record.count;
 }

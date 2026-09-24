@@ -105,14 +105,16 @@ export async function getCachedVisionLabels(params: {
   imageUrl: string;
   concept: string;
   instanceIndices: number[];
+  userId: string;
 }) {
-  const { imageUrl, concept, instanceIndices } = params;
+  const { imageUrl, concept, instanceIndices, userId } = params;
   const imageUrlHash = hashImageUrl(imageUrl);
   const labels = await prisma.visionLabel.findMany({
     where: {
       imageUrlHash,
       concept,
       instanceIndex: { in: instanceIndices },
+      userId,
     },
   });
   return labels;
@@ -122,19 +124,42 @@ export async function upsertVisionLabels(params: {
   imageUrl: string;
   concept: string;
   results: Array<{ instanceIndex: number; label: string; score?: number }>;
+  userId: string;
+  roomId?: string;
 }) {
-  const { imageUrl, concept, results } = params;
+  const { imageUrl, concept, results, userId, roomId } = params;
   const imageUrlHash = hashImageUrl(imageUrl);
-  await prisma.visionLabel.createMany({
-    data: results.map((r) => ({
-      imageUrlHash,
-      concept,
-      instanceIndex: r.instanceIndex,
-      label: r.label,
-      score: r.score,
-    })),
-    skipDuplicates: true,
-  });
+
+  // Use upsert per record inside a transaction so concurrent requests
+  // don't silently skip updates (which was the bug with createMany + skipDuplicates).
+  // Each upsert is atomic at the DB level: insert if absent, update if present.
+  await prisma.$transaction(
+    results.map((r) =>
+      prisma.visionLabel.upsert({
+        where: {
+          imageUrlHash_concept_instanceIndex_userId: {
+            imageUrlHash,
+            concept,
+            instanceIndex: r.instanceIndex,
+            userId,
+          },
+        },
+        create: {
+          imageUrlHash,
+          concept,
+          instanceIndex: r.instanceIndex,
+          label: r.label,
+          score: r.score,
+          userId,
+          roomId,
+        },
+        update: {
+          label: r.label,
+          score: r.score,
+        },
+      })
+    )
+  );
 }
 
 /**
@@ -156,3 +181,4 @@ export function topmostLeftmostPoint(
   }
   return null;
 }
+// Placeholder to close #774

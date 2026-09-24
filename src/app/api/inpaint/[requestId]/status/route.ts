@@ -6,6 +6,10 @@ import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { decideInpaintPersistence } from "@/lib/inpaint-persistence";
 import { classifyIntegrationError } from "@/lib/error-classify";
 import { FAL_FLUX_FILL_MODEL } from "@/lib/prompts";
+import { slidingWindowRateLimit } from "@/lib/sliding-window-ratelimit";
+
+const INPAINT_STATUS_RATE_LIMIT = 60;
+const INPAINT_STATUS_RATE_WINDOW_MS = 60_000;
 
 const INPAINT_STATUS_ERROR_COPY = {
   notFound: {
@@ -16,6 +20,16 @@ const INPAINT_STATUS_ERROR_COPY = {
     error: "Status check failed",
     message: "Unable to check image processing status. Please try again.",
   },
+};
+
+// Terminal payload for a permanently failed inpaint job (fal ERROR).
+// `retryable: false` + `status: "ERROR"` are both read as terminal by the
+// client's polling classifier (src/lib/inpaint-polling.ts).
+const INPAINT_TERMINAL_ERROR_BODY = {
+  status: "ERROR",
+  error: "Inpainting failed",
+  message: "The image editing process encountered an error. Please try again.",
+  retryable: false,
 };
 
 interface FalStatusResult {
@@ -50,6 +64,31 @@ export async function GET(
           message: "You must be signed in to check inpainting status.",
         },
         { status: 401 }
+      );
+    }
+
+    const rateLimit = await slidingWindowRateLimit(
+      user.id,
+      INPAINT_STATUS_RATE_LIMIT,
+      INPAINT_STATUS_RATE_WINDOW_MS
+    );
+
+    if (!rateLimit.allowed) {
+      const retryAfter = Math.ceil((rateLimit.resetsAt.getTime() - Date.now()) / 1000);
+      return NextResponse.json(
+        {
+          error: "Too many requests",
+          message: `Rate limit exceeded. Please wait ${retryAfter} seconds before trying again.`,
+        },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(retryAfter),
+            "X-RateLimit-Limit": String(INPAINT_STATUS_RATE_LIMIT),
+            "X-RateLimit-Remaining": String(rateLimit.remaining),
+            "X-RateLimit-Reset": String(Math.floor(rateLimit.resetsAt.getTime() / 1000)),
+          },
+        }
       );
     }
 
@@ -104,28 +143,120 @@ export async function GET(
       });
     }
 
+    // Terminal durability (issue #686): an ERROR row is a permanently dead
+    // job — serve the terminal payload immediately without calling fal.
+    // This also covers resumed polls after a refresh, so they fail fast
+    // instead of burning the full poll budget against a dead requestId.
+    if (inpaintRequest.status === "ERROR") {
+      return NextResponse.json(INPAINT_TERMINAL_ERROR_BODY, { status: 500 });
+    }
+
     const falQueueStatus = fal.queue.status as FalQueueStatusFunction;
     const falQueueResult = fal.queue.result as FalQueueResultFunction;
+
+    // PERSISTENCE_FAILED: persistence previously failed (Supabase storage error).
+    // Retry by fetching the fal result and attempting persistence again.
+    // On success: DB updated to COMPLETED with storage URL.
+    // On failure: stays PERSISTENCE_FAILED; client polls again.
+    if (inpaintRequest.status === "PERSISTENCE_FAILED") {
+      let persisted = true;
+      let resolvedImageUrl: string | null = null;
+      try {
+        const falResult = await falQueueResult(FAL_FLUX_FILL_MODEL, { requestId }).catch(
+          () => null
+        );
+        const falImageUrl: string | null = falResult?.images?.[0]?.url ?? null;
+        if (!falImageUrl) throw new Error("fal result unavailable");
+
+        const controller1 = new AbortController();
+        const timeoutId1 = setTimeout(() => controller1.abort(), 30_000);
+        let imageBlob: Blob;
+        try {
+          imageBlob = await fetch(falImageUrl, { signal: controller1.signal }).then((r) => r.blob());
+        } finally {
+          clearTimeout(timeoutId1);
+        }
+        const supabase = await createSupabaseRequestClient();
+        const objectPath = `after-${requestId}.png`;
+
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from("staging-images")
+          .upload(objectPath, imageBlob, {
+            contentType: "image/png",
+            upsert: true,
+          });
+
+        if (uploadError || !uploadData) throw new Error(uploadError?.message ?? "upload failed");
+        const storageUrl = supabase.storage
+          .from("staging-images")
+          .getPublicUrl(objectPath).data.publicUrl;
+        resolvedImageUrl = storageUrl;
+      } catch {
+        persisted = false;
+      }
+
+      if (persisted && resolvedImageUrl) {
+        await prisma.inpaintRequest.update({
+          where: { id: requestId },
+          data: { status: "COMPLETED", resultUrl: resolvedImageUrl },
+        });
+        return NextResponse.json({
+          status: "completed",
+          imageUrl: resolvedImageUrl,
+          persisted: true,
+        });
+      }
+
+      return NextResponse.json({
+        status: "retryable",
+        imageUrl: null,
+        persisted: false,
+      });
+    }
+
     const statusResponse = await falQueueStatus(FAL_FLUX_FILL_MODEL, { requestId });
 
     if (statusResponse.status === "ERROR") {
-      return NextResponse.json(
-        {
-          error: "Inpainting failed",
-          message: "The image editing process encountered an error. Please try again.",
-          retryable: true,
-        },
-        { status: 500 }
-      );
+      // Persist the terminal state so subsequent and resumed polls
+      // short-circuit above. Best-effort: a failed write must not flip the
+      // terminal response back into a retryable one.
+      try {
+        await prisma.inpaintRequest.update({
+          where: { id: requestId },
+          data: { status: "ERROR" },
+        });
+      } catch (recordError) {
+        console.error(
+          JSON.stringify({
+            event: "inpaint_error_record_failed",
+            requestId,
+          }),
+          recordError
+        );
+      }
+
+      return NextResponse.json(INPAINT_TERMINAL_ERROR_BODY, { status: 500 });
     }
 
     if (statusResponse.status === "COMPLETED") {
       // The queue status payload does not include the generated image —
       // fetch it from the result endpoint (fal serves it right after the
-      // status flips to COMPLETED).
+      // status flips to COMPLETED). A failure here must not crash the
+      // route, but it must be logged (issue #717) so a fal result-endpoint
+      // outage is correlatable in production instead of surfacing only as
+      // unexplained retryable 500s.
       const falResult = await falQueueResult(FAL_FLUX_FILL_MODEL, {
         requestId,
-      }).catch(() => null);
+      }).catch((resultError: unknown) => {
+        console.error(
+          JSON.stringify({
+            event: "inpaint_result_fetch_failed",
+            requestId,
+          }),
+          resultError
+        );
+        return null;
+      });
       const falImageUrl = falResult?.images?.[0]?.url;
 
       if (!falImageUrl) {
@@ -148,7 +279,14 @@ export async function GET(
       let resolvedImageUrl = falImageUrl;
 
       try {
-        const imageBlob = await fetch(falImageUrl).then((r) => r.blob());
+        const controller2 = new AbortController();
+        const timeoutId2 = setTimeout(() => controller2.abort(), 30_000);
+        let imageBlob: Blob;
+        try {
+          imageBlob = await fetch(falImageUrl, { signal: controller2.signal }).then((r) => r.blob());
+        } finally {
+          clearTimeout(timeoutId2);
+        }
         const supabase = await createSupabaseRequestClient();
         const objectPath = `after-${requestId}.png`;
 
@@ -221,11 +359,14 @@ export async function GET(
         });
       }
 
-      // Storage persistence failed: return the fal URL explicitly marked as
-      // not persisted so the client can warn — it expires, so it must not be
-      // treated as a durable success.
+      // Storage persistence failed: update DB to PERSISTENCE_FAILED so subsequent
+      // polls retry persistence, and return retryable so the client knows to poll again.
+      await prisma.inpaintRequest.update({
+        where: { id: requestId },
+        data: { status: "PERSISTENCE_FAILED", resultUrl: null },
+      });
       return NextResponse.json({
-        status: "completed",
+        status: "retryable",
         imageUrl: falImageUrl,
         persisted: false,
       });

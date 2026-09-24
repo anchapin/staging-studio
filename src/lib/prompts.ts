@@ -30,6 +30,22 @@ export const FRAMING_CONTEXT =
   "Presented as a finished object with its own frame and mounting, " +
   "integrated natural shadows and depth, clean surrounding wall.";
 
+// Issue #788: extracted from room-type-detection.ts so it can be reviewed and
+// tested in isolation, matching the pattern used for other vision prompt modules.
+export const ROOM_TYPE_SYSTEM_PROMPT = `You are an expert interior design assistant. Given a room photo, identify the room type from this list:
+- Primary Bedroom
+- Secondary Bedroom
+- Living Room
+- Dining Room
+- Kitchen
+- Bathroom
+- Home Office
+- Garage
+- Outdoor/Patio
+- Other
+
+Respond with ONLY the room type name. If uncertain, respond with the most likely option.`;
+
 // FLUX.1 Fill [dev] with LoRAs — the live fal endpoint (the old
 // "fal-ai/flux/1/fill" route was removed from fal's queue; submit
 // succeeded but execution 404'd with "Path /1/fill not found").

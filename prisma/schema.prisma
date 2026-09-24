@@ -89,6 +89,7 @@ model Room {
   inpaintRequests InpaintRequest[]
   inpaintVersions InpaintVersion[]
   selectionLogs  SelectionLog[]
+  visionLabels  VisionLabel[]
 
   @@index([projectId])
 }
@@ -105,7 +106,7 @@ model InpaintRequest {
                        // overwrites its "after" slot in place (selection untouched).
                        // Persisted so a pendingRequestId resume can apply the same
                        // result-persistence semantics as the original submit.
-  status      String   // mirrors fal queue status: IN_QUEUE | IN_PROGRESS | COMPLETED | ERROR
+  status      String   // mirrors fal queue status: IN_QUEUE | IN_PROGRESS | COMPLETED | ERROR | PERSISTENCE_FAILED
   resultUrl   String?  // filled when status is COMPLETED
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -133,6 +134,8 @@ model InpaintVersion {
 
 // VisionLabel model: caches GPT-4o-mini vision labels for detected instances
 // so re-opening the editor does not re-bill (issue #266).
+// userId scopes cache entries per-user so one user's billed labels are not
+// served to another user at no cost (issue #774).
 model VisionLabel {
   id             String   @id @default(cuid())
   imageUrlHash   String   // hash of imageUrl (stable identifier)
@@ -140,9 +143,13 @@ model VisionLabel {
   instanceIndex  Int
   label          String   // GPT-4o-mini's label text
   score          Float?
+  userId         String  // scopes cache to the user who paid
+  roomId         String?  // optional: links to owning room for cascade delete (#775)
+  room           Room?    @relation(fields: [roomId], references: [id], onDelete: Cascade)
   createdAt      DateTime @default(now())
 
-  @@unique([imageUrlHash, concept, instanceIndex])
+  @@unique([imageUrlHash, concept, instanceIndex, userId])
+  @@index([roomId])
 }
 
 // SelectionLog model: durable log of every instance toggle for the training
@@ -199,4 +206,33 @@ model ProcurementItem {
   updatedAt   DateTime @updatedAt
 
   @@index([projectId])
+}
+
+// DailyApiUsage model: Postgres-backed daily counter for copy/export/segment/label
+// surfaces, replacing the in-process Map that had multi-instance race conditions
+// on serverless platforms (issue #784).
+model DailyApiUsage {
+  id        String   @id @default(cuid())
+  userId    String
+  surface   String
+  dayKey    String
+  count     Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, surface, dayKey])
+  @@index([userId, surface, dayKey])
+}
+
+// RateLimitEntry model: Postgres-backed sliding window rate limiting for API
+// routes. Replaces the in-memory Map that failed in serverless environments
+// where multiple instances share no state (issue #832).
+model RateLimitEntry {
+  id          String   @id @default(cuid())
+  identifier  String   // e.g. user ID or IP address
+  windowStart BigInt  // Unix timestamp (ms) of window start
+  count       Int      @default(1)
+  expiresAt   DateTime // when this entry can be purged
+
+  @@index([identifier, windowStart])
+  @@index([expiresAt])
 }

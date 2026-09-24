@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
+// Browserless fetch + auth/DB overhead comfortably fit under 90s.
+// Default App Router limit is 10s, which is too short for PDF export.
+export const maxDuration = 90;
+
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { PREVIEW_TOKEN_QUERY_PARAM, signPreviewToken } from "@/lib/preview-token";
@@ -17,24 +21,37 @@ import {
   BROWSERLESS_TIMEOUT_MS,
   buildBrowserlessPdfBody,
   buildBrowserlessPdfUrl,
+  fetchBrowserlessPdfWithCircuitBreaker,
 } from "@/lib/browserless";
+import {
+  API_ERROR_UNAUTHORIZED,
+  API_ERROR_PROJECT_NOT_FOUND,
+  API_ERROR_RATE_LIMIT_EXCEEDED,
+  API_ERROR_PDF_AUTHENTICATION_FAILED,
+  API_ERROR_PDF_GENERATION_FAILED,
+  API_ERROR_EXPORT_FAILED,
+} from "@/lib/api-errors";
 
 const EXPORT_PDF_ERROR_COPY = {
   auth: {
     error: "Authentication failed",
     message: "PDF export service authentication failed. Please contact support.",
+    code: API_ERROR_PDF_AUTHENTICATION_FAILED,
   },
   timeout: {
     error: "PDF export timed out",
     message: "PDF generation took too long. Please try again in a moment.",
+    code: API_ERROR_PDF_GENERATION_FAILED,
   },
   network: {
     error: "Network error",
     message: "Unable to reach the PDF export service. Please check your connection and try again.",
+    code: API_ERROR_EXPORT_FAILED,
   },
   unknown: {
     error: "PDF export failed",
     message: "An unexpected error occurred while generating the PDF. Please try again.",
+    code: API_ERROR_EXPORT_FAILED,
   },
 };
 
@@ -55,6 +72,7 @@ export async function POST(req: NextRequest) {
         {
           error: "Unauthorized",
           message: "You must be signed in to export a PDF",
+          code: API_ERROR_UNAUTHORIZED,
         },
         { status: 401 }
       );
@@ -69,7 +87,7 @@ export async function POST(req: NextRequest) {
       DEFAULT_DAILY_EXPORT_LIMIT
     );
     const exportQuota = evaluateDailyQuota(
-      getDailyUsage("export", user.id),
+      await getDailyUsage("export", user.id),
       exportLimit
     );
     if (!exportQuota.allowed) {
@@ -82,7 +100,10 @@ export async function POST(req: NextRequest) {
         })
       );
       return NextResponse.json(
-        dailyQuotaExceededPayload(exportQuota, "Please try again tomorrow."),
+        {
+          ...dailyQuotaExceededPayload(exportQuota, "Please try again tomorrow."),
+          code: API_ERROR_RATE_LIMIT_EXCEEDED,
+        },
         { status: 429 }
       );
     }
@@ -94,10 +115,11 @@ export async function POST(req: NextRequest) {
     if (typeof projectId !== "string" || !PROJECT_ID_PATTERN.test(projectId)) {
       return NextResponse.json(
         {
-          error: "Invalid projectId",
-          message: "Project ID is required to generate PDF",
+          error: "Project not found",
+          message: "Project does not exist",
+          code: API_ERROR_PROJECT_NOT_FOUND,
         },
-        { status: 400 }
+        { status: 404 }
       );
     }
 
@@ -165,15 +187,18 @@ export async function POST(req: NextRequest) {
 
     let chromeResponse: Response;
     try {
-      chromeResponse = await fetch(buildBrowserlessPdfUrl(), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`,
-        },
-        body: JSON.stringify(buildBrowserlessPdfBody(previewUrl)),
-        signal: controller.signal,
-      });
+      chromeResponse = await (fetchBrowserlessPdfWithCircuitBreaker ?? globalThis.fetch)(
+        buildBrowserlessPdfUrl(),
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`,
+          },
+          body: JSON.stringify(buildBrowserlessPdfBody(previewUrl)),
+          signal: controller.signal,
+        }
+      );
     } finally {
       clearTimeout(timeoutId);
     }
@@ -193,8 +218,8 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
           {
             error: "Authentication failed",
-            message:
-              "PDF export service authentication failed. Please contact support.",
+            message: "PDF export service authentication failed. Please contact support.",
+            code: API_ERROR_PDF_AUTHENTICATION_FAILED,
           },
           { status: chromeResponse.status }
         );
@@ -204,9 +229,9 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
           {
             error: "Rate limit exceeded",
-            message:
-              "PDF export service is busy. Please wait a moment and try again.",
+            message: "PDF export service is busy. Please wait a moment and try again.",
             retryable: true,
+            code: API_ERROR_RATE_LIMIT_EXCEEDED,
           },
           { status: 429 }
         );
@@ -217,6 +242,7 @@ export async function POST(req: NextRequest) {
           error: "PDF generation failed",
           message: "Unable to generate PDF at this time. Please try again.",
           retryable: true,
+          code: API_ERROR_PDF_GENERATION_FAILED,
         },
         { status: chromeResponse.status }
       );
@@ -247,6 +273,7 @@ export async function POST(req: NextRequest) {
           error: "PDF generation failed",
           message: "Unable to generate PDF at this time. Please try again.",
           retryable: true,
+          code: API_ERROR_PDF_GENERATION_FAILED,
         },
         { status: 502 }
       );
@@ -255,7 +282,7 @@ export async function POST(req: NextRequest) {
     // Count the billable export only once a verified PDF is about to be
     // delivered: Browserless errors and non-PDF payloads do not count
     // against the user's daily cap.
-    recordDailyUsage("export", user.id);
+    await recordDailyUsage("export", user.id);
 
     return new NextResponse(pdfBuffer, {
       status: 200,
@@ -280,6 +307,7 @@ export async function POST(req: NextRequest) {
         error: classified.error,
         message: classified.message,
         retryable: classified.retryable,
+        code: classified.code,
       },
       { status: classified.status }
     );

@@ -1,67 +1,35 @@
 # Dependencies
 node_modules/
-.pnp/
-.pnp.js
 
-# Build
+# Vite / Vitest
+.vite/
+*.local
+
+# Test results
+*.vitest-results.json
+vitest/
+vitest.config.*.ts
+
+# Build output
+dist/
 .next/
 out/
-build/
-dist/
 
 # Environment
 .env
 .env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*.local
 
-# IDE
-.idea/
-*.swp
-*.swo
-.vscode/
-*.code-workspace
+# Logs
+*.log
+npm-debug.log*
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Testing
-coverage/
-.nyc_output/
-
-# Playwright e2e artifacts (issue #165)
-test-results/
-playwright-report/
-blob-report/
-playwright/.cache/
-
-# Prisma
-*.db
-*.db-journal
-
-# Misc
-*.log
-.vercel
-
-# Local AI agent tooling state (per-contributor; AGENTS.md stays tracked)
-.agents/
-.claude/
-.cursor/
-
-# generated toolchain artifacts
-next-env.d.ts
-tsconfig.tsbuildinfo
-
-# editor artifacts / env copies
-*.rswp
-.env.local*
-
-# vitest JSON reporter output (rtk/vitest artifact)
-.vitest/
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
