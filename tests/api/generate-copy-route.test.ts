@@ -50,6 +50,14 @@ vi.mock("@/lib/ai", () => ({
 }));
 
 vi.mock("@/lib/api-quota", () => ({
+  DEFAULT_DAILY_COPY_LIMIT: 50,
+  DAILY_LIMIT_ENV_VAR: {
+    inpaint: "DAILY_INPAINT_LIMIT",
+    copy: "DAILY_COPY_LIMIT",
+    label: "DAILY_LABEL_LIMIT",
+    export: "DAILY_EXPORT_LIMIT",
+    segment: "DAILY_SEGMENT_LIMIT",
+  },
   getDailyUsage: vi.fn(() => Promise.resolve(0)),
   evaluateDailyQuota: vi.fn(() => ({
     allowed: true,
@@ -157,7 +165,25 @@ describe("POST /api/generate-copy", () => {
       checklistItems: null,
       sortOrder: 0,
       createdAt: new Date(),
-    });
+      project: {
+        id: MOCK_PROJECT_ID,
+        name: "Test Project",
+        stagingDirectives: null,
+        userId: MOCK_USER_ID,
+        clientName: null,
+        buyerDemographics: null,
+        stagingAesthetic: null,
+        stagingPackage: null,
+        roiSalesPricePremium: null,
+        roiTransactionVelocity: null,
+        roiInvestmentTier: null,
+        clientSignature: null,
+        clientSignatureStatus: "Pending",
+        clientSignatureTimestamp: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    } as Awaited<ReturnType<typeof prisma.room.findFirst>>);
 
     const response = await POST(buildRequest({ roomId: MOCK_ROOM_ID }));
     const json = await response.json();

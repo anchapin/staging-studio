@@ -128,7 +128,7 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Bad Request");
+      expect(body.error).toBe("Invalid request");
     });
 
     it("returns 400 when concept is empty string", async () => {
@@ -143,7 +143,7 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Bad Request");
+      expect(body.error).toBe("Invalid request");
     });
 
     it("returns 400 when crops is empty array", async () => {
@@ -158,7 +158,7 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Bad Request");
+      expect(body.error).toBe("Invalid request");
     });
 
     it("returns 400 when concept exceeds 200 characters", async () => {
@@ -173,7 +173,7 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Bad Request");
+      expect(body.error).toBe("Invalid request");
     });
 
     it("returns 400 when crops.instanceIndex is negative", async () => {
@@ -188,7 +188,7 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Bad Request");
+      expect(body.error).toBe("Invalid request");
     });
 
     it("returns 400 when imageUrl is not a valid https URL", async () => {
@@ -203,7 +203,7 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Bad Request");
+      expect(body.error).toBe("Invalid request");
     });
 
     it("returns 400 when imageUrl host is not allowlisted (not *.supabase.co or *.fal.ai)", async () => {
@@ -218,7 +218,7 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Bad Request");
+      expect(body.error).toBe("Invalid request");
     });
 
     it("returns 400 when crop dataUrl host is not allowlisted", async () => {
@@ -233,7 +233,7 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Bad Request");
+      expect(body.error).toBe("Invalid request");
     });
 
     it("returns 400 when strict schema rejects unknown fields", async () => {
@@ -249,13 +249,14 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Bad Request");
+      expect(body.error).toBe("Invalid request");
     });
 
     it("accepts fal.ai URLs in crops and imageUrl fields", async () => {
+      vi.mocked(prisma.room.findFirst).mockResolvedValue(mockRoom as typeof mockRoom);
       vi.mocked(generateWithCircuitBreaker).mockImplementation(() =>
-      Promise.resolve({ object: [] })
-    );
+        Promise.resolve({ object: { labels: [] } })
+      );
 
       const response = await POST(
         buildRequest({
@@ -285,8 +286,8 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(404);
-      expect(body.error).toBe("Not Found");
-      expect(body.message).toBe("Room not found");
+      expect(body.error).toBe("Room not found");
+      expect(body.message).toBe("The requested room could not be found.");
     });
 
     it("returns 404 when room belongs to a different user", async () => {
@@ -303,20 +304,21 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(404);
-      expect(body.error).toBe("Not Found");
+      expect(body.error).toBe("Room not found");
     });
   });
 
   describe("AI success", () => {
     it("returns 200 with labels array when AI call succeeds", async () => {
-    vi.mocked(generateWithCircuitBreaker).mockImplementation(() =>
-      Promise.resolve({
-        object: [
-          { instanceIndex: 0, label: "Modern Grey Sofa", confidence: 0.97 },
-          { instanceIndex: 1, label: "Wooden Coffee Table", confidence: 0.95 },
-        ],
-      })
-    );
+      // Mock the wrapped function, not generateWithCircuitBreaker itself
+      vi.mocked(generateWithCircuitBreaker).mockImplementation(async () => ({
+        object: {
+          labels: [
+            { instanceIndex: 0, label: "Modern Grey Sofa", confidence: 0.97 },
+            { instanceIndex: 1, label: "Wooden Coffee Table", confidence: 0.95 },
+          ],
+        },
+      }));
 
       const response = await POST(
         buildRequest({
@@ -353,7 +355,7 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(500);
-      expect(body.error).toBe("Internal Server Error");
+      expect(body.error).toBe("Internal server error");
       expect(body.message).toBe("OpenAI API error");
     });
   });
