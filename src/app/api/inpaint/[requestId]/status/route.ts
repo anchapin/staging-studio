@@ -164,7 +164,14 @@ export async function GET(
         const falImageUrl: string | null = falResult?.images?.[0]?.url ?? null;
         if (!falImageUrl) throw new Error("fal result unavailable");
 
-        const imageBlob = await fetch(falImageUrl).then((r) => r.blob());
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30_000);
+        let imageBlob: Blob;
+        try {
+          imageBlob = await fetch(falImageUrl, { signal: controller.signal }).then((r) => r.blob());
+        } finally {
+          clearTimeout(timeoutId);
+        }
         const supabase = await createSupabaseRequestClient();
         const objectPath = `after-${requestId}.png`;
 
@@ -268,7 +275,14 @@ export async function GET(
       let resolvedImageUrl = falImageUrl;
 
       try {
-        const imageBlob = await fetch(falImageUrl).then((r) => r.blob());
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30_000);
+        let imageBlob: Blob;
+        try {
+          imageBlob = await fetch(falImageUrl, { signal: controller.signal }).then((r) => r.blob());
+        } finally {
+          clearTimeout(timeoutId);
+        }
         const supabase = await createSupabaseRequestClient();
         const objectPath = `after-${requestId}.png`;
 
