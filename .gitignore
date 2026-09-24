@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Vite / Vitest
+.vite/
+*.local
+
+# Test results
+*.vitest-results.json
+vitest/
+vitest.config.*.ts
+
+# Build output
+dist/
+.next/
+out/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
