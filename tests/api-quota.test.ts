@@ -324,3 +324,68 @@ describe("evaluateDailyBatchQuota (batch room-type detection, issue #681)", () =
     }
   });
 });
+
+describe("in-process race condition in concurrent quota enforcement (issue #836)", () => {
+  it("allows N+1 concurrent requests when all read the same in-process counter value of limit-1", async () => {
+    const limit = 20;
+    const usage = 19; // one slot remaining
+    const concurrent = 20; // 20 requests all reading usage=19
+
+    const results = await Promise.all(
+      Array.from({ length: concurrent }, () =>
+        Promise.resolve(evaluateDailyQuota(usage, limit))
+      )
+    );
+
+    const allowed = results.filter((r) => r.allowed);
+    // All 20 pass — this demonstrates the race: all saw "19 < 20" before any incremented
+    expect(allowed.length).toBe(concurrent);
+  });
+
+  it("concurrent evaluateDailyQuota calls with same usage at exact limit all return blocked", async () => {
+    const limit = 20;
+    const usage = 20; // exactly at limit
+
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () =>
+        Promise.resolve(evaluateDailyQuota(usage, limit))
+      )
+    );
+
+    const allowed = results.filter((r) => r.allowed);
+    expect(allowed.length).toBe(0);
+  });
+
+  it("simulates the label route race: concurrent requests all pass before recordDailyUsage", async () => {
+    const limit = DEFAULT_DAILY_LABEL_LIMIT; // 50
+    const usage = limit - 1; // 49 — one slot remaining
+    const concurrent = 10;
+
+    const results = await Promise.all(
+      Array.from({ length: concurrent }, () =>
+        Promise.resolve(evaluateDailyQuota(usage, limit))
+      )
+    );
+
+    const allowed = results.filter((r) => r.allowed);
+    // All 10 pass — in the real route, each would then call recordDailyUsage,
+    // pushing actual usage to 50+ and overshooting the limit.
+    expect(allowed.length).toBe(concurrent);
+  });
+
+  it("batch quota also exhibits the same race when usage is at limit-1", async () => {
+    const limit = 50;
+    const usage = 49;
+    const batchCount = 1;
+    const concurrent = 5;
+
+    const results = await Promise.all(
+      Array.from({ length: concurrent }, () =>
+        Promise.resolve(evaluateDailyBatchQuota(usage, batchCount, limit))
+      )
+    );
+
+    const allowed = results.filter((r) => r.allowed);
+    expect(allowed.length).toBe(concurrent);
+  });
+});
