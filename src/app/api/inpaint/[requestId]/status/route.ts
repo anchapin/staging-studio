@@ -6,6 +6,10 @@ import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { decideInpaintPersistence } from "@/lib/inpaint-persistence";
 import { classifyIntegrationError } from "@/lib/error-classify";
 import { FAL_FLUX_FILL_MODEL } from "@/lib/prompts";
+import { checkRateLimit } from "@/lib/sliding-window-ratelimit";
+
+const STATUS_POLL_RATE_LIMIT = 30;
+const STATUS_POLL_WINDOW_MS = 60_000;
 
 const INPAINT_STATUS_ERROR_COPY = {
   notFound: {
@@ -60,6 +64,27 @@ export async function GET(
           message: "You must be signed in to check inpainting status.",
         },
         { status: 401 }
+      );
+    }
+
+    const rateLimit = checkRateLimit(user.id, STATUS_POLL_RATE_LIMIT, STATUS_POLL_WINDOW_MS);
+    if (!rateLimit.allowed) {
+      const retryAfter = Math.ceil((rateLimit.resetAt - Date.now()) / 1000);
+      return NextResponse.json(
+        {
+          error: "Too many requests",
+          message: "Please slow down",
+          retryAfter,
+        },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(retryAfter),
+            "X-RateLimit-Limit": String(STATUS_POLL_RATE_LIMIT),
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": String(Math.ceil(rateLimit.resetAt / 1000)),
+          },
+        }
       );
     }
 
