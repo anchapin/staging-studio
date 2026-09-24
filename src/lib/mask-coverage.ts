@@ -18,15 +18,23 @@
 export const LOW_COVERAGE_WARNING_THRESHOLD = 0.005;
 
 /**
+ * Grayscale value (0–255) at or above which a pixel is considered "painted"
+ * in the white-on-black inpaint mask. Both the alpha channel and the
+ * luminance must independently clear this threshold to be classified as
+ * masked. Used by {@link isMaskedPixel} and {@link estimateMaskCoverage}.
+ */
+export const MASK_PIXEL_THRESHOLD = 128;
+
+/**
  * Classifies a single RGBA pixel as "masked" (painted, i.e. to be
  * regenerated). Mask pixels are painted white on an opaque black base, but
  * scaled exports antialias edges to gray, so classify by luminance and
  * treat low alpha as unpainted.
  */
 export function isMaskedPixel(r: number, g: number, b: number, a: number): boolean {
-  if (a < 128) return false;
+  if (a < MASK_PIXEL_THRESHOLD) return false;
   const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  return luminance >= 128;
+  return luminance >= MASK_PIXEL_THRESHOLD;
 }
 
 /**
