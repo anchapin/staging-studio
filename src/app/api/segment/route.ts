@@ -39,6 +39,9 @@ const MAX_MASK_RESPONSE_BYTES = 10 * 1024 * 1024;
 // degrades to the retryable timeout copy instead of pinning the editor.
 const SEGMENT_TIMEOUT_MS = 60_000;
 
+// Retryable CDN status codes for mask image fetch retries.
+const RETRYABLE_CDN_STATUS_CODES = new Set([500, 502, 503, 504]);
+
 type FalSubscribeFunction = (
   id: string,
   options: { input: Record<string, unknown>; abortSignal?: AbortSignal }
@@ -53,21 +56,51 @@ type FalSubscribeFunction = (
  * oversized responses so the caller's catch block classifies the failure.
  */
 async function fetchMaskAsDataUrl(url: string): Promise<string> {
-  const response = await fetch(url, { signal: AbortSignal.timeout(SEGMENT_TIMEOUT_MS) });
-  if (!response.ok) {
-    throw new Error(`Mask image request failed with HTTP ${response.status}`);
+  const maxRetries = 3;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(SEGMENT_TIMEOUT_MS),
+      });
+
+      if (response.ok) {
+        const contentType = response.headers.get("content-type") ?? "";
+        if (!contentType.startsWith("image/")) {
+          throw new Error("Mask image response has an unexpected content type");
+        }
+        const buffer = await response.arrayBuffer();
+        if (buffer.byteLength > MAX_MASK_RESPONSE_BYTES) {
+          throw new Error("Mask image response is unexpectedly large");
+        }
+        const base64 = Buffer.from(buffer).toString("base64");
+        const mime = contentType.split(";")[0].trim() || "image/png";
+        return `data:${mime};base64,${base64}`;
+      }
+
+      // Only retry on retryable CDN status codes on non-final attempt.
+      if (attempt < maxRetries && RETRYABLE_CDN_STATUS_CODES.has(response.status)) {
+        const delayMs = 1000 * Math.pow(2, attempt);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        lastError = new Error(`Mask image request failed with HTTP ${response.status}`);
+        continue;
+      }
+
+      throw new Error(`Mask image request failed with HTTP ${response.status}`);
+    } catch (error) {
+      // Network errors and timeout errors are retryable on non-final attempt.
+      if (attempt < maxRetries) {
+        const delayMs = 1000 * Math.pow(2, attempt);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        lastError = error;
+        continue;
+      }
+      throw error;
+    }
   }
-  const contentType = response.headers.get("content-type") ?? "";
-  if (!contentType.startsWith("image/")) {
-    throw new Error("Mask image response has an unexpected content type");
-  }
-  const buffer = await response.arrayBuffer();
-  if (buffer.byteLength > MAX_MASK_RESPONSE_BYTES) {
-    throw new Error("Mask image response is unexpectedly large");
-  }
-  const base64 = Buffer.from(buffer).toString("base64");
-  const mime = contentType.split(";")[0].trim() || "image/png";
-  return `data:${mime};base64,${base64}`;
+
+  throw lastError;
 }
 
 export async function POST(request: NextRequest) {
