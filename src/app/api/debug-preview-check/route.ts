@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { verifyPreviewToken, signPreviewToken } from "@/lib/preview-token";
+import { withErrorHandler } from "@/lib/api-error-handler";
 
-export async function GET(request: NextRequest) {
+const _get = async (request: NextRequest): Promise<Response> => {
   // Issue #702: diagnostic-only self-test — must not exist in production,
   // and self-guards like every other /api/* route outside production.
   if (process.env.NODE_ENV === "production") {
@@ -30,4 +31,6 @@ export async function GET(request: NextRequest) {
     selfSignVerify: selfOk,
     localTokenVerdict: local.valid ? { valid: true, projectId: local.projectId } : { valid: false },
   });
-}
+};
+
+export const GET = withErrorHandler(_get);
