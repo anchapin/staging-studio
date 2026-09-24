@@ -1,0 +1,238 @@
+// Prisma Schema for StagingStudio
+
+// Datasource
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// User model: firm branding and editable page templates
+model User {
+  id                    String    @id @default(cuid())
+  firmName              String    // "Circle G Designs"
+  ownerName             String    // "Lauren Chapin"
+  logoUrl               String?
+  email                 String?   @unique
+  psychologyPageContent String?   // Template for Page 2
+  signoffContent        String?   // Template for final page
+  darkMode              Boolean   @default(false)
+  createdAt             DateTime  @default(now())
+
+  projects Project[]
+}
+
+// Project model: a single staging job for one property
+model Project {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  propertyAddress String
+  clientName      String
+  targetBuyer     String   // e.g. "young professional couple", "growing family"
+  stagingAesthetic String  // e.g. "Organic Modern Luxury", "Warm Transitional"
+
+  // ROI Metrics Dashboard (issue #552)
+  roiSalesPricePremium   String? // e.g. "+8–12%"
+  roiTransactionVelocity  String? // e.g. "24 Days"
+  roiInvestmentTier      String? // e.g. "$45,000"
+
+  stagingPackage   String? // e.g. "essential", "premium", "turnkey"
+  stagingDirectives String? // Issue #562: global project-wide AI staging directives
+  // Buyer Demographics JSON: buyer profile for AI copywriting + ROI metrics (issue #563)
+  // Shape: { buyerType, designPreferences[], budgetMin, budgetMax, mustHaveFeatures[], sellTimeline }
+  buyerDemographics Json?
+  // Client digital sign-off (issue #556)
+  clientSignature          String?   // PNG data URL of the signature
+  clientSignatureStatus    String?   // "Pending" | "Signed"
+  clientSignatureTimestamp  DateTime? // ISO 8601 timestamp of when signed
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  rooms Room[]
+  materialSwatches MaterialSwatch[]
+  procurementItems ProcurementItem[]
+}
+
+// Room model: a single room within a project
+model Room {
+  id                   String   @id @default(cuid())
+  projectId            String
+  project              Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name                 String   // e.g. "Primary Bedroom", "Kitchen"
+
+  // Image URLs — Variant 1
+  beforeImageUrl       String?
+  afterImageUrl        String?
+
+  // Image URLs — Variant 2
+  beforeImageUrl2      String?
+  afterImageUrl2       String?
+
+  selectedVariantIndex Int?     @default(0) // 0 or 1 — which variant is selected for PDF
+
+  // AI outputs
+  rawDirectives        String?  // User's freeform bullet directives
+  observedChallenge    String?
+  recommendation       String?
+  buyerPsychology      String?
+  checklistItems       Json?    // Array of { item, category, priority }
+
+  sortOrder           Int      @default(0) // for manual room reordering
+
+  createdAt            DateTime @default(now())
+
+  inpaintRequests InpaintRequest[]
+  inpaintVersions InpaintVersion[]
+  selectionLogs  SelectionLog[]
+  visionLabels  VisionLabel[]
+
+  @@index([projectId])
+}
+
+// InpaintRequest model: persisted fal.ai queue request (id = fal requestId)
+// so jobs survive serverless deadlines and page refreshes can resume polling.
+model InpaintRequest {
+  id          String   @id
+  roomId      String
+  room        Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  variantSlot Int      // 0 or 1 — which "after" variant slot this run targets
+  sourceSlot  Int?     // issue #170: null = run edits the original before photo;
+                       // 0 or 1 = run edits that variant's staged result and
+                       // overwrites its "after" slot in place (selection untouched).
+                       // Persisted so a pendingRequestId resume can apply the same
+                       // result-persistence semantics as the original submit.
+  status      String   // mirrors fal queue status: IN_QUEUE | IN_PROGRESS | COMPLETED | ERROR | PERSISTENCE_FAILED
+  resultUrl   String?  // filled when status is COMPLETED
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([roomId])
+}
+
+// InpaintVersion model: version history for inpaint results (issue #561).
+// Tracks each completed inpaint run per variant slot so users can preview,
+// restore, and compare previous versions. Thumbnails are stored in Supabase
+// Storage; full images use the resultUrl (persisted in staging-images).
+model InpaintVersion {
+  id             String   @id @default(cuid())
+  roomId         String
+  room           Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  variantSlot    Int      // 0 or 1 — which "after" variant slot this version belongs to
+  resultUrl      String   // URL of the full-resolution image (from staging-images)
+  thumbnailUrl   String?  // URL of the low-res thumbnail in Supabase Storage
+  seed           String?  // fal.ai seed used for this run (for regeneration)
+  promptDirectives String? // The staging directives used for this run
+  createdAt      DateTime @default(now())
+
+  @@index([roomId, variantSlot, createdAt])
+}
+
+// VisionLabel model: caches GPT-4o-mini vision labels for detected instances
+// so re-opening the editor does not re-bill (issue #266).
+// userId scopes cache entries per-user so one user's billed labels are not
+// served to another user at no cost (issue #774).
+model VisionLabel {
+  id             String   @id @default(cuid())
+  imageUrlHash   String   // hash of imageUrl (stable identifier)
+  concept        String   // e.g. "furniture", "rug", etc.
+  instanceIndex  Int
+  label          String   // GPT-4o-mini's label text
+  score          Float?
+  userId         String  // scopes cache to the user who paid
+  roomId         String?  // optional: links to owning room for cascade delete (#775)
+  room           Room?    @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+
+  @@unique([imageUrlHash, concept, instanceIndex, userId])
+  @@index([roomId])
+}
+
+// SelectionLog model: durable log of every instance toggle for the training
+// corpus (find-and-replace initiative, issue #238 / wave W3).
+// Rows are written alongside console events so the training data survives
+// past the browser console — the corpus export script dumps this table.
+model SelectionLog {
+  id            String   @id @default(cuid())
+  roomId        String
+  concept       String
+  instanceIndex Int
+  score        Float
+  editedLabel  String?
+  createdAt    DateTime @default(now())
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, createdAt])
+}
+
+// MaterialSwatch model: finish and palette references displayed in the lookbook
+// (issue #553). Belongs to a project so swatches are shared across rooms.
+model MaterialSwatch {
+  id           String  @id @default(cuid())
+  projectId    String
+  project      Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name         String  // e.g. "White Oak", "Brushed Brass", "Cream Linen"
+  hexCode      String  // e.g. "#C8A882", "#B8860B"
+  materialType String  // e.g. "Hardwood", "Metal", "Fabric"
+  useCase     String  // e.g. "Flooring", "Hardware", "Textile"
+  vendor      String? // e.g. "Wayfair", "Sherwin-Williams"
+  sku         String? // e.g. "WF-HW-1234"
+  sortOrder   Int     @default(0)
+
+  @@index([projectId])
+}
+
+// ProcurementItem model: furniture procurement items for the lookbook's
+// Furniture Procurement Table (issue #554).
+model ProcurementItem {
+  id            String   @id @default(cuid())
+  projectId    String
+  project      Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  category     String  // e.g. "Seating", "Tables", "Lighting"
+  item         String  // e.g. "Sofa", "Dining Table", "Floor Lamp"
+  description  String?
+  status      String  // "needed" | "ordered" | "received"
+  sku         String?
+  estCost     Float?
+  vendor      String?
+  notes       String?
+  sortOrder   Int     @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([projectId])
+}
+
+// DailyApiUsage model: Postgres-backed daily counter for copy/export/segment/label
+// surfaces, replacing the in-process Map that had multi-instance race conditions
+// on serverless platforms (issue #784).
+model DailyApiUsage {
+  id        String   @id @default(cuid())
+  userId    String
+  surface   String
+  dayKey    String
+  count     Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, surface, dayKey])
+  @@index([userId, surface, dayKey])
+}
+
+// RateLimitEntry model: Postgres-backed sliding window rate limiting for API
+// routes. Replaces the in-memory Map that failed in serverless environments
+// where multiple instances share no state (issue #832).
+model RateLimitEntry {
+  id          String   @id @default(cuid())
+  identifier  String   // e.g. user ID or IP address
+  windowStart BigInt  // Unix timestamp (ms) of window start
+  count       Int      @default(1)
+  expiresAt   DateTime // when this entry can be purged
+
+  @@index([identifier, windowStart])
+  @@index([expiresAt])
+}
