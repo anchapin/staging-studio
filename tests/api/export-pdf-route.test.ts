@@ -5,7 +5,9 @@ import { POST } from "@/app/api/export-pdf/route";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 
-const { buildBrowserlessPdfUrl, buildBrowserlessPdfBody } = vi.hoisted(() => {
+// Use vi.hoisted so the mock is fresh for each test run and doesn't retain
+// state from the full suite run (avoids global.fetch pollution from sibling test files)
+const { buildBrowserlessPdfUrl, buildBrowserlessPdfBody, fetchBrowserlessPdfWithCircuitBreaker } = vi.hoisted(() => {
   return {
     buildBrowserlessPdfUrl: vi.fn(() => "https://chrome.browserless.io/pdf"),
     buildBrowserlessPdfBody: vi.fn((url: string) => ({
@@ -17,6 +19,7 @@ const { buildBrowserlessPdfUrl, buildBrowserlessPdfBody } = vi.hoisted(() => {
         margin: { top: "0", right: "0", bottom: "0", left: "0" },
       },
     })),
+    fetchBrowserlessPdfWithCircuitBreaker: vi.fn(),
   };
 });
 
@@ -35,6 +38,7 @@ vi.mock("@/lib/browserless", () => ({
   buildBrowserlessPdfUrl,
   buildBrowserlessPdfBody,
   BROWSERLESS_TIMEOUT_MS: 60_000,
+  fetchBrowserlessPdfWithCircuitBreaker,
 }));
 
 const authedUser = getAuthedPrismaUser as unknown as Mock;
@@ -59,7 +63,10 @@ beforeEach(() => {
   projectFindUnique.mockResolvedValue({ id: PROJECT_ID, userId: USER_ID });
   dailyApiUsageFindUnique.mockResolvedValue({ count: 0 });
   dailyApiUsageUpsert.mockResolvedValue({ count: 1 });
-  global.fetch = vi.fn();
+  // Reset hoisted mock and delegate to global.fetch so per-test overrides work
+  vi.mocked(fetchBrowserlessPdfWithCircuitBreaker).mockReset().mockImplementation(
+    (url: string, opts?: RequestInit) => global.fetch(url, opts) as Promise<Response>,
+  );
 });
 
 function validBody() {
@@ -81,7 +88,9 @@ beforeEach(() => {
   projectFindUnique.mockResolvedValue({ id: PROJECT_ID, userId: USER_ID });
   dailyApiUsageFindUnique.mockResolvedValue({ count: 0 });
   dailyApiUsageUpsert.mockResolvedValue({ count: 1 });
-  global.fetch = vi.fn();
+  vi.mocked(fetchBrowserlessPdfWithCircuitBreaker).mockReset().mockImplementation(
+    (url: string, opts?: RequestInit) => global.fetch(url, opts) as Promise<Response>,
+  );
 });
 
 describe("POST /api/export-pdf — projectId validation", () => {
@@ -122,7 +131,7 @@ describe("POST /api/export-pdf — projectId validation", () => {
 
   it("accepts a valid CUID-formatted projectId and returns a PDF", async () => {
     const pdfContent = Buffer.from("%PDF-1.4 fake pdf content");
-    vi.mocked(global.fetch).mockResolvedValue(
+    vi.mocked(fetchBrowserlessPdfWithCircuitBreaker).mockResolvedValue(
       new Response(pdfContent, {
         status: 200,
         headers: { "Content-Type": "application/pdf" },
@@ -183,7 +192,7 @@ describe("POST /api/export-pdf — ownership", () => {
 
 describe("POST /api/export-pdf — PDF generation", () => {
   it("returns 502 when Browserless returns non-PDF content", async () => {
-    vi.mocked(global.fetch).mockResolvedValue(
+    vi.mocked(fetchBrowserlessPdfWithCircuitBreaker).mockResolvedValue(
       new Response("not a pdf", {
         status: 200,
         headers: { "Content-Type": "text/html" },
@@ -201,8 +210,7 @@ describe("POST /api/export-pdf — PDF generation", () => {
       status: 500,
       headers: { "Content-Type": "text/plain" },
     });
-    const mockFetch = vi.fn(() => Promise.resolve(mockResponse));
-    global.fetch = mockFetch;
+    vi.mocked(fetchBrowserlessPdfWithCircuitBreaker).mockResolvedValue(mockResponse);
 
     const response = await callExportRoute(validBody());
     expect(response.status).toBe(500);
@@ -213,7 +221,7 @@ describe("POST /api/export-pdf — PDF generation", () => {
 
   it("returns the PDF buffer with correct content-type on success", async () => {
     const pdfContent = Buffer.from("%PDF-1.4 test pdf content");
-    vi.mocked(global.fetch).mockResolvedValue(
+    vi.mocked(fetchBrowserlessPdfWithCircuitBreaker).mockResolvedValue(
       new Response(pdfContent, {
         status: 200,
         headers: { "Content-Type": "application/pdf" },
@@ -230,7 +238,7 @@ describe("POST /api/export-pdf — PDF generation", () => {
 
   it("builds the correct Browserless URL and signed preview URL", async () => {
     const pdfContent = Buffer.from("%PDF-1.4 test pdf content");
-    vi.mocked(global.fetch).mockResolvedValue(
+    vi.mocked(fetchBrowserlessPdfWithCircuitBreaker).mockResolvedValue(
       new Response(pdfContent, {
         status: 200,
         headers: { "Content-Type": "application/pdf" },
@@ -239,8 +247,8 @@ describe("POST /api/export-pdf — PDF generation", () => {
 
     await callExportRoute(validBody());
 
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-    const callArgs = vi.mocked(global.fetch).mock.calls[0];
+    expect(fetchBrowserlessPdfWithCircuitBreaker).toHaveBeenCalledTimes(1);
+    const callArgs = vi.mocked(fetchBrowserlessPdfWithCircuitBreaker).mock.calls[0];
     expect(callArgs).toBeDefined();
     const [url] = callArgs as [string, RequestInit];
     expect(url).toBe("https://chrome.browserless.io/pdf");
