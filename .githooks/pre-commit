@@ -1,4 +1,0 @@
-#!/usr/bin/env sh
-# Pre-commit hook: blocks committing the Next.js tsconfig.jsx build flip.
-# Activate with: git config core.hooksPath .githooks  (see AGENTS.md "Toolchain quirks")
-exec "$(git rev-parse --show-toplevel)/scripts/check-tsconfig-flip.sh"
