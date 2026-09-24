@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { NextRequest } from "next/server";
 import { POST } from "@/app/api/label-instances/route";
 import {
   getDailyUsage,
   recordDailyUsage,
   evaluateDailyQuota,
+  type QuotaDecision,
 } from "@/lib/api-quota";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
@@ -23,7 +25,7 @@ function buildNextRequest(body: unknown) {
     headers: new Headers({ "Content-Type": "application/json" }),
     body: JSON.stringify(body),
     json: () => Promise.resolve(body),
-  } as unknown as ReturnType<typeof import("next/server")["NextRequest"]>;
+  } as unknown as NextRequest;
 }
 
 vi.mock("@/lib/api-auth", () => ({
@@ -94,12 +96,12 @@ describe("POST /api/label-instances", () => {
       used: 0,
       limit: 50,
       remaining: 50,
-    });
+    } as QuotaDecision);
     vi.mocked(prisma.room.findFirst).mockResolvedValue({ id: MOCK_ROOM_ID } as never);
     vi.mocked(assertOpenAIConfigured).mockReturnValue(undefined);
     vi.mocked(getCachedVisionLabels).mockResolvedValue([]);
     vi.mocked(upsertVisionLabels).mockResolvedValue(undefined);
-    vi.mocked(recordDailyUsage).mockResolvedValue(undefined);
+    vi.mocked(recordDailyUsage).mockResolvedValue(0 as never);
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -117,9 +119,8 @@ describe("POST /api/label-instances", () => {
       allowed: false,
       used: 50,
       limit: 50,
-      remaining: 0,
       resetsAt: new Date(Date.now() + 86400000).toISOString(),
-    });
+    } as never);
 
     const response = await POST(buildNextRequest(validBody()));
 
@@ -131,7 +132,7 @@ describe("POST /api/label-instances", () => {
 
   it("does not consume quota on cache hit", async () => {
     vi.mocked(getCachedVisionLabels).mockResolvedValue([
-      { instanceIndex: 0, label: "accent chair" },
+      { id: "vl1", imageUrlHash: "hash123", concept: "furniture", instanceIndex: 0, label: "accent chair", score: null, userId: "user1", roomId: null, createdAt: new Date() },
     ]);
 
     const response = await POST(buildNextRequest(validBody()));
