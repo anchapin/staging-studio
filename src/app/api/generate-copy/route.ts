@@ -1,6 +1,7 @@
+import { generateObject } from "ai";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { aiModel, assertOpenAIConfigured, generateWithRetry } from "@/lib/ai";
+import { aiModel, assertOpenAIConfigured, generateWithCircuitBreaker } from "@/lib/ai";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import {
@@ -21,6 +22,13 @@ import {
   resolveDailyLimit,
 } from "@/lib/api-quota";
 import { saveRoomCopy, type GeneratedCopy } from "@/app/actions/room";
+import {
+  API_ERROR_UNAUTHORIZED,
+  API_ERROR_RATE_LIMIT_EXCEEDED,
+  API_ERROR_INVALID_REQUEST,
+  API_ERROR_ROOM_NOT_FOUND,
+  API_ERROR_SAVE_FAILED,
+} from "@/lib/api-errors";
 
 const COPY_OUTPUT_ERROR_COPY = {
   rateLimit: {
@@ -60,6 +68,7 @@ export async function POST(request: NextRequest) {
           success: false,
           error: "Unauthorized",
           message: "You must be signed in to generate copy.",
+          code: API_ERROR_UNAUTHORIZED,
         },
         { status: 401 }
       );
@@ -74,7 +83,7 @@ export async function POST(request: NextRequest) {
       DEFAULT_DAILY_COPY_LIMIT
     );
     const copyQuota = evaluateDailyQuota(
-      getDailyUsage("copy", user.id),
+      await getDailyUsage("copy", user.id),
       copyLimit
     );
     if (!copyQuota.allowed) {
@@ -90,6 +99,7 @@ export async function POST(request: NextRequest) {
         {
           success: false,
           ...dailyQuotaExceededPayload(copyQuota, "Please try again tomorrow."),
+          code: API_ERROR_RATE_LIMIT_EXCEEDED,
         },
         { status: 429 }
       );
@@ -123,6 +133,7 @@ export async function POST(request: NextRequest) {
           success: false,
           error: "Room not found",
           message: "Room not found.",
+          code: API_ERROR_ROOM_NOT_FOUND,
         },
         { status: 404 }
       );
@@ -136,67 +147,71 @@ export async function POST(request: NextRequest) {
         {
           success: false,
           error: "Missing staging directives",
-          message:
-            "Add staging directives at the project or room level before generating copy.",
+          message: "Add staging directives at the project or room level before generating copy.",
+          code: API_ERROR_INVALID_REQUEST,
         },
         { status: 400 }
       );
     }
 
-    const { object: copy, finishReason, usage } = await generateWithRetry({
-      model: aiModel,
-      schema: CopyOutputSchema,
-      prompt: buildCopyPrompt({
-        roomName: room.name,
-        aesthetic: room.project.stagingAesthetic,
-        targetBuyer: room.project.targetBuyer,
-        rawDirectives: room.rawDirectives ?? "",
-        globalDirectives: room.project.stagingDirectives ?? undefined,
-        buyerDemographics: (
-          room.project.buyerDemographics as unknown as import("@/lib/prompts").BuyerDemographicsInput | undefined
-        ) ?? undefined,
-      }),
-    });
+    const { object: copy, finishReason, usage } = await generateWithCircuitBreaker(async () =>
+      generateObject({
+        model: aiModel,
+        schema: CopyOutputSchema,
+        prompt: buildCopyPrompt({
+          roomName: room.name,
+          aesthetic: room.project.stagingAesthetic,
+          targetBuyer: room.project.targetBuyer,
+          rawDirectives: room.rawDirectives ?? "",
+          globalDirectives: room.project.stagingDirectives ?? undefined,
+          buyerDemographics: (
+            room.project.buyerDemographics as unknown as import("@/lib/prompts").BuyerDemographicsInput | undefined
+          ) ?? undefined,
+        }),
+      })
+    );
 
     // Count the billable generation only after the provider call resolves:
     // a failed/timeout attempt costs at most a few rejected tokens and does
     // not count against the user's daily cap.
-    recordDailyUsage("copy", user.id);
+    await recordDailyUsage("copy", user.id);
 
     // Issue #600: copy quality gate — evaluate generated copy quality before
     // persisting. Advisory only; warnings ride along with the saved copy.
     const qualityWarnings: string[] = [];
     assertOpenAIConfigured();
-    const { object: qg } = await generateWithRetry({
-      model: aiModel,
-      schema: copyQualityGateSchema,
-      messages: [
-        {
-          role: "user",
-          content: [
-            `You are a staging copy quality auditor. Evaluate the generated copy for room "${room.name}".`,
-            "",
-            `Staging aesthetic: "${room.project.stagingAesthetic}"`,
-            `Target buyer: "${room.project.targetBuyer}"`,
-            `Raw directives: "${room.rawDirectives ?? ""}"`,
-            "",
-            `Generated copy:`,
-            `  Observed challenge: "${copy.observedChallenge}"`,
-            `  Recommendation: "${copy.recommendation}"`,
-            `  Buyer psychology: "${copy.buyerPsychology}"`,
-            `  Checklist: ${copy.checklist.map((c) => `"${c.item}"`).join(", ")}`,
-            "",
-            "Evaluate:",
-            "1. specificity (0–3): 0=generic/filler like 'Attention to detail ensures lasting impressions', 3=highly specific and concrete",
-            "2. buyer_aligned: if the copy doesn't speak to the target buyer persona, explain how",
-            "3. checklist_actionable: if any checklist item is vague, non-actionable, or generic",
-            "4. aesthetic_consistent: if copy contradicts or misaligns with the staging aesthetic",
-            "",
-            "Return JSON with: specificity (0-3), buyer_aligned (string only if misaligned), checklist_actionable (string only if vague items), aesthetic_consistent (string only if inconsistent), qualityWarnings (array of distinct warning strings).",
-          ].join("\n"),
-        },
-      ],
-    });
+    const { object: qg } = await generateWithCircuitBreaker(async () =>
+      generateObject({
+        model: aiModel,
+        schema: copyQualityGateSchema,
+        messages: [
+          {
+            role: "user",
+            content: [
+              `You are a staging copy quality auditor. Evaluate the generated copy for room "${room.name}".`,
+              "",
+              `Staging aesthetic: "${room.project.stagingAesthetic}"`,
+              `Target buyer: "${room.project.targetBuyer}"`,
+              `Raw directives: "${room.rawDirectives ?? ""}"`,
+              "",
+              `Generated copy:`,
+              `  Observed challenge: "${copy.observedChallenge}"`,
+              `  Recommendation: "${copy.recommendation}"`,
+              `  Buyer psychology: "${copy.buyerPsychology}"`,
+              `  Checklist: ${copy.checklist.map((c) => `"${c.item}"`).join(", ")}`,
+              "",
+              "Evaluate:",
+              "1. specificity (0–3): 0=generic/filler like 'Attention to detail ensures lasting impressions', 3=highly specific and concrete",
+              "2. buyer_aligned: if the copy doesn't speak to the target buyer persona, explain how",
+              "3. checklist_actionable: if any checklist item is vague, non-actionable, or generic",
+              "4. aesthetic_consistent: if copy contradicts or misaligns with the staging aesthetic",
+              "",
+              "Return JSON with: specificity (0-3), buyer_aligned (string only if misaligned), checklist_actionable (string only if vague items), aesthetic_consistent (string only if inconsistent), qualityWarnings (array of distinct warning strings).",
+            ].join("\n"),
+          },
+        ],
+      })
+    );
     if (qg.buyer_aligned) {
       qualityWarnings.push(qg.buyer_aligned);
     }
@@ -237,6 +252,7 @@ export async function POST(request: NextRequest) {
           retryable: true,
           copy: generatedCopy,
           qualityWarnings,
+          code: API_ERROR_SAVE_FAILED,
         },
         { status: 502 }
       );
@@ -280,6 +296,7 @@ export async function POST(request: NextRequest) {
           success: false,
           error: "Invalid request",
           message: "Some required information is missing or invalid. Please check your inputs.",
+          code: API_ERROR_INVALID_REQUEST,
         },
         { status: 400 }
       );
@@ -293,6 +310,7 @@ export async function POST(request: NextRequest) {
         error: classified.error,
         message: classified.message,
         retryable: classified.retryable,
+        code: classified.code,
       },
       { status: classified.status }
     );

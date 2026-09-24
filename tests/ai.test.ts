@@ -1,6 +1,16 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-import { assertOpenAIConfigured, aiModel, generateWithCircuitBreaker } from "@/lib/ai";
+const { mockExecute } = vi.hoisted(() => ({
+  mockExecute: vi.fn(),
+}));
+
+vi.mock("@/lib/circuit-breaker", () => ({
+  getCircuitBreaker: vi.fn().mockReturnValue({
+    execute: mockExecute,
+  }),
+}));
+
+import { assertOpenAIConfigured, aiModel } from "@/lib/ai";
 import { MissingEnvVarsError } from "@/lib/env";
 
 describe("assertOpenAIConfigured", () => {
@@ -69,34 +79,23 @@ describe("aiModel", () => {
 describe("generateWithCircuitBreaker", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockExecute.mockResolvedValue({ text: "default response" });
   });
 
   it("calls the circuit breaker execute method with the provided function", async () => {
-    const mockExecute = vi.fn().mockResolvedValue({ text: "test response" });
-    vi.mock("@/lib/circuit-breaker", () => ({
-      getCircuitBreaker: vi.fn().mockReturnValue({
-        execute: mockExecute,
-      }),
-    }));
-
+    mockExecute.mockResolvedValue({ text: "test response" });
     const { generateWithCircuitBreaker: generate } = await import("@/lib/ai");
     const mockFn = vi.fn().mockResolvedValue({ text: "test response" });
     const result = await generate(mockFn);
 
     expect(mockExecute).toHaveBeenCalledTimes(1);
-    expect(mockExecute).toHaveBeenCalledWith(mockFn, expect.any(Object));
+    expect(mockExecute).toHaveBeenCalledWith(mockFn);
     expect(result).toEqual({ text: "test response" });
   });
 
   it("passes through the result from the circuit breaker", async () => {
     const expectedResult = { text: "hello world" };
-    const mockExecute = vi.fn().mockResolvedValue(expectedResult);
-    vi.mock("@/lib/circuit-breaker", () => ({
-      getCircuitBreaker: vi.fn().mockReturnValue({
-        execute: mockExecute,
-      }),
-    }));
-
+    mockExecute.mockResolvedValue(expectedResult);
     const { generateWithCircuitBreaker: generate } = await import("@/lib/ai");
     const result = await generate(async () => expectedResult);
 

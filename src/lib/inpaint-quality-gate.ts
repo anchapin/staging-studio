@@ -20,26 +20,6 @@ import { aiModel, assertOpenAIConfigured } from "@/lib/ai";
 
 export type InpaintQualityGateResult = z.infer<typeof inpaintQualityGateSchema>;
 
-export type QualityGateOutcome = "acceptable" | "retry" | "no-object";
-
-/** Metrics counters for quality gate outcomes — scrape via getQualityGateMetrics(). */
-const qualityGateMetrics: Record<QualityGateOutcome, number> = {
-  acceptable: 0,
-  retry: 0,
-  "no-object": 0,
-};
-
-/**
- * Returns current quality gate metrics for ops tooling scraping.
- *
- * @example
- * const metrics = getQualityGateMetrics();
- * console.log(`retry rate: ${metrics.retry / (metrics.acceptable + metrics.retry + metrics['no-object'])}`);
- */
-export function getQualityGateMetrics(): Record<QualityGateOutcome, number> {
-  return { ...qualityGateMetrics };
-}
-
 /** Inputs the gate needs; `maskCoverageRatio` undefined ⇒ gate is skipped. */
 export interface InpaintQualityGateParams {
   roomName: string;
@@ -110,12 +90,10 @@ export function qualityWarningsFromGateResult(
  * healthy fal.ai submission.
  *
  * Side effects: one `generateObject` call (gpt-4o-mini) when the gate
- * runs; `console.debug` on skip-by-failure; structured logging +
- * metrics increment on every gate outcome.
+ * runs; `console.debug` on skip-by-failure.
  */
 export async function evaluateInpaintQualityGate(
-  params: InpaintQualityGateParams,
-  requestId?: string
+  params: InpaintQualityGateParams
 ): Promise<string[]> {
   if (params.maskCoverageRatio === undefined) {
     return [];
@@ -137,23 +115,7 @@ export async function evaluateInpaintQualityGate(
         },
       ],
     });
-
-    const warnings = qualityWarningsFromGateResult(qg);
-    const outcome: QualityGateOutcome = warnings.length > 0 ? "retry" : "acceptable";
-    qualityGateMetrics[outcome]++;
-
-    console.log(
-      JSON.stringify({
-        event: "inpaint_quality_gate_outcome",
-        timestamp: new Date().toISOString(),
-        outcome,
-        requestId,
-        roomName: params.roomName,
-        warningCount: warnings.length,
-      })
-    );
-
-    return warnings;
+    return qualityWarningsFromGateResult(qg);
   } catch (error) {
     console.debug(
       JSON.stringify({

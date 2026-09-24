@@ -10,19 +10,39 @@ import type { NextRequest } from "next/server";
 import { POST } from "@/app/api/label-instances/route";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
-import { generateWithRetry } from "@/lib/ai";
-import { classifyIntegrationError } from "@/lib/error-classify";
+import { generateWithCircuitBreaker } from "@/lib/ai";
 
 const MOCK_USER_ID = "cuser12345678901234567890";
 const MOCK_ROOM_ID = "croom12345678901234567890";
 
-const mockUser = { id: MOCK_USER_ID, email: "test@example.com", name: "Test User" };
+const mockUser = {
+  id: MOCK_USER_ID,
+  email: "test@example.com",
+  firmName: "Test Firm",
+  ownerName: "Test Owner",
+  logoUrl: null,
+  psychologyPageContent: null,
+  signoffContent: null,
+  darkMode: false,
+  createdAt: new Date(),
+};
 
 const mockRoom = {
   id: MOCK_ROOM_ID,
   name: "Living Room",
   projectId: "cproj123456789012345678",
+  beforeImageUrl: null,
+  beforeImageUrl2: null,
   afterImageUrl: "https://assets.example.com/room.jpg",
+  afterImageUrl2: null,
+  selectedVariantIndex: 0,
+  rawDirectives: null,
+  observedChallenge: null,
+  recommendation: null,
+  buyerPsychology: null,
+  checklistItems: null,
+  sortOrder: 0,
+  createdAt: new Date(),
 };
 
 function buildRequest(body: Record<string, unknown>): NextRequest {
@@ -54,7 +74,7 @@ vi.mock("@/lib/api-quota", async (importOriginal) => {
 
 vi.mock("@/lib/ai", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/ai")>()),
-  generateWithRetry: vi.fn(),
+  generateWithCircuitBreaker: vi.fn(),
   assertOpenAIConfigured: vi.fn(),
 }));
 
@@ -77,7 +97,7 @@ describe("POST /api/label-instances", () => {
     vi.mocked(prisma.dailyApiUsage.findUnique).mockResolvedValue(null);
     vi.mocked(prisma.dailyApiUsage.update).mockResolvedValue({} as never);
     vi.mocked(prisma.dailyApiUsage.upsert).mockResolvedValue({} as never);
-    vi.mocked(generateWithRetry).mockImplementation(() =>
+    vi.mocked(generateWithCircuitBreaker).mockImplementation(() =>
       Promise.resolve({
         object: [{ instanceIndex: 0, label: "Modern Grey Sofa", confidence: 0.97 }],
       })
@@ -101,14 +121,14 @@ describe("POST /api/label-instances", () => {
       const response = await POST(
         buildRequest({
           concept: "sofa",
-          crops: [{ instanceIndex: 0, cropDataUrl: "https://crop.supabase.co/img.jpg" }],
+          crops: [{ instanceIndex: 0, cropDataUrl: "data:image/jpeg;base64,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==" }],
           imageUrl: "https://room.supabase.co/room.jpg",
         })
       );
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Bad Request");
+      expect(body.error).toBe("Invalid request");
     });
 
     it("returns 400 when concept is empty string", async () => {
@@ -116,14 +136,14 @@ describe("POST /api/label-instances", () => {
         buildRequest({
           roomId: MOCK_ROOM_ID,
           concept: "",
-          crops: [{ instanceIndex: 0, cropDataUrl: "https://crop.supabase.co/img.jpg" }],
+          crops: [{ instanceIndex: 0, cropDataUrl: "data:image/jpeg;base64,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==" }],
           imageUrl: "https://room.supabase.co/room.jpg",
         })
       );
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Bad Request");
+      expect(body.error).toBe("Invalid request");
     });
 
     it("returns 400 when crops is empty array", async () => {
@@ -138,7 +158,7 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Bad Request");
+      expect(body.error).toBe("Invalid request");
     });
 
     it("returns 400 when concept exceeds 200 characters", async () => {
@@ -146,14 +166,14 @@ describe("POST /api/label-instances", () => {
         buildRequest({
           roomId: MOCK_ROOM_ID,
           concept: "a".repeat(201),
-          crops: [{ instanceIndex: 0, cropDataUrl: "https://crop.supabase.co/img.jpg" }],
+          crops: [{ instanceIndex: 0, cropDataUrl: "data:image/jpeg;base64,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==" }],
           imageUrl: "https://room.supabase.co/room.jpg",
         })
       );
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Bad Request");
+      expect(body.error).toBe("Invalid request");
     });
 
     it("returns 400 when crops.instanceIndex is negative", async () => {
@@ -168,7 +188,7 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Bad Request");
+      expect(body.error).toBe("Invalid request");
     });
 
     it("returns 400 when imageUrl is not a valid https URL", async () => {
@@ -176,14 +196,14 @@ describe("POST /api/label-instances", () => {
         buildRequest({
           roomId: MOCK_ROOM_ID,
           concept: "sofa",
-          crops: [{ instanceIndex: 0, cropDataUrl: "https://crop.supabase.co/img.jpg" }],
+          crops: [{ instanceIndex: 0, cropDataUrl: "data:image/jpeg;base64,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==" }],
           imageUrl: "not-a-url",
         })
       );
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Bad Request");
+      expect(body.error).toBe("Invalid request");
     });
 
     it("returns 400 when imageUrl host is not allowlisted (not *.supabase.co or *.fal.ai)", async () => {
@@ -191,14 +211,14 @@ describe("POST /api/label-instances", () => {
         buildRequest({
           roomId: MOCK_ROOM_ID,
           concept: "sofa",
-          crops: [{ instanceIndex: 0, cropDataUrl: "https://crop.supabase.co/img.jpg" }],
+          crops: [{ instanceIndex: 0, cropDataUrl: "data:image/jpeg;base64,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==" }],
           imageUrl: "https://evil.com/room.jpg",
         })
       );
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Bad Request");
+      expect(body.error).toBe("Invalid request");
     });
 
     it("returns 400 when crop dataUrl host is not allowlisted", async () => {
@@ -213,7 +233,7 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Bad Request");
+      expect(body.error).toBe("Invalid request");
     });
 
     it("returns 400 when strict schema rejects unknown fields", async () => {
@@ -221,7 +241,7 @@ describe("POST /api/label-instances", () => {
         buildRequest({
           roomId: MOCK_ROOM_ID,
           concept: "sofa",
-          crops: [{ instanceIndex: 0, cropDataUrl: "https://crop.supabase.co/img.jpg" }],
+          crops: [{ instanceIndex: 0, cropDataUrl: "data:image/jpeg;base64,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==" }],
           imageUrl: "https://room.supabase.co/room.jpg",
           unknownField: "should be rejected",
         })
@@ -229,19 +249,20 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Bad Request");
+      expect(body.error).toBe("Invalid request");
     });
 
     it("accepts fal.ai URLs in crops and imageUrl fields", async () => {
-      vi.mocked(generateWithRetry).mockImplementation(() =>
-      Promise.resolve({ object: [] })
-    );
+      vi.mocked(prisma.room.findFirst).mockResolvedValue(mockRoom as typeof mockRoom);
+      vi.mocked(generateWithCircuitBreaker).mockImplementation(() =>
+        Promise.resolve({ object: { labels: [] } })
+      );
 
       const response = await POST(
         buildRequest({
           roomId: MOCK_ROOM_ID,
           concept: "sofa",
-          crops: [{ instanceIndex: 0, cropDataUrl: "https://crop.fal.ai/img.jpg" }],
+          crops: [{ instanceIndex: 0, cropDataUrl: "data:image/jpeg;base64,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==" }],
           imageUrl: "https://room.fal.ai/room.jpg",
         })
       );
@@ -258,15 +279,15 @@ describe("POST /api/label-instances", () => {
         buildRequest({
           roomId: "nonexistent-room",
           concept: "sofa",
-          crops: [{ instanceIndex: 0, cropDataUrl: "https://crop.supabase.co/img.jpg" }],
+          crops: [{ instanceIndex: 0, cropDataUrl: "data:image/jpeg;base64,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==" }],
           imageUrl: "https://room.supabase.co/room.jpg",
         })
       );
       const body = await response.json();
 
       expect(response.status).toBe(404);
-      expect(body.error).toBe("Not Found");
-      expect(body.message).toBe("Room not found");
+      expect(body.error).toBe("Room not found");
+      expect(body.message).toBe("The requested room could not be found.");
     });
 
     it("returns 404 when room belongs to a different user", async () => {
@@ -276,35 +297,36 @@ describe("POST /api/label-instances", () => {
         buildRequest({
           roomId: MOCK_ROOM_ID,
           concept: "sofa",
-          crops: [{ instanceIndex: 0, cropDataUrl: "https://crop.supabase.co/img.jpg" }],
+          crops: [{ instanceIndex: 0, cropDataUrl: "data:image/jpeg;base64,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==" }],
           imageUrl: "https://room.supabase.co/room.jpg",
         })
       );
       const body = await response.json();
 
       expect(response.status).toBe(404);
-      expect(body.error).toBe("Not Found");
+      expect(body.error).toBe("Room not found");
     });
   });
 
   describe("AI success", () => {
     it("returns 200 with labels array when AI call succeeds", async () => {
-    vi.mocked(generateWithRetry).mockImplementation(() =>
-      Promise.resolve({
-        object: [
-          { instanceIndex: 0, label: "Modern Grey Sofa", confidence: 0.97 },
-          { instanceIndex: 1, label: "Wooden Coffee Table", confidence: 0.95 },
-        ],
-      })
-    );
+      // Mock the wrapped function, not generateWithCircuitBreaker itself
+      vi.mocked(generateWithCircuitBreaker).mockImplementation(async () => ({
+        object: {
+          labels: [
+            { instanceIndex: 0, label: "Modern Grey Sofa", confidence: 0.97 },
+            { instanceIndex: 1, label: "Wooden Coffee Table", confidence: 0.95 },
+          ],
+        },
+      }));
 
       const response = await POST(
         buildRequest({
           roomId: MOCK_ROOM_ID,
           concept: "sofa",
           crops: [
-            { instanceIndex: 0, cropDataUrl: "https://crop.supabase.co/img0.jpg" },
-            { instanceIndex: 1, cropDataUrl: "https://crop.supabase.co/img1.jpg" },
+            { instanceIndex: 0, cropDataUrl: "data:image/jpeg;base64,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==" },
+            { instanceIndex: 1, cropDataUrl: "data:image/jpeg;base64,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==" },
           ],
           imageUrl: "https://room.supabase.co/room.jpg",
         })
@@ -319,22 +341,22 @@ describe("POST /api/label-instances", () => {
   });
 
   describe("Error handling", () => {
-    it("returns 500 when generateWithRetry throws", async () => {
-      vi.mocked(generateWithRetry).mockRejectedValue(new Error("OpenAI API error"));
+    it("returns 500 when generateWithCircuitBreaker throws", async () => {
+      vi.mocked(generateWithCircuitBreaker).mockRejectedValue(new Error("OpenAI API error"));
 
       const response = await POST(
         buildRequest({
           roomId: MOCK_ROOM_ID,
           concept: "sofa",
-          crops: [{ instanceIndex: 0, cropDataUrl: "https://crop.supabase.co/img.jpg" }],
+          crops: [{ instanceIndex: 0, cropDataUrl: "data:image/jpeg;base64,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==" }],
           imageUrl: "https://room.supabase.co/room.jpg",
         })
       );
       const body = await response.json();
 
       expect(response.status).toBe(500);
-      expect(body.error).toBe("Internal Server Error");
-      expect(body.message).toBe("OpenAI API error");
+      expect(body.error).toBe("Internal server error");
+      expect(body.message).toBe("Could not label the detected instances. Please try again.");
     });
   });
 });

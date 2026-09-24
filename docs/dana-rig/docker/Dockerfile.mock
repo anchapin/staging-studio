@@ -1,0 +1,13 @@
+FROM node:22-slim
+
+# socat: the repo's mock Supabase binds 127.0.0.1:39911 (hardcoded in its e2e
+# harness), so we forward it to all interfaces on 39912 for sibling containers.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends socat curl ca-certificates \
+  && rm -rf /var/lib/apt/lists/* \
+  && npm i -g tsx --no-audit --no-fund
+
+COPY run-mock.ts entrypoint-mock.sh /rig/
+RUN chmod -R 755 /rig
+
+ENTRYPOINT ["/rig/entrypoint-mock.sh"]
