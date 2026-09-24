@@ -413,6 +413,60 @@ export function useInpaintRuns({
     void runPerObjectBatch(activeBatch.plan, activeBatch.progress);
   }, [activeBatch, runPerObjectBatch]);
 
+  // Issue #846: extracted from inpaint-editor.tsx — encapsulates the
+  // validation + beginInpaintRun call so the editor shrinks below 400 lines.
+  const submitInpaint = useCallback(
+    async (maskDataUrl: string) => {
+      if (!promptDirectives.trim()) {
+        showError("Please add staging directives first.");
+        return;
+      }
+      if (!maskDataUrl) {
+        showError("Please draw a mask on the image first.");
+        return;
+      }
+      await beginInpaintRun({
+        maskUrl: maskDataUrl,
+        promptDirectives: promptDirectives.trim(),
+      });
+    },
+    [promptDirectives, showError, beginInpaintRun]
+  );
+
+  // Issue #846: extracted from inpaint-editor.tsx — just forwards params
+  // since beginInpaintRun already accepts holistic guidance fields.
+  const submitHolisticRun = useCallback(
+    (run: {
+      maskDataUrl: string;
+      promptDirectives: string;
+      negativePrompt?: string;
+      promptStrength?: number;
+      maskBlur?: number;
+      seed?: number;
+      creativeMode?: boolean;
+      lockSeed?: boolean;
+    }) => {
+      const {
+        promptStrength = 0.6,
+        maskBlur = 0,
+        seed,
+        creativeMode = false,
+        lockSeed = false,
+      } = run;
+      beginInpaintRun({
+        maskUrl: run.maskDataUrl,
+        promptDirectives: run.promptDirectives,
+        negativePrompt: run.negativePrompt,
+        promptStrength,
+        maskBlur,
+        seed,
+        creativeMode,
+        lockSeed,
+      });
+    },
+    [beginInpaintRun]
+  );
+
   return {
     isProcessing,
     statusText,
@@ -420,5 +474,7 @@ export function useInpaintRuns({
     handleBatchRun,
     handleBatchRetry,
     activeBatch,
+    submitInpaint,
+    submitHolisticRun,
   };
 }

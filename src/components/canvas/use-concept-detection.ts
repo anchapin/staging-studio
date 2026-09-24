@@ -399,6 +399,8 @@ export function useConceptDetection({
   // instance untinted, so the panel and the canvas always agree.
   // (The isProcessing guard lives in the editor's wrapper, which owns the
   // run status.)
+  // Issue #846: moved isProcessing guard into the hook itself so the
+  // editor's wrapper thunks disappear (fewer lines in inpaint-editor.tsx).
   const handleInstanceToggle = useCallback(
     (point: { x: number; y: number }) => {
       if (!displayedResult || !decodedInstances) return;
@@ -484,8 +486,7 @@ export function useConceptDetection({
   // same shape a click toggle emits — the corpus wants every selection).
   // When detection found more than MAX_BATCH_OBJECTS, the best-ranked fit
   // is selected and a role=status notice names what was left out.
-  // (The isProcessing guard lives in the editor's wrapper, which owns the
-  // run status.)
+  // Issue #846: isProcessing guard moved into the hook itself.
   const handleSelectAllDetected = useCallback(() => {
     if (!displayedResult || !decodedInstances) return;
     const candidates: ConceptSelectAllCandidate[] = [];

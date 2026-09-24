@@ -117,7 +117,8 @@ export default function InpaintEditor({
   // Concept detection + selection set (issue #691 extraction): the whole
   // #228/#229/#249/#252/#748 cluster — requested concept, refresh policy,
   // SegmentCache, decoded instances, vision labels, and the toggle/select
-  // handlers — lives in use-concept-detection.ts.
+  // handlers — lives in use-concept-detection.ts (issue #846: now accepts
+  // isProcessing so the inline guard thunks can be removed from the editor).
   const concept = useConceptDetection({
     roomId,
     imageUrl,
@@ -215,10 +216,11 @@ export default function InpaintEditor({
   const {
     isProcessing,
     statusText,
-    beginInpaintRun,
     handleBatchRun,
     handleBatchRetry,
     activeBatch,
+    submitInpaint,
+    submitHolisticRun,
   } = useInpaintRuns({
     roomId,
     variantSlot,
@@ -240,23 +242,6 @@ export default function InpaintEditor({
     setBatchSelections,
     setSelectedInstanceIndices,
   });
-
-  // Issue #228 guards (run status lives here, the handlers in the concept
-  // hook): toggles and bulk selects are ignored while a run is in flight.
-  const conceptToggleInstance = concept.handleInstanceToggle;
-  const conceptSelectAllDetected = concept.handleSelectAllDetected;
-  const handleInstanceToggle = useCallback(
-    (point: { x: number; y: number }) => {
-      if (isProcessing) return;
-      conceptToggleInstance(point);
-    },
-    [isProcessing, conceptToggleInstance]
-  );
-
-  const handleSelectAllDetected = useCallback(() => {
-    if (isProcessing) return;
-    conceptSelectAllDetected();
-  }, [isProcessing, conceptSelectAllDetected]);
 
   // Issue #560/#588/#617/#638 workspace keyboard shortcuts (Z / Escape /
   // backtick / Cmd+B / F) — the listener lives in use-workspace-shortcuts.
@@ -282,50 +267,26 @@ export default function InpaintEditor({
       clearRegionMaskCache,
     });
 
+  // Issue #846: submitInpaint encapsulates the validation + beginInpaintRun
+  // call so the editor shrinks below 400 lines.
   const handleInpaint = useCallback(async () => {
-    if (!promptDirectives.trim()) {
-      showError(
-        "Please fill in the “Manual paint directives” textarea in the right panel (or “Staging directives” in Room Details — they stay in sync)."
-      );
-      return;
-    }
-
     if (!maskDataUrl) {
       showError("Please draw a mask on the image first.");
       return;
     }
-
-    await beginInpaintRun({
-      maskUrl: maskDataUrl,
-      promptDirectives,
-      globalDirectives,
-      promptStrength,
-      maskBlur,
-      seed,
-      creativeMode,
-      lockSeed,
-    });
-  }, [maskDataUrl, promptDirectives, beginInpaintRun, showError, globalDirectives, promptStrength, maskBlur, seed, creativeMode, lockSeed]);
+    await submitInpaint(maskDataUrl);
+  }, [maskDataUrl, submitInpaint, showError]);
 
   // Holistic spike entry (issue #190): the panel builds the full-room
   // mask + aesthetic-derived directives; this just forwards them into
   // the shared run launcher. The one-click preset (issue #191) reuses
   // the same shape and launcher.
+  // Issue #846: submitHolisticRun encapsulates the beginInpaintRun call.
   const handleHolisticRun = useCallback(
     (run: { maskDataUrl: string; promptDirectives: string; negativePrompt: string }) => {
-      void beginInpaintRun({
-        maskUrl: run.maskDataUrl,
-        promptDirectives: run.promptDirectives,
-        negativePrompt: run.negativePrompt,
-        // Issue #558: pass AI guidance settings
-        promptStrength,
-        maskBlur,
-        seed,
-        creativeMode,
-        lockSeed,
-      });
+      submitHolisticRun({ ...run, promptStrength, maskBlur, seed, creativeMode, lockSeed });
     },
-    [beginInpaintRun, promptStrength, maskBlur, seed, creativeMode, lockSeed]
+    [submitHolisticRun, promptStrength, maskBlur, seed, creativeMode, lockSeed]
   );
 
   // Issue #252 D5: control-panel tab state (issue #691 hook) — purely
@@ -402,7 +363,7 @@ export default function InpaintEditor({
         naturalHeight={imageDims?.height ?? null}
         initialMaskDataUrl={maskDataUrl}
         onMaskChange={setMaskDataUrl}
-        onInstanceToggle={handleInstanceToggle}
+        onInstanceToggle={concept.handleInstanceToggle}
         segmentDisabled={isProcessing || conceptLoading}
         processing={isProcessing}
         segmenting={conceptLoading}
@@ -475,7 +436,7 @@ export default function InpaintEditor({
             setConceptInput={setConceptInput}
             conceptInputError={conceptInputError}
             setConceptInputError={setConceptInputError}
-            handleSelectAllDetected={handleSelectAllDetected}
+            handleSelectAllDetected={concept.handleSelectAllDetected}
             handleClearSelection={handleClearSelection}
             detectedCount={detectedCount}
             selectionCount={selectionCount}
