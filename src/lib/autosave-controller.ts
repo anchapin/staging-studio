@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from "react";
+
 /**
  * Debounced autosave decision logic for the lookbook edit page
  * (issue #250).
@@ -41,7 +43,13 @@ export interface AutosaveOptions<T> {
 export class AutosaveController<T> {
   private readonly save: (payload: T) => Promise<boolean>;
   private readonly idleMs: number;
-  private readonly onStatusChange?: (status: AutosaveStatus) => void;
+  private _onStatusChange: ((status: AutosaveStatus) => void) | undefined;
+  public get onStatusChange(): ((status: AutosaveStatus) => void) | undefined {
+    return this._onStatusChange;
+  }
+  public set onStatusChange(fn: ((status: AutosaveStatus) => void) | undefined) {
+    this._onStatusChange = fn;
+  }
 
   private _status: AutosaveStatus = "idle";
   private pending: T | null = null;
@@ -52,7 +60,7 @@ export class AutosaveController<T> {
   constructor(options: AutosaveOptions<T>) {
     this.save = options.save;
     this.idleMs = options.idleMs ?? 1000;
-    this.onStatusChange = options.onStatusChange;
+    this._onStatusChange = options.onStatusChange;
   }
 
   get status(): AutosaveStatus {
@@ -61,7 +69,7 @@ export class AutosaveController<T> {
 
   private setStatus(status: AutosaveStatus): void {
     this._status = status;
-    this.onStatusChange?.(status);
+    this._onStatusChange?.(status);
   }
 
   /** Records a change and restarts the ~1s idle window. */
@@ -145,4 +153,41 @@ export class AutosaveController<T> {
     this.inFlight = run();
     return this.inFlight;
   }
+}
+
+const _controllers = new Map<string, AutosaveController<unknown>>();
+
+function getAutoSaveController(roomId: string): AutosaveController<unknown> {
+  let controller = _controllers.get(roomId);
+  if (!controller) {
+    controller = new AutosaveController<unknown>({ save: async () => true });
+    _controllers.set(roomId, controller);
+  }
+  return controller;
+}
+
+export function useAutoSaveStatus(roomId: string): AutosaveStatus {
+  const [status, setStatus] = useState<AutosaveStatus>("idle");
+  const controllerRef = useRef<AutosaveController<unknown> | null>(null);
+
+  if (!controllerRef.current) {
+    controllerRef.current = getAutoSaveController(roomId);
+    controllerRef.current.onStatusChange?.(controllerRef.current.status);
+  }
+
+  useEffect(() => {
+    const controller = controllerRef.current;
+    if (!controller) return;
+    const prev = controller.onStatusChange;
+    controller.onStatusChange = (s) => {
+      setStatus(s);
+      prev?.(s);
+    };
+    setStatus(controller.status);
+    return () => {
+      controller.onStatusChange = prev ?? undefined;
+    };
+  }, [roomId]);
+
+  return status;
 }

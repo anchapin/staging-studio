@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useMemo } from "react";
+import { useAutoSaveStatus } from "@/lib/autosave-controller";
 import { DEFAULT_MASK_EXPANSION_RADIUS } from "@/lib/mask-dilation";
 import CollapsibleSection, {
   useCollapsiblePanel,
@@ -216,6 +217,8 @@ export default function InpaintEditor({
     }),
     [promptStrength, maskBlur, seed, creativeMode, lockSeed]
   );
+  const saveStatus = useAutoSaveStatus(roomId);
+
   const {
     isProcessing,
     statusText,
@@ -485,12 +488,36 @@ export default function InpaintEditor({
             )}
 
           <div className="sticky top-0 z-10 bg-atelier-canvas pb-1">
-            <EditorTabBar
-              tabs={editorTabs}
-              activeTab={effectiveTab}
-              onSelectTab={handleTabSelect}
-              idBase={tabIdBase}
-            />
+            <div className="flex items-center justify-between">
+              <EditorTabBar
+                tabs={editorTabs}
+                activeTab={effectiveTab}
+                onSelectTab={handleTabSelect}
+                idBase={tabIdBase}
+              />
+              {saveStatus === "saving" || saveStatus === "dirty" ? (
+                <span className="text-xs text-muted-foreground animate-pulse">
+                  Saving...
+                </span>
+              ) : saveStatus === "saved" ? (
+                <span className="text-xs text-green-600 flex items-center gap-1">
+                  <svg
+                    className="w-3 h-3"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M5 13l4 4L19 7"
+                    />
+                  </svg>
+                  Saved
+                </span>
+              ) : null}
+            </div>
           </div>
 
           {/* Tab panels stay MOUNTED (hidden, not unmounted) so tab
