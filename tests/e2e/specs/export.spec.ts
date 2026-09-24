@@ -45,7 +45,7 @@ test.describe("PDF export", () => {
   test("clicking Export PDF shows an error toast when Browserless is unavailable (outage drill)", async ({
     page,
   }) => {
-    interceptExportPdf(page, "failure");
+    interceptExportPdf(page, "outage");
     await login(page);
     await page.goto(REHEARSAL_LOOKBOOK_URL);
 
