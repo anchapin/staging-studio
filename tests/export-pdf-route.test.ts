@@ -44,11 +44,6 @@ vi.mock("@/lib/browserless", () => ({
   buildBrowserlessPdfUrl: vi.fn(() => "https://browserless.example.com/pdf"),
   buildBrowserlessPdfBody: vi.fn(() => ({ url: "https://example.com/preview" })),
   BROWSERLESS_TIMEOUT_MS: 60000,
-  // fetchBrowserlessPdfWithCircuitBreaker is not provided by the mock — provide a
-  // shim that delegates to the global fetch so that the test's
-  // global.fetch = vi.fn().mockResolvedValue(...) intercept is respected.
-  fetchBrowserlessPdfWithCircuitBreaker: (url: string, options: RequestInit & { signal?: AbortSignal }) =>
-    globalThis.fetch(url, options),
 }));
 
 vi.mock("@/lib/api-quota", () => ({

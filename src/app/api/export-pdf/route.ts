@@ -187,7 +187,7 @@ export async function POST(req: NextRequest) {
 
     let chromeResponse: Response;
     try {
-      chromeResponse = await (fetchBrowserlessPdfWithCircuitBreaker ?? globalThis.fetch)(
+      chromeResponse = await fetchBrowserlessPdfWithCircuitBreaker(
         buildBrowserlessPdfUrl(),
         {
           method: "POST",

@@ -222,17 +222,3 @@ model DailyApiUsage {
   @@unique([userId, surface, dayKey])
   @@index([userId, surface, dayKey])
 }
-
-// RateLimitEntry model: Postgres-backed sliding window rate limiting for API
-// routes. Replaces the in-memory Map that failed in serverless environments
-// where multiple instances share no state (issue #832).
-model RateLimitEntry {
-  id          String   @id @default(cuid())
-  identifier  String   // e.g. user ID or IP address
-  windowStart BigInt  // Unix timestamp (ms) of window start
-  count       Int      @default(1)
-  expiresAt   DateTime // when this entry can be purged
-
-  @@index([identifier, windowStart])
-  @@index([expiresAt])
-}

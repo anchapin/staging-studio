@@ -1,0 +1,771 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  /* Issue #592/#613: Stitch terracotta bronze — value lives in :root as
+     --color-secondary, asserted by tests/color-tokens.test.ts (#719) */
+  --color-secondary: var(--color-secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-surface: var(--color-surface);
+  --color-tertiary: var(--color-tertiary);
+  /* Atelier Canvas palette aliases (Issue #592; values live in :root and
+     are sourced from src/lib/color-tokens.ts — #719 consolidation) */
+  --color-canvas: var(--color-canvas);
+  --color-taupe: var(--color-taupe);
+  --color-cream: var(--color-cream);
+  --color-outline-variant: var(--outline-variant);
+  /* Issue #621: moodboard selector tokens (fixed tone, stable across
+     light/dark modes; values moved to :root with the rest of #613) */
+  --color-secondary-fixed: var(--color-secondary-fixed);
+  --color-secondary-fixed-dim: var(--color-secondary-fixed-dim);
+  --color-on-secondary-fixed: var(--color-on-secondary-fixed);
+  --color-on-secondary-fixed-variant: var(--color-on-secondary-fixed-variant);
+  /* Surface container utilities (values defined in :root, Issue #624/#613) */
+  --color-surface-container: var(--color-surface-container);
+  --color-surface-container-low: var(--color-surface-container-low);
+  /* Issue #620: lowest tier — workbench top bar, active sidebar rows, dock */
+  --color-surface-container-lowest: var(--color-surface-container-lowest);
+  /* Issue #613: full Atelier Canvas warm token system
+     (single source of truth: src/lib/color-tokens.ts; values in :root) */
+  --color-surface-dim: var(--color-surface-dim);
+  --color-surface-bright: var(--color-surface-bright);
+  --color-surface-container-high: var(--color-surface-container-high);
+  --color-surface-container-highest: var(--color-surface-container-highest);
+  --color-surface-variant: var(--color-surface-variant);
+  --color-surface-tint: var(--color-surface-tint);
+  --color-on-surface: var(--color-on-surface);
+  --color-on-surface-variant: var(--color-on-surface-variant);
+  --color-inverse-surface: var(--color-inverse-surface);
+  --color-inverse-on-surface: var(--color-inverse-on-surface);
+  --color-inverse-primary: var(--color-inverse-primary);
+  --color-on-primary: var(--color-on-primary);
+  --color-primary-container: var(--color-primary-container);
+  --color-on-primary-container: var(--color-on-primary-container);
+  --color-on-secondary: var(--color-on-secondary);
+  --color-secondary-container: var(--color-secondary-container);
+  --color-on-secondary-container: var(--color-on-secondary-container);
+  --color-on-tertiary: var(--color-on-tertiary);
+  --color-tertiary-container: var(--color-tertiary-container);
+  --color-on-tertiary-container: var(--color-on-tertiary-container);
+  --color-outline: var(--color-outline);
+  --color-error: var(--color-error);
+  --color-on-error: var(--color-on-error);
+  --color-error-container: var(--color-error-container);
+  --color-on-error-container: var(--color-on-error-container);
+  --radius: var(--radius);
+  --font-cinzel: var(--font-cinzel-google);
+  --font-playfair: var(--font-playfair-google);
+  --font-jakarta: var(--font-jakarta-google);
+  /* Issue #614: mono utility + Plus Jakarta Sans as the default sans body font */
+  --font-jetbrains: var(--font-jetbrains-google);
+  --font-sans: var(--font-jakarta-google);
+}
+
+/* Issue #614: Atelier Canvas typography tokens — combined utilities that
+   carry family + size + weight + line-height in a single class, exactly as
+   the Stitch spec table defines them. Values are pinned against
+   src/lib/typography-tokens.ts by tests/typography-tokens.test.ts.
+   Fonts: Playfair Display (display/headline editorial), Plus Jakarta Sans
+   (title/body/label UI), JetBrains Mono (code-inspector readouts). */
+@utility display-lg {
+  font-family: var(--font-playfair-google), Georgia, serif;
+  font-size: 3rem;
+  line-height: 3.5rem;
+  font-weight: 600;
+}
+@utility display-lg-mobile {
+  font-family: var(--font-playfair-google), Georgia, serif;
+  font-size: 3rem;
+  line-height: 3.5rem;
+  font-weight: 600;
+}
+@utility headline-lg {
+  font-family: var(--font-playfair-google), Georgia, serif;
+  font-size: 2rem;
+  line-height: 2.5rem;
+  font-weight: 500;
+}
+@utility headline-lg-mobile {
+  font-family: var(--font-playfair-google), Georgia, serif;
+  font-size: 2rem;
+  line-height: 2.5rem;
+  font-weight: 500;
+}
+@utility headline-md {
+  font-family: var(--font-playfair-google), Georgia, serif;
+  font-size: 1.5rem;
+  line-height: 2rem;
+  font-weight: 500;
+}
+@utility headline-sm {
+  font-family: var(--font-playfair-google), Georgia, serif;
+  font-size: 1.25rem;
+  line-height: 1.75rem;
+  font-weight: 600;
+}
+@utility title-md {
+  font-family: var(--font-jakarta-google), system-ui, sans-serif;
+  font-size: 1rem;
+  line-height: 1.5rem;
+  font-weight: 600;
+}
+@utility title-sm {
+  font-family: var(--font-jakarta-google), system-ui, sans-serif;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 600;
+}
+@utility body-lg {
+  font-family: var(--font-jakarta-google), system-ui, sans-serif;
+  font-size: 1rem;
+  line-height: 1.625rem;
+  font-weight: 400;
+}
+@utility body-md {
+  font-family: var(--font-jakarta-google), system-ui, sans-serif;
+  font-size: 0.875rem;
+  line-height: 1.375rem;
+  font-weight: 400;
+}
+@utility body-sm {
+  font-family: var(--font-jakarta-google), system-ui, sans-serif;
+  font-size: 0.8125rem;
+  line-height: 1.125rem;
+  font-weight: 400;
+}
+@utility label-md {
+  font-family: var(--font-jakarta-google), system-ui, sans-serif;
+  font-size: 0.75rem;
+  line-height: 1rem;
+  font-weight: 500;
+}
+@utility label-sm {
+  font-family: var(--font-jakarta-google), system-ui, sans-serif;
+  font-size: 0.6875rem;
+  line-height: 0.875rem;
+  font-weight: 600;
+}
+@utility code-inspector {
+  font-family: var(--font-jetbrains-google), ui-monospace, monospace;
+  font-size: 0.75rem;
+  line-height: 1rem;
+  font-weight: 400;
+}
+
+@layer base {
+  :root {
+    /* Issue #546/#613: Atelier Canvas design tokens.
+       #719: hex literals appear here only as the canonical token
+       definitions (mirrored from src/lib/color-tokens.ts and pinned by
+       tests/color-tokens.test.ts); every other consumer of a token value
+       references it through var(). */
+    /* Surface base: warm linen (spec background #fff8f4) */
+    --background: #fff8f4;
+    --foreground: var(--primary);
+    --card: var(--color-surface);
+    --card-foreground: var(--primary);
+    /* Primary: charred walnut */
+    --primary: #181716;
+    --primary-foreground: var(--color-on-primary);
+    /* Secondary: terracotta bronze (spec value rides --color-secondary,
+       Issue #613/#719) */
+    --secondary: var(--color-secondary);
+    --secondary-foreground: var(--color-on-secondary);
+    /* Neutral: Honed Taupe */
+    --muted: var(--color-canvas);
+    --muted-foreground: var(--color-taupe);
+    --accent: var(--color-canvas);
+    --accent-foreground: var(--primary);
+    --destructive: oklch(0.577 0.245 27.325);
+    --destructive-foreground: 210 40% 98%;
+    --border: oklch(0.922 0 0);
+    --input: oklch(0.922 0 0);
+    --ring: oklch(0.708 0 0);
+    --radius: 0.625rem;
+    --popover: var(--color-surface);
+    --popover-foreground: var(--primary);
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
+    /* Semantic status colors for toast, badges, alerts */
+    --success: oklch(0.627 0.194 149.213);
+    --success-foreground: oklch(0.98 0.01 149.213);
+    --warning: oklch(0.769 0.188 70.08);
+    --warning-foreground: oklch(0.98 0.01 70.08);
+    --info: oklch(0.546 0.245 252.149);
+    --info-foreground: oklch(0.98 0.01 252.149);
+    /* Atelier Canvas sidebar (token values via #719 var() consolidation) */
+    --sidebar: var(--color-cream);
+    --sidebar-foreground: var(--primary);
+    --sidebar-primary: var(--primary);
+    --sidebar-primary-foreground: var(--color-cream);
+    --sidebar-accent: var(--color-canvas);
+    --sidebar-accent-foreground: var(--primary);
+    --sidebar-border: oklch(0.922 0 0);
+    --sidebar-ring: oklch(0.708 0 0);
+
+    /* Atelier Canvas canvas background */
+    --canvas-background: var(--color-canvas);
+
+    /* Issue #592/#613: Stitch design token aliases mapped to Atelier palette
+       values. Tertiary is now the spec muted sage #5C6E58 (restoration/success
+       indicator), replacing the old warm-taupe #8C827A. The pre-#613 legacy
+       aliases (canvas/taupe/cream) live here too since #719 consolidated
+       their globals.css literals into src/lib/color-tokens.ts. */
+    --color-surface: #fff8f4;
+    --color-secondary: #8f4d20;
+    --color-tertiary: #5C6E58;
+    --color-canvas: #F8F6F2;
+    --color-taupe: #8C827A;
+    --color-cream: #fff8f8;
+
+    /* Issue #624/#613: Stitch surface container tokens for gradient cards */
+    /* Surface container: warm linen gradient hierarchy (spec values) */
+    --color-surface-container: #f9ece2;
+    --color-surface-container-low: #fef1e8;
+    --color-surface-container-lowest: #ffffff;
+
+    /* Atelier Canvas inpaint mask overlay (Issue #546) */
+    --inpaint-mask-overlay: rgba(0, 245, 160, 0.35);
+    --inpaint-laser-rim: rgba(0, 245, 160, 0.8);
+
+    /* Hairline divider token (Issue #640/#613: spec outline-variant #ccc5bd) */
+    --outline-variant: #ccc5bd;
+
+    /* Issue #613: remaining Atelier Canvas color tokens (single source of
+       truth: src/lib/color-tokens.ts; pinned by tests/color-tokens.test.ts).
+       Fixed/neutral tones intentionally NOT overridden in .dark. */
+    --color-surface-dim: #e4d8ce;
+    --color-surface-bright: #fff8f4;
+    --color-surface-container-high: #f3e6dc;
+    --color-surface-container-highest: #ede0d7;
+    --color-surface-variant: #ede0d7;
+    --color-surface-tint: #605e5c;
+    --color-on-surface: #201a15;
+    --color-on-surface-variant: #4a4640;
+    --color-inverse-surface: #362f29;
+    --color-inverse-on-surface: #fceee5;
+    --color-inverse-primary: #cac6c4;
+    --color-on-primary: #ffffff;
+    --color-primary-container: #1c1b1a;
+    /* spec draft #868382 failed AA on the dark container; issue #613 directs
+       the warm off-white instead */
+    --color-on-primary-container: #fff8f4;
+    --color-on-secondary: #ffffff;
+    --color-secondary-container: #fda772;
+    --color-on-secondary-container: #773b0e;
+    --color-secondary-fixed: #ffdbc8;
+    --color-secondary-fixed-dim: #ffb68b;
+    --color-on-secondary-fixed: #321300;
+    --color-on-secondary-fixed-variant: #713609;
+    --color-on-tertiary: #ffffff;
+    --color-tertiary-container: #d4e8cd;
+    --color-on-tertiary-container: #3a4b37;
+    --color-outline: #8C827A;
+    --color-error: #ba1a1a;
+    --color-on-error: #ffffff;
+    --color-error-container: #ffdad6;
+    --color-on-error-container: #93000a;
+
+    /* Issue #614: font stack aliases — canonical vars are minted by next/font
+       in src/app/layout.tsx; these aliases give every var(--font-*) consumer
+       (legacy CSS, tailwind aliases) a resolvable target. */
+    --font-cinzel: var(--font-cinzel-google);
+    --font-playfair: var(--font-playfair-google);
+    --font-jakarta: var(--font-jakarta-google);
+    --font-jetbrains: var(--font-jetbrains-google);
+  }
+  .theme {
+    /* Issue #614: both vars used to resolve to themselves (an invalid CSS
+       cycle); resolve them through the canonical Jakarta variable instead. */
+    --font-heading: var(--font-jakarta-google);
+    --font-sans: var(--font-jakarta-google);
+  }
+  .dark {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.205 0 0);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.205 0 0);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --secondary: oklch(0.269 0 0);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --accent: oklch(0.269 0 0);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.556 0 0);
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
+    /* Semantic status colors (dark mode) */
+    --success: oklch(0.55 0.17 145);
+    --success-foreground: oklch(0.98 0.01 145);
+    --warning: oklch(0.7 0.17 70);
+    --warning-foreground: oklch(0.98 0.01 70);
+    --info: oklch(0.55 0.22 252);
+    --info-foreground: oklch(0.98 0.01 252);
+    --sidebar: oklch(0.205 0 0);
+    --sidebar-foreground: oklch(0.985 0 0);
+    --sidebar-primary: oklch(0.488 0.243 264.376);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.269 0 0);
+    --sidebar-accent-foreground: oklch(0.985 0 0);
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: oklch(0.556 0 0);
+    /* Hairline divider token (Issue #640) */
+    --outline-variant: oklch(0.65 0.02 70);
+  }
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-jakarta;
+  }
+}
+
+/* Print styles for lookbook PDF export */
+@media print {
+  .page-break {
+    page-break-after: always;
+  }
+
+  .avoid-break {
+    page-break-inside: avoid;
+  }
+
+  /* Hide navigation in print */
+  nav,
+  .no-print {
+    display: none !important;
+  }
+
+  /* Full-bleed lookbook pages: the standalone /preview route is already
+     full viewport width, so no negative-margin compensation — each page
+     ends with a hard break and the last one avoids a trailing blank. */
+  .lookbook-page {
+    width: 100vw;
+    margin: 0;
+    page-break-after: always;
+  }
+
+  .lookbook-page:last-child {
+    page-break-after: auto;
+  }
+
+  /* Issue #643: Proposal Footer — inline footer hidden in PDF (content
+     comes from @page bottom-center). Show on screen only. */
+  .proposal-footer {
+    display: none;
+  }
+
+  /* PDF page footer via @page rule (issue #643: Browserless/print capture). */
+  @page {
+    size: letter portrait;
+    margin: 0mm;
+    @bottom-center {
+      content: "Atelier\u{2009}Canvas  \00A9\u{2009}2026\u{2009}Circle\u{2009}G\u{2009}Designs\u{2009}\u00B7\u{2009}Staging\u{2009}Studio  \u{2009}\u{2009}\u{2009}\u{2009}\u{2009}Policy\u{2009}\u00B7\u{2009}Privacy\u{2009}\u00B7\u{2009}Terms";
+      font-family: var(--font-jakarta), sans-serif;
+      font-size: 6pt;
+      color: #8C827A;
+    }
+    @bottom-center:before {
+      content: "";
+      display: block;
+      border-top: 0.5pt solid #8C827A;
+      margin-bottom: 2pt;
+    }
+  }
+}
+
+/* Respect prefers-reduced-motion (WCAG 2.1 SC 2.3.3) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* On-screen paper preview for /projects/[id]/lookbook (issue #250).
+   Scoped to .paper-preview so the print route and Browserless capture
+   are untouched: pages keep their internal flex/grid layouts but lose
+   min-h-screen in favor of fixed letter proportions (8.5in x 11in at
+   96dpi = 816px x 1056px). */
+.paper-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  align-items: center;
+}
+
+.paper-preview .lookbook-page {
+  width: 100%;
+  max-width: 816px;
+  min-height: 0;
+  aspect-ratio: 8.5 / 11;
+  overflow: hidden;
+  border: 1px solid var(--border, #e7e5e4);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
+  background: white;
+}
+
+/* Issue #615 (extends #549): Atelier Canvas spec Precision Inspector slider */
+/* Custom minimalist track: 2px height in warm taupe rgba(140,130,122,0.25) */
+/* Active fill track: 2px height in charred walnut #181716 */
+/* Thumb: 12px solid #181716 disc with inner 2px white core, free of heavy
+   drop shadows; expands to 14px on hover/active. Firefox renders the fill
+   natively via ::-moz-range-progress; WebKit uses the --atelier-fill custom
+   property set per call site from lib/precision-slider. */
+.atelier-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 2px;
+  background: transparent;
+  outline: none;
+  cursor: pointer;
+}
+
+.atelier-slider::-webkit-slider-runnable-track {
+  height: 2px;
+  border-radius: 1px;
+  background: linear-gradient(
+    to right,
+    #181716 var(--atelier-fill, 50%),
+    rgba(140, 130, 122, 0.25) var(--atelier-fill, 50%)
+  );
+}
+
+.atelier-slider::-moz-range-track {
+  height: 2px;
+  background: rgba(140, 130, 122, 0.25);
+  border-radius: 1px;
+}
+
+.atelier-slider::-moz-range-progress {
+  height: 2px;
+  background: #181716;
+  border-radius: 1px;
+}
+
+.atelier-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  background: #181716;
+  border-radius: 50%;
+  border: 2px solid white;
+  margin-top: -5px;
+  box-shadow: none;
+  transition: width 150ms ease, height 150ms ease, box-shadow 150ms ease;
+}
+
+.atelier-slider::-moz-range-thumb {
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  background: #181716;
+  border-radius: 50%;
+  border: 2px solid white;
+  box-shadow: none;
+  transition: width 150ms ease, height 150ms ease, box-shadow 150ms ease;
+}
+
+.atelier-slider:hover::-webkit-slider-thumb,
+.atelier-slider:active::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+  margin-top: -6px;
+}
+
+.atelier-slider:hover::-moz-range-thumb,
+.atelier-slider:active::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+}
+
+.atelier-slider:focus {
+  outline: none;
+}
+
+.atelier-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 2px rgba(24, 23, 22, 0.2);
+}
+
+.atelier-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 2px rgba(24, 23, 22, 0.2);
+}
+
+/* Issue #615: numeric tooltip shown on thumb hover/active (brush parameter
+   sliders). Content comes from data-slider-tooltip; the tooltip follows the
+   thumb via the --atelier-fill custom property. */
+.atelier-slider-tooltip {
+  position: relative;
+}
+
+.atelier-slider-tooltip:hover::after,
+.atelier-slider-tooltip:active::after,
+.atelier-slider-tooltip:focus-visible::after {
+  content: attr(data-slider-tooltip);
+  position: absolute;
+  left: var(--atelier-fill, 50%);
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #181716;
+  color: #ffffff;
+  font-family: var(--font-jetbrains, ui-monospace, monospace);
+  font-size: 10px;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 30;
+}
+
+/* Issue #560: Zen Mode styles
+   Zen Mode hides all non-essential chrome and shows a full-viewport canvas
+   with a floating pill toolbar and subtle vignette. */
+.zen-mode-active {
+  cursor: default;
+}
+
+/* Issue #639: Material Symbols icon system */
+.material-symbols-outlined {
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20;
+  font-size: 1em;
+  line-height: 1;
+  display: inline-block;
+  vertical-align: middle;
+  user-select: none;
+}
+
+/* Size variants */
+.material-symbols-outlined.icon-xs {
+  font-size: 16px;
+  font-variation-settings: "FILL" 0, "wght" 300, "GRAD" 0, "opsz" 16;
+}
+.material-symbols-outlined.icon-sm {
+  font-size: 18px;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20;
+}
+.material-symbols-outlined.icon-md {
+  font-size: 24px;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+}
+.material-symbols-outlined.icon-lg {
+  font-size: 32px;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 32;
+}
+.material-symbols-outlined.icon-xl {
+  font-size: 48px;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 48;
+}
+
+/* Filled variant (for active states) */
+.material-symbols-outlined.filled {
+  font-variation-settings: "FILL" 1, "wght" 400, "GRAD" 0, "opsz" 20;
+}
+
+/* Icon in buttons */
+button .material-symbols-outlined,
+.btn .material-symbols-outlined {
+  vertical-align: middle;
+  margin-right: 0.25em;
+}
+
+/* Icon-only buttons */
+.icon-only-button {
+  width: 2.5rem;
+  height: 2.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  transition: background-color 0.15s;
+}
+
+.icon-only-button:hover {
+  background-color: var(--accent);
+}
+
+/* Vignette overlay — subtle darkening at canvas edges */
+.zen-mode-vignette::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 40;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 50%,
+    rgba(0, 0, 0, 0.18) 100%
+  );
+}
+
+/* Zen Mode dark background override for the inpaint canvas area */
+.zen-mode-dark {
+  background: #181716;
+}
+
+/* Zen Mode: hides all non-essential chrome when active */
+.zen-mode-hidden {
+  display: none !important;
+}
+
+/* Issue #638: Focus Canvas Mode floating restore pill animation */
+@keyframes focusPillShow {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+/* Issue #617: collapsed inspector rail fade/slide-in (spec: rail expand
+   is an opacity/transform fade over 300ms). */
+@keyframes inspectorRailShow {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Issue #641: Stage Status Pulse Animation — subtle animated indicator showing
+   that a room is in active AI staging processing. */
+@keyframes stage-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(0.85);
+  }
+}
+
+.stage-pulse {
+  animation: stage-pulse 1.8s ease-in-out infinite;
+}
+
+/* Issue #645: Comparison slider handle */
+.shadow-handle {
+  box-shadow: 0 2px 8px rgba(196, 120, 71, 0.35);
+}
+
+.shadow-handle-hover {
+  box-shadow: 0 2px 8px rgba(196, 120, 71, 0.5);
+}
+
+/* Issue #628: Prompt Chip animations */
+@keyframes chipAppear {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes chipRemove {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}
+
+@keyframes chipFlash {
+  0% {
+    background-color: transparent;
+  }
+  50% {
+    background-color: oklch(0.708 0.16 47 0.3);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.animate-chip-appear {
+  animation: chipAppear 0.15s ease-out forwards;
+}
+
+.animate-chip-remove {
+  animation: chipRemove 0.1s ease-in forwards;
+}
+
+.animate-chip-flash {
+  animation: chipFlash 0.08s ease-out;
+}
+
+/* Issue #623: Comparison slider tooltip — appears at low opacity then fades out */
+@keyframes tooltipFade {
+  0% {
+    opacity: 0.1;
+  }
+  20% {
+    opacity: 0.1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.animate-tooltip-fade {
+  animation: tooltipFade 2s ease-out forwards;
+}

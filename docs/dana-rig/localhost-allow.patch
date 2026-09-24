@@ -1,0 +1,50 @@
+diff --git a/next.config.ts b/next.config.ts
+index 5f988aa..6ced23d 100644
+--- a/next.config.ts
++++ b/next.config.ts
+@@ -1,6 +1,7 @@
+ import type { NextConfig } from "next";
+ 
+ const nextConfig: NextConfig = {
++  allowedDevOrigins: ["web", "127.0.0.1", "localhost"],
+   images: {
+     // Issue #264: allow next/image optimizer to fetch from loopback private IPs
+     // in the e2e harness. The mock Supabase storage runs on 127.0.0.1 and the
+@@ -29,6 +30,10 @@ const nextConfig: NextConfig = {
+         protocol: "http",
+         hostname: "localhost",
+       },
++      {
++        protocol: "http",
++        hostname: "mock",
++      },
+     ],
+   },
+ };
+diff --git a/src/lib/ai-route-schemas.ts b/src/lib/ai-route-schemas.ts
+index 2c70974..d87c8de 100644
+--- a/src/lib/ai-route-schemas.ts
++++ b/src/lib/ai-route-schemas.ts
+@@ -5,6 +5,8 @@ const IMAGE_HOST_PATTERN = /(^|\.)supabase\.co$|(^|\.)fal\.ai$/;
+ function isAllowlistedHttpsUrl(value: string) {
+   try {
+     const url = new URL(value);
++    // UX-PROTO-ONLY (revert before any commit): allow the local mock result URL.
++    if (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "mock") return true;
+     return url.protocol === "https:" && IMAGE_HOST_PATTERN.test(url.hostname);
+   } catch {
+     return false;
+diff --git a/src/lib/room-patch-schema.ts b/src/lib/room-patch-schema.ts
+index 2213936..80b3d24 100644
+--- a/src/lib/room-patch-schema.ts
++++ b/src/lib/room-patch-schema.ts
+@@ -1,7 +1,7 @@
+ import { z } from "zod";
+ 
+ const IMAGE_HOST_PATTERN = /(^|\.)supabase\.co$|(^|\.)fal\.ai$/;
+-const LOCAL_HOST_PATTERN = /^127\.0\.0\.1$|^localhost$/;
++const LOCAL_HOST_PATTERN = /^127\.0\.0\.1$|^localhost$|^mock$/;
+ 
+ const imageUrlSchema = z
+   .string()
+

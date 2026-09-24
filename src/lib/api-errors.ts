@@ -1,113 +1,49 @@
 /**
- * Application-level error codes for API routes.
- *
- * Problem: Next.js route handlers that throw non-`Response` values during
- * streaming (e.g. inside a `streamText`/`streamObject` generator) are not
- * caught by the `try/catch` that wraps `handler` in the route — they
- * manifest as unhandled promise rejections with no `errorId` that Vercel
- * reports to Sentry as "no user context".  The only reliable escape hatch
- * is throwing a `NEXT_AUTH_CODE` (a string that middleware.ts listens for in
- * `errorMiddleware`) so the error is caught and normalized there.
- *
- * Solution: all API route auth errors MUST throw
- * `ApiError(NEXT_AUTH_CODE, 401, "…")` rather than bare `Response.json`
- * or plain `Error` objects so that:
- * - `middleware.ts` sees `NEXT_AUTH_CODE` and does not re-throw to Sentry
- *   with "no user context"
- * - The handler's catch block can `return err.toResponse()` and get a
- *   properly shaped 401 JSON with `{ error, message }`
- *
- * Non-auth errors (validation, not found, 429, etc.) use the same
- * `ApiError` class for consistency but without `NEXT_AUTH_CODE` so that
- * Sentry captures the full stack with user context.
- *
- * @example
- * ```ts
- * // In a route handler:
- * const user = await getAuthedPrismaUser(req).catch((err) => {
- *   if (err instanceof ApiError) return err.toResponse();
- *   throw err;
- * });
- * if (!user) throw new ApiError("INVALID_API_KEY", 401, "Invalid API key");
- * if (!room) throw new ApiError("ROOM_NOT_FOUND", 404, "Room not found");
- * if (quotaExhausted) throw new ApiError("QUOTA_EXCEEDED", 429, "Quota exceeded");
- * ```
- *
- * @example
- * ```ts
- * // In middleware.ts errorMiddleware:
- * if (cause === "NEXT_AUTH_CODE") {
- *   console.warn("[auth]", status, message);
- *   return NextResponse.json({ error: "Unauthorized", message }, { status });
- * }
- * ```
+ * Machine-readable error codes for API responses.
+ * Each code is a kebab-case string constant for programmatic handling.
  */
-export class ApiError extends Error {
-  constructor(
-    public readonly code: string,
-    public readonly status: number,
-    message: string
-  ) {
-    super(message);
-    this.name = "ApiError";
-  }
 
-  toResponse(): Response {
-    return NextResponse.json(
-      { error: this.code, message: this.message },
-      { status: this.status }
-    );
-  }
-}
+/* ─── Auth / Session ─────────────────────────────────────────────────────── */
+export const API_ERROR_UNAUTHORIZED = "unauthorized";
+export const API_ERROR_INVALID_TOKEN = "invalid-token";
+export const API_ERROR_INVALID_PREVIEW_TOKEN = "invalid-preview-token";
 
-// Minimal NextResponse stub so ApiError works in edge / non-Next contexts.
-// (Production imports the real NextResponse from next/server.)
-// eslint-disable-next-line @typescript-eslint/no-redeclare
-const NextResponse = {
-  json: (body: unknown, init?: ResponseInit) => new Response(JSON.stringify(body), init),
-};
+/* ─── Resource Not Found ─────────────────────────────────────────────────── */
+export const API_ERROR_PROJECT_NOT_FOUND = "project-not-found";
+export const API_ERROR_ROOM_NOT_FOUND = "room-not-found";
+export const API_ERROR_REQUEST_NOT_FOUND = "request-not-found";
+export const API_ERROR_USER_NOT_FOUND = "user-not-found";
 
-/**
- * Magic string that middleware.ts listens for in thrown errors to detect auth
- * failures and suppress Sentry reporting with "no user context".
- *
- * Usage: `throw new ApiError(NEXT_AUTH_CODE, 401, "Unauthenticated")`
- *
- * In middleware.ts `errorMiddleware`:
- * ```ts
- * if (cause === "NEXT_AUTH_CODE") {
- *   return NextResponse.json({ error: "Unauthorized", message }, { status });
- * }
- * ```
- */
-export const NEXT_AUTH_CODE = "NEXT_AUTH";
+/* ─── Validation / Input ──────────────────────────────────────────────────── */
+export const API_ERROR_MISSING_REQUIRED_FIELDS = "missing-required-fields";
+export const API_ERROR_INVALID_REQUEST = "invalid-request";
+export const API_ERROR_INVALID_SIGNATURE = "invalid-signature";
+export const API_ERROR_INVALID_PROJECT = "invalid-project";
+export const API_ERROR_INVALID_CONCEPT = "invalid-concept";
 
-/**
- * Alias for `NEXT_AUTH_CODE` for use in `throw new ApiError` calls so that
- * call sites can use either name — useful when callers need to signal
- * "this is an auth error and should not pollute Sentry" without knowing
- * which alias the codebase prefers.
- */
-export { NEXT_AUTH_CODE as AUTH_ERROR_CODE };
+/* ─── Business Logic ──────────────────────────────────────────────────────── */
+export const API_ERROR_ALREADY_SIGNED = "already-signed";
+export const API_ERROR_SAVE_FAILED = "save-failed";
+export const API_ERROR_SETUP_REQUIRED = "setup-required";
 
-// Convenience error-code constants for common HTTP status codes used across
-// the API route surface. Route handlers throw these via `ApiError`:
-//
-//   throw new ApiError(UNAUTHORIZED, 401, "Unauthenticated");
-//
-// These are NOT `Response` objects — they are plain string constants that
-// carry no protocol semantics. Always pair with a `status` number when
-// constructing an `ApiError`.
+/* ─── Quota / Rate Limit ──────────────────────────────────────────────────── */
+export const API_ERROR_RATE_LIMIT_EXCEEDED = "rate-limit-exceeded";
+export const API_ERROR_TOO_MANY_REQUESTS = "too-many-requests";
 
-/** 401 Unauthorized — session absent, invalid, or expired. */
-export const UNAUTHORIZED = "UNAUTHORIZED";
-/** 403 Forbidden — session valid but action not permitted. */
-export const FORBIDDEN = "FORBIDDEN";
-/** 404 Not Found — resource does not exist or is not visible to caller. */
-export const NOT_FOUND = "NOT_FOUND";
-/** 409 Conflict — idempotency key collision or exclusive lock held. */
-export const CONFLICT = "CONFLICT";
-/** 422 Unprocessable Entity — request was well-formed but semantically invalid. */
-export const UNPROCESSABLE_ENTITY = "UNPROCESSABLE_ENTITY";
-/** 429 Too Many Requests — request rate or quota exceeded. */
-export const RATE_LIMITED = "RATE_LIMITED";
+/* ─── Third-Party / Integration ───────────────────────────────────────────── */
+export const API_ERROR_PDF_GENERATION_FAILED = "pdf-generation-failed";
+export const API_ERROR_PDF_AUTHENTICATION_FAILED = "pdf-authentication-failed";
+export const API_ERROR_EXPORT_FAILED = "export-failed";
+export const API_ERROR_COPY_GENERATION_FAILED = "copy-generation-failed";
+export const API_ERROR_INPAINT_SUBMIT_FAILED = "inpaint-submit-failed";
+export const API_ERROR_INPAINT_FETCH_FAILED = "inpaint-fetch-failed";
+export const API_ERROR_INPAINT_STATUS_FAILED = "inpaint-status-failed";
+export const API_ERROR_INPAINT_TERMINAL = "inpaint-terminal-error";
+export const API_ERROR_SEGMENTATION_FAILED = "segmentation-failed";
+export const API_ERROR_DETECTION_FAILED = "detection-failed";
+
+/* ─── Configuration ────────────────────────────────────────────────────────── */
+export const API_ERROR_CONFIGURATION_MISSING = "configuration-missing";
+
+/* ─── Server / Unknown ────────────────────────────────────────────────────── */
+export const API_ERROR_INTERNAL_SERVER = "internal-server-error";

@@ -129,37 +129,18 @@ export async function upsertVisionLabels(params: {
 }) {
   const { imageUrl, concept, results, userId, roomId } = params;
   const imageUrlHash = hashImageUrl(imageUrl);
-
-  // Use upsert per record inside a transaction so concurrent requests
-  // don't silently skip updates (which was the bug with createMany + skipDuplicates).
-  // Each upsert is atomic at the DB level: insert if absent, update if present.
-  await prisma.$transaction(
-    results.map((r) =>
-      prisma.visionLabel.upsert({
-        where: {
-          imageUrlHash_concept_instanceIndex_userId: {
-            imageUrlHash,
-            concept,
-            instanceIndex: r.instanceIndex,
-            userId,
-          },
-        },
-        create: {
-          imageUrlHash,
-          concept,
-          instanceIndex: r.instanceIndex,
-          label: r.label,
-          score: r.score,
-          userId,
-          roomId,
-        },
-        update: {
-          label: r.label,
-          score: r.score,
-        },
-      })
-    )
-  );
+  await prisma.visionLabel.createMany({
+    data: results.map((r) => ({
+      imageUrlHash,
+      concept,
+      instanceIndex: r.instanceIndex,
+      label: r.label,
+      score: r.score,
+      userId,
+      roomId,
+    })),
+    skipDuplicates: true,
+  });
 }
 
 /**
