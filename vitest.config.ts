@@ -7,6 +7,7 @@ export default defineConfig({
     // Playwright owns the browser specs under tests/e2e (issue #165);
     // keep the vitest unit run scoped to the pure-logic tests.
     exclude: ["**/node_modules/**", "tests/e2e/**"],
+    setupFiles: ["./tests/setup.ts"],
   },
   resolve: {
     alias: {

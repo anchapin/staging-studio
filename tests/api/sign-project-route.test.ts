@@ -3,7 +3,8 @@ import type { NextRequest } from "next/server";
 import { POST } from "@/app/api/sign-project/route";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
-import { signPreviewToken } from "@/lib/preview-token";
+import { verifyPreviewToken } from "@/lib/preview-token";
+import { API_ERROR_ALREADY_SIGNED } from "@/lib/api-errors";
 
 const MOCK_USER_ID = "cuser12345678901234567890";
 const MOCK_OTHER_USER_ID = "cuser22345678901234567890";
@@ -33,7 +34,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 vi.mock("@/lib/preview-token", () => ({
-  verifyPreviewToken: vi.fn(),
+  verifyPreviewToken: vi.fn().mockResolvedValue({ valid: true, projectId: "proj_123" }),
   signPreviewToken: vi.fn(),
   PREVIEW_TOKEN_QUERY_PARAM: "token",
 }));
@@ -41,6 +42,8 @@ vi.mock("@/lib/preview-token", () => ({
 describe("POST /api/sign-project", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    // Re-apply preview-token mock after reset with valid token since most tests need this
+    vi.mocked(verifyPreviewToken).mockResolvedValue({ valid: true, projectId: "cproj12345678901234567890" });
   });
 
   it("rejects unauthenticated requests with 401", async () => {
@@ -92,6 +95,12 @@ describe("POST /api/sign-project", () => {
     const res = await POST(req);
 
     expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toBe("Already signed");
+    expect(json.code).toBe(API_ERROR_ALREADY_SIGNED);
+    expect(json.message).toBe(
+      "This project has already been signed. The staging firm must reset the signature before it can be signed again.",
+    );
   });
 
   it("saves signature and returns 200 for valid authenticated request", async () => {
