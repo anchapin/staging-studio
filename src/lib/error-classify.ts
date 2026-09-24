@@ -11,6 +11,8 @@ export interface IntegrationErrorCopy {
   error: string;
   /** User-facing sentence explaining the failure. */
   message: string;
+  /** Optional machine-readable error code for programmatic handling. */
+  code?: string;
 }
 
 /**
@@ -28,6 +30,7 @@ export interface ClassifiedIntegrationError {
   retryable: boolean;
   error: string;
   message: string;
+  code: string;
 }
 
 interface ClassRule {
@@ -133,5 +136,6 @@ export function classifyIntegrationError(
     retryable: rule.retryable,
     error: copy.error,
     message: copy.message,
+    code: copy.code ?? "integration-error",
   };
 }

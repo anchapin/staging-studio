@@ -19,19 +19,23 @@ import {
   buildFalFillPayload,
   buildInpaintPrompt,
 } from "@/lib/prompts";
+import { API_ERROR_INPAINT_SUBMIT_FAILED } from "@/lib/api-errors";
 
 const INPAINT_ERROR_COPY = {
   auth: {
     error: "Authentication failed",
     message: "Unable to connect to the image editing service. Please check your configuration.",
+    code: API_ERROR_INPAINT_SUBMIT_FAILED,
   },
   timeout: {
     error: "Request timeout",
     message: "The image editing service is taking too long to respond. Please try again.",
+    code: API_ERROR_INPAINT_SUBMIT_FAILED,
   },
   unknown: {
     error: "Inpainting failed",
     message: "We couldn't process your image. Please try again.",
+    code: API_ERROR_INPAINT_SUBMIT_FAILED,
   },
 };
 
@@ -342,6 +346,7 @@ export async function POST(request: NextRequest) {
         error: classified.error,
         message: classified.message,
         retryable: classified.retryable,
+        code: classified.code,
       },
       { status: classified.status }
     );

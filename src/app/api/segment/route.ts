@@ -13,6 +13,11 @@ import {
   buildSegmentServerTimingEvent,
   emitSegmentTiming,
 } from "@/lib/segment-timing";
+import {
+  API_ERROR_UNAUTHORIZED,
+  API_ERROR_INVALID_REQUEST,
+  API_ERROR_ROOM_NOT_FOUND,
+} from "@/lib/api-errors";
 
 const SEGMENT_ERROR_COPY = {
   auth: {
@@ -83,6 +88,7 @@ export async function POST(request: NextRequest) {
         {
           error: "Unauthorized",
           message: "You must be signed in to select objects.",
+          code: API_ERROR_UNAUTHORIZED,
         },
         { status: 401 }
       );
@@ -93,9 +99,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error: "Invalid request",
-          message:
-            "Please provide a valid roomId, imageUrl, click point, and image dimensions.",
+          message: "Please provide a valid roomId, imageUrl, click point, and image dimensions.",
           issues: parsed.error.issues,
+          code: API_ERROR_INVALID_REQUEST,
         },
         { status: 400 }
       );
@@ -113,6 +119,7 @@ export async function POST(request: NextRequest) {
         {
           error: "Room not found",
           message: "The requested room could not be found.",
+          code: API_ERROR_ROOM_NOT_FOUND,
         },
         { status: 404 }
       );
@@ -184,6 +191,7 @@ export async function POST(request: NextRequest) {
         error: classified.error,
         message: classified.message,
         retryable: classified.retryable,
+        code: classified.code,
       },
       { status: classified.status }
     );

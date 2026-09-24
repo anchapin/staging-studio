@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { prisma } from "@/lib/prisma";
+import { API_ERROR_UNAUTHORIZED, API_ERROR_INTERNAL_SERVER } from "@/lib/api-errors";
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
@@ -43,7 +44,7 @@ export async function GET(request: NextRequest) {
     } = await supabase.auth.getUser();
 
     if (!user) {
-      return respond({ exists: false }, { status: 401 });
+      return respond({ exists: false, code: API_ERROR_UNAUTHORIZED }, { status: 401 });
     }
     userEmail = user.email ?? null;
 
@@ -61,6 +62,6 @@ export async function GET(request: NextRequest) {
       JSON.stringify({ event: "setup_check_failed", email: userEmail }),
       error
     );
-    return respond({ exists: false }, { status: 500 });
+    return respond({ exists: false, code: API_ERROR_INTERNAL_SERVER }, { status: 500 });
   }
 }

@@ -20,6 +20,13 @@ import {
   recordDailyUsage,
   resolveDailyLimit,
 } from "@/lib/api-quota";
+import {
+  API_ERROR_UNAUTHORIZED,
+  API_ERROR_RATE_LIMIT_EXCEEDED,
+  API_ERROR_INVALID_REQUEST,
+  API_ERROR_ROOM_NOT_FOUND,
+  API_ERROR_INTERNAL_SERVER,
+} from "@/lib/api-errors";
 
 /**
  * POST /api/label-instances (issue #252 D4 / WS3).
@@ -56,6 +63,7 @@ export async function POST(request: NextRequest) {
           success: false,
           error: "Unauthorized",
           message: "You must be signed in to label instances.",
+          code: API_ERROR_UNAUTHORIZED,
         },
         { status: 401 }
       );
@@ -87,6 +95,7 @@ export async function POST(request: NextRequest) {
         {
           success: false,
           ...dailyQuotaExceededPayload(labelQuota, "Please try again tomorrow."),
+          code: API_ERROR_RATE_LIMIT_EXCEEDED,
         },
         { status: 429 }
       );
@@ -99,6 +108,7 @@ export async function POST(request: NextRequest) {
           success: false,
           error: "Invalid request",
           message: "Some required information is missing or invalid.",
+          code: API_ERROR_INVALID_REQUEST,
         },
         { status: 400 }
       );
@@ -118,6 +128,7 @@ export async function POST(request: NextRequest) {
           success: false,
           error: "Room not found",
           message: "The requested room could not be found.",
+          code: API_ERROR_ROOM_NOT_FOUND,
         },
         { status: 404 }
       );
@@ -213,8 +224,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error: "Labeling failed",
+        error: "Internal server error",
         message: "Could not label the detected instances. Please try again.",
+        code: API_ERROR_INTERNAL_SERVER,
       },
       { status: 500 }
     );

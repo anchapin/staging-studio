@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createSupabaseRequestClient } from "@/lib/supabase";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
+import {
+  API_ERROR_UNAUTHORIZED,
+  API_ERROR_INTERNAL_SERVER,
+  API_ERROR_MISSING_REQUIRED_FIELDS,
+  API_ERROR_USER_NOT_FOUND,
+} from "@/lib/api-errors";
 
 // GET: List the authed user's projects (scoped to caller)
 export async function GET() {
@@ -9,7 +15,10 @@ export async function GET() {
     const userRow = await getAuthedPrismaUser();
 
     if (!userRow) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Unauthorized", message: "You must be logged in to access this resource.", code: API_ERROR_UNAUTHORIZED },
+        { status: 401 }
+      );
     }
 
     const projects = await prisma.project.findMany({
@@ -29,7 +38,10 @@ export async function GET() {
     return NextResponse.json(projects);
   } catch (error) {
     console.error("Error fetching projects:", error);
-    return NextResponse.json({ error: "Failed to fetch projects" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Internal server error", message: "Failed to fetch projects.", code: API_ERROR_INTERNAL_SERVER },
+      { status: 500 }
+    );
   }
 }
 
@@ -43,7 +55,10 @@ export async function POST(request: Request) {
     } = await supabase.auth.getUser();
 
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Unauthorized", message: "You must be logged in to create a project.", code: API_ERROR_UNAUTHORIZED },
+        { status: 401 }
+      );
     }
 
     const body = await request.json();
@@ -59,7 +74,7 @@ export async function POST(request: Request) {
 
     if (!propertyAddress || !clientName || !targetBuyer || !stagingAesthetic) {
       return NextResponse.json(
-        { error: "Missing required fields" },
+        { error: "Missing required fields", message: "propertyAddress, clientName, targetBuyer, and stagingAesthetic are required.", code: API_ERROR_MISSING_REQUIRED_FIELDS },
         { status: 400 }
       );
     }
@@ -70,7 +85,7 @@ export async function POST(request: Request) {
 
     if (!userRow) {
       return NextResponse.json(
-        { error: "User not found in database" },
+        { error: "User not found", message: "User not found in database.", code: API_ERROR_USER_NOT_FOUND },
         { status: 404 }
       );
     }
@@ -95,7 +110,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Error creating project:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: "Internal server error", message: "Failed to create project.", code: API_ERROR_INTERNAL_SERVER },
       { status: 500 }
     );
   }

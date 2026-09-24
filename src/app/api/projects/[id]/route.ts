@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
+import {
+  API_ERROR_UNAUTHORIZED,
+  API_ERROR_PROJECT_NOT_FOUND,
+  API_ERROR_INTERNAL_SERVER,
+} from "@/lib/api-errors";
 
 export async function GET(
   request: Request,
@@ -10,7 +15,10 @@ export async function GET(
     const userRow = await getAuthedPrismaUser();
 
     if (!userRow) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Unauthorized", message: "You must be logged in to access this resource.", code: API_ERROR_UNAUTHORIZED },
+        { status: 401 }
+      );
     }
 
     const { id } = await params;
@@ -64,12 +72,18 @@ export async function GET(
     });
 
     if (!project) {
-      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Project not found", message: "The requested project could not be found.", code: API_ERROR_PROJECT_NOT_FOUND },
+        { status: 404 }
+      );
     }
 
     return NextResponse.json(project);
   } catch (error) {
     console.error("Error fetching project:", error);
-    return NextResponse.json({ error: "Failed to fetch project" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Internal server error", message: "Failed to fetch project.", code: API_ERROR_INTERNAL_SERVER },
+      { status: 500 }
+    );
   }
 }

@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { roomPatchSchema } from "@/lib/room-patch-schema";
+import {
+  API_ERROR_UNAUTHORIZED,
+  API_ERROR_INVALID_REQUEST,
+  API_ERROR_ROOM_NOT_FOUND,
+  API_ERROR_INTERNAL_SERVER,
+} from "@/lib/api-errors";
 
 export async function PATCH(
   request: Request,
@@ -12,13 +18,16 @@ export async function PATCH(
 
     const user = await getAuthedPrismaUser();
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Unauthorized", message: "You must be logged in to update a room.", code: API_ERROR_UNAUTHORIZED },
+        { status: 401 }
+      );
     }
 
     const parsed = roomPatchSchema.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json(
-        { error: "Invalid request body", issues: parsed.error.issues },
+        { error: "Invalid request body", message: "The request body is invalid.", issues: parsed.error.issues, code: API_ERROR_INVALID_REQUEST },
         { status: 400 }
       );
     }
@@ -28,7 +37,7 @@ export async function PATCH(
     // a client bug worth surfacing.
     if (Object.keys(parsed.data).length === 0) {
       return NextResponse.json(
-        { error: "Invalid request body", issues: [{ message: "At least one field is required" }] },
+        { error: "Invalid request body", message: "At least one field is required.", issues: [{ message: "At least one field is required" }], code: API_ERROR_INVALID_REQUEST },
         { status: 400 }
       );
     }
@@ -44,17 +53,26 @@ export async function PATCH(
     });
 
     if (count === 0) {
-      return NextResponse.json({ error: "Room not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Room not found", message: "The requested room could not be found.", code: API_ERROR_ROOM_NOT_FOUND },
+        { status: 404 }
+      );
     }
 
     const room = await prisma.room.findFirst({ where: ownershipWhere });
     if (!room) {
-      return NextResponse.json({ error: "Room not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Room not found", message: "The requested room could not be found.", code: API_ERROR_ROOM_NOT_FOUND },
+        { status: 404 }
+      );
     }
 
     return NextResponse.json(room);
   } catch (error) {
     console.error("Error updating room:", error);
-    return NextResponse.json({ error: "Failed to update room" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Internal server error", message: "Failed to update room.", code: API_ERROR_INTERNAL_SERVER },
+      { status: 500 }
+    );
   }
 }

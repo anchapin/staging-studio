@@ -1,6 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { prisma } from "@/lib/prisma";
+import {
+  API_ERROR_UNAUTHORIZED,
+  API_ERROR_MISSING_REQUIRED_FIELDS,
+  API_ERROR_INTERNAL_SERVER,
+} from "@/lib/api-errors";
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
@@ -100,7 +105,7 @@ export async function POST(request: NextRequest) {
     } = await supabase.auth.getUser();
 
     if (!user) {
-      return respond({ error: "Unauthorized" }, { status: 401 });
+      return respond({ error: "Unauthorized", message: "You must be signed in to complete setup.", code: API_ERROR_UNAUTHORIZED }, { status: 401 });
     }
     userEmail = user.email ?? null;
 
@@ -109,7 +114,7 @@ export async function POST(request: NextRequest) {
 
     if (!firmName || !ownerName) {
       return respond(
-        { error: "Firm name and owner name are required" },
+        { error: "Missing required fields", message: "Firm name and owner name are required.", code: API_ERROR_MISSING_REQUIRED_FIELDS },
         { status: 400 }
       );
     }
@@ -131,6 +136,6 @@ export async function POST(request: NextRequest) {
       JSON.stringify({ event: "setup_post_failed", email: userEmail }),
       error
     );
-    return respond({ error: "Failed to save user setup" }, { status: 500 });
+    return respond({ error: "Internal server error", message: "Failed to save user setup.", code: API_ERROR_INTERNAL_SERVER }, { status: 500 });
   }
 }
