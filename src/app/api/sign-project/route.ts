@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type { ZodError } from "zod";
 
 import { prisma } from "@/lib/prisma";
+import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { verifyPreviewToken } from "@/lib/preview-token";
 import {
   signProjectRequestSchema,
@@ -61,6 +62,14 @@ function validationFailure(error: ZodError): NextResponse {
  * with a structured `sign_project_save_failed` event, never swallowed.
  */
 export async function POST(req: NextRequest) {
+  const user = await getAuthedPrismaUser();
+  if (!user) {
+    return NextResponse.json(
+      { error: "Unauthorized", message: "You must be logged in to sign a project." },
+      { status: 401 }
+    );
+  }
+
   try {
     const body = await req.json();
 
@@ -77,10 +86,16 @@ export async function POST(req: NextRequest) {
 
     const existing = await prisma.project.findUnique({
       where: { id: projectId },
-      select: { clientSignatureStatus: true },
+      select: { clientSignatureStatus: true, userId: true },
     });
     if (!existing) {
       return NextResponse.json(SIGN_ERROR_COPY.invalidProject, { status: 404 });
+    }
+    if (existing.userId !== user.id) {
+      return NextResponse.json(
+        { error: "Forbidden", message: "You do not have permission to sign this project." },
+        { status: 403 }
+      );
     }
     if (existing.clientSignatureStatus === "Signed") {
       return NextResponse.json(SIGN_ERROR_COPY.alreadySigned, { status: 409 });
