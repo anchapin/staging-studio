@@ -15,16 +15,15 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { POST } from "@/app/api/inpaint/route";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { fal } from "@/lib/fal";
 import { evaluateInpaintQualityGate } from "@/lib/inpaint-quality-gate";
-import { resolveDailyLimit, evaluateDailyQuota, dailyQuotaExceededPayload, inpaintDailyUsageWhere } from "@/lib/api-quota";
+import { resolveDailyLimit, evaluateDailyQuota } from "@/lib/api-quota";
 import { buildInpaintPrompt } from "@/lib/prompts";
-import { classifyIntegrationError, INPAINT_ERROR_COPY } from "@/lib/error-classify";
+import { INPAINT_ERROR_COPY } from "@/lib/error-classify";
 
 // ---------------------------------------------------------------------------
 // Helpers

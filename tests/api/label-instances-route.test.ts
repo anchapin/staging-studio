@@ -11,7 +11,6 @@ import { POST } from "@/app/api/label-instances/route";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { generateWithRetry } from "@/lib/ai";
-import { classifyIntegrationError } from "@/lib/error-classify";
 
 const MOCK_USER_ID = "cuser12345678901234567890";
 const MOCK_ROOM_ID = "croom12345678901234567890";

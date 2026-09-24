@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-import { assertFalConfigured, falSubscribeWithCircuitBreaker } from "@/lib/fal";
+import { assertFalConfigured } from "@/lib/fal";
 import { MissingEnvVarsError } from "@/lib/env";
 
 describe("assertFalConfigured", () => {
@@ -69,7 +69,7 @@ describe("falSubscribeWithCircuitBreaker", () => {
     }));
 
     const { falSubscribeWithCircuitBreaker: subscribe } = await import("@/lib/fal");
-    const result = await subscribe("fal-ai/flux-fill", {
+    await subscribe("fal-ai/flux-fill", {
       input: { prompt: "test" },
     });
 
@@ -98,11 +98,7 @@ describe("falSubscribeWithCircuitBreaker", () => {
   });
 
   it("passes modelId and options to fal.subscribe", async () => {
-    let capturedArgs: unknown[] = [];
-    const mockExecute = vi.fn().mockImplementation(async (fn: () => Promise<unknown>) => {
-      capturedArgs = (fn as () => Promise<unknown>).toString().includes("fal") ? ["fal-subscribe-call"] : [];
-      return { data: "test" };
-    });
+    const mockExecute = vi.fn().mockResolvedValue({ data: "test" });
     
     vi.mock("@/lib/circuit-breaker", () => ({
       getCircuitBreaker: vi.fn().mockReturnValue({

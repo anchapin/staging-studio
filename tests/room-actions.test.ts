@@ -30,7 +30,6 @@ import { saveRoomMetadata } from "@/app/actions/room";
 import { reorderRooms } from "@/app/actions/room";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
-import { revalidatePath } from "next/cache";
 
 describe("saveRoomMetadata", () => {
   const validMeta = {

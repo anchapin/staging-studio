@@ -30,7 +30,6 @@ beforeEach(() => {
 import { getBatchRoomUploadUrls } from "@/app/actions/room-batch";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
-import { revalidatePath } from "next/cache";
 
 describe("getBatchRoomUploadUrls", () => {
   const projectId = "c123456789012345678901234";

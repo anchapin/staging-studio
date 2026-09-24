@@ -291,7 +291,6 @@ describe("POST /api/segment", () => {
     });
 
     const response = await POST(request);
-    const json = await response.json();
     expect(response.status).toBe(500);
 
     vi.stubGlobal("fetch", originalFetch);

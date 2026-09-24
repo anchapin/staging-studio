@@ -13,7 +13,7 @@
  * as the actual NextResponse objects require the Next.js server runtime.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { verifyPreviewToken } from "@/lib/preview-token";
 import { API_ERROR_UNAUTHORIZED, API_ERROR_INVALID_PREVIEW_TOKEN } from "@/lib/api-errors";
 import { dailyQuotaExceededPayload, type QuotaDecision } from "@/lib/api-quota";

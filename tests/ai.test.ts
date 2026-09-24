@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-import { assertOpenAIConfigured, aiModel, generateWithCircuitBreaker } from "@/lib/ai";
+import { assertOpenAIConfigured, aiModel } from "@/lib/ai";
 import { MissingEnvVarsError } from "@/lib/env";
 
 describe("assertOpenAIConfigured", () => {

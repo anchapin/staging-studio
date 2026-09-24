@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { z } from "zod";
 import type { NextRequest } from "next/server";
 import { POST } from "@/app/api/generate-copy/route";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
