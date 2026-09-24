@@ -90,7 +90,7 @@ describe("POST /api/segment", () => {
     });
   });
 
-  test.skip("returns 404 when room not found", async () => {
+  it.skip("returns 404 when room not found", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue({
       id: "user-1",
       email: "test@test.com",
@@ -115,7 +115,7 @@ describe("POST /api/segment", () => {
     });
   });
 
-  test.skip("retries on CDN 500 error and succeeds on retry", async () => {
+  it.skip("retries on CDN 500 error and succeeds on retry", async () => {
     const mockMaskUrl = "https://cdn.example.com/mask.png";
     let callCount = 0;
 
@@ -160,7 +160,7 @@ describe("POST /api/segment", () => {
     vi.stubGlobal("fetch", originalFetch);
   });
 
-  test.skip("retries on CDN 502 error and succeeds on retry", async () => {
+  it.skip("retries on CDN 502 error and succeeds on retry", async () => {
     const mockMaskUrl = "https://cdn.example.com/mask.png";
     let callCount = 0;
 
@@ -204,7 +204,7 @@ describe("POST /api/segment", () => {
     vi.stubGlobal("fetch", originalFetch);
   });
 
-  test.skip("retries on network error and succeeds on retry", async () => {
+  it.skip("retries on network error and succeeds on retry", async () => {
     const mockMaskUrl = "https://cdn.example.com/mask.png";
     let callCount = 0;
 
@@ -244,7 +244,7 @@ describe("POST /api/segment", () => {
     vi.stubGlobal("fetch", originalFetch);
   });
 
-  test.skip("fails after max retries on persistent CDN error", async () => {
+  it.skip("fails after max retries on persistent CDN error", async () => {
     const mockMaskUrl = "https://cdn.example.com/mask.png";
 
     vi.mocked(fal.subscribe).mockImplementation(
@@ -278,7 +278,7 @@ describe("POST /api/segment", () => {
     vi.stubGlobal("fetch", originalFetch);
   });
 
-  test.skip("fails after max retries on persistent network error", async () => {
+  it.skip("fails after max retries on persistent network error", async () => {
     const mockMaskUrl = "https://cdn.example.com/mask.png";
 
     vi.mocked(fal.subscribe).mockImplementation(

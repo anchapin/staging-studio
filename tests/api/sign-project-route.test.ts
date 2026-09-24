@@ -53,7 +53,7 @@ describe("POST /api/sign-project", () => {
     expect((json as { error: string }).error).toBe("Unauthorized");
   });
 
-  test.skip("rejects authenticated user who does not own the project with 403", async () => {
+  it.skip("rejects authenticated user who does not own the project with 403", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser as never);
     vi.mocked(prisma.project.findUnique).mockResolvedValue({
       id: MOCK_PROJECT_ID,
@@ -69,7 +69,7 @@ describe("POST /api/sign-project", () => {
     expect(json.error).toBe("Forbidden");
   });
 
-  test.skip("returns 404 when project does not exist", async () => {
+  it.skip("returns 404 when project does not exist", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser as never);
     vi.mocked(prisma.project.findUnique).mockResolvedValue(null);
 
@@ -79,7 +79,7 @@ describe("POST /api/sign-project", () => {
     expect(res.status).toBe(404);
   });
 
-  test.skip("returns 409 when project is already signed", async () => {
+  it.skip("returns 409 when project is already signed", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser as never);
     vi.mocked(prisma.project.findUnique).mockResolvedValue({
       id: MOCK_PROJECT_ID,
@@ -93,7 +93,7 @@ describe("POST /api/sign-project", () => {
     expect(res.status).toBe(409);
   });
 
-  test.skip("saves signature and returns 200 for valid authenticated request", async () => {
+  it.skip("saves signature and returns 200 for valid authenticated request", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser as never);
     vi.mocked(prisma.project.findUnique).mockResolvedValue({
       id: MOCK_PROJECT_ID,
