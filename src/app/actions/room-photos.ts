@@ -4,6 +4,7 @@ import { createSupabaseRequestClient } from "@/lib/supabase";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { revalidatePath } from "next/cache";
+import { withRetry } from "@/lib/retry";
 
 const ALLOWED_IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp"];
 
@@ -128,11 +129,16 @@ export async function getSignedUploadUrl(
 
   const storagePath = storagePathForSlot(roomId, fileExt, variantSlot);
 
-  const { data, error } = await supabase.storage
-    .from("room-photos")
-    .createSignedUploadUrl(storagePath, {
-      upsert: true,
-    });
+  const { data, error } = await withRetry(
+    () =>
+      supabase.storage
+        .from("room-photos")
+        .createSignedUploadUrl(storagePath, {
+          upsert: true,
+        }),
+    2,
+    500
+  );
 
   if (error) {
     return failure(`Failed to get signed URL: ${error.message}`);

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { revalidatePath } from "next/cache";
 import { createSupabaseRequestClient } from "@/lib/supabase";
+import { withRetry } from "@/lib/retry";
 import { batchRoomTypesRequestSchema } from "@/lib/ai-route-schemas";
 import {
   batchRoomUploadUrlsRequestSchema,
@@ -182,9 +183,14 @@ export async function getBatchRoomUploadUrls(
     const roomIndex = i;
     const storagePath = `batch-rooms/${parsed.data.projectId}/room-${roomIndex}-${Date.now()}.${fileExt}`;
 
-    const { data, error } = await supabase.storage
-      .from("room-photos")
-      .createSignedUploadUrl(storagePath, { upsert: true });
+    const { data, error } = await withRetry(
+      () =>
+        supabase.storage
+          .from("room-photos")
+          .createSignedUploadUrl(storagePath, { upsert: true }),
+      2,
+      500
+    );
 
     if (error) {
       return { success: false, error: `Failed to get signed URL: ${error.message}` };
