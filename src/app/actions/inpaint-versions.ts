@@ -251,7 +251,7 @@ export async function restoreInpaintVersion(
       room: {
         select: {
           id: true,
-          project: { select: { id: true, userId: true } },
+          project: { select: { id: true, userId: true, clientSignatureStatus: true } },
         },
       },
     },
@@ -259,6 +259,10 @@ export async function restoreInpaintVersion(
 
   if (!version || version.room.project.userId !== user.id) {
     return failure("Version not found or not owned by user");
+  }
+
+  if (version.room.project.clientSignatureStatus === "Signed") {
+    return failure("Cannot restore a version on a signed project");
   }
 
   const column =
