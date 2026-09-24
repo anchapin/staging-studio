@@ -42,6 +42,69 @@ describe("POST /api/segment", () => {
     vi.mocked(prisma.room.findFirst).mockResolvedValue({ id: MOCK_ROOM_ID });
   });
 
+  it("returns 401 when unauthenticated", async () => {
+    vi.mocked(getAuthedPrismaUser).mockResolvedValue(null);
+
+    const response = await POST(
+      buildRequest({
+        roomId: "room-1",
+        imageUrl: "https://example.supabase.co/storage/room1.jpg",
+        point: { x: 100, y: 100 },
+        imageWidth: 800,
+        imageHeight: 600,
+      })
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(json).toMatchObject({
+      error: "Unauthorized",
+      message: "You must be signed in to select objects.",
+      code: "unauthorized",
+    });
+  });
+
+  it("returns 400 when request body is invalid", async () => {
+    vi.mocked(getAuthedPrismaUser).mockResolvedValue({
+      id: "user-1",
+      email: "test@test.com",
+    });
+
+    const response = await POST(buildRequest({}));
+    const json = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(json).toMatchObject({
+      error: "Invalid request",
+      code: "invalid-request",
+    });
+  });
+
+  it("returns 404 when room not found", async () => {
+    vi.mocked(getAuthedPrismaUser).mockResolvedValue({
+      id: "user-1",
+      email: "test@test.com",
+    });
+    vi.mocked(prisma.room.findFirst).mockResolvedValue(null);
+
+    const response = await POST(
+      buildRequest({
+        roomId: "nonexistent",
+        imageUrl: "https://example.supabase.co/storage/room1.jpg",
+        point: { x: 100, y: 100 },
+        imageWidth: 800,
+        imageHeight: 600,
+      })
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(json).toMatchObject({
+      error: "Not found",
+      code: "not-found",
+    });
+  });
+
   it("retries on CDN 500 error and succeeds on retry", async () => {
     const mockMaskUrl = "https://cdn.example.com/mask.png";
     let callCount = 0;
