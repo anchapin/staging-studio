@@ -61,6 +61,13 @@ type FalQueueSubmitFunction = (
   options: { input: Record<string, unknown> }
 ) => Promise<{ request_id: string }>;
 
+// Issue #831: fal.queue.submit has no built-in retry for transient errors.
+// Retries with exponential backoff for network/timeout/5xx failures.
+// Auth errors (401/403) are non-retryable — they indicate a config problem
+// that retries will not resolve.
+const FAL_SUBMIT_ATTEMPTS = 3;
+const FAL_SUBMIT_BASE_DELAY_MS = 200;
+
 // Issue #688: by the time the requestId → room row is written, the fal
 // job is already queued and billed. A transient DB failure there must
 // NOT surface as a 500 — the client's retry would submit a brand-new
@@ -104,6 +111,48 @@ async function createInpaintRequestWithRetry(
       );
     }
   }
+}
+
+// Issue #831: wraps fal.queue.submit with exponential-backoff retry for
+// transient errors (network failures, timeouts, 5xx HTTP responses).
+// Auth errors (401/403) are not retried — they indicate a config problem
+// that subsequent attempts will not resolve.
+async function submitWithRetry(
+  falQueueSubmit: FalQueueSubmitFunction,
+  model: string,
+  payload: { input: Record<string, unknown> }
+): Promise<{ request_id: string }> {
+  for (let attempt = 1; attempt <= FAL_SUBMIT_ATTEMPTS; attempt += 1) {
+    try {
+      return await falQueueSubmit(model, payload);
+    } catch (error) {
+      const isLastAttempt = attempt === FAL_SUBMIT_ATTEMPTS;
+      const isAuthError =
+        error != null &&
+        typeof error === "object" &&
+        "status" in error &&
+        (error.status === 401 || error.status === 403);
+
+      if (isLastAttempt || isAuthError) {
+        throw error;
+      }
+
+      const delayMs = FAL_SUBMIT_BASE_DELAY_MS * Math.pow(2, attempt - 1);
+      console.error(
+        JSON.stringify({
+          event: "fal_submit_retry",
+          attempt,
+          attempts: FAL_SUBMIT_ATTEMPTS,
+          delayMs,
+        }),
+        error
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  // Satisfy TypeScript: this is unreachable because the loop always returns
+  // or throws, but the return type requires a value.
+  throw new Error("submitWithRetry: unexpected exit");
 }
 
 export async function POST(request: NextRequest) {
@@ -215,8 +264,9 @@ export async function POST(request: NextRequest) {
 
     // Fire-and-forget submit: returns as soon as the job is queued (~2s),
     // instead of holding the request open for the full generation.
+    // Issue #831: submitWithRetry handles transient errors with exponential backoff.
     const falQueueSubmit = fal.queue.submit as FalQueueSubmitFunction;
-    const submission = await falQueueSubmit(FAL_FLUX_FILL_MODEL, {
+    const submission = await submitWithRetry(falQueueSubmit, FAL_FLUX_FILL_MODEL, {
       input: buildFalFillPayload({
         imageUrl,
         maskUrl,
