@@ -3,6 +3,7 @@ import type { ZodError } from "zod";
 
 import { prisma } from "@/lib/prisma";
 import { verifyPreviewToken } from "@/lib/preview-token";
+import { withRetry } from "@/lib/retry";
 import {
   signProjectRequestSchema,
   tokenMatchesProject,
@@ -87,14 +88,19 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      await prisma.project.update({
-        where: { id: projectId },
-        data: {
-          clientSignature: signatureDataUrl,
-          clientSignatureStatus: "Signed",
-          clientSignatureTimestamp: new Date(),
-        },
-      });
+      await withRetry(
+        async () =>
+          prisma.project.update({
+            where: { id: projectId },
+            data: {
+              clientSignature: signatureDataUrl,
+              clientSignatureStatus: "Signed",
+              clientSignatureTimestamp: new Date(),
+            },
+          }),
+        3,
+        200
+      );
     } catch (error) {
       console.error("sign_project_save_failed", {
         projectId,
