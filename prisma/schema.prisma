@@ -89,6 +89,7 @@ model Room {
   inpaintRequests InpaintRequest[]
   inpaintVersions InpaintVersion[]
   selectionLogs  SelectionLog[]
+  visionLabels  VisionLabel[]
 
   @@index([projectId])
 }
@@ -143,9 +144,12 @@ model VisionLabel {
   label          String   // GPT-4o-mini's label text
   score          Float?
   userId         String?  // optional: scopes cache to the user who paid
+  roomId         String?  // optional: links to owning room for cascade delete (#775)
+  room           Room?    @relation(fields: [roomId], references: [id], onDelete: Cascade)
   createdAt      DateTime @default(now())
 
   @@unique([imageUrlHash, concept, instanceIndex, userId])
+  @@index([roomId])
 }
 
 // SelectionLog model: durable log of every instance toggle for the training

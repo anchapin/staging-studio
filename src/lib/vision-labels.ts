@@ -125,8 +125,9 @@ export async function upsertVisionLabels(params: {
   concept: string;
   results: Array<{ instanceIndex: number; label: string; score?: number }>;
   userId?: string;
+  roomId?: string;
 }) {
-  const { imageUrl, concept, results, userId } = params;
+  const { imageUrl, concept, results, userId, roomId } = params;
   const imageUrlHash = hashImageUrl(imageUrl);
   await prisma.visionLabel.createMany({
     data: results.map((r) => ({
@@ -136,6 +137,7 @@ export async function upsertVisionLabels(params: {
       label: r.label,
       score: r.score,
       userId,
+      roomId,
     })),
     skipDuplicates: true,
   });
