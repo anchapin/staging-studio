@@ -2,6 +2,8 @@ export const BROWSERLESS_PDF_ENDPOINT = "https://chrome.browserless.io/pdf";
 
 export const BROWSERLESS_TIMEOUT_MS = 60_000;
 
+import { getCircuitBreaker } from "@/lib/circuit-breaker";
+
 export interface BrowserlessPdfBody {
   url: string;
   gotoOptions: { waitUntil: "networkidle0" };
@@ -60,4 +62,15 @@ export function buildBrowserlessPdfBody(previewUrl: string): BrowserlessPdfBody 
       },
     },
   };
+}
+
+export async function fetchBrowserlessPdfWithCircuitBreaker(
+  url: string,
+  options: RequestInit & { signal?: AbortSignal }
+): Promise<Response> {
+  const cb = getCircuitBreaker("browserless", {
+    failureThreshold: 3,
+    cooldownMs: 30_000,
+  });
+  return cb.execute(() => fetch(url, options));
 }

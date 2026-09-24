@@ -21,6 +21,7 @@ import {
   BROWSERLESS_TIMEOUT_MS,
   buildBrowserlessPdfBody,
   buildBrowserlessPdfUrl,
+  fetchBrowserlessPdfWithCircuitBreaker,
 } from "@/lib/browserless";
 
 const EXPORT_PDF_ERROR_COPY = {
@@ -169,15 +170,18 @@ export async function POST(req: NextRequest) {
 
     let chromeResponse: Response;
     try {
-      chromeResponse = await fetch(buildBrowserlessPdfUrl(), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`,
-        },
-        body: JSON.stringify(buildBrowserlessPdfBody(previewUrl)),
-        signal: controller.signal,
-      });
+      chromeResponse = await fetchBrowserlessPdfWithCircuitBreaker(
+        buildBrowserlessPdfUrl(),
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`,
+          },
+          body: JSON.stringify(buildBrowserlessPdfBody(previewUrl)),
+          signal: controller.signal,
+        }
+      );
     } finally {
       clearTimeout(timeoutId);
     }

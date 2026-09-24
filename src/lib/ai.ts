@@ -1,5 +1,6 @@
 import { openai } from "@ai-sdk/openai";
 import { requireEnvVars } from "@/lib/env";
+import { getCircuitBreaker } from "@/lib/circuit-breaker";
 
 /**
  * Shared OpenAI chat model instance (gpt-4o-mini) for the Vercel AI SDK.
@@ -25,4 +26,14 @@ export const aiModel = openai("gpt-4o-mini");
  */
 export function assertOpenAIConfigured(): void {
   requireEnvVars("OPENAI_API_KEY");
+}
+
+export async function generateWithCircuitBreaker<T>(
+  fn: () => Promise<T>
+): Promise<T> {
+  const cb = getCircuitBreaker("openai", {
+    failureThreshold: 3,
+    cooldownMs: 30_000,
+  });
+  return cb.execute(fn);
 }

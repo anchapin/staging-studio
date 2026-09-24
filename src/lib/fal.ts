@@ -1,5 +1,8 @@
 import * as fal from "@fal-ai/serverless-client";
 import { requireEnvVars } from "@/lib/env";
+import {
+  getCircuitBreaker,
+} from "@/lib/circuit-breaker";
 
 fal.config({
   credentials: process.env.FAL_KEY,
@@ -32,4 +35,40 @@ export { fal };
  */
 export function assertFalConfigured(): void {
   requireEnvVars("FAL_KEY");
+}
+
+interface FalSubscribeOptions {
+  input: Record<string, unknown>;
+  abortSignal?: AbortSignal;
+}
+
+export async function falSubscribeWithCircuitBreaker<T = unknown>(
+  modelId: string,
+  options: FalSubscribeOptions
+): Promise<T> {
+  const cb = getCircuitBreaker("fal.ai", {
+    failureThreshold: 3,
+    cooldownMs: 30_000,
+  });
+  return cb.execute(() =>
+    fal.subscribe(modelId, { ...options })
+  ) as Promise<T>;
+}
+
+interface FalQueueSubmitOptions {
+  input: Record<string, unknown>;
+  abortSignal?: AbortSignal;
+}
+
+export async function falQueueSubmitWithCircuitBreaker(
+  modelId: string,
+  options: FalQueueSubmitOptions
+): Promise<{ request_id: string }> {
+  const cb = getCircuitBreaker("fal.ai", {
+    failureThreshold: 3,
+    cooldownMs: 30_000,
+  });
+  return cb.execute(() =>
+    fal.queue.submit(modelId, options)
+  ) as Promise<{ request_id: string }>;
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { fal } from "@/lib/fal";
+import { falQueueSubmitWithCircuitBreaker } from "@/lib/fal";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { inpaintRequestSchema } from "@/lib/ai-route-schemas";
@@ -56,17 +56,17 @@ const inpaintSubmitSchema = inpaintRequestSchema.extend({
   maskCoverageRatio: z.number().min(0).max(1).optional(),
 });
 
-type FalQueueSubmitFunction = (
-  id: string,
-  options: { input: Record<string, unknown> }
-) => Promise<{ request_id: string }>;
-
 // Issue #831: fal.queue.submit has no built-in retry for transient errors.
 // Retries with exponential backoff for network/timeout/5xx failures.
 // Auth errors (401/403) are non-retryable — they indicate a config problem
 // that retries will not resolve.
 const FAL_SUBMIT_ATTEMPTS = 3;
 const FAL_SUBMIT_BASE_DELAY_MS = 200;
+
+type FalQueueSubmitFunction = (
+  id: string,
+  options: { input: Record<string, unknown> }
+) => Promise<{ request_id: string }>;
 
 // Issue #688: by the time the requestId → room row is written, the fal
 // job is already queued and billed. A transient DB failure there must
@@ -264,20 +264,25 @@ export async function POST(request: NextRequest) {
 
     // Fire-and-forget submit: returns as soon as the job is queued (~2s),
     // instead of holding the request open for the full generation.
-    // Issue #831: submitWithRetry handles transient errors with exponential backoff.
-    const falQueueSubmit = fal.queue.submit as FalQueueSubmitFunction;
-    const submission = await submitWithRetry(falQueueSubmit, FAL_FLUX_FILL_MODEL, {
-      input: buildFalFillPayload({
-        imageUrl,
-        maskUrl,
-        prompt,
-        negativePrompt,
-        promptStrength,
-        maskBlur,
-        seed,
-        creativeMode,
-      }),
-    });
+    // submitWithRetry handles transient errors; the circuit breaker wrapper
+    // (falQueueSubmitWithCircuitBreaker) prevents cascading failures when
+    // the service is degraded.
+    const submission = await submitWithRetry(
+      falQueueSubmitWithCircuitBreaker,
+      FAL_FLUX_FILL_MODEL,
+      {
+        input: buildFalFillPayload({
+          imageUrl,
+          maskUrl,
+          prompt,
+          negativePrompt,
+          promptStrength,
+          maskBlur,
+          seed,
+          creativeMode,
+        }),
+      }
+    );
 
     // Persist the requestId → room mapping before responding so the status
     // route can attribute requests and a refresh can resume polling.

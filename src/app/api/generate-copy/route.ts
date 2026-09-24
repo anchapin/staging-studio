@@ -1,7 +1,7 @@
 import { generateObject } from "ai";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { aiModel, assertOpenAIConfigured } from "@/lib/ai";
+import { aiModel, assertOpenAIConfigured, generateWithCircuitBreaker } from "@/lib/ai";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import {
@@ -144,20 +144,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { object: copy, finishReason, usage } = await generateObject({
-      model: aiModel,
-      schema: CopyOutputSchema,
-      prompt: buildCopyPrompt({
-        roomName: room.name,
-        aesthetic: room.project.stagingAesthetic,
-        targetBuyer: room.project.targetBuyer,
-        rawDirectives: room.rawDirectives ?? "",
-        globalDirectives: room.project.stagingDirectives ?? undefined,
-        buyerDemographics: (
-          room.project.buyerDemographics as unknown as import("@/lib/prompts").BuyerDemographicsInput | undefined
-        ) ?? undefined,
-      }),
-    });
+    const { object: copy, finishReason, usage } = await generateWithCircuitBreaker(async () =>
+      generateObject({
+        model: aiModel,
+        schema: CopyOutputSchema,
+        prompt: buildCopyPrompt({
+          roomName: room.name,
+          aesthetic: room.project.stagingAesthetic,
+          targetBuyer: room.project.targetBuyer,
+          rawDirectives: room.rawDirectives ?? "",
+          globalDirectives: room.project.stagingDirectives ?? undefined,
+          buyerDemographics: (
+            room.project.buyerDemographics as unknown as import("@/lib/prompts").BuyerDemographicsInput | undefined
+          ) ?? undefined,
+        }),
+      })
+    );
 
     // Count the billable generation only after the provider call resolves:
     // a failed/timeout attempt costs at most a few rejected tokens and does
@@ -168,36 +170,38 @@ export async function POST(request: NextRequest) {
     // persisting. Advisory only; warnings ride along with the saved copy.
     const qualityWarnings: string[] = [];
     assertOpenAIConfigured();
-    const { object: qg } = await generateObject({
-      model: aiModel,
-      schema: copyQualityGateSchema,
-      messages: [
-        {
-          role: "user",
-          content: [
-            `You are a staging copy quality auditor. Evaluate the generated copy for room "${room.name}".`,
-            "",
-            `Staging aesthetic: "${room.project.stagingAesthetic}"`,
-            `Target buyer: "${room.project.targetBuyer}"`,
-            `Raw directives: "${room.rawDirectives ?? ""}"`,
-            "",
-            `Generated copy:`,
-            `  Observed challenge: "${copy.observedChallenge}"`,
-            `  Recommendation: "${copy.recommendation}"`,
-            `  Buyer psychology: "${copy.buyerPsychology}"`,
-            `  Checklist: ${copy.checklist.map((c) => `"${c.item}"`).join(", ")}`,
-            "",
-            "Evaluate:",
-            "1. specificity (0–3): 0=generic/filler like 'Attention to detail ensures lasting impressions', 3=highly specific and concrete",
-            "2. buyer_aligned: if the copy doesn't speak to the target buyer persona, explain how",
-            "3. checklist_actionable: if any checklist item is vague, non-actionable, or generic",
-            "4. aesthetic_consistent: if copy contradicts or misaligns with the staging aesthetic",
-            "",
-            "Return JSON with: specificity (0-3), buyer_aligned (string only if misaligned), checklist_actionable (string only if vague items), aesthetic_consistent (string only if inconsistent), qualityWarnings (array of distinct warning strings).",
-          ].join("\n"),
-        },
-      ],
-    });
+    const { object: qg } = await generateWithCircuitBreaker(async () =>
+      generateObject({
+        model: aiModel,
+        schema: copyQualityGateSchema,
+        messages: [
+          {
+            role: "user",
+            content: [
+              `You are a staging copy quality auditor. Evaluate the generated copy for room "${room.name}".`,
+              "",
+              `Staging aesthetic: "${room.project.stagingAesthetic}"`,
+              `Target buyer: "${room.project.targetBuyer}"`,
+              `Raw directives: "${room.rawDirectives ?? ""}"`,
+              "",
+              `Generated copy:`,
+              `  Observed challenge: "${copy.observedChallenge}"`,
+              `  Recommendation: "${copy.recommendation}"`,
+              `  Buyer psychology: "${copy.buyerPsychology}"`,
+              `  Checklist: ${copy.checklist.map((c) => `"${c.item}"`).join(", ")}`,
+              "",
+              "Evaluate:",
+              "1. specificity (0–3): 0=generic/filler like 'Attention to detail ensures lasting impressions', 3=highly specific and concrete",
+              "2. buyer_aligned: if the copy doesn't speak to the target buyer persona, explain how",
+              "3. checklist_actionable: if any checklist item is vague, non-actionable, or generic",
+              "4. aesthetic_consistent: if copy contradicts or misaligns with the staging aesthetic",
+              "",
+              "Return JSON with: specificity (0-3), buyer_aligned (string only if misaligned), checklist_actionable (string only if vague items), aesthetic_consistent (string only if inconsistent), qualityWarnings (array of distinct warning strings).",
+            ].join("\n"),
+          },
+        ],
+      })
+    );
     if (qg.buyer_aligned) {
       qualityWarnings.push(qg.buyer_aligned);
     }

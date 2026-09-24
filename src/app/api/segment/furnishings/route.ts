@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fal, assertFalConfigured } from "@/lib/fal";
+import { assertFalConfigured, falSubscribeWithCircuitBreaker } from "@/lib/fal";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { furnishingsSegmentRequestSchema } from "@/lib/ai-route-schemas";
@@ -54,11 +54,6 @@ const INVALID_CONCEPT_COPY = {
 // provider degrades to the retryable timeout copy instead of hanging
 // the detection request.
 const DETECTION_TIMEOUT_MS = 90_000;
-
-type FalSubscribeFunction = (
-  id: string,
-  options: { input: Record<string, unknown>; abortSignal?: AbortSignal }
-) => Promise<unknown>;
 
 /**
  * Fetches a fal-hosted mask image and re-encodes it as a data URL so the
@@ -172,8 +167,7 @@ export async function POST(request: NextRequest) {
     // builder applies the verified "furniture" default, so the preset
     // path stays byte-equivalent.
     const payload = buildFurnishingDetectionPayload({ imageUrl, concept });
-    const falSubscribe = fal.subscribe as FalSubscribeFunction;
-    const result = await falSubscribe(FAL_FURNISHING_DETECTION_MODEL, {
+    const result = await falSubscribeWithCircuitBreaker(FAL_FURNISHING_DETECTION_MODEL, {
       input: payload,
       abortSignal: AbortSignal.timeout(DETECTION_TIMEOUT_MS),
     });

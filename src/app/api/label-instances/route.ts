@@ -2,7 +2,7 @@ import { generateObject } from "ai";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
-import { aiModel, assertOpenAIConfigured } from "@/lib/ai";
+import { aiModel, assertOpenAIConfigured, generateWithCircuitBreaker } from "@/lib/ai";
 import {
   visionLabelRequestSchema,
   visionLabelOutputSchema,
@@ -143,35 +143,37 @@ export async function POST(request: NextRequest) {
       base64: crop.cropDataUrl.slice(crop.cropDataUrl.indexOf(",") + 1),
     }));
 
-    const { object } = await generateObject({
-      model: aiModel,
-      schema: visionLabelOutputSchema,
-      messages: [
-        {
-          role: "user" as const,
-          content: [
-            {
-              type: "text" as const,
-              text: [
-                `A room photo was scanned for "${concept}" instances.`,
-                "Numbered crops of each detected instance follow, in detection order.",
-                "Name each crop with a short, specific interior-design noun phrase",
-                '(e.g. "accent chair", "coffee table"). Keep labels under 6 words.',
-                "If a crop is ambiguous, use the most likely furniture name.",
-                `Respond with one label per instance index (${crops
-                  .map((crop: { instanceIndex: number }) => crop.instanceIndex)
-                  .join(", ")}).`,
-              ].join(" "),
-            },
-            ...cropsWithBytes.map((crop) => ({
-              type: "file" as const,
-              mediaType: "image/jpeg" as const,
-              data: crop.base64,
-            })),
-          ],
-        },
-      ],
-    });
+    const { object } = await generateWithCircuitBreaker(async () =>
+      generateObject({
+        model: aiModel,
+        schema: visionLabelOutputSchema,
+        messages: [
+          {
+            role: "user" as const,
+            content: [
+              {
+                type: "text" as const,
+                text: [
+                  `A room photo was scanned for "${concept}" instances.`,
+                  "Numbered crops of each detected instance follow, in detection order.",
+                  "Name each crop with a short, specific interior-design noun phrase",
+                  '(e.g. "accent chair", "coffee table"). Keep labels under 6 words.',
+                  "If a crop is ambiguous, use the most likely furniture name.",
+                  `Respond with one label per instance index (${crops
+                    .map((crop: { instanceIndex: number }) => crop.instanceIndex)
+                    .join(", ")}).`,
+                ].join(" "),
+              },
+              ...cropsWithBytes.map((crop) => ({
+                type: "file" as const,
+                mediaType: "image/jpeg" as const,
+                data: crop.base64,
+              })),
+            ],
+          },
+        ],
+      })
+    );
 
     // Keep only labels for instance indices the caller actually sent —
     // the model occasionally echoes stray indices, and the client keys labels
