@@ -143,7 +143,7 @@ model VisionLabel {
   instanceIndex  Int
   label          String   // GPT-4o-mini's label text
   score          Float?
-  userId         String?  // optional: scopes cache to the user who paid
+  userId         String  // scopes cache to the user who paid
   roomId         String?  // optional: links to owning room for cascade delete (#775)
   room           Room?    @relation(fields: [roomId], references: [id], onDelete: Cascade)
   createdAt      DateTime @default(now())

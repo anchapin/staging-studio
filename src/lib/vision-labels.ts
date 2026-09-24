@@ -105,7 +105,7 @@ export async function getCachedVisionLabels(params: {
   imageUrl: string;
   concept: string;
   instanceIndices: number[];
-  userId?: string;
+  userId: string;
 }) {
   const { imageUrl, concept, instanceIndices, userId } = params;
   const imageUrlHash = hashImageUrl(imageUrl);
@@ -114,7 +114,7 @@ export async function getCachedVisionLabels(params: {
       imageUrlHash,
       concept,
       instanceIndex: { in: instanceIndices },
-      ...(userId !== undefined ? { userId } : {}),
+      userId,
     },
   });
   return labels;
@@ -124,7 +124,7 @@ export async function upsertVisionLabels(params: {
   imageUrl: string;
   concept: string;
   results: Array<{ instanceIndex: number; label: string; score?: number }>;
-  userId?: string;
+  userId: string;
   roomId?: string;
 }) {
   const { imageUrl, concept, results, userId, roomId } = params;
