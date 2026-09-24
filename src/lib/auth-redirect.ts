@@ -45,7 +45,7 @@ export function resolveAuthRedirect(
   if (
     !isAuthenticated &&
     (pathname.startsWith("/dashboard") ||
-      pathname.startsWith("/projects") ||
+      pathname.startsWith("/projects/") ||
       pathname.startsWith("/settings"))
   ) {
     return "/login";

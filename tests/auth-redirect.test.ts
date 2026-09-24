@@ -22,7 +22,6 @@ const cases: Array<{
 }> = [
   // Unauthenticated → protected prefixes redirect to /login
   { pathname: "/dashboard", isAuthenticated: false, expected: "/login" },
-  { pathname: "/projects", isAuthenticated: false, expected: "/login" },
   { pathname: "/projects/abc", isAuthenticated: false, expected: "/login" },
   { pathname: "/projects/new", isAuthenticated: false, expected: "/login" },
   { pathname: "/settings", isAuthenticated: false, expected: "/login" },
@@ -50,12 +49,12 @@ const cases: Array<{
   { pathname: "/", isAuthenticated: true, expected: null },
 
   // Surprising PREFIX-match semantics (startsWith everywhere) — pinned as-is.
-  // "/projectsXYZ" matches the "/projects" guard: prefix match, not segment match.
+  // /projectsXYZ no longer matches /projects/ since fix #860 (no longer a prefix match).
   {
-    pathname: "/projectsXYZ",
+    pathname: "/projectX",
     isAuthenticated: false,
-    expected: "/login",
-    note: "prefix match: /projects matches /projectsXYZ",
+    expected: null,
+    note: "segment match: /projectX does not start with /projects/",
   },
   {
     pathname: "/dashboardfoo",
@@ -101,7 +100,7 @@ const cases: Array<{
     pathname: "/projects/",
     isAuthenticated: false,
     expected: "/login",
-    note: "trailing slash still starts with /projects",
+    note: "segment match: /projects/ starts with /projects/",
   },
 ];
 
