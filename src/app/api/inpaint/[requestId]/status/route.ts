@@ -6,10 +6,28 @@ import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { decideInpaintPersistence } from "@/lib/inpaint-persistence";
 import { classifyIntegrationError } from "@/lib/error-classify";
 import { FAL_FLUX_FILL_MODEL } from "@/lib/prompts";
-import { checkRateLimit } from "@/lib/sliding-window-ratelimit";
 
-const STATUS_POLL_RATE_LIMIT = 30;
-const STATUS_POLL_WINDOW_MS = 60_000;
+const INPAINT_STATUS_RATE_LIMIT = 60;
+const INPAINT_STATUS_RATE_WINDOW_MS = 60_000;
+
+type RateLimitEntry = { count: number; windowStart: number };
+
+const inpaintStatusRateLimitMap = new Map<string, RateLimitEntry>();
+
+function checkInpaintStatusRateLimit(userId: string): { allowed: boolean; remaining: number; retryAfterMs: number } {
+  const now = Date.now();
+  const entry = inpaintStatusRateLimitMap.get(userId);
+  if (!entry || now - entry.windowStart >= INPAINT_STATUS_RATE_WINDOW_MS) {
+    inpaintStatusRateLimitMap.set(userId, { count: 1, windowStart: now });
+    return { allowed: true, remaining: INPAINT_STATUS_RATE_LIMIT - 1, retryAfterMs: INPAINT_STATUS_RATE_WINDOW_MS };
+  }
+  if (entry.count >= INPAINT_STATUS_RATE_LIMIT) {
+    const retryAfterMs = INPAINT_STATUS_RATE_WINDOW_MS - (now - entry.windowStart);
+    return { allowed: false, remaining: 0, retryAfterMs: Math.ceil(retryAfterMs / 1000) };
+  }
+  entry.count++;
+  return { allowed: true, remaining: INPAINT_STATUS_RATE_LIMIT - entry.count, retryAfterMs: INPAINT_STATUS_RATE_WINDOW_MS - (now - entry.windowStart) };
+}
 
 const INPAINT_STATUS_ERROR_COPY = {
   notFound: {
@@ -67,22 +85,19 @@ export async function GET(
       );
     }
 
-    const rateLimit = checkRateLimit(user.id, STATUS_POLL_RATE_LIMIT, STATUS_POLL_WINDOW_MS);
+    const rateLimit = checkInpaintStatusRateLimit(user.id);
     if (!rateLimit.allowed) {
-      const retryAfter = Math.ceil((rateLimit.resetAt - Date.now()) / 1000);
       return NextResponse.json(
         {
           error: "Too many requests",
-          message: "Please slow down",
-          retryAfter,
+          message: `Rate limit exceeded. Please wait ${rateLimit.retryAfterMs} seconds before trying again.`,
         },
         {
           status: 429,
           headers: {
-            "Retry-After": String(retryAfter),
-            "X-RateLimit-Limit": String(STATUS_POLL_RATE_LIMIT),
+            "Retry-After": String(rateLimit.retryAfterMs),
+            "X-RateLimit-Limit": String(INPAINT_STATUS_RATE_LIMIT),
             "X-RateLimit-Remaining": "0",
-            "X-RateLimit-Reset": String(Math.ceil(rateLimit.resetAt / 1000)),
           },
         }
       );
@@ -164,13 +179,13 @@ export async function GET(
         const falImageUrl: string | null = falResult?.images?.[0]?.url ?? null;
         if (!falImageUrl) throw new Error("fal result unavailable");
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30_000);
+        const controller1 = new AbortController();
+        const timeoutId1 = setTimeout(() => controller1.abort(), 30_000);
         let imageBlob: Blob;
         try {
-          imageBlob = await fetch(falImageUrl, { signal: controller.signal }).then((r) => r.blob());
+          imageBlob = await fetch(falImageUrl, { signal: controller1.signal }).then((r) => r.blob());
         } finally {
-          clearTimeout(timeoutId);
+          clearTimeout(timeoutId1);
         }
         const supabase = await createSupabaseRequestClient();
         const objectPath = `after-${requestId}.png`;
@@ -275,13 +290,13 @@ export async function GET(
       let resolvedImageUrl = falImageUrl;
 
       try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30_000);
+        const controller2 = new AbortController();
+        const timeoutId2 = setTimeout(() => controller2.abort(), 30_000);
         let imageBlob: Blob;
         try {
-          imageBlob = await fetch(falImageUrl, { signal: controller.signal }).then((r) => r.blob());
+          imageBlob = await fetch(falImageUrl, { signal: controller2.signal }).then((r) => r.blob());
         } finally {
-          clearTimeout(timeoutId);
+          clearTimeout(timeoutId2);
         }
         const supabase = await createSupabaseRequestClient();
         const objectPath = `after-${requestId}.png`;
