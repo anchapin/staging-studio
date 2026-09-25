@@ -1,6 +1,7 @@
 import { openai } from "@ai-sdk/openai";
 import { requireEnvVars } from "@/lib/env";
 import { getCircuitBreaker } from "@/lib/circuit-breaker";
+import { withRetry } from "@/lib/retry";
 
 /**
  * Shared OpenAI chat model instance (gpt-4o-mini) for the Vercel AI SDK.
@@ -29,11 +30,12 @@ export function assertOpenAIConfigured(): void {
 }
 
 export async function generateWithCircuitBreaker<T>(
-  fn: () => Promise<T>
+  fn: () => Promise<T>,
 ): Promise<T> {
   const cb = getCircuitBreaker("openai", {
     failureThreshold: 3,
     cooldownMs: 30_000,
   });
-  return cb.execute(fn);
+  // Combine circuit breaker with exponential backoff retry
+  return withRetry(() => cb.execute(fn), 5, 1000, 30000);
 }

@@ -3,6 +3,7 @@ import { requireEnvVars } from "@/lib/env";
 import {
   getCircuitBreaker,
 } from "@/lib/circuit-breaker";
+import { withRetry } from "@/lib/retry";
 
 fal.config({
   credentials: process.env.FAL_KEY,
@@ -50,9 +51,16 @@ export async function falSubscribeWithCircuitBreaker<T = unknown>(
     failureThreshold: 3,
     cooldownMs: 30_000,
   });
-  return cb.execute(() =>
-    fal.subscribe(modelId, { ...options })
-  ) as Promise<T>;
+  // Combine circuit breaker with exponential backoff retry
+  return withRetry(
+    () =>
+      cb.execute(() =>
+        fal.subscribe(modelId, { ...options })
+      ) as Promise<T>,
+    5,
+    1000,
+    30000
+  );
 }
 
 interface FalQueueSubmitOptions {
@@ -68,7 +76,14 @@ export async function falQueueSubmitWithCircuitBreaker(
     failureThreshold: 3,
     cooldownMs: 30_000,
   });
-  return cb.execute(() =>
-    fal.queue.submit(modelId, options)
-  ) as Promise<{ request_id: string }>;
+  // Combine circuit breaker with exponential backoff retry
+  return withRetry(
+    () =>
+      cb.execute(() =>
+        fal.queue.submit(modelId, options)
+      ) as Promise<{ request_id: string }>,
+    5,
+    1000,
+    30000
+  );
 }
