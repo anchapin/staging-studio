@@ -28,6 +28,7 @@ import {
   API_ERROR_INTERNAL_SERVER,
 } from "@/lib/api-errors";
 import { withErrorHandler, ApiError } from "@/lib/api-error-handler";
+import { sanitizePromptValue } from "@/lib/sanitize-prompt";
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
   const user = await getAuthedPrismaUser();
@@ -73,7 +74,8 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     });
   }
 
-  const { roomId, concept, crops, imageUrl } = parsed.data;
+  const { roomId, concept: rawConcept, crops, imageUrl } = parsed.data;
+  const concept = sanitizePromptValue(rawConcept);
 
   const room = await prisma.room.findFirst({
     where: { id: roomId, project: { userId: user.id } },

@@ -2,6 +2,7 @@ import { generateObject } from "ai";
 import type { z } from "zod";
 import { inpaintQualityGateSchema } from "@/lib/ai-route-schemas";
 import { aiModel, assertOpenAIConfigured } from "@/lib/ai";
+import { sanitizePromptValue } from "@/lib/sanitize-prompt";
 
 /**
  * Inpaint pre-flight quality gate (issue #600), made failure-tolerant of
@@ -41,12 +42,14 @@ export function buildInpaintQualityGatePrompt(params: {
   maskCoverageRatio: number;
   promptDirectives: string;
 }): string {
+  const safeRoomName = sanitizePromptValue(params.roomName);
+  const safeDirectives = sanitizePromptValue(params.promptDirectives);
   return [
-    `You are a staging quality auditor. Evaluate the inpaint directive for a room named "${params.roomName}".`,
+    `You are a staging quality auditor. Evaluate the inpaint directive for a room named "${safeRoomName}".`,
     "",
     `Mask coverage ratio: ${(params.maskCoverageRatio * 100).toFixed(1)}% of the canvas is masked for regeneration.`,
     "",
-    `Directives: "${params.promptDirectives}"`,
+    `Directives: "${safeDirectives}"`,
     "",
     "Evaluate:",
     "1. specificity (0–3): 0=completely generic/vague, 3=highly specific and concrete",
