@@ -3,6 +3,7 @@ import { fal } from "@/lib/fal";
 import { prisma } from "@/lib/prisma";
 import { createSupabaseRequestClient } from "@/lib/supabase";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { buildDeprecationHeaders } from "@/lib/api-version";
 import { decideInpaintPersistence } from "@/lib/inpaint-persistence";
 import { classifyIntegrationError } from "@/lib/error-classify";
 import { FAL_FLUX_FILL_MODEL } from "@/lib/prompts";
@@ -93,7 +94,7 @@ export async function GET(
           message: "You must be signed in to check inpainting status.",
           code: API_ERROR_UNAUTHORIZED,
         },
-        { status: 401 }
+        { status: 401, headers: buildDeprecationHeaders() }
       );
     }
 

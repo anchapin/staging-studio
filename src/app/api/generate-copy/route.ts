@@ -4,6 +4,7 @@ import { z } from "zod";
 import { aiModel, assertOpenAIConfigured, generateWithCircuitBreaker } from "@/lib/ai";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { buildDeprecationHeaders } from "@/lib/api-version";
 import {
   generateCopyRequestSchema,
   copyQualityGateSchema,
@@ -71,7 +72,7 @@ export async function POST(request: NextRequest) {
           message: "You must be signed in to generate copy.",
           code: API_ERROR_UNAUTHORIZED,
         },
-        { status: 401 }
+        { status: 401, headers: buildDeprecationHeaders() }
       );
     }
 
