@@ -12,6 +12,7 @@ import { buildCopyPrompt } from "@/lib/prompts";
 import { checklistItemSchema } from "@/lib/checklist-schema";
 import { classifyIntegrationError } from "@/lib/error-classify";
 import { describeNoObjectGeneratedError } from "@/lib/no-object-error";
+import { sanitizeCopy } from "@/lib/sanitize-copy";
 import {
   DEFAULT_DAILY_COPY_LIMIT,
   DAILY_LIMIT_ENV_VAR,
@@ -225,11 +226,12 @@ export async function POST(request: NextRequest) {
       qualityWarnings.push(...qg.qualityWarnings);
     }
 
+    // Sanitize all AI-generated copy fields before saving or returning (#920)
     const generatedCopy: GeneratedCopy = {
-      observedChallenge: copy.observedChallenge,
-      recommendation: copy.recommendation,
-      buyerPsychology: copy.buyerPsychology,
-      checklist: copy.checklist,
+      observedChallenge: sanitizeCopy(copy.observedChallenge),
+      recommendation: sanitizeCopy(copy.recommendation),
+      buyerPsychology: sanitizeCopy(copy.buyerPsychology),
+      checklist: copy.checklist, // checklist items are Zod-validated strings, no HTML expected
     };
 
     const saveResult = await saveRoomCopy(roomId, generatedCopy);
