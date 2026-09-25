@@ -14,7 +14,7 @@ import {
   DEFAULT_DAILY_LABEL_LIMIT,
   DAILY_LIMIT_ENV_VAR,
   dailyQuotaExceededPayload,
-  evaluateDailyBatchQuota,
+  evaluateDailyQuota,
   getDailyUsage,
   recordDailyUsage,
   resolveDailyLimit,
@@ -245,9 +245,8 @@ export async function detectBatchRoomTypes(
     process.env[DAILY_LIMIT_ENV_VAR.label],
     DEFAULT_DAILY_LABEL_LIMIT
   );
-  const labelQuota = evaluateDailyBatchQuota(
+  const labelQuota = evaluateDailyQuota(
     await getDailyUsage("label", user.id),
-    parsed.data.imageUrls.length,
     labelLimit
   );
   if (!labelQuota.allowed) {
