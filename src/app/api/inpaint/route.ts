@@ -3,6 +3,7 @@ import { z } from "zod";
 import { falQueueSubmitWithCircuitBreaker } from "@/lib/fal";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { buildDeprecationHeaders } from "@/lib/api-version";
 import { inpaintRequestSchema } from "@/lib/ai-route-schemas";
 import { evaluateInpaintQualityGate } from "@/lib/inpaint-quality-gate";
 import { classifyIntegrationError } from "@/lib/error-classify";
@@ -171,7 +172,7 @@ export async function POST(request: NextRequest) {
           error: "Unauthorized",
           message: "You must be signed in to start inpainting.",
         },
-        { status: 401 }
+        { status: 401, headers: buildDeprecationHeaders() }
       );
     }
 

@@ -14,7 +14,7 @@ const mockGetDailyUsage = vi.fn();
 
 const mockDetectRoomType = vi.fn();
 
-const mockEvaluateDailyBatchQuota = vi.fn();
+const mockEvaluateDailyQuota = vi.fn();
 
 const mockRecordDailyUsage = vi.fn();
 
@@ -35,7 +35,7 @@ vi.mock("@/lib/api-quota", async (importOriginal) => {
   return {
     ...actual,
     getDailyUsage: mockGetDailyUsage,
-    evaluateDailyBatchQuota: mockEvaluateDailyBatchQuota,
+    evaluateDailyQuota: mockEvaluateDailyQuota,
     recordDailyUsage: mockRecordDailyUsage,
   };
 });
@@ -99,13 +99,11 @@ describe("detectBatchRoomTypes", () => {
       "https://room2.jpg.supabase.co/storage/v1/object/public/rooms/room2.jpg",
     ];
 
-    // Simulate quota exceeded - remaining quota (0) < requested count (2)
-    mockEvaluateDailyBatchQuota.mockReturnValue({
+    // Simulate quota exceeded - used (20) >= limit (20)
+    mockEvaluateDailyQuota.mockReturnValue({
       allowed: false,
       used: 20,
-      requested: 2,
       limit: 20,
-      remaining: 0,
     });
 
     const result = await detectBatchRoomTypes(mockProject.id, imageUrls);
@@ -127,12 +125,11 @@ describe("detectBatchRoomTypes", () => {
       "https://room1.jpg.supabase.co/storage/v1/object/public/rooms/room1.jpg",
     ];
 
-    mockEvaluateDailyBatchQuota.mockReturnValue({
+    // used (5) < limit (20) so allowed
+    mockEvaluateDailyQuota.mockReturnValue({
       allowed: true,
       used: 5,
-      requested: 1,
       limit: 20,
-      remaining: 15,
     });
 
     mockDetectRoomType.mockResolvedValue("Living Room");

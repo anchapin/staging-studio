@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { assertFalConfigured, falSubscribeWithCircuitBreaker } from "@/lib/fal";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { buildDeprecationHeaders } from "@/lib/api-version";
 import { furnishingsSegmentRequestSchema } from "@/lib/ai-route-schemas";
 import { classifyIntegrationError } from "@/lib/error-classify";
 import {
@@ -99,7 +100,7 @@ export async function POST(request: NextRequest) {
           message: "You must be signed in to detect furnishings.",
           code: API_ERROR_UNAUTHORIZED,
         },
-        { status: 401 }
+        { status: 401, headers: buildDeprecationHeaders() }
       );
     }
 
