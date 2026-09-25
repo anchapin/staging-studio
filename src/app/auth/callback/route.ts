@@ -1,16 +1,38 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 
 export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get("code");
 
-  if (!code) {
+  // Apply rate limiting based on client IP
+  // Rate limit: 5 Magic Link exchanges per IP per 10 minutes
+  const clientIp = getClientIp(request);
+  const { allowed, remaining, resetIn } = checkRateLimit(clientIp, 5, 10 * 60 * 1000);
+
+  // Rate limit headers for debugging and client awareness
+  const rateLimitHeaders = {
+    "X-RateLimit-Remaining": String(remaining),
+    "X-RateLimit-Reset": String(Math.ceil(resetIn / 1000)),
+  };
+
+  if (!allowed) {
     return NextResponse.redirect(
-      new URL("/login?error=auth_callback_failed", request.url)
+      new URL("/login?error=rate_limit_exceeded", request.url),
+      { status: 302, headers: rateLimitHeaders }
     );
   }
 
-  const response = NextResponse.redirect(new URL("/dashboard", request.url));
+  if (!code) {
+    return NextResponse.redirect(
+      new URL("/login?error=auth_callback_failed", request.url),
+      { headers: rateLimitHeaders }
+    );
+  }
+
+  const response = NextResponse.redirect(new URL("/dashboard", request.url), {
+    headers: rateLimitHeaders,
+  });
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -33,7 +55,8 @@ export async function GET(request: NextRequest) {
 
   if (error || !data?.user) {
     return NextResponse.redirect(
-      new URL("/login?error=auth_callback_failed", request.url)
+      new URL("/login?error=auth_callback_failed", request.url),
+      { headers: rateLimitHeaders }
     );
   }
 
