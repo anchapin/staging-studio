@@ -1,13 +1,8 @@
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { createSupabaseRequestClient } from "@/lib/supabase";
+import { NextRequest, NextResponse } from "next/server";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
-import {
-  API_ERROR_UNAUTHORIZED,
-  API_ERROR_MISSING_REQUIRED_FIELDS,
-  API_ERROR_USER_NOT_FOUND,
-} from "@/lib/api-errors";
+import { listProjects, createProject } from "@/lib/projects-service";
 import { withErrorHandler, ApiError } from "@/lib/api-error-handler";
+import { API_ERROR_UNAUTHORIZED } from "@/lib/api-errors";
 
 // GET: List the authed user's projects (scoped to caller)
 export const GET = withErrorHandler(async () => {
@@ -19,39 +14,12 @@ export const GET = withErrorHandler(async () => {
       status: 401,
     });
   }
-
-  const projects = await prisma.project.findMany({
-    where: { userId: userRow.id },
-    select: {
-      id: true,
-      propertyAddress: true,
-      clientName: true,
-      stagingAesthetic: true,
-      createdAt: true,
-      rooms: {
-        select: { id: true, name: true },
-      },
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  const projects = await listProjects(userRow.id);
   return NextResponse.json(projects);
 });
 
 // POST: Create a new project (auth-protected)
-export const POST = withErrorHandler(async (request: Request) => {
-  const supabase = await createSupabaseRequestClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    throw new ApiError({
-      code: API_ERROR_UNAUTHORIZED,
-      message: "You must be logged in to create a project.",
-      status: 401,
-    });
-  }
-
+export const POST = withErrorHandler(async (request: NextRequest) => {
   const body = await request.json();
   const {
     propertyAddress,
@@ -63,41 +31,15 @@ export const POST = withErrorHandler(async (request: Request) => {
     rooms,
   } = body;
 
-  if (!propertyAddress || !clientName || !targetBuyer || !stagingAesthetic) {
-    throw new ApiError({
-      code: API_ERROR_MISSING_REQUIRED_FIELDS,
-      message: "propertyAddress, clientName, targetBuyer, and stagingAesthetic are required.",
-      status: 400,
-    });
-  }
-
-  const userRow = await prisma.user.findUnique({
-    where: { email: user.email },
+  const project = await createProject({
+    propertyAddress,
+    clientName,
+    targetBuyer,
+    stagingAesthetic,
+    buyerDemographics,
+    stagingPackage: stagingPackage ?? null,
+    rooms: rooms ?? [],
   });
 
-  if (!userRow) {
-    throw new ApiError({
-      code: API_ERROR_USER_NOT_FOUND,
-      message: "User not found in database.",
-      status: 404,
-    });
-  }
-
-  const project = await prisma.project.create({
-    data: {
-      userId: userRow.id,
-      propertyAddress,
-      clientName,
-      targetBuyer,
-      stagingAesthetic,
-      stagingPackage: stagingPackage ?? null,
-      buyerDemographics: buyerDemographics ?? undefined,
-      rooms: {
-        create: rooms.map((name: string) => ({ name })),
-      },
-    },
-    include: { rooms: true },
-  });
-
-  return NextResponse.json(project);
+  return NextResponse.json(project, { status: 201 });
 });
