@@ -13,19 +13,22 @@ describe("sanitizeCopy", () => {
     expect(result).not.toContain("<script>"); // raw tags gone
   });
 
-  it("strips img onerror injection", () => {
+  it("escapes img onerror injection as literal text (safe to render)", () => {
     const input = `<img src=x onerror="alert('xss')">Hello`;
     const result = sanitizeCopy(input);
-    expect(result).not.toContain("onerror");
+    // The img tag is escaped so onerror can't execute - it renders as literal text
+    expect(result).toContain("&lt;img"); // tag escaped to entities
     expect(result).toContain("Hello");
+    expect(result).not.toContain("<img"); // raw tags gone
   });
 
-  it("strips HTML tags with attributes", () => {
+  it("escapes HTML links with javascript: href as literal text", () => {
     const input = `<a href="javascript:alert(1)" onclick="alert(2)">Click</a>`;
     const result = sanitizeCopy(input);
-    expect(result).not.toContain("href");
-    expect(result).not.toContain("onclick");
-    expect(result).not.toContain("javascript");
+    // All HTML is escaped - href, onclick, javascript all rendered as safe text
+    expect(result).not.toContain("<a"); // raw tags gone
+    expect(result).toContain("&lt;a"); // escaped
+    expect(result).toContain("&gt;"); // closing tag escaped
   });
 
   it("escapes malformed/unclosed HTML tags", () => {
