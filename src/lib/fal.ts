@@ -3,6 +3,7 @@ import { requireEnvVars } from "@/lib/env";
 import {
   getCircuitBreaker,
 } from "@/lib/circuit-breaker";
+import { logger } from "@/lib/logger";
 
 fal.config({
   credentials: process.env.FAL_KEY,
@@ -50,9 +51,23 @@ export async function falSubscribeWithCircuitBreaker<T = unknown>(
     failureThreshold: 3,
     cooldownMs: 30_000,
   });
-  return cb.execute(() =>
-    fal.subscribe(modelId, { ...options })
-  ) as Promise<T>;
+  try {
+    return await cb.execute(() =>
+      fal.subscribe(modelId, { ...options })
+    ) as Promise<T>;
+  } catch (error) {
+    logger.error(
+      {
+        event: "fal_error",
+        errorType: "ExternalApiError",
+        modelId,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      },
+      `[ExternalApiError] fal.ai subscribe error: ${error instanceof Error ? error.message : String(error)}`
+    );
+    throw error;
+  }
 }
 
 interface FalQueueSubmitOptions {
@@ -68,7 +83,21 @@ export async function falQueueSubmitWithCircuitBreaker(
     failureThreshold: 3,
     cooldownMs: 30_000,
   });
-  return cb.execute(() =>
-    fal.queue.submit(modelId, options)
-  ) as Promise<{ request_id: string }>;
+  try {
+    return await cb.execute(() =>
+      fal.queue.submit(modelId, options)
+    ) as unknown as Promise<{ request_id: string }>;
+  } catch (error) {
+    logger.error(
+      {
+        event: "fal_error",
+        errorType: "ExternalApiError",
+        modelId,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      },
+      `[ExternalApiError] fal.ai queue submit error: ${error instanceof Error ? error.message : String(error)}`
+    );
+    throw error;
+  }
 }
