@@ -4,6 +4,7 @@ import {
   API_ERROR_INTERNAL_SERVER,
   API_ERROR_RATE_LIMIT_EXCEEDED,
   API_ERROR_INVALID_REQUEST,
+  API_ERROR_PROJECT_OWNERSHIP_DENIED,
 } from "@/lib/api-errors";
 
 /**
@@ -38,6 +39,22 @@ export class ApiError extends Error {
     this.code = params.code;
     this.status = params.status ?? 500;
     this.details = params.details;
+  }
+}
+
+/**
+ * Thrown when a user attempts to access a project they do not own.
+ * Maps to HTTP 403 Forbidden.
+ */
+export class ProjectOwnershipError extends ApiError {
+  constructor(projectId: string) {
+    super({
+      code: API_ERROR_PROJECT_OWNERSHIP_DENIED,
+      message: `Access denied: you do not own project "${projectId}"`,
+      status: 403,
+      details: { projectId },
+    });
+    this.name = "ProjectOwnershipError";
   }
 }
 

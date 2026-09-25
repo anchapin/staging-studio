@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { getAuthedPrismaUser, requireProjectOwnership } from "@/lib/api-auth";
 import { revalidatePath } from "next/cache";
 import { createSupabaseRequestClient } from "@/lib/supabase";
 import { withRetry } from "@/lib/retry";
@@ -87,15 +87,20 @@ export async function createRoomsBatch(
     };
   }
 
-  const project = await prisma.project.findUnique({
-    where: { id: parsed.data.projectId, userId: user.id },
-    select: { id: true, rooms: { select: { id: true, sortOrder: true }, orderBy: { sortOrder: "desc" }, take: 1 } },
-  });
-  if (!project) {
+  try {
+    await requireProjectOwnership(parsed.data.projectId, user.id);
+  } catch {
     return { success: false, error: "Project not found" };
   }
 
-  const maxSortOrder = project.rooms[0]?.sortOrder ?? -1;
+  const maxSortOrder =
+    (
+      await prisma.room.findFirst({
+        where: { projectId: parsed.data.projectId },
+        orderBy: { sortOrder: "desc" },
+        select: { sortOrder: true },
+      })
+    )?.sortOrder ?? -1;
 
   try {
     const rooms = await prisma.$transaction(
@@ -163,11 +168,9 @@ export async function getBatchRoomUploadUrls(
     };
   }
 
-  const project = await prisma.project.findUnique({
-    where: { id: parsed.data.projectId, userId: user.id },
-    select: { id: true },
-  });
-  if (!project) {
+  try {
+    await requireProjectOwnership(parsed.data.projectId, user.id);
+  } catch {
     return { success: false, error: "Project not found" };
   }
 
@@ -268,11 +271,9 @@ export async function detectBatchRoomTypes(
 
   // Ownership: the project the photos belong to must be owned by the
   // authenticated user — checked before any AI work.
-  const project = await prisma.project.findUnique({
-    where: { id: parsed.data.projectId, userId: user.id },
-    select: { id: true },
-  });
-  if (!project) {
+  try {
+    await requireProjectOwnership(parsed.data.projectId, user.id);
+  } catch {
     return { success: false, error: "Project not found" };
   }
 

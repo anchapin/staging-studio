@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { getAuthedPrismaUser, requireProjectOwnership } from "@/lib/api-auth";
 import { API_ERROR_PROJECT_NOT_FOUND, API_ERROR_UNAUTHORIZED } from "@/lib/api-errors";
 import { withErrorHandler, ApiError } from "@/lib/api-error-handler";
 
@@ -18,6 +18,10 @@ export const GET = withErrorHandler(async (
   }
 
   const { id } = await params;
+
+  // Ownership check before fetching full project data
+  await requireProjectOwnership(id, userRow.id);
+
   const project = await prisma.project.findUnique({
     where: { id, userId: userRow.id },
     select: {

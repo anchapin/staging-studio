@@ -10,6 +10,7 @@ export const API_ERROR_INVALID_PREVIEW_TOKEN = "invalid-preview-token";
 
 /* ─── Resource Not Found ─────────────────────────────────────────────────── */
 export const API_ERROR_PROJECT_NOT_FOUND = "project-not-found";
+export const API_ERROR_PROJECT_OWNERSHIP_DENIED = "project-ownership-denied";
 export const API_ERROR_ROOM_NOT_FOUND = "room-not-found";
 export const API_ERROR_REQUEST_NOT_FOUND = "request-not-found";
 export const API_ERROR_USER_NOT_FOUND = "user-not-found";

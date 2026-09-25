@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { createServerClientSingleton } from "@/lib/supabase";
+import { ProjectOwnershipError } from "@/lib/api-error-handler";
 
 /**
  * Resolves the current request's authenticated user as a Prisma `User`.
@@ -51,4 +52,26 @@ export async function getAuthedPrismaUser() {
   return prisma.user.findUnique({
     where: { email: user.email },
   });
+}
+
+/**
+ * Verifies that the given user owns the given project.
+ * Throws a typed `ProjectOwnershipError` if the project does not exist
+ * or belongs to a different user.
+ *
+ * Use this at the start of every server action and API route that accepts
+ * a `projectId` parameter to enforce uniform ownership checks.
+ */
+export async function requireProjectOwnership(
+  projectId: string,
+  userId: string,
+): Promise<void> {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId, userId },
+    select: { id: true },
+  });
+
+  if (!project) {
+    throw new ProjectOwnershipError(projectId);
+  }
 }

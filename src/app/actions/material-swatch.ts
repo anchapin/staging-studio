@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { getAuthedPrismaUser, requireProjectOwnership } from "@/lib/api-auth";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -43,11 +43,9 @@ export async function saveMaterialSwatch(
     return failure("Not authenticated");
   }
 
-  const project = await prisma.project.findUnique({
-    where: { id: projectId, userId: user.id },
-    select: { id: true },
-  });
-  if (!project) {
+  try {
+    await requireProjectOwnership(projectId, user.id);
+  } catch {
     return failure("Project not found");
   }
 
@@ -119,11 +117,9 @@ export async function deleteMaterialSwatch(
     return failure("Not authenticated");
   }
 
-  const project = await prisma.project.findUnique({
-    where: { id: projectId, userId: user.id },
-    select: { id: true },
-  });
-  if (!project) {
+  try {
+    await requireProjectOwnership(projectId, user.id);
+  } catch {
     return failure("Project not found");
   }
 
@@ -160,11 +156,9 @@ export async function replaceMaterialSwatches(
     return failure("Not authenticated");
   }
 
-  const project = await prisma.project.findUnique({
-    where: { id: projectId, userId: user.id },
-    select: { id: true },
-  });
-  if (!project) {
+  try {
+    await requireProjectOwnership(projectId, user.id);
+  } catch {
     return failure("Project not found");
   }
 

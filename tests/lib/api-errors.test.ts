@@ -4,6 +4,7 @@ import {
   API_ERROR_INVALID_TOKEN,
   API_ERROR_INVALID_PREVIEW_TOKEN,
   API_ERROR_PROJECT_NOT_FOUND,
+  API_ERROR_PROJECT_OWNERSHIP_DENIED,
   API_ERROR_ROOM_NOT_FOUND,
   API_ERROR_REQUEST_NOT_FOUND,
   API_ERROR_USER_NOT_FOUND,
@@ -55,6 +56,11 @@ describe("API error constants", () => {
     it("API_ERROR_PROJECT_NOT_FOUND is a non-empty string", () => {
       expect(typeof API_ERROR_PROJECT_NOT_FOUND).toBe("string");
       expect(API_ERROR_PROJECT_NOT_FOUND.length).toBeGreaterThan(0);
+    });
+
+    it("API_ERROR_PROJECT_OWNERSHIP_DENIED is a non-empty string", () => {
+      expect(typeof API_ERROR_PROJECT_OWNERSHIP_DENIED).toBe("string");
+      expect(API_ERROR_PROJECT_OWNERSHIP_DENIED.length).toBeGreaterThan(0);
     });
 
     it("API_ERROR_ROOM_NOT_FOUND is a non-empty string", () => {

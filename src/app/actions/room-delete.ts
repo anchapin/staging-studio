@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { getAuthedPrismaUser, requireProjectOwnership } from "@/lib/api-auth";
 import { revalidatePath } from "next/cache";
 
 function failure(error: string): { success: false; error: string } {
@@ -21,11 +21,9 @@ export async function reorderRooms(
     return failure("Not authenticated");
   }
 
-  const project = await prisma.project.findUnique({
-    where: { id: projectId, userId: user.id },
-    select: { id: true },
-  });
-  if (!project) {
+  try {
+    await requireProjectOwnership(projectId, user.id);
+  } catch {
     return failure("Project not found");
   }
 
