@@ -6,6 +6,7 @@ const ENV_VAR_DOCS: Record<string, string> = {
   OPENAI_API_KEY: "platform.openai.com → API keys",
   FAL_KEY: "fal.ai dashboard → API keys",
   BROWSERLESS_API_KEY: "browserless.io → account API key",
+  SIGNATURE_ENCRYPTION_KEY: "AES-256 key for client signature encryption; generate with: openssl rand -base64 32",
 };
 
 /**

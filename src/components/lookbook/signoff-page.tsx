@@ -2,6 +2,7 @@ import Image from "next/image";
 import { LookbookRoomData } from "./types";
 import { ProposalFooter } from "./proposal-footer";
 import { formatLongDate } from "@/lib/relative-time";
+import { decryptSignature } from "@/lib/signature-encryption";
 
 interface SignoffPageProps {
   user: LookbookRoomData["user"];
@@ -18,9 +19,13 @@ interface SignoffPageProps {
  * The interactive signing form (draw/type signature + approval checkbox) is
  * handled by `SignoffPageClient`, which wraps this component on the preview page.
  */
-export function SignoffPage({ user, project, rooms }: SignoffPageProps) {
+export async function SignoffPage({ user, project, rooms }: SignoffPageProps) {
   const isSigned = project.clientSignatureStatus === "Signed" && project.clientSignature;
   const content = user.signoffContent || getDefaultSignoff(user, project);
+
+  const decryptedSignature = isSigned && project.clientSignature
+    ? await decryptSignature(project.clientSignature).catch(() => project.clientSignature)
+    : null;
 
   return (
     <div className="lookbook-page min-h-screen flex flex-col items-center justify-between bg-stone-50 p-12">
@@ -49,7 +54,7 @@ export function SignoffPage({ user, project, rooms }: SignoffPageProps) {
             <div className="pt-4 border-t border-border space-y-3">
               <div className="flex justify-center">
                 <Image
-                  src={project.clientSignature}
+                  src={decryptedSignature ?? project.clientSignature}
                   alt="Client signature"
                   width={200}
                   height={80}
