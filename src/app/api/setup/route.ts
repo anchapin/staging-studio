@@ -6,6 +6,7 @@ import {
   API_ERROR_MISSING_REQUIRED_FIELDS,
   API_ERROR_INTERNAL_SERVER,
 } from "@/lib/api-errors";
+import { createPreflightResponse, withCors } from "@/lib/cors";
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
@@ -35,7 +36,7 @@ export async function GET(request: NextRequest) {
     cookiesToSet.forEach(({ name, value, options }) =>
       response.cookies.set(name, value, options)
     );
-    return response;
+    return withCors(response);
   };
 
   // Hoisted so the catch block can correlate failures with the user even
@@ -65,6 +66,7 @@ export async function GET(request: NextRequest) {
     return respond({ exists: false }, { status: 500 });
   }
 }
+export const OPTIONS = createPreflightResponse;
 
 export async function POST(request: NextRequest) {
   const cookiesToSet: CookieToSet[] = [];
@@ -92,7 +94,7 @@ export async function POST(request: NextRequest) {
     cookiesToSet.forEach(({ name, value, options }) =>
       response.cookies.set(name, value, options)
     );
-    return response;
+    return withCors(response);
   };
 
   // Hoisted so the catch block can correlate failures with the user even

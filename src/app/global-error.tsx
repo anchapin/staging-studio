@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import * as Sentry from "@sentry/nextjs";
 import { Cinzel, Playfair_Display, Plus_Jakarta_Sans } from "next/font/google";
 import { cn } from "@/lib/utils";
 import "./globals.css";
@@ -34,6 +35,12 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
+    // Capture error with Sentry for production monitoring
+    if (process.env.NEXT_PUBLIC_SENTRY_DSN) {
+      Sentry.captureException(error, {
+        extra: { digest: error.digest },
+      });
+    }
     console.error(
       `[app:error] Unhandled application error${error.digest ? ` (digest: ${error.digest})` : ""}`,
       error,
