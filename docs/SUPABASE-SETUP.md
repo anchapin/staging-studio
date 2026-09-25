@@ -78,6 +78,183 @@ Notes:
 - Without the INSERT policies, the room-photo flow fails with `new row violates row-level security policy` when the server requests a signed upload URL, and the logo upload fails in the `/setup` wizard.
 - Bucket-level allowed-MIME/size limits are optional hardening; the app already enforces `jpg|jpeg|png|webp` extensions in code. If you do set MIME types on the bucket, allow at least `image/jpeg`, `image/png`, `image/webp` or uploads will be rejected by Storage.
 
+## Storage RLS Policies
+
+> **Issue #987 audit findings.** This section documents the RLS policy requirements for all Supabase Storage buckets used by the app, security findings, and recommended policies.
+
+### Buckets in use
+
+| Bucket | Path patterns | Upload mechanism | Notes |
+| --- | --- | --- | --- |
+| `room-photos` | `rooms/{roomId}/before-image[-2].{ext}`, `rooms/{roomId}/versions/{slot}/{now}-{uuid}.jpg` | Signed upload URL (server issues URL, browser PUTs directly) | before/after images + inpaint version thumbnails |
+| `logos` | `{email}-logo-{timestamp}.{ext}` | Client-side direct upload (setup wizard) | Firm logo; email in path provides natural scoping |
+| `staging-images` | `after-{requestId}.png` | Server-side only (`src/lib/inpaint-status.ts` → `persistFalImage`) | fal.ai result staging; see policy gap below |
+
+### Security findings (Issue #987)
+
+#### CRITICAL: `staging-images` bucket has no documented RLS policies
+
+The `staging-images` bucket is referenced in `src/lib/inpaint-status.ts` (`persistFalImage`) but **has no policies documented or created** in SUPABASE-SETUP.md. The upload path `after-{requestId}.png` uses a UUID-like request ID generated server-side, which provides unpredictability — but the bucket itself has no INSERT, SELECT, or DELETE policies. If this bucket was created as private (the default), all uploads via `persistFalImage` would fail with RLS violations.
+
+**Action required:** Create the `staging-images` bucket with the following policies, or clarify whether it is intended to be a public bucket:
+
+```sql
+-- If `staging-images` is intended to be PUBLIC (accessible without auth):
+-- Mark the bucket public when creating it:
+update storage.buckets set public = true where id = 'staging-images';
+
+-- Allow anyone to read objects (public bucket):
+create policy "public read staging-images"
+on storage.objects for select to authenticated
+using (bucket_id = 'staging-images');
+
+-- Server-side uploads use the anon key or user's session, so INSERT must be allowed:
+create policy "authenticated can upload to staging-images"
+on storage.objects for insert to authenticated
+with check (bucket_id = 'staging-images');
+
+-- If `staging-images` is intended to be PRIVATE (recommended for inpaint results):
+-- Only allow server-side uploads via service role (bypasses RLS):
+-- No policies needed if using service role key for server uploads.
+-- For additional hardening, add a path-based INSERT check:
+create policy "authenticated can upload to staging-images"
+on storage.objects for insert to authenticated
+with check (bucket_id = 'staging-images');
+```
+
+#### HIGH: `room-photos` INSERT policy lacks path-scoped ownership check
+
+The documented INSERT policy for `room-photos` only checks `bucket_id = 'room-photos'`, which allows any authenticated user to upload to **any path** within the bucket — not just their own rooms. While the application-layer `getSignedUploadUrl` (`src/app/actions/room-photos.ts`) performs a Prisma ownership check before generating a signed URL, the signed URL itself does not encode path restrictions. If a signed URL is leaked or obtained through a separate vulnerability, an attacker could overwrite another user's room photos.
+
+**Recommended path-scoped INSERT policy:**
+
+```sql
+-- Restrict INSERT to paths under the user's own rooms.
+-- The path pattern `rooms/{roomId}/...` is enforced by checking
+-- that the roomId prefix exists and the user owns the room via a
+-- subquery on the auth.users → Project → Room chain.
+-- NOTE: This requires storage.objects to have a reusable relationship
+-- to the user's project ownership. Since Supabase Storage RLS cannot
+-- directly join to the app's Room table, the application-layer
+-- ownership check (getAuthedPrismaUser + Prisma findFirst in
+-- getSignedUploadUrl and saveInpaintVersion) remains the primary
+-- enforcement gate.
+--
+-- Minimum viable policy (bucket-level, authenticated):
+create policy "authenticated can upload to room-photos"
+on storage.objects for insert to authenticated
+with check (bucket_id = 'room-photos');
+```
+
+**The application-layer ownership check IS the primary enforcement.** The signed upload URL flow means the server generates a one-time URL only after verifying room ownership via Prisma. The RLS INSERT policy is a defence-in-depth measure. The path-based `WITH CHECK` expression cannot fully enforce app-level room ownership without a way to join storage paths to the `Room` table in the same query.
+
+#### MEDIUM: `room-photos` lacks UPDATE and DELETE policies
+
+Inpaint version thumbnails are deleted during FIFO eviction in `saveInpaintVersion` (`src/app/actions/inpaint-versions.ts`) via `supabase.storage.from("room-photos").remove(pathsToDelete)`. If this is called with paths from evicted version rows, those paths must be deletable by the authenticated user. Currently no DELETE or UPDATE policy is documented.
+
+```sql
+-- Allow users to delete their own version thumbnails.
+-- The application enforces ownership at the Prisma level before calling remove().
+create policy "authenticated can delete from room-photos"
+on storage.objects for delete to authenticated
+using (
+  bucket_id = 'room-photos'
+  -- Path must be under a room the user owns:
+  and (
+    -- Pattern: rooms/{roomId}/versions/...
+    name like 'rooms/%/versions/%'
+  )
+);
+```
+
+#### LOW: `logos` bucket path implicitly scoped by email
+
+The `logos` bucket path `${email}-logo-${Date.now()}.{ext}` embeds the user's email, providing natural path scoping. Users cannot overwrite another user's logo because the path is unique per email. The current INSERT-only policy is sufficient for this bucket.
+
+```sql
+-- Path-based INSERT policy for logos (email is embedded in the path):
+-- The authenticated user's email must appear in the object name.
+-- Note: Supabase does not expose the user's email in Storage RLS directly,
+-- so this policy is a no-op without a custom function or trigger.
+-- The current bucket-level INSERT policy is acceptable because the path
+-- naturally scopes writes to the uploading user.
+create policy "authenticated can upload to logos"
+on storage.objects for insert to authenticated
+with check (bucket_id = 'logos');
+```
+
+### Complete recommended SQL (all buckets)
+
+```sql
+-- ============================================================
+-- Storage buckets — ensure all exist and are public
+-- ============================================================
+insert into storage.buckets (id, name, public)
+values
+  ('room-photos', 'room-photos', true),
+  ('logos',       'logos',       true),
+  ('staging-images', 'staging-images', true)  -- Issue #987: was missing
+on conflict (id) do update set public = true;
+
+-- ============================================================
+-- room-photos bucket
+-- ============================================================
+-- INSERT: allows authenticated users to upload room photos.
+-- Path scoping (rooms/{roomId}/...) is enforced application-layer
+-- via getSignedUploadUrl + Prisma ownership check, not RLS.
+create policy "authenticated can upload to room-photos"
+on storage.objects for insert to authenticated
+with check (bucket_id = 'room-photos');
+
+-- Issue #987: DELETE policy needed for inpaint version FIFO eviction.
+-- The application calls storage.remove() for evicted thumbnail paths.
+create policy "authenticated can delete from room-photos"
+on storage.objects for delete to authenticated
+using (bucket_id = 'room-photos');
+
+-- SELECT: public bucket — anyone with the public URL can read.
+-- Explicit policy for authenticated users (defense-in-depth):
+create policy "authenticated can read room-photos"
+on storage.objects for select to authenticated
+using (bucket_id = 'room-photos');
+
+-- ============================================================
+-- logos bucket
+-- ============================================================
+create policy "authenticated can upload to logos"
+on storage.objects for insert to authenticated
+with check (bucket_id = 'logos');
+
+create policy "authenticated can read logos"
+on storage.objects for select to authenticated
+using (bucket_id = 'logos');
+
+-- ============================================================
+-- staging-images bucket (Issue #987: was undocumented)
+-- ============================================================
+-- Uploads are server-side only (persistFalImage in inpaint-status.ts).
+-- Path `after-{requestId}.png` uses UUID requestId — unpredictable.
+-- If bucket is public (public=true), uploads succeed without policy.
+-- If bucket is private, server-side uploads require service role (bypasses RLS).
+create policy "authenticated can upload to staging-images"
+on storage.objects for insert to authenticated
+with check (bucket_id = 'staging-images');
+
+create policy "authenticated can read staging-images"
+on storage.objects for select to authenticated
+using (bucket_id = 'staging-images');
+```
+
+### Policy enforcement summary
+
+| Bucket | App-level enforcement | RLS enforcement |
+| --- | --- | --- |
+| `room-photos` INSERT | `getSignedUploadUrl` checks `userId → project → room` before issuing URL | INSERT allowed for authenticated (path check is app-level) |
+| `room-photos` DELETE | `saveInpaintVersion` Prisma ownership check before evicting thumbnails | DELETE policy added Issue #987 |
+| `logos` INSERT | Client uploads from authenticated setup wizard; email in path | INSERT allowed for authenticated |
+| `staging-images` INSERT | Server-side only (`persistFalImage`); requestId is UUID | INSERT allowed for authenticated (Issue #987 fix) |
+| `staging-images` SELECT | Public URL stored in `InpaintRequest.resultUrl` | SELECT policy added Issue #987 |
+
 ## Step 4 — Get the other service keys
 
 | Provider | Console URL | Key / setting in `.env.local` | Capability needed |
