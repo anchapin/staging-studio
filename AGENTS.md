@@ -38,6 +38,8 @@ scripts/dev-tunnel.sh        # local PDF export only: public tunnel (cloudflared
 - Two runners, deliberately split: vitest owns pure-logic unit tests (`tests/*.test.ts`; its config excludes `tests/e2e/**`), Playwright owns browser specs (`tests/e2e/specs/`: `breadcrumb`, `concept-flow`, `editor-layout`, `lookbook-edit`, `mask-paint`, `preview`, `rehearsal`, `upload`, `version-history`). Don't move specs between them.
 - `npm run e2e` is hermetic — no real credentials or paid services. Playwright global setup spins up a throwaway Dockerized Postgres (pushes schema, seeds fixed rows) plus a local mock Supabase (GoTrue auth + Storage), and fal.ai / OpenAI / Browserless calls are intercepted at the network layer, so the dummy API keys are never exercised. Runs against a production build, single worker for determinism. Requires Docker and `npx playwright install chromium`. Run it when touching upload/inpaint/export flows. Failure artifacts land in `test-results/` and `playwright-report/` (both gitignored).
 
+- The git remote is `anchapin/staging-studio` (not `stagingstudio/staging-studio`). Use `anchapin/staging-studio` for all `gh` CLI commands and GitHub API calls.
+
 ## Layout
 
 - All code lives under `src/` (Next.js src-dir convention): `src/app`, `src/components`, `src/lib`. The `@/*` import alias maps to `src/*`. `middleware.ts` stays at the repo root, not in `src/`.
