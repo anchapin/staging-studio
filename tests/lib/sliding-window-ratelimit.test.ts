@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+// Import AFTER vi.mock so we get the mocked versions
 import { checkRateLimit, clearRateLimit } from "@/lib/sliding-window-ratelimit";
 
 // Mutable in-memory store keyed by `${identifier}:${dayKey}`.
