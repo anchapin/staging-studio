@@ -45,5 +45,8 @@ export const API_ERROR_DETECTION_FAILED = "detection-failed";
 /* ─── Configuration ────────────────────────────────────────────────────────── */
 export const API_ERROR_CONFIGURATION_MISSING = "configuration-missing";
 
+/* ─── External / Service ──────────────────────────────────────────────────── */
+export const API_ERROR_EXTERNAL_SERVICE_ERROR = "external-service-error";
+
 /* ─── Server / Unknown ────────────────────────────────────────────────────── */
 export const API_ERROR_INTERNAL_SERVER = "internal-server-error";
