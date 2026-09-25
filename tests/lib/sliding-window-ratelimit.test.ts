@@ -1,4 +1,23 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+
+const { mockFindUnique, mockCreate, mockUpdate, mockDeleteMany } = vi.hoisted(() => ({
+  mockFindUnique: vi.fn(),
+  mockCreate: vi.fn(),
+  mockUpdate: vi.fn(),
+  mockDeleteMany: vi.fn(),
+}));
+
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
+    dailyApiUsage: {
+      findUnique: mockFindUnique,
+      create: mockCreate,
+      update: mockUpdate,
+      deleteMany: mockDeleteMany,
+    },
+  },
+}));
+
 import { prisma } from "@/lib/prisma";
 import {
   checkRateLimit,
@@ -7,21 +26,10 @@ import {
   checkAndRecordRateLimit,
 } from "@/lib/sliding-window-ratelimit";
 
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
-    dailyApiUsage: {
-      findUnique: vi.fn(),
-      create: vi.fn(),
-      update: vi.fn(),
-      deleteMany: vi.fn(),
-    },
-  },
-}));
-
-const mockFindUnique = vi.mocked(prisma.dailyApiUsage.findUnique);
-const mockCreate = vi.mocked(prisma.dailyApiUsage.create);
-const mockUpdate = vi.mocked(prisma.dailyApiUsage.update);
-const mockDeleteMany = vi.mocked(prisma.dailyApiUsage.deleteMany);
+vi.mocked(prisma.dailyApiUsage.findUnique).mockResolvedValue(null);
+vi.mocked(prisma.dailyApiUsage.create).mockResolvedValue({} as any);
+vi.mocked(prisma.dailyApiUsage.update).mockResolvedValue({} as any);
+vi.mocked(prisma.dailyApiUsage.deleteMany).mockResolvedValue({ count: 0 });
 
 const USER_ID = "user_123";
 const SURFACE = "test";
@@ -44,7 +52,7 @@ function buildRecord(overrides: Partial<{
   count: number;
   timestamps: Date[];
   dayKey: string;
-}> = {}) {
+}> = {}): any {
   return {
     id: "mock_id_123",
     userId: USER_ID,
