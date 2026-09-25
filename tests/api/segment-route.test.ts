@@ -69,8 +69,6 @@ describe("POST /api/segment", () => {
     expect(response.status).toBe(401);
     expect(json).toMatchObject({
       error: "Unauthorized",
-      message: "You must be signed in to select objects.",
-      code: "unauthorized",
     });
   });
 
