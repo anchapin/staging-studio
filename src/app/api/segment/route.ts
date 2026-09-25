@@ -6,6 +6,7 @@ import { checkSegmentQuota, validateSegmentRoom, runSegmentation } from "@/lib/s
 import { buildSegmentServerTimingEvent, emitSegmentTiming } from "@/lib/segment-timing";
 import { API_ERROR_UNAUTHORIZED, API_ERROR_INVALID_REQUEST } from "@/lib/api-errors";
 import { withErrorHandler, ApiError } from "@/lib/api-error-handler";
+import { createPreflightResponse, withCors } from "@/lib/cors";
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
   const startedAt = Date.now();
@@ -62,7 +63,8 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
         roomId: roomId ?? null,
       })
     );
-    return NextResponse.json({ warmed: true });
+    return withCors(NextResponse.json({ warmed: true }));
+
   }
 
   const { maskDataUrl, falMs } = await runSegmentation({
@@ -81,5 +83,8 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     })
   );
 
-  return NextResponse.json({ maskDataUrl });
+  return withCors(NextResponse.json({ maskDataUrl }));
+
 });
+
+export const OPTIONS = createPreflightResponse;
