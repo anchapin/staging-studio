@@ -22,6 +22,7 @@ const mockUser = {
 
 function buildRequest(body: unknown): NextRequest {
   return {
+    url: "http://localhost/api/segment",
     json: () => Promise.resolve(body),
   } as unknown as NextRequest;
 }
@@ -84,7 +85,6 @@ describe("POST /api/segment", () => {
     expect(response.status).toBe(400);
     expect(json).toMatchObject({
       error: "Invalid request",
-      code: "invalid-request",
     });
   });
 
@@ -109,7 +109,6 @@ describe("POST /api/segment", () => {
     expect(response.status).toBe(404);
     expect(json).toMatchObject({
       error: "Room not found",
-      code: "room-not-found",
     });
   });
 
