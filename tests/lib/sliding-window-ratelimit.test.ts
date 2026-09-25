@@ -46,6 +46,7 @@ function buildRecord(overrides: Partial<{
   dayKey: string;
 }> = {}) {
   return {
+    id: "mock_id_123",
     userId: USER_ID,
     surface: SURFACE,
     dayKey: overrides.dayKey ?? todayDayKey(),
