@@ -3,12 +3,13 @@ import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { verifyPreviewToken, signPreviewToken } from "@/lib/preview-token";
 import { withErrorHandler } from "@/lib/api-error-handler";
 import { API_ERROR_UNAUTHORIZED } from "@/lib/api-errors";
+import { createPreflightResponse, withCors } from "@/lib/cors";
 
 const _get = async (request: NextRequest): Promise<Response> => {
   // Issue #702: diagnostic-only self-test — must not exist in production,
   // and self-guards like every other /api/* route outside production.
   if (process.env.NODE_ENV === "production") {
-    return new NextResponse(null, { status: 404 });
+    return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
   const user = await getAuthedPrismaUser();
@@ -35,4 +36,9 @@ const _get = async (request: NextRequest): Promise<Response> => {
   });
 };
 
-export const GET = withErrorHandler(_get);
+export const GET = (req: NextRequest): Promise<Response> => {
+  const response = withErrorHandler(_get)(req);
+  return response.then((res) => withCors(res as NextResponse));
+};
+
+export const OPTIONS = createPreflightResponse;

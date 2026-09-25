@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 export const maxDuration = 90;
 
 import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { buildDeprecationHeaders } from "@/lib/api-version";
 import { prisma } from "@/lib/prisma";
 import { PREVIEW_TOKEN_QUERY_PARAM, signPreviewToken } from "@/lib/preview-token";
 import { classifyIntegrationError } from "@/lib/error-classify";
@@ -74,7 +75,7 @@ export async function POST(req: NextRequest) {
           message: "You must be signed in to export a PDF",
           code: API_ERROR_UNAUTHORIZED,
         },
-        { status: 401 }
+        { status: 401, headers: buildDeprecationHeaders() }
       );
     }
 

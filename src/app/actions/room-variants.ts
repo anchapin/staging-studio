@@ -2,6 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { setActiveVariant } from "@/lib/room-variant-service";
 import {
   resolveSelectionAfterDelete,
   touchUpCountsBySlot,
@@ -23,7 +24,8 @@ export async function saveVariantSelection(
   roomId: string,
   variantIndex: number | null
 ): Promise<{ success: boolean; error?: string }> {
-  if (variantIndex !== null && variantIndex !== 0 && variantIndex !== 1) {
+  const validated = setActiveVariant({ selectedVariantIndex: variantIndex } as never, variantIndex);
+  if (validated === null && variantIndex !== null) {
     return failure(
       "Invalid variant index: must be null (Original), 0, or 1"
     );

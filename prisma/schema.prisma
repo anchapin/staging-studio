@@ -217,6 +217,7 @@ model DailyApiUsage {
   surface   String
   dayKey    String
   count     Int      @default(0)
+  timestamps DateTime[] @default([])
   updatedAt DateTime @updatedAt
 
   @@unique([userId, surface, dayKey])

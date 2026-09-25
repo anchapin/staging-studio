@@ -1,3 +1,8 @@
+import {
+  sanitizePromptValue,
+  sanitizePromptArray,
+} from "./sanitize-prompt";
+
 export interface BuyerDemographicsInput {
   buyerType: string;
   designPreferences: string[];
@@ -129,7 +134,27 @@ export function mergeDirectives(
  * Side effects: none (pure).
  */
 export function buildCopyPrompt(input: CopyPromptInput): string {
-  const { roomName, aesthetic, targetBuyer, rawDirectives, globalDirectives, buyerDemographics } = input;
+  const {
+    roomName: rawRoomName,
+    aesthetic: rawAesthetic,
+    targetBuyer: rawTargetBuyer,
+    rawDirectives: rawRawDirectives,
+    globalDirectives: rawGlobalDirectives,
+    buyerDemographics: rawBuyerDemographics,
+  } = input;
+
+  const roomName = sanitizePromptValue(rawRoomName);
+  const aesthetic = sanitizePromptValue(rawAesthetic);
+  const targetBuyer = sanitizePromptValue(rawTargetBuyer);
+  const rawDirectives = sanitizePromptValue(rawRawDirectives);
+  const globalDirectives = sanitizePromptValue(rawGlobalDirectives);
+  const buyerDemographics = rawBuyerDemographics
+    ? {
+        ...rawBuyerDemographics,
+        designPreferences: sanitizePromptArray(rawBuyerDemographics.designPreferences),
+        mustHaveFeatures: sanitizePromptArray(rawBuyerDemographics.mustHaveFeatures),
+      }
+    : undefined;
 
   // Issue #562: merge global + room directives
   const mergedDirectives = mergeDirectives(globalDirectives, rawDirectives);
@@ -232,7 +257,9 @@ export function buildInpaintPrompt(
   aesthetic: string,
   directives: string
 ): string {
-  const base = `${aesthetic} style. ${directives}`.replace(/\s+$/, "");
+  const safeAesthetic = sanitizePromptValue(aesthetic);
+  const safeDirectives = sanitizePromptValue(directives);
+  const base = `${safeAesthetic} style. ${safeDirectives}`.replace(/\s+$/, "");
   return `${base} ${FRAMING_CONTEXT}`;
 }
 

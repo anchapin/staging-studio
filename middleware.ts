@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { resolveAuthRedirect } from "@/lib/auth-redirect";
+import { logger } from "@/lib/logger";
 
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -34,9 +35,17 @@ export async function middleware(request: NextRequest) {
   // Refresh session if expired. getUser() validates the JWT against the
   // Supabase auth server (signature + expiry); on error (forged/stale cookie,
   // invalid token) user is null and every branch below fails closed.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let user = null;
+  try {
+    const { data } = await supabase.auth.getUser();
+    user = data.user;
+  } catch (err) {
+    // Log structured auth error; continue with user=null so we fail closed
+    logger.warn(
+      { event: "auth_check_failed", path: request.nextUrl.pathname, error: err instanceof Error ? err.message : String(err) },
+      "Supabase auth.getUser() threw — failing closed"
+    );
+  }
 
   // Note: /preview/:id (the PDF-export print route) self-guards via
   // src/lib/preview-access.ts (signed token or owning session) — it sits
