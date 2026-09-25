@@ -12,6 +12,7 @@ import { buildCopyPrompt } from "@/lib/prompts";
 import { checklistItemSchema } from "@/lib/checklist-schema";
 import { classifyIntegrationError } from "@/lib/error-classify";
 import { describeNoObjectGeneratedError } from "@/lib/no-object-error";
+import { sanitizePromptValue } from "@/lib/sanitize-prompt";
 import {
   DEFAULT_DAILY_COPY_LIMIT,
   DAILY_LIMIT_ENV_VAR,
@@ -188,11 +189,11 @@ export async function POST(request: NextRequest) {
           {
             role: "user",
             content: [
-              `You are a staging copy quality auditor. Evaluate the generated copy for room "${room.name}".`,
+              `You are a staging copy quality auditor. Evaluate the generated copy for room "${sanitizePromptValue(room.name)}".`,
               "",
-              `Staging aesthetic: "${room.project.stagingAesthetic}"`,
-              `Target buyer: "${room.project.targetBuyer}"`,
-              `Raw directives: "${room.rawDirectives ?? ""}"`,
+              `Staging aesthetic: "${sanitizePromptValue(room.project.stagingAesthetic)}"`,
+              `Target buyer: "${sanitizePromptValue(room.project.targetBuyer)}"`,
+              `Raw directives: "${sanitizePromptValue(room.rawDirectives ?? "")}"`,
               "",
               `Generated copy:`,
               `  Observed challenge: "${copy.observedChallenge}"`,
