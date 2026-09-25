@@ -7,6 +7,13 @@ import {
   API_ERROR_INTERNAL_SERVER,
 } from "@/lib/api-errors";
 import { createPreflightResponse, withCors } from "@/lib/cors";
+import { requireEnvVars } from "@/lib/env";
+import {
+  hashIp,
+  recordFailedAttempt,
+  clearRateLimit,
+  checkRateLimit,
+} from "@/lib/setup-rate-limit";
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
@@ -39,9 +46,24 @@ export async function GET(request: NextRequest) {
     return withCors(response);
   };
 
-  // Hoisted so the catch block can correlate failures with the user even
-  // when the error fires before the session is resolved.
   let userEmail: string | null = null;
+
+  const rawIp = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+    ?? request.headers.get("x-real-ip") ?? "unknown";
+  const ipHashed = await hashIp(rawIp);
+
+  const rateLimit = await checkRateLimit(ipHashed);
+  if (!rateLimit.allowed) {
+    return respond(
+      {
+        error: "Too many requests",
+        message: `Rate limit exceeded. Try again after ${new Date(rateLimit.resetAt).toISOString()}.`,
+        code: "RATE_LIMIT_EXCEEDED",
+        retryAfter: Math.ceil((rateLimit.resetAt - Date.now()) / 1000),
+      },
+      { status: 429 }
+    );
+  }
 
   try {
     const {
@@ -66,6 +88,7 @@ export async function GET(request: NextRequest) {
     return respond({ exists: false }, { status: 500 });
   }
 }
+
 export const OPTIONS = createPreflightResponse;
 
 export async function POST(request: NextRequest) {
@@ -97,9 +120,11 @@ export async function POST(request: NextRequest) {
     return withCors(response);
   };
 
-  // Hoisted so the catch block can correlate failures with the user even
-  // when the error fires before the session is resolved.
   let userEmail: string | null = null;
+
+  const rawIp = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+    ?? request.headers.get("x-real-ip") ?? "unknown";
+  const ipHashed = await hashIp(rawIp);
 
   try {
     const {
@@ -107,9 +132,14 @@ export async function POST(request: NextRequest) {
     } = await supabase.auth.getUser();
 
     if (!user) {
-      return respond({ error: "Unauthorized", message: "You must be signed in to complete setup.", code: API_ERROR_UNAUTHORIZED }, { status: 401 });
+      return respond(
+        { error: "Unauthorized", message: "You must be signed in to complete setup.", code: API_ERROR_UNAUTHORIZED },
+        { status: 401 }
+      );
     }
     userEmail = user.email ?? null;
+
+    requireEnvVars("NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_ANON_KEY");
 
     const body = await request.json();
     const { firmName, ownerName, logoUrl, psychologyPageContent, signoffContent } = body;
@@ -132,12 +162,30 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    await clearRateLimit(ipHashed);
+
     return respond({ success: true, user: createdUser });
   } catch (error) {
+    const rateLimit = await recordFailedAttempt(ipHashed);
+    if (!rateLimit.allowed) {
+      return respond(
+        {
+          error: "Too many requests",
+          message: `Rate limit exceeded. Try again after ${new Date(rateLimit.resetAt).toISOString()}.`,
+          code: "RATE_LIMIT_EXCEEDED",
+          retryAfter: Math.ceil((rateLimit.resetAt - Date.now()) / 1000),
+        },
+        { status: 429 }
+      );
+    }
+
     console.error(
       JSON.stringify({ event: "setup_post_failed", email: userEmail }),
       error
     );
-    return respond({ error: "Internal server error", message: "Failed to save user setup.", code: API_ERROR_INTERNAL_SERVER }, { status: 500 });
+    return respond(
+      { error: "Internal server error", message: "Failed to save user setup.", code: API_ERROR_INTERNAL_SERVER },
+      { status: 500 }
+    );
   }
 }
