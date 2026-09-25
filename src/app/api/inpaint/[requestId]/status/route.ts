@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
-<<<<<<< HEAD
+import { buildDeprecationHeaders } from "@/lib/api-version";
+import { decideInpaintPersistence } from "@/lib/inpaint-persistence";
+import { classifyIntegrationError } from "@/lib/error-classify";
+import { FAL_FLUX_FILL_MODEL } from "@/lib/prompts";
 import {
   INPAINT_STATUS_RATE_LIMIT,
   checkInpaintStatusRateLimit,
@@ -9,12 +12,6 @@ import {
   validateInpaintRequestOwnership,
   classifyStatusError,
 } from "@/lib/inpaint-status";
-=======
-import { buildDeprecationHeaders } from "@/lib/api-version";
-import { decideInpaintPersistence } from "@/lib/inpaint-persistence";
-import { classifyIntegrationError } from "@/lib/error-classify";
-import { FAL_FLUX_FILL_MODEL } from "@/lib/prompts";
->>>>>>> origin/develop
 import {
   API_ERROR_UNAUTHORIZED,
   API_ERROR_TOO_MANY_REQUESTS,
@@ -32,17 +29,12 @@ export async function GET(
     const user = await getAuthedPrismaUser();
     if (!user) {
       return NextResponse.json(
-<<<<<<< HEAD
-        { error: "Unauthorized", message: "You must be signed in to check inpainting status.", code: API_ERROR_UNAUTHORIZED },
-        { status: 401 }
-=======
         {
           error: "Unauthorized",
           message: "You must be signed in to check inpainting status.",
           code: API_ERROR_UNAUTHORIZED,
         },
         { status: 401, headers: buildDeprecationHeaders() }
->>>>>>> origin/develop
       );
     }
 

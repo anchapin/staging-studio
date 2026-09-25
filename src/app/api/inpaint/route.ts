@@ -14,16 +14,11 @@ export async function POST(request: NextRequest) {
     const user = await getAuthedPrismaUser();
     if (!user) {
       return NextResponse.json(
-<<<<<<< HEAD
-        { error: "Unauthorized", message: "You must be signed in to start inpainting." },
-        { status: 401 }
-=======
         {
           error: "Unauthorized",
           message: "You must be signed in to start inpainting.",
         },
         { status: 401, headers: buildDeprecationHeaders() }
->>>>>>> origin/develop
       );
     }
 
