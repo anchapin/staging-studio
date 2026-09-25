@@ -4,6 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { componentLogger } from "@/lib/logger";
+
+const log = componentLogger("action:material-swatch");
 
 const materialSwatchSchema = z.object({
   name: z.string().min(1).max(100),
@@ -31,7 +34,7 @@ function failure(error: string): { success: false; error: string } {
  * their project's swatches. Failures are caught and reported, never thrown.
  *
  * Side effects: needs `DATABASE_URL` and a valid Supabase session cookie;
- * performs a Prisma `upsert`; logs failures to `console.error`. Revalidates
+ * performs a Prisma `upsert`; logs failures via structured logger. Revalidates
  * the project lookbook path on success.
  */
 export async function saveMaterialSwatch(
@@ -93,10 +96,7 @@ export async function saveMaterialSwatch(
       return { success: true, id: result.id };
     }
   } catch (error) {
-    console.error(
-      JSON.stringify({ event: "save_material_swatch_failed", projectId }),
-      error
-    );
+    log.error({ type: "save_material_swatch_failed", projectId }, "Failed to save material swatch");
     return failure(error instanceof Error ? error.message : "Unknown error");
   }
 }
@@ -134,10 +134,7 @@ export async function deleteMaterialSwatch(
     revalidatePath(`/projects/${projectId}`);
     return { success: true };
   } catch (error) {
-    console.error(
-      JSON.stringify({ event: "delete_material_swatch_failed", swatchId }),
-      error
-    );
+    log.error({ type: "delete_material_swatch_failed", swatchId, projectId }, "Failed to delete material swatch");
     return failure(error instanceof Error ? error.message : "Unknown error");
   }
 }
@@ -196,10 +193,7 @@ export async function replaceMaterialSwatches(
     revalidatePath(`/projects/${projectId}`);
     return { success: true };
   } catch (error) {
-    console.error(
-      JSON.stringify({ event: "replace_material_swatches_failed", projectId }),
-      error
-    );
+    log.error({ type: "replace_material_swatches_failed", projectId }, "Failed to replace material swatches");
     return failure(error instanceof Error ? error.message : "Unknown error");
   }
 }

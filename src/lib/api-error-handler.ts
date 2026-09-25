@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ZodError } from "zod";
+import { componentLogger } from "@/lib/logger";
+import { trackError } from "@/lib/error-tracking";
 import {
   API_ERROR_INTERNAL_SERVER,
   API_ERROR_RATE_LIMIT_EXCEEDED,
   API_ERROR_INVALID_REQUEST,
 } from "@/lib/api-errors";
+
+const log = componentLogger("api-error-handler");
 
 /**
  * Standardized API error shape returned by all wrapped route handlers.
@@ -139,14 +143,12 @@ export function withErrorHandler(handler: (request: NextRequest, ...args: any[])
 
       // Log the full error for debugging; for unknown errors, always log
       if (classified.code === API_ERROR_INTERNAL_SERVER || !(error instanceof ApiError)) {
-        console.error(
-          JSON.stringify({
-            event: "unhandled_route_error",
-            path,
-            method,
-            error: error instanceof Error ? error.message : String(error),
-          }),
-          error
+        trackError(error, {
+          action: `${method} ${path}`,
+        });
+        log.error(
+          { type: "unhandled_route_error", path, method },
+          `Unhandled route error: ${error instanceof Error ? error.message : String(error)}`
         );
       }
 

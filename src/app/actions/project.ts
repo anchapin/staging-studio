@@ -8,6 +8,9 @@ import {
 } from "@/lib/metadata-schemas";
 import { signProjectPayloadSchema } from "@/lib/sign-project-schema";
 import { revalidatePath } from "next/cache";
+import { componentLogger } from "@/lib/logger";
+
+const log = componentLogger("action:project");
 
 /**
  * Server action: updates editable project metadata fields.
@@ -28,7 +31,7 @@ import { revalidatePath } from "next/cache";
  * Side effects: needs `DATABASE_URL` and a valid Supabase session
  * cookie; performs a Prisma `project.update` and calls
  * `revalidatePath(/projects/{projectId})` so the page reflects the
- * change; logs failures to `console.error`.
+ * change; logs failures via structured logger.
  *
  * @param projectId ID of the project to update.
  * @param metadata Partial fields: `propertyAddress`, `clientName`,
@@ -63,7 +66,7 @@ export async function saveProjectMetadata(
     revalidatePath(`/projects/${projectId}`);
     return { success: true };
   } catch (error) {
-    console.error("Failed to save project metadata:", error);
+    log.error({ type: "save_project_metadata_failed", projectId }, "Failed to save project metadata");
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",
@@ -122,7 +125,7 @@ export async function saveProjectSignature(
     revalidatePath(`/projects/${projectId}/lookbook`);
     return { success: true };
   } catch (error) {
-    console.error("Failed to save project signature:", error);
+    log.error({ type: "save_project_signature_failed", projectId }, "Failed to save project signature");
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",

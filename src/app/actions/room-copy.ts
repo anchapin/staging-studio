@@ -10,6 +10,9 @@ import {
   roomCopyEditSchema,
   type RoomCopyEditInput,
 } from "@/lib/room-copy-edit-schema";
+import { componentLogger } from "@/lib/logger";
+
+const log = componentLogger("action:room-copy");
 
 export type CopyChecklistItem = ChecklistItem;
 
@@ -63,7 +66,7 @@ export async function saveRoomCopy(
     revalidatePath(`/projects/[id]/rooms`, "page");
     return { success: true };
   } catch (err) {
-    console.error("[saveRoomCopy]", err);
+    log.error({ type: "save_room_copy_failed", roomId }, "Failed to save room copy");
     return failure(err instanceof Error ? err.message : "Write failed");
   }
 }
@@ -107,7 +110,7 @@ export async function saveRoomCopyEdits(
     revalidatePath(`/projects/[id]/rooms`, "page");
     return { success: true };
   } catch (err) {
-    console.error("[saveRoomCopyEdits]", err);
+    log.error({ type: "save_room_copy_edits_failed", roomId }, "Failed to save room copy edits");
     return failure(err instanceof Error ? err.message : "Write failed");
   }
 }

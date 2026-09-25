@@ -9,6 +9,9 @@ import {
   versionThumbnailStoragePath,
 } from "@/lib/inpaint-version-storage";
 import { revalidatePath } from "next/cache";
+import { componentLogger } from "@/lib/logger";
+
+const log = componentLogger("action:inpaint-versions");
 
 const MAX_VERSIONS_PER_VARIANT = 20;
 
@@ -87,7 +90,7 @@ export async function saveInpaintVersion({
       });
 
     if (uploadError || !uploadData) {
-      console.error("[inpaint-versions] thumbnail upload failed:", uploadError);
+      log.error({ type: "thumbnail_upload_failed", roomId, variantSlot }, "Thumbnail upload failed (continuing without thumbnail)");
       // Non-fatal: continue without thumbnail
     } else {
       const { data: publicUrlData } = supabase.storage
@@ -172,16 +175,13 @@ export async function saveInpaintVersion({
           await supabase.storage.from("room-photos").remove(pathsToDelete);
         }
       } catch (cleanupError) {
-        console.error(
-          "[inpaint-versions] evicted thumbnail cleanup failed:",
-          cleanupError
-        );
+        log.error({ type: "evicted_thumbnail_cleanup_failed", roomId, variantSlot }, "Evicted thumbnail cleanup failed");
       }
     }
 
     return { success: true, versionId: version.id };
   } catch (error) {
-    console.error("[inpaint-versions] failed to save version:", error);
+    log.error({ type: "save_inpaint_version_failed", roomId, variantSlot }, "Failed to save inpaint version");
     return failure("Failed to save version");
   }
 }

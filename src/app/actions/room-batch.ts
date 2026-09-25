@@ -20,6 +20,9 @@ import {
   resolveDailyLimit,
 } from "@/lib/api-quota";
 import { detectRoomType } from "@/lib/room-type-detection";
+import { componentLogger } from "@/lib/logger";
+
+const log = componentLogger("action:room-batch");
 
 
 export interface BatchRoomEntry {
@@ -115,7 +118,7 @@ export async function createRoomsBatch(
     revalidatePath(`/projects/${parsed.data.projectId}`);
     return { success: true, rooms };
   } catch (error) {
-    console.error("Failed to create rooms batch:", error);
+    log.error({ type: "create_rooms_batch_failed", projectId }, "Failed to create rooms batch");
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",
@@ -250,14 +253,15 @@ export async function detectBatchRoomTypes(
     labelLimit
   );
   if (!labelQuota.allowed) {
-    console.warn(
-      JSON.stringify({
-        event: "batch_room_types_daily_quota_exceeded",
+    log.warn(
+      {
+        type: "batch_room_types_daily_quota_exceeded",
         userId: user.id,
         used: labelQuota.used,
         limit: labelQuota.limit,
         requested: parsed.data.imageUrls.length,
-      })
+      },
+      "Daily label quota exceeded in batch room type detection"
     );
     return {
       success: false,
@@ -299,7 +303,7 @@ export async function detectBatchRoomTypes(
 
     return { success: true, roomTypes };
   } catch (error) {
-    console.error("Batch room type detection failed:", error);
+    log.error({ type: "batch_room_type_detection_failed", projectId: parsed.data.projectId }, "Batch room type detection failed");
     return {
       success: false,
       error: error instanceof Error ? error.message : "Detection failed",
@@ -350,7 +354,7 @@ export async function bulkUpdateRoomAesthetic(
     // Return success; bulk aesthetic is applied at project level via saveProjectMetadata.
     return { success: true };
   } catch (error) {
-    console.error("Bulk update room failed:", error);
+    log.error({ type: "bulk_update_room_failed" }, "Bulk update room failed");
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",

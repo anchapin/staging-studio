@@ -4,6 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { componentLogger } from "@/lib/logger";
+
+const log = componentLogger("action:procurement");
 
 const procurementItemSchema = z.object({
   id: z.string().optional(),
@@ -76,7 +79,7 @@ export async function saveProcurementItems(
     revalidatePath(`/preview/${projectId}`);
     return { success: true };
   } catch (error) {
-    console.error("Failed to save procurement items:", error);
+    log.error({ type: "procurement_save_failed", projectId }, "Failed to save procurement items");
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",

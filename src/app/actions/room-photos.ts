@@ -5,6 +5,9 @@ import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { revalidatePath } from "next/cache";
 import { withRetry } from "@/lib/retry";
+import { componentLogger } from "@/lib/logger";
+
+const log = componentLogger("action:room-photos");
 
 const ALLOWED_IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp"];
 
@@ -214,7 +217,7 @@ export async function confirmRoomPhotoUpload(
       data: { [slotColumn(variantSlot)]: publicUrl },
     });
   } catch (error) {
-    console.error("Failed to confirm room photo upload:", error);
+    log.error({ type: "confirm_photo_upload_failed", roomId, projectId }, "Failed to confirm room photo upload");
     return failure(
       error instanceof Error ? error.message : "Failed to link uploaded photo to room"
     );

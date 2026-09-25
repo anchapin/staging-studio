@@ -1,12 +1,22 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { componentLogger } from "@/lib/logger";
 
 import { resolveAuthRedirect } from "@/lib/auth-redirect";
+
+const log = componentLogger("middleware");
 
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
   });
+
+  const requestId =
+    request.headers.get("x-request-id") ??
+    request.headers.get("x-vercel-id") ??
+    "unknown";
+
+  const log = componentLogger("middleware").child({ requestId });
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -34,30 +44,32 @@ export async function middleware(request: NextRequest) {
   // Refresh session if expired. getUser() validates the JWT against the
   // Supabase auth server (signature + expiry); on error (forged/stale cookie,
   // invalid token) user is null and every branch below fails closed.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let user = null;
+  try {
+    const { data } = await supabase.auth.getUser();
+    user = data.user;
+  } catch (err) {
+    // getUser() throws on network errors; fail closed (no user) and log
+    log.error(
+      { type: "session_refresh_error", error: err instanceof Error ? err.message : String(err) },
+      "Session refresh failed — denying access"
+    );
+    // Continue with user=null so the protected-route logic below redirects to login
+  }
 
-  // Note: /preview/:id (the PDF-export print route) self-guards via
-  // src/lib/preview-access.ts (signed token or owning session) — it sits
-  // outside the protected prefixes and passes through middleware in both
-  // directions. The former signed-token bypass here for the removed
-  // /projects/:id/preview route was deleted (issue #715).
-
-  // Redirect decision matrix (see src/lib/auth-redirect.ts):
-  // unauthenticated → /login for protected prefixes (/dashboard,
-  // /projects, /settings), authenticated → /dashboard for the /login
-  // prefix, otherwise pass through. `/setup` passes through in both
-  // directions: middleware cannot consult Postgres (edge runtime), so
-  // the setup page self-guards server-side (resolveSetupPageTarget) —
-  // this is what lets an authenticated user WITHOUT a Prisma User row
-  // reach setup instead of dead-ending.
   const pathname = request.nextUrl.pathname;
   const authenticated = Boolean(user);
   const redirectTarget = resolveAuthRedirect(pathname, authenticated);
+
   if (redirectTarget) {
+    log.info(
+      { type: "auth_redirect", from: pathname, to: redirectTarget, authenticated },
+      `Redirecting unauthenticated request from ${pathname} to ${redirectTarget}`
+    );
     return NextResponse.redirect(new URL(redirectTarget, request.url));
   }
+
+  log.debug({ type: "middleware_pass", pathname, authenticated }, "Request passed through middleware");
 
   return supabaseResponse;
 }

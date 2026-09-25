@@ -9,6 +9,9 @@ import { buildDeprecationHeaders } from "@/lib/api-version";
 import { prisma } from "@/lib/prisma";
 import { PREVIEW_TOKEN_QUERY_PARAM, signPreviewToken } from "@/lib/preview-token";
 import { classifyIntegrationError } from "@/lib/error-classify";
+import { withNextRouteLogging } from "@/lib/api-logging";
+import { trackError } from "@/lib/error-tracking";
+import { componentLogger } from "@/lib/logger";
 import {
   DEFAULT_DAILY_EXPORT_LIMIT,
   DAILY_LIMIT_ENV_VAR,
@@ -32,6 +35,8 @@ import {
   API_ERROR_EXPORT_FAILED,
   API_ERROR_INVALID_REQUEST,
 } from "@/lib/api-errors";
+
+const log = componentLogger("api:export-pdf");
 
 const EXPORT_PDF_ERROR_COPY = {
   auth: {
@@ -62,255 +67,254 @@ const EXPORT_PDF_ERROR_COPY = {
 const PROJECT_ID_PATTERN = /^c[a-z0-9]{24}$/;
 
 export async function POST(req: NextRequest) {
-  // Hoisted so the catch block can correlate failures with the project even
-  // when the error fires before/after the request body is parsed.
-  let projectId: string | undefined;
-  try {
-    // 1. Session auth. Fail closed before touching any paid quota.
-    const user = await getAuthedPrismaUser();
-    if (!user) {
-      return NextResponse.json(
-        {
-          error: "Unauthorized",
-          message: "You must be signed in to export a PDF",
-          code: API_ERROR_UNAUTHORIZED,
-        },
-        { status: 401, headers: buildDeprecationHeaders() }
-      );
-    }
-
-    // Issue #201: daily per-user Browserless cost guardrail, checked before
-    // any validation work. Usage lives in the in-process daily counter
-    // (lib/api-quota.ts), which resets on cold start; that under-count
-    // limitation is documented there.
-    const exportLimit = resolveDailyLimit(
-      process.env[DAILY_LIMIT_ENV_VAR.export],
-      DEFAULT_DAILY_EXPORT_LIMIT
-    );
-    const exportQuota = evaluateDailyQuota(
-      await getDailyUsage("export", user.id),
-      exportLimit
-    );
-    if (!exportQuota.allowed) {
-      console.warn(
-        JSON.stringify({
-          event: "export_pdf_daily_quota_exceeded",
-          userId: user.id,
-          used: exportQuota.used,
-          limit: exportQuota.limit,
-        })
-      );
-      return NextResponse.json(
-        {
-          ...dailyQuotaExceededPayload(exportQuota, "Please try again tomorrow."),
-          code: API_ERROR_RATE_LIMIT_EXCEEDED,
-        },
-        { status: 429 }
-      );
-    }
-
-    // 2. Shape-validate projectId BEFORE it is interpolated into the
-    //    preview URL handed to an external service.
-    const { projectId: requestedProjectId } = await req.json();
-    projectId = requestedProjectId;
-    if (typeof projectId !== "string" || !PROJECT_ID_PATTERN.test(projectId)) {
-      return NextResponse.json(
-        {
-          error: "Invalid projectId",
-          message: "projectId must be a valid CUID",
-          code: API_ERROR_INVALID_REQUEST,
-        },
-        { status: 400 }
-      );
-    }
-
-    // 3. Ownership check — before spending Browserless quota.
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
-      select: { userId: true },
-    });
-    if (!project || project.userId !== user.id) {
-      return NextResponse.json(
-        { error: "Project not found", message: "Project does not exist" },
-        { status: 404 }
-      );
-    }
-
-    // 4. App URL: the cloud browser must be able to reach this deployment.
-    //    A localhost default is only ever valid in development.
-    let appUrl = process.env.NEXT_PUBLIC_APP_URL;
-    if (!appUrl || appUrl.trim() === "") {
-      if (process.env.NODE_ENV === "production") {
-        console.error(
-          JSON.stringify({
-            event: "export_pdf_app_url_missing",
-            projectId,
-          }),
-          "NEXT_PUBLIC_APP_URL must be set in production (public URL of this deployment)."
-        );
-        return NextResponse.json(
-          {
-            error: "Configuration missing",
-            message:
-              "PDF export is not properly configured. Please contact support.",
-          },
-          { status: 500 }
-        );
-      }
-      appUrl = "http://localhost:3000";
-    }
-
-    const apiKey = process.env.BROWSERLESS_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        {
-          error: "Configuration missing",
-          message:
-            "PDF export service is not properly configured. Please contact support.",
-        },
-        { status: 500 }
-      );
-    }
-
-    // 5. Signed, short-lived, projectId-scoped token lets the cookie-less
-    //    headless browser through middleware auth for THIS project only.
-    const token = await signPreviewToken(projectId);
-    const previewUrl = `${appUrl}/preview/${projectId}?${PREVIEW_TOKEN_QUERY_PARAM}=${encodeURIComponent(token)}`;
-
-    // 6. Credential rides in a header (Basic auth, `apiKey:`), never the
-    //    query string; bounded by an AbortController so a hung Browserless
-    //    call cannot hold the request open forever.
-    const controller = new AbortController();
-    const timeoutId = setTimeout(
-      () => controller.abort(),
-      BROWSERLESS_TIMEOUT_MS
-    );
-
-    let chromeResponse: Response;
+  return withNextRouteLogging(req, null, async () => {
+    // Hoisted so the catch block can correlate failures with the project even
+    // when the error fires before/after the request body is parsed.
+    let projectId: string | undefined;
     try {
-      chromeResponse = await fetchBrowserlessPdfWithCircuitBreaker(
-        buildBrowserlessPdfUrl(),
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`,
-          },
-          body: JSON.stringify(buildBrowserlessPdfBody(previewUrl)),
-          signal: controller.signal,
-        }
-      );
-    } finally {
-      clearTimeout(timeoutId);
-    }
-
-    if (!chromeResponse.ok) {
-      const errorText = await chromeResponse.text();
-      console.error(
-        JSON.stringify({
-          event: "export_pdf_browserless_error",
-          projectId,
-          status: chromeResponse.status,
-        }),
-        errorText
-      );
-
-      if (chromeResponse.status === 401 || chromeResponse.status === 403) {
+      // 1. Session auth. Fail closed before touching any paid quota.
+      const user = await getAuthedPrismaUser();
+      if (!user) {
         return NextResponse.json(
           {
-            error: "Authentication failed",
-            message: "PDF export service authentication failed. Please contact support.",
-            code: API_ERROR_PDF_AUTHENTICATION_FAILED,
+            error: "Unauthorized",
+            message: "You must be signed in to export a PDF",
+            code: API_ERROR_UNAUTHORIZED,
           },
-          { status: chromeResponse.status }
+          { status: 401, headers: buildDeprecationHeaders() }
         );
       }
 
-      if (chromeResponse.status === 429) {
+      // Issue #201: daily per-user Browserless cost guardrail, checked before
+      // any validation work. Usage lives in the in-process daily counter
+      // (lib/api-quota.ts), which resets on cold start; that under-count
+      // limitation is documented there.
+      const exportLimit = resolveDailyLimit(
+        process.env[DAILY_LIMIT_ENV_VAR.export],
+        DEFAULT_DAILY_EXPORT_LIMIT
+      );
+      const exportQuota = evaluateDailyQuota(
+        await getDailyUsage("export", user.id),
+        exportLimit
+      );
+      if (!exportQuota.allowed) {
+        log.warn(
+          {
+            type: "export_pdf_daily_quota_exceeded",
+            userId: user.id,
+            used: exportQuota.used,
+            limit: exportQuota.limit,
+          },
+          "Daily PDF export quota exceeded"
+        );
         return NextResponse.json(
           {
-            error: "Rate limit exceeded",
-            message: "PDF export service is busy. Please wait a moment and try again.",
-            retryable: true,
+            ...dailyQuotaExceededPayload(exportQuota, "Please try again tomorrow."),
             code: API_ERROR_RATE_LIMIT_EXCEEDED,
           },
           { status: 429 }
         );
       }
 
+      // 2. Shape-validate projectId BEFORE it is interpolated into the
+      //    preview URL handed to an external service.
+      const { projectId: requestedProjectId } = await req.json();
+      projectId = requestedProjectId;
+      if (typeof projectId !== "string" || !PROJECT_ID_PATTERN.test(projectId)) {
+        return NextResponse.json(
+          {
+            error: "Invalid projectId",
+            message: "projectId must be a valid CUID",
+            code: API_ERROR_INVALID_REQUEST,
+          },
+          { status: 400 }
+        );
+      }
+
+      // 3. Ownership check — before spending Browserless quota.
+      const project = await prisma.project.findUnique({
+        where: { id: projectId },
+        select: { userId: true },
+      });
+      if (!project || project.userId !== user.id) {
+        return NextResponse.json(
+          { error: "Project not found", message: "Project does not exist" },
+          { status: 404 }
+        );
+      }
+
+      // 4. App URL: the cloud browser must be able to reach this deployment.
+      //    A localhost default is only ever valid in development.
+      let appUrl = process.env.NEXT_PUBLIC_APP_URL;
+      if (!appUrl || appUrl.trim() === "") {
+        if (process.env.NODE_ENV === "production") {
+          log.error(
+            { type: "export_pdf_app_url_missing", projectId },
+            "NEXT_PUBLIC_APP_URL must be set in production"
+          );
+          return NextResponse.json(
+            {
+              error: "Configuration missing",
+              message:
+                "PDF export is not properly configured. Please contact support.",
+            },
+            { status: 500 }
+          );
+        }
+        appUrl = "http://localhost:3000";
+      }
+
+      const apiKey = process.env.BROWSERLESS_API_KEY;
+      if (!apiKey) {
+        return NextResponse.json(
+          {
+            error: "Configuration missing",
+            message:
+              "PDF export service is not properly configured. Please contact support.",
+          },
+          { status: 500 }
+        );
+      }
+
+      // 5. Signed, short-lived, projectId-scoped token lets the cookie-less
+      //    headless browser through middleware auth for THIS project only.
+      const token = await signPreviewToken(projectId);
+      const previewUrl = `${appUrl}/preview/${projectId}?${PREVIEW_TOKEN_QUERY_PARAM}=${encodeURIComponent(token)}`;
+
+      // 6. Credential rides in a header (Basic auth, `apiKey:`), never the
+      //    query string; bounded by an AbortController so a hung Browserless
+      //    call cannot hold the request open forever.
+      const controller = new AbortController();
+      const timeoutId = setTimeout(
+        () => controller.abort(),
+        BROWSERLESS_TIMEOUT_MS
+      );
+
+      let chromeResponse: Response;
+      try {
+        chromeResponse = await fetchBrowserlessPdfWithCircuitBreaker(
+          buildBrowserlessPdfUrl(),
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`,
+            },
+            body: JSON.stringify(buildBrowserlessPdfBody(previewUrl)),
+            signal: controller.signal,
+          }
+        );
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
+      if (!chromeResponse.ok) {
+        const errorText = await chromeResponse.text();
+        log.error(
+          {
+            type: "export_pdf_browserless_error",
+            projectId,
+            status: chromeResponse.status,
+            errorText,
+          },
+          `Browserless error: ${chromeResponse.status}`
+        );
+
+        if (chromeResponse.status === 401 || chromeResponse.status === 403) {
+          return NextResponse.json(
+            {
+              error: "Authentication failed",
+              message: "PDF export service authentication failed. Please contact support.",
+              code: API_ERROR_PDF_AUTHENTICATION_FAILED,
+            },
+            { status: chromeResponse.status }
+          );
+        }
+
+        if (chromeResponse.status === 429) {
+          return NextResponse.json(
+            {
+              error: "Rate limit exceeded",
+              message: "PDF export service is busy. Please wait a moment and try again.",
+              retryable: true,
+              code: API_ERROR_RATE_LIMIT_EXCEEDED,
+            },
+            { status: 429 }
+          );
+        }
+
+        return NextResponse.json(
+          {
+            error: "PDF generation failed",
+            message: "Unable to generate PDF at this time. Please try again.",
+            retryable: true,
+            code: API_ERROR_PDF_GENERATION_FAILED,
+          },
+          { status: chromeResponse.status }
+        );
+      }
+
+      // 7. Sanity-check the payload really is a PDF before streaming it to
+      //    the user (e.g. an HTML error page slipped through with a 200).
+      const pdfBuffer = await chromeResponse.arrayBuffer();
+      const contentType = chromeResponse.headers.get("content-type") ?? "";
+      const leadingBytes = String.fromCharCode(
+        ...new Uint8Array(pdfBuffer.slice(0, 4))
+      );
+      if (
+        pdfBuffer.byteLength === 0 ||
+        !contentType.includes("application/pdf") ||
+        leadingBytes !== "%PDF"
+      ) {
+        log.error(
+          {
+            type: "export_pdf_non_pdf_response",
+            projectId,
+            contentType,
+            byteLength: pdfBuffer.byteLength,
+          },
+          "Browserless returned non-PDF content"
+        );
+        return NextResponse.json(
+          {
+            error: "PDF generation failed",
+            message: "Unable to generate PDF at this time. Please try again.",
+            retryable: true,
+            code: API_ERROR_PDF_GENERATION_FAILED,
+          },
+          { status: 502 }
+        );
+      }
+
+      // Count the billable export only once a verified PDF is about to be
+      // delivered: Browserless errors and non-PDF payloads do not count
+      // against the user's daily cap.
+      await recordDailyUsage("export", user.id);
+
+      return new NextResponse(pdfBuffer, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `attachment; filename="project-${projectId}.pdf"`,
+        },
+      });
+    } catch (error) {
+      trackError(error, {
+        action: "POST /api/export-pdf",
+        projectId,
+      });
+
+      const classified = classifyIntegrationError(error, EXPORT_PDF_ERROR_COPY);
+
       return NextResponse.json(
         {
-          error: "PDF generation failed",
-          message: "Unable to generate PDF at this time. Please try again.",
-          retryable: true,
-          code: API_ERROR_PDF_GENERATION_FAILED,
+          error: classified.error,
+          message: classified.message,
+          retryable: classified.retryable,
+          code: classified.code,
         },
-        { status: chromeResponse.status }
+        { status: classified.status }
       );
     }
-
-    // 7. Sanity-check the payload really is a PDF before streaming it to
-    //    the user (e.g. an HTML error page slipped through with a 200).
-    const pdfBuffer = await chromeResponse.arrayBuffer();
-    const contentType = chromeResponse.headers.get("content-type") ?? "";
-    const leadingBytes = String.fromCharCode(
-      ...new Uint8Array(pdfBuffer.slice(0, 4))
-    );
-    if (
-      pdfBuffer.byteLength === 0 ||
-      !contentType.includes("application/pdf") ||
-      leadingBytes !== "%PDF"
-    ) {
-      console.error(
-        JSON.stringify({
-          event: "export_pdf_non_pdf_response",
-          projectId,
-          contentType,
-          byteLength: pdfBuffer.byteLength,
-        })
-      );
-      return NextResponse.json(
-        {
-          error: "PDF generation failed",
-          message: "Unable to generate PDF at this time. Please try again.",
-          retryable: true,
-          code: API_ERROR_PDF_GENERATION_FAILED,
-        },
-        { status: 502 }
-      );
-    }
-
-    // Count the billable export only once a verified PDF is about to be
-    // delivered: Browserless errors and non-PDF payloads do not count
-    // against the user's daily cap.
-    await recordDailyUsage("export", user.id);
-
-    return new NextResponse(pdfBuffer, {
-      status: 200,
-      headers: {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="project-${projectId}.pdf"`,
-      },
-    });
-  } catch (error) {
-    console.error(
-      JSON.stringify({
-        event: "export_pdf_failed",
-        projectId: projectId ?? null,
-      }),
-      error
-    );
-
-    const classified = classifyIntegrationError(error, EXPORT_PDF_ERROR_COPY);
-
-    return NextResponse.json(
-      {
-        error: classified.error,
-        message: classified.message,
-        retryable: classified.retryable,
-        code: classified.code,
-      },
-      { status: classified.status }
-    );
-  }
+  });
 }

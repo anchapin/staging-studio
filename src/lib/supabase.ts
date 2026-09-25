@@ -1,5 +1,8 @@
 import { createBrowserClient, createServerClient } from "@supabase/ssr";
 import { MissingEnvVarsError, requireEnvVars } from "@/lib/env";
+import { componentLogger } from "@/lib/logger";
+
+const log = componentLogger("supabase");
 
 const globalForSupabaseBrowser = globalThis as unknown as {
   supabaseBrowser: ReturnType<typeof createBrowserClient> | undefined;
@@ -84,8 +87,31 @@ export function createServerClientSingleton(
   }
 ) {
   const env = requireEnvVars("NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_ANON_KEY");
+
+  // Wrap cookie operations to log auth-related failures
+  const instrumentedCookies = {
+    getAll() {
+      try {
+        return cookies.getAll();
+      } catch (err) {
+        log.error({ type: "supabase_cookie_read_error", err }, "Failed to read Supabase auth cookies");
+        return [];
+      }
+    },
+    setAll(cookiesToSet: { name: string; value: string; options?: Record<string, unknown> }[]) {
+      try {
+        cookies.setAll(cookiesToSet);
+      } catch (err) {
+        log.error(
+          { type: "supabase_cookie_write_error", cookieCount: cookiesToSet.length, err },
+          "Failed to write Supabase auth cookies (may indicate server-component cookie mutation attempt)"
+        );
+      }
+    },
+  };
+
   return createServerClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
-    cookies,
+    cookies: instrumentedCookies,
   });
 }
 

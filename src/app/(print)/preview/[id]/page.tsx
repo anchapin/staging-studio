@@ -8,6 +8,10 @@ import {
   extractPreviewToken,
   getPreviewAccess as resolvePreviewAccessRequest,
 } from "@/lib/preview-access";
+import { componentLogger } from "@/lib/logger";
+import { trackError } from "@/lib/error-tracking";
+
+const log = componentLogger("preview-page");
 
 import {
   LookbookPreviewView,
@@ -148,7 +152,8 @@ export default async function LookbookPreviewPage({
   try {
     project = await getPreviewProject(id);
   } catch (error) {
-    console.error("Error loading preview project:", error);
+    trackError(error, { action: "GET /preview/[id]", projectId: id });
+    log.error({ type: "preview_load_failed", projectId: id }, "Error loading preview project");
     // Access was already granted (token or owning session), so
     // re-requesting the same URL replays it as a plain-server-render
     // "Retry". The token, when present, is preserved on the real

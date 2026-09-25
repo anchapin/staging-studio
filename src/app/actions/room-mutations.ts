@@ -3,6 +3,9 @@
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { revalidatePath } from "next/cache";
+import { componentLogger } from "@/lib/logger";
+
+const log = componentLogger("action:room-mutations");
 
 export async function bulkUpdateRoomAesthetic(
   roomIds: string[],
@@ -41,7 +44,7 @@ export async function bulkUpdateRoomAesthetic(
 
     return { success: true };
   } catch (error) {
-    console.error("Bulk update room failed:", error);
+    log.error({ type: "bulk_update_room_aesthetic_failed", roomCount: roomIds.length }, "Bulk update room aesthetic failed");
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",

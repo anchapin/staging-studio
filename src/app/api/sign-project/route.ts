@@ -5,6 +5,9 @@ import { createPreflightResponse, withCors } from "@/lib/cors";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { verifyPreviewToken } from "@/lib/preview-token";
 import { withRetry } from "@/lib/retry";
+import { withNextRouteLogging } from "@/lib/api-logging";
+import { trackError } from "@/lib/error-tracking";
+import { componentLogger } from "@/lib/logger";
 import {
   signProjectRequestSchema,
   tokenMatchesProject,
@@ -17,6 +20,8 @@ import {
   API_ERROR_SAVE_FAILED,
   API_ERROR_INTERNAL_SERVER,
 } from "@/lib/api-errors";
+
+const log = componentLogger("api:sign-project");
 
 const SIGN_ERROR_COPY = {
   invalidToken: {
@@ -76,74 +81,81 @@ function validationFailure(error: ZodError): NextResponse {
  * with a structured `sign_project_save_failed` event, never swallowed.
  */
 export async function POST(req: NextRequest) {
-  const user = await getAuthedPrismaUser();
-  if (!user) {
-    return withCors(NextResponse.json(
-      { error: "Unauthorized", message: "You must be logged in to sign a project." },
-      { status: 401 }
-    ));
-  }
-
-  try {
-    const body = await req.json();
-
-    const parsed = signProjectRequestSchema.safeParse(body);
-    if (!parsed.success) {
-      return withCors(validationFailure(parsed.error));
-    }
-    const { projectId, signatureDataUrl, token } = parsed.data;
-
-    const tokenVerification = await verifyPreviewToken(token);
-    if (!tokenMatchesProject(tokenVerification, projectId)) {
-      return withCors(NextResponse.json(SIGN_ERROR_COPY.invalidToken, { status: 401 }));
-    }
-
-    const existing = await prisma.project.findUnique({
-      where: { id: projectId },
-      select: { clientSignatureStatus: true, userId: true },
-    });
-    if (!existing) {
-      return withCors(NextResponse.json(SIGN_ERROR_COPY.invalidProject, { status: 404 }));
-    }
-    if (existing.userId !== user.id) {
+  return withNextRouteLogging(req, null, async () => {
+    const user = await getAuthedPrismaUser();
+    if (!user) {
       return withCors(NextResponse.json(
-        { error: "Forbidden", message: "You do not have permission to sign this project." },
-        { status: 403 }
+        { error: "Unauthorized", message: "You must be logged in to sign a project." },
+        { status: 401 }
       ));
-    }
-    if (existing.clientSignatureStatus === "Signed") {
-      return withCors(NextResponse.json(SIGN_ERROR_COPY.alreadySigned, { status: 409 }));
     }
 
     try {
-      await withRetry(
-        async () =>
-          prisma.project.update({
-            where: { id: projectId },
-            data: {
-              clientSignature: signatureDataUrl,
-              clientSignatureStatus: "Signed",
-              clientSignatureTimestamp: new Date(),
-            },
-          }),
-        3,
-        200
-      );
-    } catch (error) {
-      console.error("sign_project_save_failed", {
-        projectId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return withCors(NextResponse.json(SIGN_ERROR_COPY.saveFailed, { status: 500 }));
-    }
+      const body = await req.json();
 
-    return withCors(NextResponse.json({ success: true }));
-  } catch {
-    return withCors(NextResponse.json(
-      { error: "Server error", message: "An unexpected error occurred.", code: API_ERROR_INTERNAL_SERVER },
-      { status: 500 }
-    ));
-  }
+      const parsed = signProjectRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        return withCors(validationFailure(parsed.error));
+      }
+      const { projectId, signatureDataUrl, token } = parsed.data;
+
+      const tokenVerification = await verifyPreviewToken(token);
+      if (!tokenMatchesProject(tokenVerification, projectId)) {
+        return withCors(NextResponse.json(SIGN_ERROR_COPY.invalidToken, { status: 401 }));
+      }
+
+      const existing = await prisma.project.findUnique({
+        where: { id: projectId },
+        select: { clientSignatureStatus: true, userId: true },
+      });
+      if (!existing) {
+        return withCors(NextResponse.json(SIGN_ERROR_COPY.invalidProject, { status: 404 }));
+      }
+      if (existing.userId !== user.id) {
+        return withCors(NextResponse.json(
+          { error: "Forbidden", message: "You do not have permission to sign this project." },
+          { status: 403 }
+        ));
+      }
+      if (existing.clientSignatureStatus === "Signed") {
+        return withCors(NextResponse.json(SIGN_ERROR_COPY.alreadySigned, { status: 409 }));
+      }
+
+      try {
+        await withRetry(
+          async () =>
+            prisma.project.update({
+              where: { id: projectId },
+              data: {
+                clientSignature: signatureDataUrl,
+                clientSignatureStatus: "Signed",
+                clientSignatureTimestamp: new Date(),
+              },
+            }),
+          3,
+          200
+        );
+      } catch (error) {
+        log.error(
+          {
+            type: "sign_project_save_failed",
+            projectId,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          "Failed to save client signature"
+        );
+        return withCors(NextResponse.json(SIGN_ERROR_COPY.saveFailed, { status: 500 }));
+      }
+
+      return withCors(NextResponse.json({ success: true }));
+    } catch (err) {
+      trackError(err, { action: "POST /api/sign-project" });
+      return withCors(NextResponse.json(
+        { error: "Server error", message: "An unexpected error occurred.", code: API_ERROR_INTERNAL_SERVER },
+        { status: 500 }
+      ));
+    }
+  });
 }
 
 export const OPTIONS = createPreflightResponse;

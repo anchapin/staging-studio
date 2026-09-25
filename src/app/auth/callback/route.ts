@@ -1,5 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
+import { componentLogger } from "@/lib/logger";
+import { trackError } from "@/lib/error-tracking";
+
+const log = componentLogger("auth-callback");
 
 export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get("code");
@@ -47,12 +51,9 @@ export async function GET(request: NextRequest) {
   const { prisma } = await import("@/lib/prisma");
   try {
     if (!data.user.email) {
-      console.error(
-        JSON.stringify({
-          event: "auth_callback_lookup_failed",
-          userId: data.user.id,
-          reason: "missing_email",
-        })
+      log.error(
+        { type: "auth_callback_missing_email", userId: data.user.id },
+        "Auth callback: user has no email"
       );
     } else {
       await prisma.user.findUnique({
@@ -60,13 +61,13 @@ export async function GET(request: NextRequest) {
       });
     }
   } catch (lookupError) {
-    console.error(
-      JSON.stringify({
-        event: "auth_callback_lookup_failed",
-        userId: data.user.id,
-        reason: "prisma_error",
-      }),
-      lookupError
+    trackError(lookupError, {
+      action: "GET /auth/callback",
+      userId: data.user.id,
+    });
+    log.error(
+      { type: "auth_callback_prisma_error", userId: data.user.id },
+      "Auth callback: Prisma lookup failed"
     );
   }
 

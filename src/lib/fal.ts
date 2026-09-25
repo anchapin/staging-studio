@@ -1,8 +1,9 @@
 import * as fal from "@fal-ai/serverless-client";
 import { requireEnvVars } from "@/lib/env";
-import {
-  getCircuitBreaker,
-} from "@/lib/circuit-breaker";
+import { getCircuitBreaker } from "@/lib/circuit-breaker";
+import { componentLogger } from "@/lib/logger";
+
+const log = componentLogger("fal");
 
 fal.config({
   credentials: process.env.FAL_KEY,
@@ -50,9 +51,26 @@ export async function falSubscribeWithCircuitBreaker<T = unknown>(
     failureThreshold: 3,
     cooldownMs: 30_000,
   });
-  return cb.execute(() =>
-    fal.subscribe(modelId, { ...options })
-  ) as Promise<T>;
+  try {
+    return await (cb.execute(() =>
+      fal.subscribe(modelId, { ...options })
+    ) as Promise<T>);
+  } catch (err) {
+    const errMessage = err instanceof Error ? err.message : String(err);
+    const isRetryable = /rate limit|429|503|502|timeout|ECONNREFUSED/i.test(errMessage);
+    log.error(
+      {
+        type: "falai_subscribe_error",
+        modelId,
+        inputKeys: Object.keys(options.input ?? {}),
+        error: errMessage,
+        retryable: isRetryable,
+        fallback: "circuit_breaker_open",
+      },
+      `fal.ai subscribe failed for ${modelId}: ${errMessage}`
+    );
+    throw err;
+  }
 }
 
 interface FalQueueSubmitOptions {
@@ -68,7 +86,24 @@ export async function falQueueSubmitWithCircuitBreaker(
     failureThreshold: 3,
     cooldownMs: 30_000,
   });
-  return cb.execute(() =>
-    fal.queue.submit(modelId, options)
-  ) as Promise<{ request_id: string }>;
+  try {
+    return await (cb.execute(() =>
+      fal.queue.submit(modelId, options)
+    ) as Promise<{ request_id: string }>);
+  } catch (err) {
+    const errMessage = err instanceof Error ? err.message : String(err);
+    const isRetryable = /rate limit|429|503|502|timeout|ECONNREFUSED/i.test(errMessage);
+    log.error(
+      {
+        type: "falai_queue_submit_error",
+        modelId,
+        inputKeys: Object.keys(options.input ?? {}),
+        error: errMessage,
+        retryable: isRetryable,
+        fallback: "circuit_breaker_open",
+      },
+      `fal.ai queue.submit failed for ${modelId}: ${errMessage}`
+    );
+    throw err;
+  }
 }

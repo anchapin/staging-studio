@@ -3,6 +3,9 @@
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { selectionLogSchema } from "@/lib/selection-log-schema";
+import { componentLogger } from "@/lib/logger";
+
+const log = componentLogger("action:selection-log");
 
 /**
  * Server action: persists a selection toggle event to the durable SelectionLog table.
@@ -73,7 +76,7 @@ export async function logSelectionEvent(input: {
 
     return { success: true };
   } catch (error) {
-    console.error("[selection-log] failed to write:", error);
+    log.error({ type: "selection_log_write_failed", roomId: input.roomId, concept: input.concept }, "Failed to write selection log entry");
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",

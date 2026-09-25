@@ -1,6 +1,9 @@
 import { openai } from "@ai-sdk/openai";
 import { requireEnvVars } from "@/lib/env";
 import { getCircuitBreaker } from "@/lib/circuit-breaker";
+import { componentLogger } from "@/lib/logger";
+
+const log = componentLogger("ai");
 
 /**
  * Shared OpenAI chat model instance (gpt-4o-mini) for the Vercel AI SDK.
@@ -35,5 +38,50 @@ export async function generateWithCircuitBreaker<T>(
     failureThreshold: 3,
     cooldownMs: 30_000,
   });
-  return cb.execute(fn);
+  try {
+    return await cb.execute(fn);
+  } catch (err) {
+    const errMessage = err instanceof Error ? err.message : String(err);
+    const isRetryable = /rate limit|429|503|502|too many requests/i.test(errMessage);
+    log.error(
+      {
+        type: "ai_api_error",
+        error: errMessage,
+        retryable: isRetryable,
+        fallback: "circuit_breaker_open",
+      },
+      `OpenAI / AI call failed (${errMessage})`
+    );
+    throw err;
+  }
+}
+
+/**
+ * Logs an AI API error with structured metadata extracted from the error.
+ * Use this when you have additional context (e.g., model, prompt length, tokens).
+ */
+export function trackAIError(params: {
+  err: unknown;
+  model?: string;
+  promptTokens?: number;
+  completionTokens?: number;
+  context?: Record<string, unknown>;
+}) {
+  const { err, model = "gpt-4o-mini", promptTokens, completionTokens, context } = params;
+  const errMessage = err instanceof Error ? err.message : String(err);
+  const isRateLimit = /rate limit|429|too many requests/i.test(errMessage);
+  const isRetryable = isRateLimit || /503|502|timeout|ECONNREFUSED/i.test(errMessage);
+
+  log.error(
+    {
+      type: "ai_api_error",
+      model,
+      error: errMessage,
+      retryable: isRetryable,
+      ...(promptTokens !== undefined && { promptTokens }),
+      ...(completionTokens !== undefined && { completionTokens }),
+      ...(context && { context }),
+    },
+    `AI API error: ${errMessage}`
+  );
 }

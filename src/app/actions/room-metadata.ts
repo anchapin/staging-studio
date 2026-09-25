@@ -6,6 +6,9 @@ import {
   roomMetadataSchema,
   type RoomMetadataInput,
 } from "@/lib/metadata-schemas";
+import { componentLogger } from "@/lib/logger";
+
+const log = componentLogger("action:room-metadata");
 
 function failure(error: string): { success: false; error: string } {
   return { success: false, error };
@@ -45,7 +48,7 @@ export async function saveRoomMetadata(
     });
     return { success: true };
   } catch (error) {
-    console.error("Failed to save room metadata:", error);
+    log.error({ type: "save_room_metadata_failed", roomId }, "Failed to save room metadata");
     return failure(error instanceof Error ? error.message : "Unknown error");
   }
 }

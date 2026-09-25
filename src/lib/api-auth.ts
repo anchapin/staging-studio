@@ -1,6 +1,10 @@
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { createServerClientSingleton } from "@/lib/supabase";
+import { componentLogger } from "@/lib/logger";
+import { trackError } from "@/lib/error-tracking";
+
+const log = componentLogger("api-auth");
 
 /**
  * Resolves the current request's authenticated user as a Prisma `User`.
@@ -42,9 +46,20 @@ export async function getAuthedPrismaUser() {
     },
   });
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let user = null;
+  try {
+    const result = await supabase.auth.getUser();
+    user = result.data.user;
+  } catch (err) {
+    // getUser() throws on network/validation errors — treat as no-session
+    // and log for observability without surfacing to the caller.
+    trackError(err, { action: "supabase.getUser" });
+    log.debug(
+      { type: "auth_getuser_error", error: err instanceof Error ? err.message : String(err) },
+      "Supabase getUser() failed — treating as unauthenticated"
+    );
+    return null;
+  }
 
   if (!user?.email) return null;
 

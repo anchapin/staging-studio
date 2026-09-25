@@ -3,6 +3,9 @@
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { revalidatePath } from "next/cache";
+import { componentLogger } from "@/lib/logger";
+
+const log = componentLogger("action:room-delete");
 
 function failure(error: string): { success: false; error: string } {
   return { success: false, error };
@@ -40,7 +43,7 @@ export async function reorderRooms(
     );
     return { success: true };
   } catch (err) {
-    console.error("[reorderRooms]", err);
+    log.error({ type: "reorder_rooms_failed", projectId }, "Failed to reorder rooms");
     return failure(err instanceof Error ? err.message : "Unknown error");
   }
 }
@@ -66,7 +69,7 @@ export async function deleteRoom(
     revalidatePath(`/projects/${room.projectId}/rooms`);
     return { success: true };
   } catch (err) {
-    console.error("[deleteRoom]", err);
+    log.error({ type: "delete_room_failed", roomId }, "Failed to delete room");
     return failure(err instanceof Error ? err.message : "Unknown error");
   }
 }

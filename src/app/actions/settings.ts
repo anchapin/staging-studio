@@ -4,6 +4,10 @@ import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { revalidatePath } from "next/cache";
 import { settingsSchema, type SettingsInput } from "@/lib/settings-schema";
+import { withTrackedAction } from "@/lib/error-tracking";
+import { componentLogger } from "@/lib/logger";
+
+const log = componentLogger("action:settings");
 
 /**
  * Server action: updates the authed user's editable branding/template
@@ -26,7 +30,7 @@ import { settingsSchema, type SettingsInput } from "@/lib/settings-schema";
  * Side effects: needs `DATABASE_URL` and a valid Supabase session
  * cookie; performs a Prisma `user.update` and calls
  * `revalidatePath("/settings")` so the page reflects the change; logs
- * failures to `console.error`.
+ * failures to structured logging via `error-tracking`.
  *
  * @param input The five editable fields as sent by the client form.
  * @returns `{ success: true }` on write, or
@@ -65,7 +69,7 @@ export async function updateUserSettings(
     revalidatePath("/settings");
     return { success: true };
   } catch (error) {
-    console.error("Failed to save user settings:", error);
+    log.error({ type: "settings_save_failed", userId: user.id }, "Failed to save user settings");
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",

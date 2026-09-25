@@ -1,10 +1,13 @@
 import { generateObject } from "ai";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { aiModel, assertOpenAIConfigured, generateWithCircuitBreaker } from "@/lib/ai";
+import { aiModel, assertOpenAIConfigured, generateWithCircuitBreaker, trackAIError } from "@/lib/ai";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { buildDeprecationHeaders } from "@/lib/api-version";
+import { withNextRouteLogging } from "@/lib/api-logging";
+import { trackError } from "@/lib/error-tracking";
+import { componentLogger } from "@/lib/logger";
 import {
   generateCopyRequestSchema,
   copyQualityGateSchema,
@@ -31,6 +34,8 @@ import {
   API_ERROR_ROOM_NOT_FOUND,
   API_ERROR_SAVE_FAILED,
 } from "@/lib/api-errors";
+
+const log = componentLogger("api:generate-copy");
 
 const COPY_OUTPUT_ERROR_COPY = {
   rateLimit: {
@@ -59,58 +64,60 @@ const CopyOutputSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  // Hoisted so the catch block can correlate failures with the room even
-  // when the error fires before/after the request body is parsed.
-  let roomId: string | undefined;
-  try {
-    const user = await getAuthedPrismaUser();
-    if (!user) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Unauthorized",
-          message: "You must be signed in to generate copy.",
-          code: API_ERROR_UNAUTHORIZED,
-        },
-        { status: 401, headers: buildDeprecationHeaders() }
-      );
-    }
+  return withNextRouteLogging(request, null, async () => {
+    // Hoisted so the catch block can correlate failures with the room even
+    // when the error fires before/after the request body is parsed.
+    let roomId: string | undefined;
+    try {
+      const user = await getAuthedPrismaUser();
+      if (!user) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Unauthorized",
+            message: "You must be signed in to generate copy.",
+            code: API_ERROR_UNAUTHORIZED,
+          },
+          { status: 401, headers: buildDeprecationHeaders() }
+        );
+      }
 
-    // Issue #201: daily per-user OpenAI cost guardrail, checked BEFORE any
-    // validation or DB work — a user at their cap never reaches gpt-4o-mini.
-    // Usage lives in the in-process daily counter (lib/api-quota.ts), which
-    // resets on cold start; that under-count limitation is documented there.
-    const copyLimit = resolveDailyLimit(
-      process.env[DAILY_LIMIT_ENV_VAR.copy],
-      DEFAULT_DAILY_COPY_LIMIT
-    );
-    const copyQuota = evaluateDailyQuota(
-      await getDailyUsage("copy", user.id),
-      copyLimit
-    );
-    if (!copyQuota.allowed) {
-      console.warn(
-        JSON.stringify({
-          event: "generate_copy_daily_quota_exceeded",
-          userId: user.id,
-          used: copyQuota.used,
-          limit: copyQuota.limit,
-        })
+      // Issue #201: daily per-user OpenAI cost guardrail, checked BEFORE any
+      // validation or DB work — a user at their cap never reaches gpt-4o-mini.
+      // Usage lives in the in-process daily counter (lib/api-quota.ts), which
+      // resets on cold start; that under-count limitation is documented there.
+      const copyLimit = resolveDailyLimit(
+        process.env[DAILY_LIMIT_ENV_VAR.copy],
+        DEFAULT_DAILY_COPY_LIMIT
       );
-      return NextResponse.json(
-        {
-          success: false,
-          ...dailyQuotaExceededPayload(copyQuota, "Please try again tomorrow."),
-          code: API_ERROR_RATE_LIMIT_EXCEEDED,
-        },
-        { status: 429 }
+      const copyQuota = evaluateDailyQuota(
+        await getDailyUsage("copy", user.id),
+        copyLimit
       );
-    }
+      if (!copyQuota.allowed) {
+        log.warn(
+          {
+            type: "generate_copy_daily_quota_exceeded",
+            userId: user.id,
+            used: copyQuota.used,
+            limit: copyQuota.limit,
+          },
+          "Daily copy generation quota exceeded"
+        );
+        return NextResponse.json(
+          {
+            success: false,
+            ...dailyQuotaExceededPayload(copyQuota, "Please try again tomorrow."),
+            code: API_ERROR_RATE_LIMIT_EXCEEDED,
+          },
+          { status: 429 }
+        );
+      }
 
-    const { roomId: parsedRoomId } = generateCopyRequestSchema.parse(
-      await request.json()
-    );
-    roomId = parsedRoomId;
+      const { roomId: parsedRoomId } = generateCopyRequestSchema.parse(
+        await request.json()
+      );
+      roomId = parsedRoomId;
 
     // Ownership filter follows the server-action convention
     // (`getOwnedRoomWhere` in `app/actions/room.ts`): a roomId owned by
@@ -240,12 +247,13 @@ export async function POST(request: NextRequest) {
       // The copy was generated (and paid for) but persistence failed.
       // Return it under a distinct `save_failed` code so the client can
       // retry save-only instead of paying to regenerate.
-      console.error(
-        JSON.stringify({
-          event: "generate_copy_save_failed",
+      log.error(
+        {
+          type: "generate_copy_save_failed",
           roomId,
           saveError: saveResult.error ?? null,
-        })
+        },
+        "Copy generated but save failed"
       );
       return NextResponse.json(
         {
@@ -272,24 +280,26 @@ export async function POST(request: NextRequest) {
       { status: 200 }
     );
   } catch (error) {
-    console.error(
-      JSON.stringify({ event: "generate_copy_failed", roomId: roomId ?? null }),
-      error
-    );
-
-    // A NoObjectGeneratedError means the model finished but its output
-    // could not be parsed into the schema. Its `.cause`/finishReason/text
-    // are the only way to diagnose recurring malformed-JSON incidents, so
-    // surface them in the structured log payload.
     const noObjectFields = describeNoObjectGeneratedError(error);
+
+    trackAIError({
+      err: error,
+      model: "gpt-4o-mini",
+      context: {
+        route: "generate-copy",
+        roomId: roomId ?? null,
+        ...(noObjectFields ?? {}),
+      },
+    });
+
     if (noObjectFields) {
-      console.error(
-        JSON.stringify({
-          event: "generate_copy_no_object_generated",
+      log.error(
+        {
+          type: "generate_copy_no_object_generated",
           roomId: roomId ?? null,
           ...noObjectFields,
-        }),
-        error
+        },
+        "AI model returned unparseable output"
       );
     }
 
@@ -318,4 +328,5 @@ export async function POST(request: NextRequest) {
       { status: classified.status }
     );
   }
+  });
 }

@@ -3,6 +3,9 @@ import { assertFalConfigured, falSubscribeWithCircuitBreaker } from "@/lib/fal";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { buildDeprecationHeaders } from "@/lib/api-version";
+import { withNextRouteLogging } from "@/lib/api-logging";
+import { trackError } from "@/lib/error-tracking";
+import { componentLogger } from "@/lib/logger";
 import { furnishingsSegmentRequestSchema } from "@/lib/ai-route-schemas";
 import { classifyIntegrationError } from "@/lib/error-classify";
 import {
@@ -26,6 +29,8 @@ import {
   API_ERROR_INVALID_CONCEPT,
   API_ERROR_ROOM_NOT_FOUND,
 } from "@/lib/api-errors";
+
+const log = componentLogger("api:segment:furnishings");
 
 const FURNISHINGS_ERROR_COPY = {
   auth: {
@@ -90,49 +95,51 @@ async function fetchMaskAsDataUrl(url: string): Promise<string> {
 }
 
 export async function POST(request: NextRequest) {
-  let roomId: string | undefined;
-  try {
-    const user = await getAuthedPrismaUser();
-    if (!user) {
-      return NextResponse.json(
-        {
-          error: "Unauthorized",
-          message: "You must be signed in to detect furnishings.",
-          code: API_ERROR_UNAUTHORIZED,
-        },
-        { status: 401, headers: buildDeprecationHeaders() }
-      );
-    }
+  return withNextRouteLogging(request, null, async () => {
+    let roomId: string | undefined;
+    try {
+      const user = await getAuthedPrismaUser();
+      if (!user) {
+        return NextResponse.json(
+          {
+            error: "Unauthorized",
+            message: "You must be signed in to detect furnishings.",
+            code: API_ERROR_UNAUTHORIZED,
+          },
+          { status: 401, headers: buildDeprecationHeaders() }
+        );
+      }
 
-    // Issue #226: daily per-user segment guardrail (in-process counter —
-    // see lib/api-quota.ts for the mechanism and its multi-instance
-    // limitation). Checked BEFORE the body is parsed so a user at their
-    // cap never reaches the paid provider.
-    const segmentLimit = resolveDailyLimit(
-      process.env[DAILY_LIMIT_ENV_VAR.segment],
-      DEFAULT_DAILY_SEGMENT_LIMIT
-    );
-    const segmentQuota = evaluateDailyQuota(
-      await getDailyUsage("segment", user.id),
-      segmentLimit
-    );
-    if (!segmentQuota.allowed) {
-      console.warn(
-        JSON.stringify({
-          event: "segment_daily_quota_exceeded",
-          userId: user.id,
-          used: segmentQuota.used,
-          limit: segmentQuota.limit,
-        })
+      // Issue #226: daily per-user segment guardrail (in-process counter —
+      // see lib/api-quota.ts for the mechanism and its multi-instance
+      // limitation). Checked BEFORE the body is parsed so a user at their
+      // cap never reaches the paid provider.
+      const segmentLimit = resolveDailyLimit(
+        process.env[DAILY_LIMIT_ENV_VAR.segment],
+        DEFAULT_DAILY_SEGMENT_LIMIT
       );
-      return NextResponse.json(
-        {
-          ...dailyQuotaExceededPayload(segmentQuota, "Please try again tomorrow."),
-          code: API_ERROR_RATE_LIMIT_EXCEEDED,
-        },
-        { status: 429 }
+      const segmentQuota = evaluateDailyQuota(
+        await getDailyUsage("segment", user.id),
+        segmentLimit
       );
-    }
+      if (!segmentQuota.allowed) {
+        log.warn(
+          {
+            type: "segment_daily_quota_exceeded",
+            userId: user.id,
+            used: segmentQuota.used,
+            limit: segmentQuota.limit,
+          },
+          "Daily segmentation quota exceeded"
+        );
+        return NextResponse.json(
+          {
+            ...dailyQuotaExceededPayload(segmentQuota, "Please try again tomorrow."),
+            code: API_ERROR_RATE_LIMIT_EXCEEDED,
+          },
+          { status: 429 }
+        );
+      }
 
     const parsed = furnishingsSegmentRequestSchema.safeParse(await request.json());
     if (!parsed.success) {
@@ -208,10 +215,10 @@ export async function POST(request: NextRequest) {
       scores: detection.scores,
     });
   } catch (error) {
-    console.error(
-      JSON.stringify({ event: "furnishings_detection_failed", roomId: roomId ?? null }),
-      error
-    );
+    trackError(error, {
+      action: "POST /api/segment/furnishings",
+      roomId,
+    });
 
     const classified = classifyIntegrationError(error, FURNISHINGS_ERROR_COPY);
 
@@ -225,4 +232,5 @@ export async function POST(request: NextRequest) {
       { status: classified.status }
     );
   }
+  });
 }

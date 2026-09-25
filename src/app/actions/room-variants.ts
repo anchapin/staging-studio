@@ -9,6 +9,9 @@ import {
   type TouchUpRequestRow,
 } from "@/lib/variant-legibility";
 import type { StagedVariantPair } from "@/lib/staged-result";
+import { componentLogger } from "@/lib/logger";
+
+const log = componentLogger("action:room-variants");
 
 function failure(error: string): { success: false; error: string } {
   return { success: false, error };
@@ -43,7 +46,7 @@ export async function saveVariantSelection(
     });
     return { success: true };
   } catch (error) {
-    console.error("[saveVariantSelection]", error);
+    log.error({ type: "save_variant_selection_failed", roomId }, "Failed to save variant selection");
     return failure(error instanceof Error ? error.message : "Unknown error");
   }
 }
@@ -65,7 +68,7 @@ export async function getVariantTouchUpCounts(
 
     return { success: true, counts: touchUpCountsBySlot(rows as TouchUpRequestRow[]) };
   } catch (err) {
-    console.error("[getVariantTouchUpCounts]", err);
+    log.error({ type: "get_variant_touchup_counts_failed", roomId }, "Failed to get variant touch-up counts");
     return failure(err instanceof Error ? err.message : "Query failed");
   }
 }
@@ -126,7 +129,7 @@ export async function deleteVariantAfterImage(
 
     return { success: true };
   } catch (err) {
-    console.error("[deleteVariantAfterImage]", err);
+    log.error({ type: "delete_variant_after_image_failed", roomId, variantSlot }, "Failed to delete variant after image");
     return failure(err instanceof Error ? err.message : "Unknown error");
   }
 }
