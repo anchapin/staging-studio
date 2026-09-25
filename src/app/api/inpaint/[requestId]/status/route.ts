@@ -35,25 +35,6 @@ export async function GET(
       );
     }
 
-    const rateLimit = checkInpaintStatusRateLimit(user.id);
-    if (!rateLimit.allowed) {
-      return NextResponse.json(
-        {
-          error: "Too many requests",
-          message: `Rate limit exceeded. Please wait ${rateLimit.retryAfterMs} seconds before trying again.`,
-          code: API_ERROR_TOO_MANY_REQUESTS,
-        },
-        {
-          status: 429,
-          headers: {
-            "Retry-After": String(rateLimit.retryAfterMs),
-            "X-RateLimit-Limit": String(INPAINT_STATUS_RATE_LIMIT),
-            "X-RateLimit-Remaining": "0",
-          },
-        }
-      );
-    }
-
     const { requestId: requestIdParam } = await params;
     requestId = requestIdParam;
 
@@ -61,6 +42,25 @@ export async function GET(
       return NextResponse.json(
         { error: "Missing requestId", message: "Request ID is required to check status", code: API_ERROR_INVALID_REQUEST },
         { status: 400 }
+      );
+    }
+
+    const rateLimit = checkInpaintStatusRateLimit(user.id, requestId);
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        {
+          error: "Too many requests",
+          message: `Rate limit exceeded. Please wait ${rateLimit.retryAfterSeconds} seconds before trying again.`,
+          code: API_ERROR_TOO_MANY_REQUESTS,
+        },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(rateLimit.retryAfterSeconds),
+            "X-RateLimit-Limit": String(INPAINT_STATUS_RATE_LIMIT),
+            "X-RateLimit-Remaining": "0",
+          },
+        }
       );
     }
 
