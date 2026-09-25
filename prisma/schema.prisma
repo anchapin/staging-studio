@@ -148,7 +148,7 @@ model VisionLabel {
   room           Room?    @relation(fields: [roomId], references: [id], onDelete: Cascade)
   createdAt      DateTime @default(now())
 
-  @@unique([imageUrlHash, concept, instanceIndex, userId])
+  @@unique([userId, imageUrlHash, concept, instanceIndex])
   @@index([roomId])
 }
 
