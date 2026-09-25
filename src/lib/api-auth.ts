@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { createServerClientSingleton } from "@/lib/supabase";
+import type { PrismaClient, Project } from "@prisma/client";
 
 /**
  * Resolves the current request's authenticated user as a Prisma `User`.
@@ -51,4 +52,20 @@ export async function getAuthedPrismaUser() {
   return prisma.user.findUnique({
     where: { email: user.email },
   });
+}
+
+/**
+ * Returns the project if the user owns it, otherwise null.
+ * Non-throwing variant for server actions.
+ */
+export async function requireProjectOwnershipSafe(
+  projectId: string,
+  userId: string,
+  prisma: PrismaClient,
+): Promise<{ project: Project } | null> {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId, userId },
+  });
+  if (!project) return null;
+  return { project };
 }

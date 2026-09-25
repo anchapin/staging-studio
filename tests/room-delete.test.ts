@@ -13,10 +13,11 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
+  requireProjectOwnershipSafe: vi.fn(),
 }));
 
 import { prisma } from "@/lib/prisma";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { getAuthedPrismaUser, requireProjectOwnershipSafe } from "@/lib/api-auth";
 import { reorderRooms } from "@/app/actions/room-delete";
 
 const MOCK_USER_ID = "cuser12345678901234567890";
@@ -47,7 +48,7 @@ describe("room-delete actions", () => {
     });
 
     it("returns error when project not found", async () => {
-      vi.mocked(prisma.project.findUnique).mockResolvedValue(null);
+      vi.mocked(requireProjectOwnershipSafe).mockResolvedValue(null);
 
       const result = await reorderRooms(MOCK_PROJECT_ID, ["room1", "room2"]);
 
@@ -56,7 +57,7 @@ describe("room-delete actions", () => {
     });
 
     it("updates sortOrder and returns success for valid input", async () => {
-      vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: MOCK_PROJECT_ID } as never);
+      vi.mocked(requireProjectOwnershipSafe).mockResolvedValue({ project: { id: MOCK_PROJECT_ID } as never });
       vi.mocked(prisma.room.updateMany).mockResolvedValue({ count: 1 } as never);
 
       const result = await reorderRooms(MOCK_PROJECT_ID, ["room1", "room2"]);
