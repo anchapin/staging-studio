@@ -12,6 +12,11 @@ vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
 }));
 
+vi.mock("@/lib/signature-encryption", () => ({
+  encryptSignature: vi.fn().mockImplementation((data: string) => Promise.resolve(`encrypted_${data}`)),
+  decryptSignature: vi.fn().mockImplementation((data: string) => Promise.resolve(data.replace("encrypted_", ""))),
+}));
+
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));
@@ -148,7 +153,7 @@ describe("saveProjectSignature", () => {
       roiSalesPricePremium: "0",
       roiTransactionVelocity: "faster",
       roiInvestmentTier: "mid",
-      clientSignature: "data:image/png;base64,abc123",
+      clientSignature: "encrypted_data:image/png;base64,abc123",
       clientSignatureStatus: "Signed",
       clientSignatureTimestamp: new Date(),
       createdAt: new Date(),
@@ -161,7 +166,7 @@ describe("saveProjectSignature", () => {
     expect(prisma.project.update).toHaveBeenCalledWith({
       where: { id: validProjectId, userId: mockUser.id },
       data: {
-        clientSignature: "data:image/png;base64,abc123",
+        clientSignature: "encrypted_data:image/png;base64,abc123",
         clientSignatureStatus: "Signed",
         clientSignatureTimestamp: expect.any(Date),
       },
