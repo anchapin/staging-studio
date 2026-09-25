@@ -222,3 +222,18 @@ model DailyApiUsage {
   @@unique([userId, surface, dayKey])
   @@index([userId, surface, dayKey])
 }
+
+// SetupRateLimit model: IP-based rate limiting for the setup password flow.
+// Tracks failed attempts per hashed IP with a sliding one-hour window.
+// On 10 failed attempts within the window the IP is locked for the remainder
+// of the window duration. Resets atomically on a successful setup.
+model SetupRateLimit {
+  id          String    @id @default(cuid())
+  ipHash      String    @unique  // SHA-256 of client IP, stored not raw
+  attemptCount Int       @default(0)
+  windowStart  DateTime  @default(now()) // start of current rate-limit window
+  lockedUntil  DateTime?           // optional hard lockout until this time
+  updatedAt    DateTime  @updatedAt
+
+  @@index([ipHash])
+}
