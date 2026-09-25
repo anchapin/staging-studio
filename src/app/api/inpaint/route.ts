@@ -58,7 +58,12 @@ export async function POST(request: NextRequest) {
     if (roomValidation.error || !roomValidation.room) {
       return NextResponse.json(
         {
-          error: roomValidation.room ? "Invalid source" : "Room not found",
+          // room === null means either "not found" (404) or "no staged result for this variant" (400)
+          error: roomValidation.room
+            ? "Invalid source"
+            : roomValidation.status === 404
+              ? "Room not found"
+              : "Invalid source",
           message: roomValidation.error ?? "Unexpected error",
         },
         { status: roomValidation.status }

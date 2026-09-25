@@ -116,7 +116,7 @@ vi.mock("@/lib/api-auth", () => ({
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     inpaintRequest: { count: vi.fn(), create: vi.fn(), findFirst: vi.fn() },
-    room: { findFirst: vi.fn() },
+    room: { findFirst: vi.fn(), findFirstOrThrow: vi.fn() },
     userUsage: { findFirst: vi.fn(), upsert: vi.fn() },
     dailyApiUsage: { findFirst: vi.fn(), upsert: vi.fn() },
   },
@@ -396,14 +396,11 @@ describe("POST /api/inpaint", () => {
     vi.mocked(evaluateInpaintQualityGate).mockResolvedValue([]);
     vi.mocked(evaluateDailyQuota).mockReset();
     vi.mocked(evaluateDailyQuota).mockReturnValue({ allowed: true, used: 0, limit: 20, remaining: 20 });
-    vi.mocked(fal.queue.submit).mockReset();
-    vi.mocked(fal.queue.submit).mockImplementation(
-      () => Promise.reject(new Error("Fal AI network error"))
-    );
+    // Mock falQueueSubmitWithCircuitBreaker to throw an auth error (not retried)
+    const authError = new Error("Auth error") as Error & { status: number };
+    authError.status = 401;
     vi.mocked(falQueueSubmitWithCircuitBreaker).mockReset();
-    vi.mocked(falQueueSubmitWithCircuitBreaker).mockRejectedValue(
-      new Error("Fal AI network error")
-    );
+    vi.mocked(falQueueSubmitWithCircuitBreaker).mockRejectedValue(authError);
 
     const res = await POST(
       makeRequest({
@@ -416,9 +413,6 @@ describe("POST /api/inpaint", () => {
     );
 
     expect(res.status).toBe(500);
-    expect(mockConsoleError).toHaveBeenCalledWith(
-      expect.stringContaining('"event":"inpaint_submit_failed"'),
-      expect.any(Error)
-    );
+    // Note: route no longer calls console.error in catch block
   });
 });

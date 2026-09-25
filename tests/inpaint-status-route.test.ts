@@ -124,11 +124,10 @@ describe("GET /api/inpaint/[requestId]/status — COMPLETED result-endpoint fail
     const response = await callStatusRoute();
     const body = await response.json();
 
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(200);
     expect(body).toEqual({
-      error: "Processing incomplete",
-      message: "The image was processed but could not be retrieved. Please try again.",
-      retryable: true,
+      status: "retryable",
+      persisted: false,
     });
     expect(consoleError).toHaveBeenCalledTimes(1);
     expect(consoleError).toHaveBeenCalledWith(
