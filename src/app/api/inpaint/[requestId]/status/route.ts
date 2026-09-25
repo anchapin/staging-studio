@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { buildDeprecationHeaders } from "@/lib/api-version";
-import { decideInpaintPersistence } from "@/lib/inpaint-persistence";
-import { classifyIntegrationError } from "@/lib/error-classify";
-import { FAL_FLUX_FILL_MODEL } from "@/lib/prompts";
 import {
   INPAINT_STATUS_RATE_LIMIT,
   checkInpaintStatusRateLimit,
