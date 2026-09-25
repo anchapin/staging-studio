@@ -1,13 +1,17 @@
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { createSupabaseRequestClient } from "@/lib/supabase";
+import { NextRequest, NextResponse } from "next/server";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
+<<<<<<< HEAD
+import { listProjects, createProject } from "@/lib/projects-service";
+import { withErrorHandler, ApiError } from "@/lib/api-error-handler";
+import { API_ERROR_UNAUTHORIZED } from "@/lib/api-errors";
+=======
 import {
   API_ERROR_UNAUTHORIZED,
   API_ERROR_MISSING_REQUIRED_FIELDS,
   API_ERROR_USER_NOT_FOUND,
 } from "@/lib/api-errors";
 import { withErrorHandler, ApiError } from "@/lib/api-error-handler";
+>>>>>>> origin/develop
 
 // GET: List the authed user's projects (scoped to caller)
 export const GET = withErrorHandler(async () => {
@@ -19,6 +23,9 @@ export const GET = withErrorHandler(async () => {
       status: 401,
     });
   }
+<<<<<<< HEAD
+  const projects = await listProjects(userRow.id);
+=======
 
   const projects = await prisma.project.findMany({
     where: { userId: userRow.id },
@@ -34,10 +41,36 @@ export const GET = withErrorHandler(async () => {
     },
     orderBy: { createdAt: "desc" },
   });
+>>>>>>> origin/develop
   return NextResponse.json(projects);
 });
 
 // POST: Create a new project (auth-protected)
+<<<<<<< HEAD
+export const POST = withErrorHandler(async (request: NextRequest) => {
+  const body = await request.json();
+  const {
+    propertyAddress,
+    clientName,
+    targetBuyer,
+    stagingAesthetic,
+    buyerDemographics,
+    stagingPackage,
+    rooms,
+  } = body;
+
+  const project = await createProject({
+    propertyAddress,
+    clientName,
+    targetBuyer,
+    stagingAesthetic,
+    buyerDemographics,
+    stagingPackage: stagingPackage ?? null,
+    rooms: rooms ?? [],
+  });
+
+  return NextResponse.json(project, { status: 201 });
+=======
 export const POST = withErrorHandler(async (request: Request) => {
   const supabase = await createSupabaseRequestClient();
   const {
@@ -100,4 +133,5 @@ export const POST = withErrorHandler(async (request: Request) => {
   });
 
   return NextResponse.json(project);
+>>>>>>> origin/develop
 });

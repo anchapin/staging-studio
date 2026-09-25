@@ -1,7 +1,10 @@
-import { generateObject } from "ai";
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
+<<<<<<< HEAD
+import { visionLabelRequestSchema } from "@/lib/ai-route-schemas";
+import { checkLabelQuota, validateLabelRoom, generateVisionLabels } from "@/lib/label-instances-service";
+import { API_ERROR_UNAUTHORIZED, API_ERROR_INVALID_REQUEST } from "@/lib/api-errors";
+=======
 import { aiModel, assertOpenAIConfigured, generateWithCircuitBreaker } from "@/lib/ai";
 import {
   visionLabelRequestSchema,
@@ -27,6 +30,7 @@ import {
   API_ERROR_ROOM_NOT_FOUND,
   API_ERROR_INTERNAL_SERVER,
 } from "@/lib/api-errors";
+>>>>>>> origin/develop
 import { withErrorHandler, ApiError } from "@/lib/api-error-handler";
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
@@ -37,6 +41,34 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
       message: "You must be signed in to label instances.",
       status: 401,
     });
+<<<<<<< HEAD
+  }
+
+  await checkLabelQuota(user.id);
+
+  const parsed = visionLabelRequestSchema.safeParse(await request.json());
+  if (!parsed.success) {
+    throw new ApiError({
+      code: API_ERROR_INVALID_REQUEST,
+      message: "Some required information is missing or invalid.",
+      status: 400,
+      details: parsed.error.issues,
+    });
+  }
+
+  const { roomId, concept, crops, imageUrl } = parsed.data;
+
+  await validateLabelRoom(roomId, user.id);
+
+  const { labels } = await generateVisionLabels({
+    imageUrl,
+    concept,
+    crops,
+    userId: user.id,
+    roomId,
+  });
+
+=======
   }
 
   const labelLimit = resolveDailyLimit(
@@ -177,5 +209,6 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     });
   }
 
+>>>>>>> origin/develop
   return NextResponse.json({ success: true, labels }, { status: 200 });
 });

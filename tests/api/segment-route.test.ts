@@ -69,7 +69,14 @@ describe("POST /api/segment", () => {
 
     expect(response.status).toBe(401);
     expect(json).toMatchObject({
+<<<<<<< HEAD
+      error: {
+        code: "unauthorized",
+        message: "You must be signed in to select objects.",
+      },
+=======
       error: "Unauthorized",
+>>>>>>> origin/develop
     });
   });
 
@@ -84,7 +91,14 @@ describe("POST /api/segment", () => {
 
     expect(response.status).toBe(400);
     expect(json).toMatchObject({
+<<<<<<< HEAD
+      error: {
+        code: "invalid-request",
+        message: "Please provide a valid roomId, imageUrl, click point, and image dimensions.",
+      },
+=======
       error: "Invalid request",
+>>>>>>> origin/develop
     });
   });
 
@@ -108,7 +122,14 @@ describe("POST /api/segment", () => {
 
     expect(response.status).toBe(404);
     expect(json).toMatchObject({
+<<<<<<< HEAD
+      error: {
+        code: "room-not-found",
+        message: "The requested room could not be found.",
+      },
+=======
       error: "Room not found",
+>>>>>>> origin/develop
     });
   });
 
