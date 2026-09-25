@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { buildDeprecationHeaders } from "@/lib/api-version";
 import {
   inpaintSubmitSchema,
   checkDailyQuota,
@@ -13,8 +14,16 @@ export async function POST(request: NextRequest) {
     const user = await getAuthedPrismaUser();
     if (!user) {
       return NextResponse.json(
+<<<<<<< HEAD
         { error: "Unauthorized", message: "You must be signed in to start inpainting." },
         { status: 401 }
+=======
+        {
+          error: "Unauthorized",
+          message: "You must be signed in to start inpainting.",
+        },
+        { status: 401, headers: buildDeprecationHeaders() }
+>>>>>>> origin/develop
       );
     }
 

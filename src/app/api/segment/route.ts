@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { buildDeprecationHeaders } from "@/lib/api-version";
 import { segmentRequestSchema } from "@/lib/ai-route-schemas";
 import { checkSegmentQuota, validateSegmentRoom, runSegmentation } from "@/lib/segment-service";
 import { buildSegmentServerTimingEvent, emitSegmentTiming } from "@/lib/segment-timing";
@@ -8,6 +9,24 @@ import { withErrorHandler, ApiError } from "@/lib/api-error-handler";
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
   const startedAt = Date.now();
+<<<<<<< HEAD
+=======
+  // Hoisted so the catch block can correlate failures with the room even
+  // when the error fires before/after the request body is parsed.
+  let roomId: string | undefined;
+  try {
+    const user = await getAuthedPrismaUser();
+    if (!user) {
+      return NextResponse.json(
+        {
+          error: "Unauthorized",
+          message: "You must be signed in to select objects.",
+          code: API_ERROR_UNAUTHORIZED,
+        },
+        { status: 401, headers: buildDeprecationHeaders() }
+      );
+    }
+>>>>>>> origin/develop
 
   const user = await getAuthedPrismaUser();
   if (!user) {

@@ -25,6 +25,7 @@
     "@eslint/eslintrc": "^3.3.7",
     "@fal-ai/serverless-client": "^0.15.0",
     "@prisma/client": "^5.22.0",
+    "@sentry/nextjs": "^11.0.0",
     "@supabase/ssr": "^0.6.0",
     "@supabase/supabase-js": "^2.0.0",
     "ai": "^7.0.102",
