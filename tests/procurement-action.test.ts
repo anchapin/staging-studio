@@ -14,6 +14,7 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
+  requireProjectOwnershipSafe: vi.fn(),
 }));
 
 vi.mock("next/cache", () => ({
@@ -37,7 +38,7 @@ beforeEach(() => {
 });
 
 import { saveProcurementItems } from "@/app/actions/procurement";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { getAuthedPrismaUser, requireProjectOwnershipSafe } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 
@@ -60,7 +61,7 @@ describe("saveProcurementItems", () => {
 
   it("returns error when project not found", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.findUnique).mockResolvedValue(null);
+    vi.mocked(requireProjectOwnershipSafe).mockResolvedValue(null);
 
     const result = await saveProcurementItems(projectId, validItems);
 
@@ -69,7 +70,7 @@ describe("saveProcurementItems", () => {
 
   it("deletes existing items and creates new ones on success", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: projectId } as any);
+    vi.mocked(requireProjectOwnershipSafe).mockResolvedValue({ project: { id: projectId } as any});
 
     const result = await saveProcurementItems(projectId, validItems);
 
@@ -90,7 +91,7 @@ describe("saveProcurementItems", () => {
 
   it("returns error when database operation fails", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: projectId } as any);
+    vi.mocked(requireProjectOwnershipSafe).mockResolvedValue({ project: { id: projectId } as any });
     vi.mocked(prisma.procurementItem.deleteMany).mockRejectedValue(new Error("DB error"));
 
     const result = await saveProcurementItems(projectId, validItems);
@@ -100,7 +101,7 @@ describe("saveProcurementItems", () => {
 
   it("returns error for invalid item data", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: projectId } as any);
+    vi.mocked(requireProjectOwnershipSafe).mockResolvedValue({ project: { id: projectId } as any });
 
     const result = await saveProcurementItems(projectId, [{ item: "", category: "Seating" }]);
 

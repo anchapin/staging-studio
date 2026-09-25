@@ -10,6 +10,8 @@ const mockPrisma = {
 
 const mockGetAuthedPrismaUser = vi.fn();
 
+const mockRequireProjectOwnershipSafe = vi.fn();
+
 const mockGetDailyUsage = vi.fn();
 
 const mockDetectRoomType = vi.fn();
@@ -24,6 +26,7 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: mockGetAuthedPrismaUser,
+  requireProjectOwnershipSafe: mockRequireProjectOwnershipSafe,
 }));
 
 vi.mock("@/lib/room-type-detection", () => ({
@@ -91,6 +94,7 @@ describe("detectBatchRoomTypes", () => {
     mockGetAuthedPrismaUser.mockResolvedValue(mockUser);
     mockPrisma.project.findFirst.mockResolvedValue(mockProject);
     mockPrisma.project.findUnique.mockResolvedValue(mockProject);
+    mockRequireProjectOwnershipSafe.mockResolvedValue({ project: mockProject });
   });
 
   it("rejects when daily label quota is exceeded (issue #790)", async () => {
