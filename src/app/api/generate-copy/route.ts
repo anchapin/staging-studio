@@ -4,7 +4,6 @@ import { z } from "zod";
 import { aiModel, assertOpenAIConfigured, generateWithCircuitBreaker } from "@/lib/ai";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
-import { buildDeprecationHeaders } from "@/lib/api-version";
 import {
   generateCopyRequestSchema,
   copyQualityGateSchema,
@@ -13,7 +12,7 @@ import { buildCopyPrompt } from "@/lib/prompts";
 import { checklistItemSchema } from "@/lib/checklist-schema";
 import { classifyIntegrationError } from "@/lib/error-classify";
 import { describeNoObjectGeneratedError } from "@/lib/no-object-error";
-import { sanitizeCopy } from "@/lib/sanitize-copy";
+import { sanitizePromptValue } from "@/lib/sanitize-prompt";
 import {
   DEFAULT_DAILY_COPY_LIMIT,
   DAILY_LIMIT_ENV_VAR,
@@ -72,7 +71,7 @@ export async function POST(request: NextRequest) {
           message: "You must be signed in to generate copy.",
           code: API_ERROR_UNAUTHORIZED,
         },
-        { status: 401, headers: buildDeprecationHeaders() }
+        { status: 401 }
       );
     }
 
@@ -190,11 +189,11 @@ export async function POST(request: NextRequest) {
           {
             role: "user",
             content: [
-              `You are a staging copy quality auditor. Evaluate the generated copy for room "${room.name}".`,
+              `You are a staging copy quality auditor. Evaluate the generated copy for room "${sanitizePromptValue(room.name)}".`,
               "",
-              `Staging aesthetic: "${room.project.stagingAesthetic}"`,
-              `Target buyer: "${room.project.targetBuyer}"`,
-              `Raw directives: "${room.rawDirectives ?? ""}"`,
+              `Staging aesthetic: "${sanitizePromptValue(room.project.stagingAesthetic)}"`,
+              `Target buyer: "${sanitizePromptValue(room.project.targetBuyer)}"`,
+              `Raw directives: "${sanitizePromptValue(room.rawDirectives ?? "")}"`,
               "",
               `Generated copy:`,
               `  Observed challenge: "${copy.observedChallenge}"`,
@@ -227,12 +226,11 @@ export async function POST(request: NextRequest) {
       qualityWarnings.push(...qg.qualityWarnings);
     }
 
-    // Sanitize all AI-generated copy fields before saving or returning (#920)
     const generatedCopy: GeneratedCopy = {
-      observedChallenge: sanitizeCopy(copy.observedChallenge),
-      recommendation: sanitizeCopy(copy.recommendation),
-      buyerPsychology: sanitizeCopy(copy.buyerPsychology),
-      checklist: copy.checklist, // checklist items are Zod-validated strings, no HTML expected
+      observedChallenge: copy.observedChallenge,
+      recommendation: copy.recommendation,
+      buyerPsychology: copy.buyerPsychology,
+      checklist: copy.checklist,
     };
 
     const saveResult = await saveRoomCopy(roomId, generatedCopy);

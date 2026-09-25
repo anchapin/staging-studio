@@ -71,7 +71,7 @@ describe("withRetry", () => {
     expect(delays[1]).toBeGreaterThan(delays[0]);
   });
 
-  it("capped at maxDelayMs", async () => {
+  it("(e) capped at maxDelayMs", async () => {
     const mockFn = vi
       .fn()
       .mockRejectedValueOnce(new Error("fail"))
@@ -97,5 +97,42 @@ describe("withRetry", () => {
     }
     // Last delay before success should be close to 5000 (capped)
     expect(delays[delays.length - 1]).toBeGreaterThan(4000);
+  });
+
+  it("(f) maxAttempts=1 — no retries, fails immediately", async () => {
+    const mockFn = vi.fn().mockRejectedValue(new Error("fail"));
+
+    await expect(withRetry(mockFn, 1)).rejects.toThrow("fail");
+    expect(mockFn).toHaveBeenCalledTimes(1);
+    expect(setTimeoutSpy).not.toHaveBeenCalled();
+  });
+
+  it("(g) maxAttempts=1 — succeeds on first try", async () => {
+    const mockFn = vi.fn().mockResolvedValue("immediate success");
+
+    const result = await withRetry(mockFn, 1);
+
+    expect(result).toBe("immediate success");
+    expect(mockFn).toHaveBeenCalledTimes(1);
+    expect(setTimeoutSpy).not.toHaveBeenCalled();
+  });
+
+  it("(h) error is preserved — thrown error is the last error from fn", async () => {
+    const lastError = new Error("final failure");
+    const mockFn = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("first"))
+      .mockRejectedValueOnce(new Error("second"))
+      .mockRejectedValueOnce(new Error("third"))
+      .mockRejectedValue(lastError);
+
+    // Advance time automatically when setTimeout is called
+    setTimeoutSpy.mockImplementation((callback: () => void) => {
+      callback();
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    });
+
+    await expect(withRetry(mockFn, 4)).rejects.toThrow(lastError);
+    expect(mockFn).toHaveBeenCalledTimes(4);
   });
 });

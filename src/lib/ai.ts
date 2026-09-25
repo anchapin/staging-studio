@@ -1,6 +1,7 @@
 import { openai } from "@ai-sdk/openai";
 import { requireEnvVars } from "@/lib/env";
 import { getCircuitBreaker } from "@/lib/circuit-breaker";
+import { logger } from "@/lib/logger";
 
 /**
  * Shared OpenAI chat model instance (gpt-4o-mini) for the Vercel AI SDK.
@@ -35,5 +36,18 @@ export async function generateWithCircuitBreaker<T>(
     failureThreshold: 3,
     cooldownMs: 30_000,
   });
-  return cb.execute(fn);
+  try {
+    return await cb.execute(fn);
+  } catch (error) {
+    logger.error(
+      {
+        event: "ai_error",
+        errorType: "ExternalApiError",
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      },
+      `[ExternalApiError] OpenAI error: ${error instanceof Error ? error.message : String(error)}`
+    );
+    throw error;
+  }
 }

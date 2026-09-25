@@ -1,8 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { prisma } from "@/lib/prisma";
-import { API_ERROR_UNAUTHORIZED, API_ERROR_INTERNAL_SERVER } from "@/lib/api-errors";
-import { createPreflightResponse, withCors } from "@/lib/cors";
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
@@ -32,7 +30,7 @@ export async function GET(request: NextRequest) {
     cookiesToSet.forEach(({ name, value, options }) =>
       response.cookies.set(name, value, options)
     );
-    return withCors(response);
+    return response;
   };
 
   // Hoisted so the catch block can correlate failures with the user even
@@ -45,7 +43,8 @@ export async function GET(request: NextRequest) {
     } = await supabase.auth.getUser();
 
     if (!user) {
-      return respond({ exists: false, code: API_ERROR_UNAUTHORIZED }, { status: 401 });
+      // Unauthenticated — return 200 with setupComplete: false to prevent user enumeration
+      return respond({ setupComplete: false });
     }
     userEmail = user.email ?? null;
 
@@ -54,18 +53,17 @@ export async function GET(request: NextRequest) {
     });
 
     if (!userRow) {
-      return respond({ exists: false }, { status: 404 });
+      // Authenticated but no Prisma User row — return 200 with setupComplete: false
+      return respond({ setupComplete: false });
     }
 
-    return respond({ exists: true });
+    return respond({ setupComplete: true });
   } catch (error) {
     console.error(
       JSON.stringify({ event: "setup_check_failed", email: userEmail }),
       error
     );
-    return respond({ exists: false, code: API_ERROR_INTERNAL_SERVER }, { status: 500 });
+    // Return 200 with setupComplete: false on error to prevent enumeration
+    return respond({ setupComplete: false });
   }
 }
-
-export const OPTIONS = createPreflightResponse;
-

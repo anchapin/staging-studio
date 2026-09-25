@@ -3,7 +3,6 @@ import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { API_ERROR_PROJECT_NOT_FOUND, API_ERROR_UNAUTHORIZED } from "@/lib/api-errors";
 import { withErrorHandler, ApiError } from "@/lib/api-error-handler";
-import { createPreflightResponse, withCors } from "@/lib/cors";
 
 export const GET = withErrorHandler(async (
   _request: NextRequest,
@@ -71,8 +70,5 @@ export const GET = withErrorHandler(async (
     });
   }
 
-  return withCors(NextResponse.json(project));
-
+  return NextResponse.json(project);
 });
-
-export const OPTIONS = createPreflightResponse;

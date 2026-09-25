@@ -1,239 +1,143 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
-
-const { mockFindUnique, mockCreate, mockUpdate, mockDeleteMany } = vi.hoisted(() => ({
-  mockFindUnique: vi.fn(),
-  mockCreate: vi.fn(),
-  mockUpdate: vi.fn(),
-  mockDeleteMany: vi.fn(),
-}));
-
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
-    dailyApiUsage: {
-      findUnique: mockFindUnique,
-      create: mockCreate,
-      update: mockUpdate,
-      deleteMany: mockDeleteMany,
-    },
-  },
-}));
-
-import { prisma } from "@/lib/prisma";
-import {
-  checkRateLimit,
-  recordRateLimit,
-  clearRateLimit,
-  checkAndRecordRateLimit,
-} from "@/lib/sliding-window-ratelimit";
-
-vi.mocked(prisma.dailyApiUsage.findUnique).mockResolvedValue(null);
-vi.mocked(prisma.dailyApiUsage.create).mockResolvedValue({} as any);
-vi.mocked(prisma.dailyApiUsage.update).mockResolvedValue({} as any);
-vi.mocked(prisma.dailyApiUsage.deleteMany).mockResolvedValue({ count: 0 });
-
-const USER_ID = "user_123";
-const SURFACE = "test";
-const IDENTIFIER = `${SURFACE}:${USER_ID}`;
-const LIMIT = 5;
-const WINDOW_MS = 60_000;
-
-function todayDayKey(now: Date = new Date()): string {
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  const day = now.getDate();
-  return [
-    String(year).padStart(4, "0"),
-    String(month + 1).padStart(2, "0"),
-    String(day).padStart(2, "0"),
-  ].join("-");
-}
-
-function buildRecord(overrides: Partial<{
-  count: number;
-  timestamps: Date[];
-  dayKey: string;
-}> = {}): any {
-  return {
-    id: "mock_id_123",
-    userId: USER_ID,
-    surface: SURFACE,
-    dayKey: overrides.dayKey ?? todayDayKey(),
-    count: overrides.count ?? 0,
-    timestamps: overrides.timestamps ?? [],
-    updatedAt: new Date(),
-    createdAt: new Date(),
-  };
-}
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { checkRateLimit, clearRateLimit } from "@/lib/sliding-window-ratelimit";
 
 describe("sliding-window-ratelimit", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    clearRateLimit("test");
+    clearRateLimit("other");
+    vi.useFakeTimers();
   });
 
-  describe("checkRateLimit", () => {
-    it("allows first request when no record exists", async () => {
-      mockFindUnique.mockResolvedValue(null);
-
-      const result = await checkRateLimit(IDENTIFIER, LIMIT, WINDOW_MS);
-
-      expect(result.allowed).toBe(true);
-      expect(result.remaining).toBe(LIMIT - 1);
-    });
-
-    it("returns remaining based on prior count", async () => {
-      const now = new Date();
-      mockFindUnique.mockResolvedValue(
-        buildRecord({
-          count: 3,
-          timestamps: [
-            new Date(now.getTime() - 30000),
-            new Date(now.getTime() - 20000),
-            new Date(now.getTime() - 10000),
-          ],
-        })
-      );
-
-      const result = await checkRateLimit(IDENTIFIER, LIMIT, WINDOW_MS, now);
-      expect(result.remaining).toBe(0);
-    });
-
-    it("blocks when limit is reached within window", async () => {
-      const now = new Date();
-      const timestamps = Array.from(
-        { length: LIMIT },
-        (_, i) => new Date(now.getTime() - (LIMIT - i) * 1000)
-      );
-      mockFindUnique.mockResolvedValue(
-        buildRecord({ count: LIMIT, timestamps })
-      );
-
-      const result = await checkRateLimit(IDENTIFIER, LIMIT, WINDOW_MS, now);
-      expect(result.allowed).toBe(false);
-      expect(result.remaining).toBe(0);
-    });
-
-    it("allows request after window expires", async () => {
-      const now = new Date();
-      const oldTimestamp = new Date(now.getTime() - WINDOW_MS - 1000);
-      mockFindUnique.mockResolvedValue(
-        buildRecord({ count: LIMIT, timestamps: [oldTimestamp] })
-      );
-
-      const result = await checkRateLimit(IDENTIFIER, LIMIT, WINDOW_MS, now);
-      expect(result.allowed).toBe(true);
-    });
-
-    it("cleans up expired timestamps on check", async () => {
-      const now = new Date();
-      const oldTimestamp = new Date(now.getTime() - WINDOW_MS - 1000);
-      mockFindUnique.mockResolvedValue(
-        buildRecord({ count: LIMIT, timestamps: [oldTimestamp] })
-      );
-      mockUpdate.mockResolvedValue(buildRecord({ count: 0, timestamps: [] }));
-
-      await checkRateLimit(IDENTIFIER, LIMIT, WINDOW_MS, now);
-
-      expect(mockUpdate).toHaveBeenCalledWith({
-        where: {
-          userId_surface_dayKey: {
-            userId: USER_ID,
-            surface: SURFACE,
-            dayKey: todayDayKey(now),
-          },
-        },
-        data: {
-          timestamps: [],
-          count: 0,
-        },
-      });
-    });
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
-  describe("recordRateLimit", () => {
-    it("creates record on first request", async () => {
-      mockFindUnique.mockResolvedValue(null);
-      mockCreate.mockResolvedValue(buildRecord({ count: 1 }));
+  it("1. allows first request with remaining = limit - 1", () => {
+    const now = new Date("2026-01-01T00:00:00Z").getTime();
+    vi.setSystemTime(new Date(now));
 
-      const now = new Date();
-      const result = await recordRateLimit(IDENTIFIER, LIMIT, WINDOW_MS, now);
+    const result = checkRateLimit("test", 5, 60000);
 
-      expect(result.allowed).toBe(true);
-      expect(result.remaining).toBe(LIMIT - 1);
-      expect(mockCreate).toHaveBeenCalled();
-    });
-
-    it("increments count and adds timestamp when under limit", async () => {
-      const now = new Date();
-      mockFindUnique.mockResolvedValue(
-        buildRecord({
-          count: 1,
-          timestamps: [new Date(now.getTime() - 10000)],
-        })
-      );
-      mockUpdate.mockResolvedValue(buildRecord({ count: 2 }));
-
-      await recordRateLimit(IDENTIFIER, LIMIT, WINDOW_MS, now);
-
-      expect(mockUpdate).toHaveBeenCalled();
-    });
-
-    it("blocks and does not record when limit exceeded", async () => {
-      const now = new Date();
-      const timestamps = Array.from(
-        { length: LIMIT },
-        (_, i) => new Date(now.getTime() - (LIMIT - i) * 1000)
-      );
-      mockFindUnique.mockResolvedValue(buildRecord({ count: LIMIT, timestamps }));
-
-      const result = await recordRateLimit(IDENTIFIER, LIMIT, WINDOW_MS, now);
-
-      expect(result.allowed).toBe(false);
-      expect(result.remaining).toBe(0);
-    });
+    expect(result.allowed).toBe(true);
+    expect(result.remaining).toBe(4);
+    expect(result.resetAt).toBe(now + 60000);
   });
 
-  describe("clearRateLimit", () => {
-    it("deletes the record for identifier", async () => {
-      mockDeleteMany.mockResolvedValue({ count: 1 });
+  it("2. allows requests under the limit", () => {
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
 
-      await clearRateLimit(IDENTIFIER);
+    checkRateLimit("test", 5, 60000);
+    checkRateLimit("test", 5, 60000);
+    checkRateLimit("test", 5, 60000);
 
-      expect(mockDeleteMany).toHaveBeenCalledWith({
-        where: {
-          userId: USER_ID,
-          surface: SURFACE,
-          dayKey: expect.any(String),
-        },
-      });
-    });
+    const result = checkRateLimit("test", 5, 60000);
+
+    expect(result.allowed).toBe(true);
+    expect(result.remaining).toBe(1); // 5 - 3 = 2, then 5 - 4 = 1 after 4th call
   });
 
-  describe("checkAndRecordRateLimit", () => {
-    it("allows and records when under limit", async () => {
-      mockFindUnique.mockResolvedValue(null);
-      mockCreate.mockResolvedValue(buildRecord({ count: 1 }));
+  it("3. blocks requests at/over the limit", () => {
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
 
-      const now = new Date();
-      const result = await checkAndRecordRateLimit(IDENTIFIER, LIMIT, WINDOW_MS, now);
+    // Make 5 allowed requests (limit = 5)
+    for (let i = 0; i < 5; i++) {
+      const r = checkRateLimit("test", 5, 60000);
+      expect(r.allowed).toBe(true);
+    }
 
-      expect(result.allowed).toBe(true);
-      expect(result.remaining).toBe(LIMIT - 1);
-      expect(mockCreate).toHaveBeenCalled();
-    });
+    // 6th request must be blocked
+    const result = checkRateLimit("test", 5, 60000);
 
-    it("blocks and does not record when at limit", async () => {
-      const now = new Date();
-      const timestamps = Array.from(
-        { length: LIMIT },
-        (_, i) => new Date(now.getTime() - (LIMIT - i) * 1000)
-      );
-      mockFindUnique.mockResolvedValue(buildRecord({ count: LIMIT, timestamps }));
+    expect(result.allowed).toBe(false);
+    expect(result.remaining).toBe(0);
+  });
 
-      const result = await checkAndRecordRateLimit(IDENTIFIER, LIMIT, WINDOW_MS, now);
+  it("4. remaining decrements correctly as requests are made", () => {
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
 
-      expect(result.allowed).toBe(false);
-      expect(result.remaining).toBe(0);
-      expect(mockCreate).not.toHaveBeenCalled();
-    });
+    const r1 = checkRateLimit("test", 3, 60000);
+    expect(r1.allowed).toBe(true);
+    expect(r1.remaining).toBe(2);
+
+    const r2 = checkRateLimit("test", 3, 60000);
+    expect(r2.allowed).toBe(true);
+    expect(r2.remaining).toBe(1);
+
+    const r3 = checkRateLimit("test", 3, 60000);
+    expect(r3.allowed).toBe(true);
+    expect(r3.remaining).toBe(0);
+
+    const r4 = checkRateLimit("test", 3, 60000);
+    expect(r4.allowed).toBe(false);
+    expect(r4.remaining).toBe(0);
+  });
+
+  it("5. resetAt is correctly calculated (oldest timestamp + windowMs when rate limited)", () => {
+    const now = new Date("2026-01-01T00:00:00.000Z").getTime();
+    vi.setSystemTime(new Date(now));
+
+    // Exhaust the limit
+    for (let i = 0; i < 3; i++) {
+      checkRateLimit("test", 3, 60000);
+    }
+
+    const blocked = checkRateLimit("test", 3, 60000);
+    expect(blocked.allowed).toBe(false);
+    // The oldest entry was at t=now, so resetAt = now + 60000
+    expect(blocked.resetAt).toBe(now + 60000);
+  });
+
+  it("6. old entries outside the window are evicted on each call", () => {
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+
+    // Fill up to limit
+    checkRateLimit("test", 3, 60000);
+    checkRateLimit("test", 3, 60000);
+    checkRateLimit("test", 3, 60000);
+
+    // Advance time past the window
+    vi.setSystemTime(new Date("2026-01-01T00:01:30Z")); // 90 seconds later
+
+    // Old entries should be evicted, so this should be allowed again
+    const result = checkRateLimit("test", 3, 60000);
+
+    expect(result.allowed).toBe(true);
+    expect(result.remaining).toBe(2);
+  });
+
+  it("7. different identifiers have independent rate limits", () => {
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+
+    // Exhaust limit on "test"
+    for (let i = 0; i < 3; i++) {
+      checkRateLimit("test", 3, 60000);
+    }
+
+    // "other" should still be allowed
+    const result = checkRateLimit("other", 3, 60000);
+
+    expect(result.allowed).toBe(true);
+    expect(result.remaining).toBe(2);
+  });
+
+  it("8. clearRateLimit removes entries and subsequent requests are allowed again", () => {
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+
+    // Exhaust limit
+    for (let i = 0; i < 3; i++) {
+      checkRateLimit("test", 3, 60000);
+    }
+
+    // Verify blocked
+    const blocked = checkRateLimit("test", 3, 60000);
+    expect(blocked.allowed).toBe(false);
+
+    // Clear and retry
+    clearRateLimit("test");
+
+    const result = checkRateLimit("test", 3, 60000);
+
+    expect(result.allowed).toBe(true);
+    expect(result.remaining).toBe(2);
   });
 });
