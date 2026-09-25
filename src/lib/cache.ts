@@ -15,11 +15,13 @@ import { AsyncLocalStorage } from "async_hooks";
 export interface CacheEntry<V> {
   value: V;
   expiresAt: number;
+  insertedAt?: number;
 }
 
 export interface CacheOptions {
   ttl?: number;
   maxSize?: number;
+  maxAge?: number;
 }
 
 interface RequestCache {
@@ -39,11 +41,27 @@ function isAsyncLocalStorageAvailable(): boolean {
 export class Cache<K, V> {
   private readonly ttl: number;
   private readonly maxSize: number;
+  private readonly maxAge: number;
   private readonly store = new Map<K, CacheEntry<V>>();
 
   constructor(options: CacheOptions = {}) {
     this.ttl = options.ttl ?? Infinity;
     this.maxSize = options.maxSize ?? Infinity;
+    this.maxAge = options.maxAge ?? Infinity;
+  }
+
+  sweep(maxAgeMs?: number): number {
+    const maxAge = maxAgeMs ?? this.maxAge;
+    if (!isFinite(maxAge)) return 0;
+    const cutoff = Date.now() - maxAge;
+    let removed = 0;
+    for (const [key, entry] of this.store.entries()) {
+      if (entry.insertedAt !== undefined && entry.insertedAt <= cutoff) {
+        this.store.delete(key);
+        removed++;
+      }
+    }
+    return removed;
   }
 
   private getFromStore(key: K): V | undefined {
@@ -85,6 +103,7 @@ export class Cache<K, V> {
   }
 
   set(key: K, value: V): void {
+    this.sweep();
     const strKey = String(key);
     const alsStore = this.getAlsStore();
     if (alsStore) {
@@ -102,18 +121,20 @@ export class Cache<K, V> {
       alsStore.set(strKey, { value, expiresAt });
       return;
     }
+    const now = Date.now();
     if (this.store.has(key)) {
       const entry = this.store.get(key)!;
       this.store.delete(key);
-      this.store.set(key, { value, expiresAt: entry.expiresAt });
+      const expiresAt = this.ttl === Infinity ? Infinity : now + this.ttl;
+      this.store.set(key, { value, expiresAt, insertedAt: entry.insertedAt });
       return;
     }
     if (this.store.size >= this.maxSize) {
       const first = this.store.keys().next().value;
       if (first !== undefined) this.store.delete(first);
     }
-    const expiresAt = this.ttl === Infinity ? Infinity : Date.now() + this.ttl;
-    this.store.set(key, { value, expiresAt });
+    const expiresAt = this.ttl === Infinity ? Infinity : now + this.ttl;
+    this.store.set(key, { value, expiresAt, insertedAt: now });
   }
 
   has(key: K): boolean {
