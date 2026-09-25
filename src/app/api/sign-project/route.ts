@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { verifyPreviewToken } from "@/lib/preview-token";
 import { withRetry } from "@/lib/retry";
+import { encryptSignature } from "@/lib/signature-encryption";
 import {
   signProjectRequestSchema,
   tokenMatchesProject,
@@ -121,7 +122,7 @@ export async function POST(req: NextRequest) {
           prisma.project.update({
             where: { id: projectId },
             data: {
-              clientSignature: signatureDataUrl,
+              clientSignature: await encryptSignature(signatureDataUrl),
               clientSignatureStatus: "Signed",
               clientSignatureTimestamp: new Date(),
             },
