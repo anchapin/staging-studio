@@ -78,7 +78,6 @@ vi.mock("@/lib/prisma", () => ({ prisma: mockPrisma }));
 
 // Intercept checkRateLimit to record entries in our simulated store.
 // This lets the test exercise the real sliding-window algorithm logic.
-const originalCheckRateLimit = checkRateLimit;
 vi.mock("@/lib/sliding-window-ratelimit", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/sliding-window-ratelimit")>();
   return {
