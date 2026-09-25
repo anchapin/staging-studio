@@ -8,6 +8,7 @@ import {
   API_ERROR_UNAUTHORIZED,
 } from "@/lib/api-errors";
 import { withErrorHandler, ApiError } from "@/lib/api-error-handler";
+import { createPreflightResponse, withCors } from "@/lib/cors";
 
 export const PATCH = withErrorHandler(async (
   request: NextRequest,
@@ -69,5 +70,8 @@ export const PATCH = withErrorHandler(async (
     });
   }
 
-  return NextResponse.json(room);
+  return withCors(NextResponse.json(room));
+
 });
+
+export const OPTIONS = createPreflightResponse;

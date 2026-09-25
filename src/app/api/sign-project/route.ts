@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { ZodError } from "zod";
-
 import { prisma } from "@/lib/prisma";
+import { createPreflightResponse, withCors } from "@/lib/cors";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { verifyPreviewToken } from "@/lib/preview-token";
 import { withRetry } from "@/lib/retry";
@@ -78,10 +78,10 @@ function validationFailure(error: ZodError): NextResponse {
 export async function POST(req: NextRequest) {
   const user = await getAuthedPrismaUser();
   if (!user) {
-    return NextResponse.json(
+    return withCors(NextResponse.json(
       { error: "Unauthorized", message: "You must be logged in to sign a project." },
       { status: 401 }
-    );
+    ));
   }
 
   try {
@@ -89,13 +89,13 @@ export async function POST(req: NextRequest) {
 
     const parsed = signProjectRequestSchema.safeParse(body);
     if (!parsed.success) {
-      return validationFailure(parsed.error);
+      return withCors(validationFailure(parsed.error));
     }
     const { projectId, signatureDataUrl, token } = parsed.data;
 
     const tokenVerification = await verifyPreviewToken(token);
     if (!tokenMatchesProject(tokenVerification, projectId)) {
-      return NextResponse.json(SIGN_ERROR_COPY.invalidToken, { status: 401 });
+      return withCors(NextResponse.json(SIGN_ERROR_COPY.invalidToken, { status: 401 }));
     }
 
     const existing = await prisma.project.findUnique({
@@ -103,16 +103,16 @@ export async function POST(req: NextRequest) {
       select: { clientSignatureStatus: true, userId: true },
     });
     if (!existing) {
-      return NextResponse.json(SIGN_ERROR_COPY.invalidProject, { status: 404 });
+      return withCors(NextResponse.json(SIGN_ERROR_COPY.invalidProject, { status: 404 }));
     }
     if (existing.userId !== user.id) {
-      return NextResponse.json(
+      return withCors(NextResponse.json(
         { error: "Forbidden", message: "You do not have permission to sign this project." },
         { status: 403 }
-      );
+      ));
     }
     if (existing.clientSignatureStatus === "Signed") {
-      return NextResponse.json(SIGN_ERROR_COPY.alreadySigned, { status: 409 });
+      return withCors(NextResponse.json(SIGN_ERROR_COPY.alreadySigned, { status: 409 }));
     }
 
     try {
@@ -134,14 +134,16 @@ export async function POST(req: NextRequest) {
         projectId,
         error: error instanceof Error ? error.message : String(error),
       });
-      return NextResponse.json(SIGN_ERROR_COPY.saveFailed, { status: 500 });
+      return withCors(NextResponse.json(SIGN_ERROR_COPY.saveFailed, { status: 500 }));
     }
 
-    return NextResponse.json({ success: true });
+    return withCors(NextResponse.json({ success: true }));
   } catch {
-    return NextResponse.json(
+    return withCors(NextResponse.json(
       { error: "Server error", message: "An unexpected error occurred.", code: API_ERROR_INTERNAL_SERVER },
       { status: 500 }
-    );
+    ));
   }
 }
+
+export const OPTIONS = createPreflightResponse;
