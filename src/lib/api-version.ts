@@ -35,8 +35,9 @@ function getSunsetDate(): string {
 }
 
 export function parseApiVersion(req: Request): VersionInfo {
-  const url = req.url ?? "";
+  const rawUrl = req.url ?? "";
   const accept = req.headers.get("Accept") ?? "";
+  const url = rawUrl.startsWith("http") ? new URL(rawUrl).pathname : rawUrl;
 
   if (url.includes("/api/v1/") || accept.includes("application/vnd.stagingstudio.v1")) {
     return { version: "v1", isDeprecated: false, sunsetDate: null };

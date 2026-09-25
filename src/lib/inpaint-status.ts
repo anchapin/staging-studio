@@ -12,7 +12,7 @@ import {
 
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
 
-export const INPAINT_STATUS_RATE_LIMIT = 60;
+export const INPAINT_STATUS_RATE_LIMIT = 10;
 const INPAINT_STATUS_RATE_WINDOW_MS = 60_000;
 
 type RateLimitEntry = { count: number; windowStart: number };
@@ -22,26 +22,45 @@ const inpaintStatusRateLimitMap = new Map<string, RateLimitEntry>();
 export interface RateLimitResult {
   allowed: boolean;
   remaining: number;
-  retryAfterMs: number;
+  retryAfterSeconds: number;
 }
 
 /**
- * Sliding-window rate limiter for inpaint status polling. Prevents abuse of a
- * route that is polled frequently from the client.
+ * Sliding-window rate limiter for inpaint status polling. Tracks (userId, requestId)
+ * to prevent a client from hammering a single inpaint request.
  */
-export function checkInpaintStatusRateLimit(userId: string): RateLimitResult {
+export function checkInpaintStatusRateLimit(
+  userId: string,
+  requestId: string
+): RateLimitResult {
   const now = Date.now();
-  const entry = inpaintStatusRateLimitMap.get(userId);
+  const key = `${userId}:${requestId}`;
+  const entry = inpaintStatusRateLimitMap.get(key);
+
   if (!entry || now - entry.windowStart >= INPAINT_STATUS_RATE_WINDOW_MS) {
-    inpaintStatusRateLimitMap.set(userId, { count: 1, windowStart: now });
-    return { allowed: true, remaining: INPAINT_STATUS_RATE_LIMIT - 1, retryAfterMs: INPAINT_STATUS_RATE_WINDOW_MS };
+    inpaintStatusRateLimitMap.set(key, { count: 1, windowStart: now });
+    return {
+      allowed: true,
+      remaining: INPAINT_STATUS_RATE_LIMIT - 1,
+      retryAfterSeconds: 60,
+    };
   }
+
   if (entry.count >= INPAINT_STATUS_RATE_LIMIT) {
-    const retryAfterMs = INPAINT_STATUS_RATE_WINDOW_MS - (now - entry.windowStart);
-    return { allowed: false, remaining: 0, retryAfterMs: Math.ceil(retryAfterMs / 1000) };
+    const retryAfterSeconds = Math.ceil(
+      (INPAINT_STATUS_RATE_WINDOW_MS - (now - entry.windowStart)) / 1000
+    );
+    return { allowed: false, remaining: 0, retryAfterSeconds };
   }
+
   entry.count++;
-  return { allowed: true, remaining: INPAINT_STATUS_RATE_LIMIT - entry.count, retryAfterMs: INPAINT_STATUS_RATE_WINDOW_MS - (now - entry.windowStart) };
+  return {
+    allowed: true,
+    remaining: INPAINT_STATUS_RATE_LIMIT - entry.count,
+    retryAfterSeconds: Math.ceil(
+      (INPAINT_STATUS_RATE_WINDOW_MS - (now - entry.windowStart)) / 1000
+    ),
+  };
 }
 
 // ─── Error Copy ───────────────────────────────────────────────────────────────
