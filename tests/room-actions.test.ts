@@ -136,7 +136,7 @@ describe("reorderRooms", () => {
 
   it("reorders rooms on success", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: "proj-1" } as any);
+    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: "proj-1", userId: mockUser.id } as any);
     vi.mocked(prisma.room.updateMany).mockResolvedValue({ count: 1 });
 
     const result = await reorderRooms("proj-1", ["room-2", "room-1"]);
@@ -155,7 +155,7 @@ describe("reorderRooms", () => {
 
   it("propagates database errors", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: "proj-1" } as any);
+    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: "proj-1", userId: mockUser.id } as any);
     vi.mocked(prisma.room.updateMany).mockRejectedValue(new Error("DB error"));
 
     const result = await reorderRooms("proj-1", ["room-2", "room-1"]);

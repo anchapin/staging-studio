@@ -56,7 +56,7 @@ describe("room-delete actions", () => {
     });
 
     it("updates sortOrder and returns success for valid input", async () => {
-      vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: MOCK_PROJECT_ID } as never);
+      vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: MOCK_PROJECT_ID, userId: MOCK_USER_ID } as never);
       vi.mocked(prisma.room.updateMany).mockResolvedValue({ count: 1 } as never);
 
       const result = await reorderRooms(MOCK_PROJECT_ID, ["room1", "room2"]);
