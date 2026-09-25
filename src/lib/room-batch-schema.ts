@@ -92,14 +92,14 @@ const FAL_HOST_PATTERN = /(^|\.)fal\.ai$/;
 
 /**
  * Storage-path shape minted by `getBatchRoomUploadUrls`:
- * `batch-rooms/{projectId}/room-{index}-{timestamp}.{ext}`. Anchored at
+  * `batch-rooms/{projectId}/room-{index}-{uuid}.{ext}`. Anchored at
  * the end so it matches the path embedded in both the signed
  * (`/storage/v1/object/upload/sign/room-photos/...`) and public
  * (`/storage/v1/object/public/room-photos/...`) URL forms.
  */
 export function batchRoomStoragePathPattern(projectId: string): RegExp {
   return new RegExp(
-    `(?:^|/)batch-rooms/${escapeRegExp(projectId)}/room-\\d+-\\d+\\.(?:${BATCH_ROOM_ALLOWED_IMAGE_EXTENSIONS.join("|")})$`
+    `(?:^|/)batch-rooms/${escapeRegExp(projectId)}/room-\\d+-[a-f0-9-]+\\.(?:${BATCH_ROOM_ALLOWED_IMAGE_EXTENSIONS.join("|")})$`
   );
 }
 

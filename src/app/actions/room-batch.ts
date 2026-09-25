@@ -181,7 +181,7 @@ export async function getBatchRoomUploadUrls(
 
     // Each room gets its own folder; roomIndex maps entry → room
     const roomIndex = i;
-    const storagePath = `batch-rooms/${parsed.data.projectId}/room-${roomIndex}-${Date.now()}.${fileExt}`;
+    const storagePath = `batch-rooms/${parsed.data.projectId}/room-${roomIndex}-${crypto.randomUUID()}.${fileExt}`;
 
     const { data, error } = await withRetry(
       () =>
