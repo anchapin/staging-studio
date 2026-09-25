@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { requireUser, requireProjectOwnership } from "@/lib/api-auth";
 import {
   projectMetadataSchema,
   type ProjectMetadataInput,
@@ -50,10 +50,8 @@ export async function saveProjectMetadata(
     };
   }
 
-  const user = await getAuthedPrismaUser();
-  if (!user) {
-    return { success: false, error: "Not authenticated" };
-  }
+  const user = await requireUser();
+  await requireProjectOwnership(projectId, user.id);
 
   try {
     await prisma.project.update({
@@ -104,10 +102,8 @@ export async function saveProjectSignature(
     };
   }
 
-  const user = await getAuthedPrismaUser();
-  if (!user) {
-    return { success: false, error: "Not authenticated" };
-  }
+  const user = await requireUser();
+  await requireProjectOwnership(projectId, user.id);
 
   try {
     await prisma.project.update({

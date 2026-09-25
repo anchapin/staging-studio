@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { requireUser } from "@/lib/api-auth";
+import { ApiError } from "@/lib/api-error-handler";
 import { buildDeprecationHeaders } from "@/lib/api-version";
 import {
   INPAINT_STATUS_RATE_LIMIT,
@@ -10,7 +11,6 @@ import {
   classifyStatusError,
 } from "@/lib/inpaint-status";
 import {
-  API_ERROR_UNAUTHORIZED,
   API_ERROR_TOO_MANY_REQUESTS,
   API_ERROR_INVALID_REQUEST,
   API_ERROR_REQUEST_NOT_FOUND,
@@ -22,19 +22,24 @@ export async function GET(
 ) {
   let requestId: string | undefined;
 
+  let user;
   try {
-    const user = await getAuthedPrismaUser();
-    if (!user) {
+    user = await requireUser();
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
       return NextResponse.json(
         {
           error: "Unauthorized",
           message: "You must be signed in to check inpainting status.",
-          code: API_ERROR_UNAUTHORIZED,
+          code: error.code,
         },
         { status: 401, headers: buildDeprecationHeaders() }
       );
     }
+    throw error;
+  }
 
+  try {
     const { requestId: requestIdParam } = await params;
     requestId = requestIdParam;
 

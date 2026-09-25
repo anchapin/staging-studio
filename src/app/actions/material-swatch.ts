@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { requireUser, requireProjectOwnership } from "@/lib/api-auth";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -38,18 +38,8 @@ export async function saveMaterialSwatch(
   projectId: string,
   swatch: MaterialSwatchInput & { id?: string }
 ): Promise<{ success: boolean; id?: string; error?: string }> {
-  const user = await getAuthedPrismaUser();
-  if (!user) {
-    return failure("Not authenticated");
-  }
-
-  const project = await prisma.project.findUnique({
-    where: { id: projectId, userId: user.id },
-    select: { id: true },
-  });
-  if (!project) {
-    return failure("Project not found");
-  }
+  const user = await requireUser();
+  await requireProjectOwnership(projectId, user.id);
 
   const parsed = materialSwatchSchema.safeParse(swatch);
   if (!parsed.success) {
@@ -114,18 +104,8 @@ export async function deleteMaterialSwatch(
   projectId: string,
   swatchId: string
 ): Promise<{ success: boolean; error?: string }> {
-  const user = await getAuthedPrismaUser();
-  if (!user) {
-    return failure("Not authenticated");
-  }
-
-  const project = await prisma.project.findUnique({
-    where: { id: projectId, userId: user.id },
-    select: { id: true },
-  });
-  if (!project) {
-    return failure("Project not found");
-  }
+  const user = await requireUser();
+  await requireProjectOwnership(projectId, user.id);
 
   try {
     await prisma.materialSwatch.delete({
@@ -155,30 +135,21 @@ export async function replaceMaterialSwatches(
   projectId: string,
   swatches: MaterialSwatchInput[]
 ): Promise<{ success: boolean; error?: string }> {
-  const user = await getAuthedPrismaUser();
-  if (!user) {
-    return failure("Not authenticated");
-  }
-
-  const project = await prisma.project.findUnique({
-    where: { id: projectId, userId: user.id },
-    select: { id: true },
-  });
-  if (!project) {
-    return failure("Project not found");
-  }
+  const user = await requireUser();
+  await requireProjectOwnership(projectId, user.id);
 
   const parsed = z.array(materialSwatchSchema).safeParse(swatches);
   if (!parsed.success) {
-    return failure(
-      parsed.error.issues[0]?.message ?? "Invalid swatches payload"
-    );
+    return failure(parsed.error.issues[0]?.message ?? "Invalid swatches payload");
   }
+
+  type SwatchItem = z.infer<typeof materialSwatchSchema>;
+  const data: SwatchItem[] = parsed.data;
 
   try {
     await prisma.$transaction([
       prisma.materialSwatch.deleteMany({ where: { projectId } }),
-      ...parsed.data.map((s, index) =>
+      ...data.map((s: SwatchItem, index: number) =>
         prisma.materialSwatch.create({
           data: {
             projectId,

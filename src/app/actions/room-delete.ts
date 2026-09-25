@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { requireUser, requireProjectOwnership } from "@/lib/api-auth";
 import { revalidatePath } from "next/cache";
 
 function failure(error: string): { success: false; error: string } {
@@ -16,18 +16,8 @@ export async function reorderRooms(
     return failure("roomIds must be a non-empty array");
   }
 
-  const user = await getAuthedPrismaUser();
-  if (!user) {
-    return failure("Not authenticated");
-  }
-
-  const project = await prisma.project.findUnique({
-    where: { id: projectId, userId: user.id },
-    select: { id: true },
-  });
-  if (!project) {
-    return failure("Project not found");
-  }
+  const user = await requireUser();
+  await requireProjectOwnership(projectId, user.id);
 
   try {
     await Promise.all(
@@ -48,11 +38,7 @@ export async function reorderRooms(
 export async function deleteRoom(
   roomId: string
 ): Promise<{ success: boolean; error?: string }> {
-  const user = await getAuthedPrismaUser();
-  if (!user) {
-    return failure("Not authenticated");
-  }
-
+  const user = await requireUser();
   const room = await prisma.room.findFirst({
     where: { id: roomId, project: { userId: user.id } },
     select: { id: true, projectId: true },

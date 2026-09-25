@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { requireUser } from "@/lib/api-auth";
 import { roomPatchSchema } from "@/lib/room-patch-schema";
 import {
   API_ERROR_ROOM_NOT_FOUND,
   API_ERROR_INVALID_REQUEST,
-  API_ERROR_UNAUTHORIZED,
 } from "@/lib/api-errors";
 import { withErrorHandler, ApiError } from "@/lib/api-error-handler";
 
@@ -13,16 +12,8 @@ export const PATCH = withErrorHandler(async (
   request: NextRequest,
   { params }: { params: Promise<{ id: string; roomId: string }> }
 ) => {
+  const user = await requireUser();
   const { id: projectId, roomId } = await params;
-
-  const user = await getAuthedPrismaUser();
-  if (!user) {
-    throw new ApiError({
-      code: API_ERROR_UNAUTHORIZED,
-      message: "You must be logged in to update a room.",
-      status: 401,
-    });
-  }
 
   const parsed = roomPatchSchema.safeParse(await request.json());
   if (!parsed.success) {

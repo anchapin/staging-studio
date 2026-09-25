@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { requireUser } from "@/lib/api-auth";
+import { ApiError } from "@/lib/api-error-handler";
 import { buildDeprecationHeaders } from "@/lib/api-version";
 import {
   inpaintSubmitSchema,
@@ -10,18 +11,20 @@ import {
 } from "@/lib/inpaint-submit";
 
 export async function POST(request: NextRequest) {
+  let user;
   try {
-    const user = await getAuthedPrismaUser();
-    if (!user) {
+    user = await requireUser();
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
       return NextResponse.json(
-        {
-          error: "Unauthorized",
-          message: "You must be signed in to start inpainting.",
-        },
+        { error: "Unauthorized", message: "You must be signed in to start inpainting." },
         { status: 401, headers: buildDeprecationHeaders() }
       );
     }
+    throw error;
+  }
 
+  try {
     const quotaResult = await checkDailyQuota(user.id);
     if (!quotaResult.allowed) {
       console.warn(
@@ -58,7 +61,6 @@ export async function POST(request: NextRequest) {
     if (roomValidation.error || !roomValidation.room) {
       return NextResponse.json(
         {
-          // room === null means either "not found" (404) or "no staged result for this variant" (400)
           error: roomValidation.room
             ? "Invalid source"
             : roomValidation.status === 404

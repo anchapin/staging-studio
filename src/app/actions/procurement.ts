@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { requireUser, requireProjectOwnership } from "@/lib/api-auth";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -31,19 +31,8 @@ export async function saveProcurementItems(
   projectId: string,
   items: ProcurementItemInput[]
 ): Promise<{ success: boolean; error?: string }> {
-  const user = await getAuthedPrismaUser();
-  if (!user) {
-    return { success: false, error: "Not authenticated" };
-  }
-
-  // Verify ownership
-  const project = await prisma.project.findUnique({
-    where: { id: projectId, userId: user.id },
-    select: { id: true },
-  });
-  if (!project) {
-    return { success: false, error: "Not authenticated" };
-  }
+  const user = await requireUser();
+  await requireProjectOwnership(projectId, user.id);
 
   const parsed = procurementItemsSchema.safeParse(items);
   if (!parsed.success) {
@@ -54,7 +43,6 @@ export async function saveProcurementItems(
   }
 
   try {
-    // Delete all existing items first, then insert new ones
     await prisma.procurementItem.deleteMany({ where: { projectId } });
 
     if (items.length > 0) {

@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { requireUser } from "@/lib/api-auth";
 import { createSupabaseRequestClient } from "@/lib/supabase";
 import { validateThumbnailDataUrl } from "@/lib/thumbnail-data-url";
 import {
@@ -51,8 +51,7 @@ export async function saveInpaintVersion({
   seed?: string;
   promptDirectives?: string;
 }): Promise<{ success: true; versionId: string } | ActionFailure> {
-  const user = await getAuthedPrismaUser();
-  if (!user) return failure("Not authenticated");
+  const user = await requireUser();
 
   // Ownership check
   const room = await prisma.room.findFirst({
@@ -206,8 +205,7 @@ export async function getInpaintVersions(
     }
   | ActionFailure
 > {
-  const user = await getAuthedPrismaUser();
-  if (!user) return failure("Not authenticated");
+  const user = await requireUser();
 
   const room = await prisma.room.findFirst({
     where: { id: roomId, project: { userId: user.id } },
@@ -238,8 +236,7 @@ export async function getInpaintVersions(
 export async function restoreInpaintVersion(
   versionId: string
 ): Promise<{ success: true } | ActionFailure> {
-  const user = await getAuthedPrismaUser();
-  if (!user) return failure("Not authenticated");
+  const user = await requireUser();
 
   const version = await prisma.inpaintVersion.findUnique({
     where: { id: versionId },

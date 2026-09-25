@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { requireUser } from "@/lib/api-auth";
 import {
   roomMetadataSchema,
   type RoomMetadataInput,
@@ -9,12 +9,6 @@ import {
 
 function failure(error: string): { success: false; error: string } {
   return { success: false, error };
-}
-
-async function getOwnedRoomWhere(roomId: string) {
-  const user = await getAuthedPrismaUser();
-  if (!user) return null;
-  return { id: roomId, project: { userId: user.id } } as const;
 }
 
 export async function saveRoomMetadata(
@@ -28,19 +22,18 @@ export async function saveRoomMetadata(
     );
   }
 
-  const ownershipWhere = await getOwnedRoomWhere(roomId);
-  if (!ownershipWhere) {
-    return failure("Not authenticated");
-  }
-
-  const room = await prisma.room.findFirst({ where: ownershipWhere });
+  const user = await requireUser();
+  const room = await prisma.room.findFirst({
+    where: { id: roomId, project: { userId: user.id } },
+    select: { id: true },
+  });
   if (!room) {
     return failure("Room not found");
   }
 
   try {
     await prisma.room.update({
-      where: ownershipWhere,
+      where: { id: roomId, project: { userId: user.id } },
       data: parsed.data,
     });
     return { success: true };

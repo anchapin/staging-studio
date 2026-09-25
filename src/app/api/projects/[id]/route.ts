@@ -1,25 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
-import { API_ERROR_PROJECT_NOT_FOUND, API_ERROR_UNAUTHORIZED } from "@/lib/api-errors";
+import { requireUser } from "@/lib/api-auth";
+import { API_ERROR_PROJECT_NOT_FOUND } from "@/lib/api-errors";
 import { withErrorHandler, ApiError } from "@/lib/api-error-handler";
 
 export const GET = withErrorHandler(async (
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) => {
-  const userRow = await getAuthedPrismaUser();
-  if (!userRow) {
-    throw new ApiError({
-      code: API_ERROR_UNAUTHORIZED,
-      message: "You must be logged in to access this resource.",
-      status: 401,
-    });
-  }
+  const user = await requireUser();
 
   const { id } = await params;
   const project = await prisma.project.findUnique({
-    where: { id, userId: userRow.id },
+    where: { id, userId: user.id },
     select: {
       id: true,
       propertyAddress: true,
