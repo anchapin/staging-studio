@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   PREVIEW_TOKEN_TTL_SECONDS,
+  getSecret,
   signPreviewToken,
   verifyPreviewToken,
 } from "@/lib/preview-token";
@@ -249,4 +250,41 @@ describe("verifyPreviewToken malformed input", () => {
       ).resolves.toEqual({ valid: false });
     },
   );
+});
+
+describe("getSecret production validation", () => {
+  const DEV_FALLBACK = "staging-studio-dev-only-preview-token-secret-do-not-use-in-production";
+  const REAL_SECRET = "real-production-secret-value";
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("throws when NODE_ENV is production and PREVIEW_TOKEN_SECRET is unset", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("PREVIEW_TOKEN_SECRET", undefined);
+    expect(() => getSecret()).toThrow(
+      "PREVIEW_TOKEN_SECRET is not set. Generate a real secret with: openssl rand -base64 32",
+    );
+  });
+
+  it("throws when NODE_ENV is production and PREVIEW_TOKEN_SECRET equals the dev fallback", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("PREVIEW_TOKEN_SECRET", DEV_FALLBACK);
+    expect(() => getSecret()).toThrow(
+      "PREVIEW_TOKEN_SECRET is set to the known DEV-ONLY fallback value. Generate a real secret with: openssl rand -base64 32",
+    );
+  });
+
+  it("returns the real secret when NODE_ENV is production and PREVIEW_TOKEN_SECRET is a real value", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("PREVIEW_TOKEN_SECRET", REAL_SECRET);
+    expect(getSecret()).toBe(REAL_SECRET);
+  });
+
+  it("returns the dev fallback when NODE_ENV is not production and PREVIEW_TOKEN_SECRET is unset", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("PREVIEW_TOKEN_SECRET", undefined);
+    expect(getSecret()).toBe(DEV_FALLBACK);
+  });
 });

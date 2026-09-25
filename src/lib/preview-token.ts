@@ -43,7 +43,7 @@ export const PREVIEW_TOKEN_TTL_SECONDS = 5 * 60;
 const DEV_FALLBACK_SECRET =
   "staging-studio-dev-only-preview-token-secret-do-not-use-in-production";
 
-function getSecret(): string {
+export function getSecret(): string {
   const secret = process.env.PREVIEW_TOKEN_SECRET;
   if (secret && secret.trim() !== "") {
     if (
