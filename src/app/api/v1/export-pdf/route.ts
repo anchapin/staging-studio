@@ -1,41 +1,239 @@
 /**
  * v1 Export PDF Route
  *
- * Demonstrates the versioned API pattern for the export-pdf endpoint.
+ * Rate-limited and ownership-checked PDF lookbook export endpoint.
  *
- * POST /api/v1/export-pdf
- *
- * Version header: API-Version: v1
+ * GET /api/v1/export-pdf?projectId=xxx
  */
 import { NextRequest, NextResponse } from "next/server";
+
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { buildVersionHeaders } from "@/lib/api-version";
+import { prisma } from "@/lib/prisma";
+import {
+  DEFAULT_DAILY_EXPORT_LIMIT,
+  DAILY_LIMIT_ENV_VAR,
+  dailyQuotaExceededPayload,
+  evaluateDailyQuota,
+  getDailyUsage,
+  recordDailyUsage,
+  resolveDailyLimit,
+} from "@/lib/api-quota";
+import {
+  BROWSERLESS_TIMEOUT_MS,
+  buildBrowserlessPdfBody,
+  buildBrowserlessPdfUrl,
+  fetchBrowserlessPdfWithCircuitBreaker,
+} from "@/lib/browserless";
+import {
+  API_ERROR_UNAUTHORIZED,
+  API_ERROR_RATE_LIMIT_EXCEEDED,
+  API_ERROR_INVALID_REQUEST,
+  API_ERROR_PROJECT_NOT_FOUND,
+} from "@/lib/api-errors";
+import { signPreviewToken } from "@/lib/preview-token";
+
+const PROJECT_ID_PATTERN = /^c[a-z0-9]{24}$/;
+const PREVIEW_TOKEN_QUERY_PARAM = "token";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(request: NextRequest) {
-  const user = await getAuthedPrismaUser();
-  if (!user) {
+export async function GET(request: NextRequest) {
+  const versionInfo = buildVersionHeaders("v1");
+
+  try {
+    const user = await getAuthedPrismaUser();
+    if (!user) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Unauthorized",
+          message: "You must be signed in to export a PDF.",
+          code: API_ERROR_UNAUTHORIZED,
+        },
+        { status: 401, headers: versionInfo }
+      );
+    }
+
+    const { searchParams } = new URL(request.url);
+    const projectId = searchParams.get("projectId");
+
+    if (typeof projectId !== "string" || !PROJECT_ID_PATTERN.test(projectId)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Invalid request",
+          message: "projectId must be a valid CUID",
+          code: API_ERROR_INVALID_REQUEST,
+        },
+        { status: 400, headers: versionInfo }
+      );
+    }
+
+    // Check daily export quota
+    const exportLimit = resolveDailyLimit(
+      process.env[DAILY_LIMIT_ENV_VAR.export],
+      DEFAULT_DAILY_EXPORT_LIMIT
+    );
+    const exportQuota = evaluateDailyQuota(
+      await getDailyUsage("export", user.id),
+      exportLimit
+    );
+    if (!exportQuota.allowed) {
+      console.warn(
+        JSON.stringify({
+          event: "export_pdf_daily_quota_exceeded",
+          userId: user.id,
+          used: exportQuota.used,
+          limit: exportQuota.limit,
+        })
+      );
+      return NextResponse.json(
+        {
+          success: false,
+          ...dailyQuotaExceededPayload(exportQuota, "Please try again tomorrow."),
+          code: API_ERROR_RATE_LIMIT_EXCEEDED,
+        },
+        { status: 429, headers: versionInfo }
+      );
+    }
+
+    // Fetch project and verify ownership
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { userId: true },
+    });
+    if (!project || project.userId !== user.id) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Project not found",
+          message: "Project does not exist",
+          code: API_ERROR_PROJECT_NOT_FOUND,
+        },
+        { status: 404, headers: versionInfo }
+      );
+    }
+
+    // App URL: the cloud browser must be able to reach this deployment
+    let appUrl = process.env.NEXT_PUBLIC_APP_URL;
+    if (!appUrl || appUrl.trim() === "") {
+      if (process.env.NODE_ENV === "production") {
+        console.error(
+          JSON.stringify({
+            event: "export_pdf_app_url_missing",
+            projectId,
+          }),
+          "NEXT_PUBLIC_APP_URL must be set in production (public URL of this deployment)."
+        );
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Configuration missing",
+            message: "PDF export is not properly configured. Please contact support.",
+          },
+          { status: 500, headers: versionInfo }
+        );
+      }
+      appUrl = "http://localhost:3000";
+    }
+
+    const apiKey = process.env.BROWSERLESS_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Configuration missing",
+          message: "PDF export service is not properly configured. Please contact support.",
+        },
+        { status: 500, headers: versionInfo }
+      );
+    }
+
+    // Signed, short-lived, projectId-scoped token for cookie-less access
+    const token = await signPreviewToken(projectId);
+    const previewUrl = `${appUrl}/preview/${projectId}?${PREVIEW_TOKEN_QUERY_PARAM}=${encodeURIComponent(token)}`;
+
+    // Fetch PDF with circuit breaker and timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      BROWSERLESS_TIMEOUT_MS
+    );
+
+    let chromeResponse: Response;
+    try {
+      chromeResponse = await fetchBrowserlessPdfWithCircuitBreaker(
+        buildBrowserlessPdfUrl(),
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`,
+          },
+          body: JSON.stringify(buildBrowserlessPdfBody(previewUrl)),
+          signal: controller.signal,
+        }
+      );
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    if (!chromeResponse.ok) {
+      const errorText = await chromeResponse.text();
+      console.error(
+        JSON.stringify({
+          event: "export_pdf_browserless_error",
+          projectId,
+          status: chromeResponse.status,
+        }),
+        errorText
+      );
+
+      if (chromeResponse.status === 401 || chromeResponse.status === 403) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Service authentication failed",
+            message: "PDF export service authentication failed. Please contact support.",
+            code: API_ERROR_INVALID_REQUEST,
+          },
+          { status: 503, headers: versionInfo }
+        );
+      }
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: "PDF generation failed",
+          message: "Failed to generate PDF. Please try again.",
+          code: API_ERROR_INVALID_REQUEST,
+        },
+        { status: 500, headers: versionInfo }
+      );
+    }
+
+    // Record usage
+    await recordDailyUsage("export", user.id);
+
+    return new NextResponse(await chromeResponse.arrayBuffer(), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="staging-report-${projectId}.pdf"`,
+        ...versionInfo,
+      },
+    });
+  } catch (error) {
+    console.error("Export PDF error:", error);
     return NextResponse.json(
-      { error: "Unauthorized", message: "You must be signed in to export a PDF." },
-      { status: 401, headers: buildVersionHeaders("v1") }
+      {
+        success: false,
+        error: "Internal error",
+        message: "An unexpected error occurred",
+        code: "internal_error",
+      },
+      { status: 500, headers: versionInfo }
     );
   }
-
-  const body = await request.json().catch(() => null);
-  if (!body) {
-    return NextResponse.json(
-      { error: "Invalid request", message: "Request body is required." },
-      { status: 400, headers: buildVersionHeaders("v1") }
-    );
-  }
-
-  return NextResponse.json(
-    {
-      message: "This is the v1 export-pdf endpoint.",
-      note: "The v1 routes demonstrate the versioning pattern.",
-      version: "v1",
-    },
-    { status: 200, headers: buildVersionHeaders("v1") }
-  );
 }
