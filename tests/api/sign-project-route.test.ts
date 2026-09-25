@@ -38,6 +38,11 @@ vi.mock("@/lib/preview-token", () => ({
   PREVIEW_TOKEN_QUERY_PARAM: "token",
 }));
 
+vi.mock("@/lib/signature-encryption", () => ({
+  encryptSignature: vi.fn().mockImplementation((data: string) => Promise.resolve(`encrypted_${data}`)),
+  decryptSignature: vi.fn().mockImplementation((data: string) => Promise.resolve(data.replace("encrypted_", ""))),
+}));
+
 describe("POST /api/sign-project", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -121,7 +126,7 @@ describe("POST /api/sign-project", () => {
     expect(prisma.project.update).toHaveBeenCalledWith({
       where: { id: MOCK_PROJECT_ID },
       data: {
-        clientSignature: MOCK_SIGNATURE,
+        clientSignature: `encrypted_${MOCK_SIGNATURE}`,
         clientSignatureStatus: "Signed",
         clientSignatureTimestamp: expect.any(Date),
       },
