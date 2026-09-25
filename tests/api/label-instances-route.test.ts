@@ -47,6 +47,7 @@ const mockRoom = {
 
 function buildRequest(body: Record<string, unknown>): NextRequest {
   return {
+    url: "http://localhost/api/label-instances",
     json: async () => body,
   } as unknown as NextRequest;
 }
@@ -112,7 +113,7 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(401);
-      expect(body.error).toBe("Unauthorized");
+      expect(body.error.code).toBe("unauthorized");
     });
   });
 
@@ -128,7 +129,7 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Invalid request");
+      expect(body.error.code).toBe("invalid-request");
     });
 
     it("returns 400 when concept is empty string", async () => {
@@ -143,7 +144,7 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Invalid request");
+      expect(body.error.code).toBe("invalid-request");
     });
 
     it("returns 400 when crops is empty array", async () => {
@@ -158,7 +159,7 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Invalid request");
+      expect(body.error.code).toBe("invalid-request");
     });
 
     it("returns 400 when concept exceeds 200 characters", async () => {
@@ -173,7 +174,7 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Invalid request");
+      expect(body.error.code).toBe("invalid-request");
     });
 
     it("returns 400 when crops.instanceIndex is negative", async () => {
@@ -188,7 +189,7 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Invalid request");
+      expect(body.error.code).toBe("invalid-request");
     });
 
     it("returns 400 when imageUrl is not a valid https URL", async () => {
@@ -203,7 +204,7 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Invalid request");
+      expect(body.error.code).toBe("invalid-request");
     });
 
     it("returns 400 when imageUrl host is not allowlisted (not *.supabase.co or *.fal.ai)", async () => {
@@ -218,7 +219,7 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Invalid request");
+      expect(body.error.code).toBe("invalid-request");
     });
 
     it("returns 400 when crop dataUrl host is not allowlisted", async () => {
@@ -233,7 +234,7 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Invalid request");
+      expect(body.error.code).toBe("invalid-request");
     });
 
     it("returns 400 when strict schema rejects unknown fields", async () => {
@@ -249,7 +250,7 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(400);
-      expect(body.error).toBe("Invalid request");
+      expect(body.error.code).toBe("invalid-request");
     });
 
     it("accepts fal.ai URLs in crops and imageUrl fields", async () => {
@@ -286,8 +287,8 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(404);
-      expect(body.error).toBe("Room not found");
-      expect(body.message).toBe("The requested room could not be found.");
+      expect(body.error.code).toBe("room-not-found");
+      expect(body.error.message).toBe("The requested room could not be found.");
     });
 
     it("returns 404 when room belongs to a different user", async () => {
@@ -304,7 +305,7 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(404);
-      expect(body.error).toBe("Room not found");
+      expect(body.error.code).toBe("room-not-found");
     });
   });
 
@@ -355,8 +356,8 @@ describe("POST /api/label-instances", () => {
       const body = await response.json();
 
       expect(response.status).toBe(500);
-      expect(body.error).toBe("Internal server error");
-      expect(body.message).toBe("Could not label the detected instances. Please try again.");
+      expect(body.error.code).toBe("internal-server-error");
+      expect(body.error.message).toBe("Could not label the detected instances. Please try again.");
     });
   });
 });

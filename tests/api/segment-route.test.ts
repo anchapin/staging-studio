@@ -22,6 +22,7 @@ const mockUser = {
 
 function buildRequest(body: unknown): NextRequest {
   return {
+    url: "http://localhost/api/segment",
     json: () => Promise.resolve(body),
   } as unknown as NextRequest;
 }
@@ -68,9 +69,10 @@ describe("POST /api/segment", () => {
 
     expect(response.status).toBe(401);
     expect(json).toMatchObject({
-      error: "Unauthorized",
-      message: "You must be signed in to select objects.",
-      code: "unauthorized",
+      error: {
+        code: "unauthorized",
+        message: "You must be signed in to select objects.",
+      },
     });
   });
 
@@ -85,8 +87,10 @@ describe("POST /api/segment", () => {
 
     expect(response.status).toBe(400);
     expect(json).toMatchObject({
-      error: "Invalid request",
-      code: "invalid-request",
+      error: {
+        code: "invalid-request",
+        message: "Please provide a valid roomId, imageUrl, click point, and image dimensions.",
+      },
     });
   });
 
@@ -110,8 +114,10 @@ describe("POST /api/segment", () => {
 
     expect(response.status).toBe(404);
     expect(json).toMatchObject({
-      error: "Room not found",
-      code: "room-not-found",
+      error: {
+        code: "room-not-found",
+        message: "The requested room could not be found.",
+      },
     });
   });
 

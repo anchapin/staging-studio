@@ -1,7 +1,8 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { describe, expect, it, vi } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
-import { withErrorHandler } from "@/lib/api-error-handler";
+import { withErrorHandler, ApiError } from "@/lib/api-error-handler";
+import { API_ERROR_INTERNAL_SERVER, API_ERROR_INVALID_REQUEST } from "@/lib/api-errors";
 
 describe("withErrorHandler", () => {
   it("returns the handler response when no error is thrown", async () => {
@@ -22,9 +23,10 @@ describe("withErrorHandler", () => {
 
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({
-      success: false,
-      error: "Internal server error",
-      message: "database connection failed",
+      error: {
+        code: API_ERROR_INTERNAL_SERVER,
+        message: "An unexpected error occurred",
+      },
     });
   });
 
@@ -36,22 +38,29 @@ describe("withErrorHandler", () => {
 
     expect(response.status).toBe(500);
     const body = await response.json();
-    expect(body.success).toBe(false);
-    expect(body.error).toBe("Internal server error");
-    expect(body.message).toBe("An unexpected error occurred");
+    expect(body.error.code).toBe(API_ERROR_INTERNAL_SERVER);
+    expect(body.error.message).toBe("An unexpected error occurred");
   });
 
-  it("catches a thrown object with message and returns its message", async () => {
+  it("catches a thrown ApiError and returns its shaped response", async () => {
     const handler = withErrorHandler(async (req: NextRequest) => {
-      const err = new Error("known failure");
-      err.stack = "fake stack";
-      throw err;
+      throw new ApiError({
+        code: API_ERROR_INVALID_REQUEST,
+        message: "The request body is invalid.",
+        status: 400,
+        details: [{ path: "name", message: "required" }],
+      });
     });
     const response = await handler(new NextRequest("http://localhost"));
 
-    expect(response.status).toBe(500);
-    const body = await response.json();
-    expect(body.message).toBe("known failure");
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: API_ERROR_INVALID_REQUEST,
+        message: "The request body is invalid.",
+        details: [{ path: "name", message: "required" }],
+      },
+    });
   });
 
   it("passes through a handler that returns a 4xx response without wrapping", async () => {

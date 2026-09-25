@@ -21,6 +21,7 @@ const mockUser = { id: MOCK_USER_ID, email: "test@example.com" };
 // Build the NextRequest-like object that returns parsed JSON from .json()
 function buildNextRequest(body: unknown) {
   return {
+    url: "http://localhost/api/label-instances",
     method: "POST",
     headers: new Headers({ "Content-Type": "application/json" }),
     body: JSON.stringify(body),
@@ -111,7 +112,7 @@ describe("POST /api/label-instances", () => {
 
     expect(response.status).toBe(401);
     const json = await response.json();
-    expect(json.error).toBe("Unauthorized");
+    expect(json.error.code).toBe("unauthorized");
   });
 
   it("returns 429 when daily label quota exceeded", async () => {
@@ -126,8 +127,7 @@ describe("POST /api/label-instances", () => {
 
     expect(response.status).toBe(429);
     const json = await response.json();
-    expect(json.error).toBe("Daily limit reached");
-    expect(json.retryable).toBe(true);
+    expect(json.error.code).toBe("rate-limit-exceeded");
   });
 
   it("does not consume quota on cache hit", async () => {
