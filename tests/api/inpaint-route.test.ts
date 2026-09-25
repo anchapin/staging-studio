@@ -17,7 +17,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import { POST } from "@/app/api/inpaint/route";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { getAuthedPrismaUser, requireUser } from "@/lib/api-auth";
+import { ApiError } from "@/lib/api-error-handler";
 import { prisma } from "@/lib/prisma";
 import { fal, falQueueSubmitWithCircuitBreaker } from "@/lib/fal";
 import { evaluateInpaintQualityGate } from "@/lib/inpaint-quality-gate";
@@ -111,6 +112,7 @@ vi.stubGlobal("console", { ...console, error: mockConsoleError });
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
+  requireUser: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -190,6 +192,14 @@ vi.mock("@/lib/error-classify", () => ({
 describe("POST /api/inpaint", () => {
   beforeEach(() => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
+    // requireUser calls getAuthedPrismaUser and throws ApiError if null
+    vi.mocked(requireUser).mockImplementation(async () => {
+      const user = await vi.mocked(getAuthedPrismaUser)();
+      if (!user) {
+        throw new ApiError({ code: "UNAUTHORIZED", status: 401, message: "Unauthorized" });
+      }
+      return user;
+    });
     vi.mocked(prisma.room.findFirst).mockResolvedValue(mockRoom as never);
     vi.mocked(prisma.inpaintRequest.count).mockResolvedValue(0);
     vi.mocked(prisma.inpaintRequest.create).mockResolvedValue(mockInpaintRequest());

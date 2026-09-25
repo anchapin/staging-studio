@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vite
 import type { NextRequest } from "next/server";
 
 import { POST } from "@/app/api/inpaint/route";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { getAuthedPrismaUser, requireUser } from "@/lib/api-auth";
 import { evaluateInpaintQualityGate } from "@/lib/inpaint-quality-gate";
 import { falQueueSubmitWithCircuitBreaker } from "@/lib/fal";
 import { prisma } from "@/lib/prisma";
@@ -21,6 +21,7 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
+  requireUser: vi.fn(),
 }));
 
 vi.mock("@/lib/inpaint-quality-gate", () => ({
@@ -32,6 +33,7 @@ const create = prisma.inpaintRequest.create as unknown as Mock;
 const findFirst = prisma.room.findFirst as unknown as Mock;
 const count = prisma.inpaintRequest.count as unknown as Mock;
 const authedUser = getAuthedPrismaUser as unknown as Mock;
+const mockRequireUser = requireUser as unknown as Mock;
 const qualityGate = evaluateInpaintQualityGate as unknown as Mock;
 
 const USER_ID = "user-1";
@@ -68,6 +70,7 @@ async function callSubmitRoute(): Promise<Response> {
 beforeEach(() => {
   vi.resetAllMocks();
   authedUser.mockResolvedValue({ id: USER_ID });
+  mockRequireUser.mockResolvedValue({ id: USER_ID });
   count.mockResolvedValue(0);
   findFirst.mockResolvedValue({
     id: ROOM_ID,

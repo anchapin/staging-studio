@@ -10,7 +10,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import { GET } from "@/app/api/projects/[id]/route";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { getAuthedPrismaUser, requireUser } from "@/lib/api-auth";
+import { ApiError } from "@/lib/api-error-handler";
 import { prisma } from "@/lib/prisma";
 
 // ---------------------------------------------------------------------------
@@ -65,6 +66,7 @@ const mockProject = {
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
+  requireUser: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -80,6 +82,14 @@ vi.mock("@/lib/prisma", () => ({
 describe("GET /api/projects/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // requireUser calls getAuthedPrismaUser and throws ApiError if null
+    vi.mocked(requireUser).mockImplementation(async () => {
+      const user = await vi.mocked(getAuthedPrismaUser)();
+      if (!user) {
+        throw new ApiError({ code: "unauthorized", status: 401, message: "Unauthorized" });
+      }
+      return user;
+    });
   });
 
   // -------------------------------------------------------------------------
