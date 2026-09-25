@@ -1,142 +1,181 @@
-import { NextResponse } from "next/server";
-import { assertOpenAIConfigured, generateWithRetry } from "@/lib/ai";
+import { generateObject } from "ai";
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { aiModel, assertOpenAIConfigured, generateWithCircuitBreaker } from "@/lib/ai";
+import {
+  visionLabelRequestSchema,
+  visionLabelOutputSchema,
+} from "@/lib/ai-route-schemas";
+import {
+  getCachedVisionLabels,
+  upsertVisionLabels,
+} from "@/lib/vision-labels";
 import {
   DEFAULT_DAILY_LABEL_LIMIT,
   DAILY_LIMIT_ENV_VAR,
+  dailyQuotaExceededPayload,
+  evaluateDailyQuota,
   getDailyUsage,
   recordDailyUsage,
   resolveDailyLimit,
 } from "@/lib/api-quota";
-import { visionLabelRequestSchema } from "@/lib/ai-route-schemas";
-import { prisma } from "@/lib/prisma";
-import { getCachedVisionLabels, upsertVisionLabels } from "@/lib/vision-labels";
+import {
+  API_ERROR_UNAUTHORIZED,
+  API_ERROR_RATE_LIMIT_EXCEEDED,
+  API_ERROR_INVALID_REQUEST,
+  API_ERROR_ROOM_NOT_FOUND,
+  API_ERROR_INTERNAL_SERVER,
+} from "@/lib/api-errors";
+import { withErrorHandler, ApiError } from "@/lib/api-error-handler";
 
-export async function POST(req: Request) {
+export const POST = withErrorHandler(async (request: NextRequest) => {
   const user = await getAuthedPrismaUser();
   if (!user) {
-    return NextResponse.json(
-      { error: "Unauthorized", message: "Not authenticated" },
-      { status: 401 }
-    );
+    throw new ApiError({
+      code: API_ERROR_UNAUTHORIZED,
+      message: "You must be signed in to label instances.",
+      status: 401,
+    });
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json(
-      { error: "Bad Request", message: "Invalid JSON body" },
-      { status: 400 }
+  const labelLimit = resolveDailyLimit(
+    process.env[DAILY_LIMIT_ENV_VAR.label],
+    DEFAULT_DAILY_LABEL_LIMIT
+  );
+  const labelQuota = evaluateDailyQuota(
+    await getDailyUsage("label", user.id),
+    labelLimit
+  );
+  if (!labelQuota.allowed) {
+    console.warn(
+      JSON.stringify({
+        event: "label_instances_daily_quota_exceeded",
+        userId: user.id,
+        used: labelQuota.used,
+        limit: labelQuota.limit,
+      })
     );
+    throw new ApiError({
+      code: API_ERROR_RATE_LIMIT_EXCEEDED,
+      message: dailyQuotaExceededPayload(labelQuota, "Please try again tomorrow.").message,
+      status: 429,
+    });
   }
 
-  const parsed = visionLabelRequestSchema.safeParse(body);
+  const parsed = visionLabelRequestSchema.safeParse(await request.json());
   if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Bad Request", message: parsed.error.message },
-      { status: 400 }
-    );
+    throw new ApiError({
+      code: API_ERROR_INVALID_REQUEST,
+      message: "Some required information is missing or invalid.",
+      status: 400,
+      details: parsed.error.issues,
+    });
   }
 
   const { roomId, concept, crops, imageUrl } = parsed.data;
-  const instanceIndices = crops.map((c) => c.instanceIndex);
 
   const room = await prisma.room.findFirst({
     where: { id: roomId, project: { userId: user.id } },
     select: { id: true },
   });
   if (!room) {
-    return NextResponse.json(
-      { error: "Not Found", message: "Room not found" },
-      { status: 404 }
-    );
-  }
-
-  const cached = await getCachedVisionLabels({
-    imageUrl,
-    concept,
-    instanceIndices,
-    userId: user.id,
-  });
-  if (cached.length > 0) {
-    const labels = cached.map((r) => ({ instanceIndex: r.instanceIndex, label: r.label }));
-    return NextResponse.json({ labels, cached: true });
-  }
-
-  const limit = resolveDailyLimit(
-    process.env[DAILY_LIMIT_ENV_VAR["label"]],
-    DEFAULT_DAILY_LABEL_LIMIT
-  );
-  const usage = await getDailyUsage("label", user.id);
-  if (usage >= limit) {
-    return NextResponse.json(
-      {
-        error: "Daily limit reached",
-        message: `You've reached today's limit of ${limit} label generations. Try again tomorrow.`,
-        retryable: true,
-        used: usage,
-        limit,
-      },
-      { status: 429 }
-    );
+    throw new ApiError({
+      code: API_ERROR_ROOM_NOT_FOUND,
+      message: "The requested room could not be found.",
+      status: 404,
+    });
   }
 
   assertOpenAIConfigured();
 
+  const instanceIndices = crops.map((c: { instanceIndex: number }) => c.instanceIndex);
+  const cached = await getCachedVisionLabels({ imageUrl, concept, instanceIndices, userId: user.id });
+  if (cached.length > 0) {
+    const labels = cached.map((row: { instanceIndex: number; label: string }) => ({
+      instanceIndex: row.instanceIndex,
+      label: row.label,
+    }));
+    return NextResponse.json({ success: true, labels }, { status: 200 });
+  }
+
+  const cropsWithBytes = crops.map((crop: { instanceIndex: number; cropDataUrl: string }) => ({
+    instanceIndex: crop.instanceIndex,
+    base64: crop.cropDataUrl.slice(crop.cropDataUrl.indexOf(",") + 1),
+  }));
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let object: any;
   try {
-    const { object } = await generateWithRetry({
-      model: "gpt-4o-mini",
-      output: "array",
-      schema: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            instanceIndex: { type: "number" },
-            label: { type: "string" },
-            confidence: { type: "number" },
+    const result = await generateWithCircuitBreaker(async () =>
+      generateObject({
+        model: aiModel,
+        schema: visionLabelOutputSchema,
+        messages: [
+          {
+            role: "user" as const,
+            content: [
+              {
+                type: "text" as const,
+                text: [
+                  `A room photo was scanned for "${concept}" instances.`,
+                  "Numbered crops of each detected instance follow, in detection order.",
+                  "Name each crop with a short, specific interior-design noun phrase",
+                  '(e.g. "accent chair", "coffee table"). Keep labels under 6 words.',
+                  "If a crop is ambiguous, use the most likely furniture name.",
+                  `Respond with one label per instance index (${crops
+                    .map((crop: { instanceIndex: number }) => crop.instanceIndex)
+                    .join(", ")}).`,
+                ].join(" "),
+              },
+              ...cropsWithBytes.map((crop) => ({
+                type: "file" as const,
+                mediaType: "image/jpeg" as const,
+                data: crop.base64,
+              })),
+            ],
           },
-          required: ["instanceIndex", "label"],
-          additionalProperties: false,
-        },
-        maxItems: crops.length,
-      },
-      system: `You are an expert at identifying furniture and décor items in interior design images. Given the concept "${concept}", label the specified instances in the image with the most specific, accurate furniture term. Return an array with the instance index and the label.`,
-      prompt: [
-        `Concept: ${concept}`,
-        `Instances: ${JSON.stringify(crops.map((c) => ({ instanceIndex: c.instanceIndex, crop: c.cropDataUrl })))}`,
-        `Return a JSON array with {instanceIndex, label, confidence}.`,
-      ].join("\n"),
-      maxTokens: 512,
-      temperature: 0.1,
+        ],
+      })
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    object = result.object as any;
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "label_instances_generation_error",
+        error: error instanceof Error ? error.message : String(error),
+      }),
+      error
+    );
+    throw new ApiError({
+      code: API_ERROR_INTERNAL_SERVER,
+      message: "Could not label the detected instances. Please try again.",
     });
+  }
 
-    const results = (object as { instanceIndex: number; label: string; confidence?: number }[])
-      .filter((item) => item.label.trim().length > 0)
-      .map((item) => ({
-        instanceIndex: item.instanceIndex,
-        label: item.label.trim(),
-        score: item.confidence,
-      }));
+  const requested = new Set(crops.map((crop: { instanceIndex: number }) => crop.instanceIndex));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const labels = (object as any).labels.filter((entry: { instanceIndex: number }) =>
+    requested.has(entry.instanceIndex)
+  );
 
+  await recordDailyUsage("label", user.id);
+
+  if (labels.length > 0) {
     await upsertVisionLabels({
       imageUrl,
       concept,
-      results,
+      results: labels.map(
+        (l: { instanceIndex: number; label: string }) => ({
+          instanceIndex: l.instanceIndex,
+          label: l.label,
+        })
+      ),
       userId: user.id,
       roomId,
     });
-
-    await recordDailyUsage("label", user.id);
-
-    return NextResponse.json({ labels: results, cached: false });
-  } catch (err) {
-    console.error("[/label-instances]", err);
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json(
-      { error: "Internal Server Error", message },
-      { status: 500 }
-    );
   }
-}
+
+  return NextResponse.json({ success: true, labels }, { status: 200 });
+});

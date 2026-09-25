@@ -6,6 +6,7 @@ vi.mock("@/lib/prisma", () => ({
       findUnique: vi.fn(),
     },
     room: {
+      findFirst: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn(),
     },
@@ -20,17 +21,44 @@ vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));
 
-const mockUser = { id: "user-1", email: "test@example.com", firmName: "Test Firm", firmLogoUrl: null, pageTemplate: null, darkMode: false };
+const mockUser = {
+  id: "user-1",
+  email: "test@example.com",
+  firmName: "Test Firm",
+  ownerName: "Test Owner",
+  logoUrl: null,
+  psychologyPageContent: null,
+  signoffContent: null,
+  darkMode: false,
+  createdAt: new Date(),
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default: findFirst returns a valid room so saveRoomMetadata proceeds to update
+  vi.mocked(prisma.room.findFirst).mockResolvedValue({
+    id: "room-1",
+    projectId: "proj-1",
+    name: "Living Room",
+    beforeImageUrl: null,
+    beforeImageUrl2: null,
+    afterImageUrl: null,
+    afterImageUrl2: null,
+    selectedVariantIndex: 0,
+    sortOrder: 0,
+    rawDirectives: null,
+    observedChallenge: null,
+    recommendation: null,
+    buyerPsychology: null,
+    checklistItems: null,
+    createdAt: new Date(),
+  });
 });
 
 import { saveRoomMetadata } from "@/app/actions/room";
 import { reorderRooms } from "@/app/actions/room";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
-import { revalidatePath } from "next/cache";
 
 describe("saveRoomMetadata", () => {
   const validMeta = {
@@ -52,20 +80,18 @@ describe("saveRoomMetadata", () => {
       id: "room-1",
       projectId: "proj-1",
       name: validMeta.name,
-      roomType: "living",
       beforeImageUrl: null,
-      beforeImageUrlHash: null,
+      beforeImageUrl2: null,
       afterImageUrl: null,
-      afterImageUrlHash: null,
-      selectedVariantSlot: 0,
+      afterImageUrl2: null,
+      selectedVariantIndex: 0,
       sortOrder: 0,
       rawDirectives: validMeta.rawDirectives,
       observedChallenge: null,
       recommendation: null,
       buyerPsychology: null,
-      checklist: null,
+      checklistItems: null,
       createdAt: new Date(),
-      updatedAt: new Date(),
     });
 
     const result = await saveRoomMetadata("room-1", validMeta);
@@ -110,7 +136,7 @@ describe("reorderRooms", () => {
 
   it("reorders rooms on success", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: "proj-1" });
+    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: "proj-1" } as any);
     vi.mocked(prisma.room.updateMany).mockResolvedValue({ count: 1 });
 
     const result = await reorderRooms("proj-1", ["room-2", "room-1"]);
@@ -129,7 +155,7 @@ describe("reorderRooms", () => {
 
   it("propagates database errors", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: "proj-1" });
+    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: "proj-1" } as any);
     vi.mocked(prisma.room.updateMany).mockRejectedValue(new Error("DB error"));
 
     const result = await reorderRooms("proj-1", ["room-2", "room-1"]);

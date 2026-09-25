@@ -1,0 +1,51 @@
+name: CI
+
+# One run per change: feature branches are covered by the pull_request
+# event (opened/synchronize/reopened), so the push trigger is scoped to
+# the long-lived branches only. Before this, every branch push fired
+# BOTH a push run and a pull_request run — two queued jobs per update,
+# and because the concurrency group keys on github.ref
+# (refs/heads/<branch> vs refs/pull/<n>/merge) they never cancelled
+# each other. During hosted-runner famines that doubles the time every
+# PR waits for capacity for no added coverage.
+on:
+  push:
+    branches:
+      - develop
+      - main
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fast-checks:
+    name: Lint · Typecheck · Unit tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: TypeScript type check
+        run: npm run typecheck
+
+      - name: Unit tests (vitest)
+        run: npm test

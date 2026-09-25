@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { fal } from "@/lib/fal";
+import { falQueueSubmitWithCircuitBreaker } from "@/lib/fal";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { inpaintRequestSchema } from "@/lib/ai-route-schemas";
@@ -19,19 +19,23 @@ import {
   buildFalFillPayload,
   buildInpaintPrompt,
 } from "@/lib/prompts";
+import { API_ERROR_INPAINT_SUBMIT_FAILED } from "@/lib/api-errors";
 
 const INPAINT_ERROR_COPY = {
   auth: {
     error: "Authentication failed",
     message: "Unable to connect to the image editing service. Please check your configuration.",
+    code: API_ERROR_INPAINT_SUBMIT_FAILED,
   },
   timeout: {
     error: "Request timeout",
     message: "The image editing service is taking too long to respond. Please try again.",
+    code: API_ERROR_INPAINT_SUBMIT_FAILED,
   },
   unknown: {
     error: "Inpainting failed",
     message: "We couldn't process your image. Please try again.",
+    code: API_ERROR_INPAINT_SUBMIT_FAILED,
   },
 };
 
@@ -55,6 +59,13 @@ const inpaintSubmitSchema = inpaintRequestSchema.extend({
   // whether the mask aligns with the stated directive intent.
   maskCoverageRatio: z.number().min(0).max(1).optional(),
 });
+
+// Issue #831: fal.queue.submit has no built-in retry for transient errors.
+// Retries with exponential backoff for network/timeout/5xx failures.
+// Auth errors (401/403) are non-retryable — they indicate a config problem
+// that retries will not resolve.
+const FAL_SUBMIT_ATTEMPTS = 3;
+const FAL_SUBMIT_BASE_DELAY_MS = 200;
 
 type FalQueueSubmitFunction = (
   id: string,
@@ -104,6 +115,48 @@ async function createInpaintRequestWithRetry(
       );
     }
   }
+}
+
+// Issue #831: wraps fal.queue.submit with exponential-backoff retry for
+// transient errors (network failures, timeouts, 5xx HTTP responses).
+// Auth errors (401/403) are not retried — they indicate a config problem
+// that subsequent attempts will not resolve.
+async function submitWithRetry(
+  falQueueSubmit: FalQueueSubmitFunction,
+  model: string,
+  payload: { input: Record<string, unknown> }
+): Promise<{ request_id: string }> {
+  for (let attempt = 1; attempt <= FAL_SUBMIT_ATTEMPTS; attempt += 1) {
+    try {
+      return await falQueueSubmit(model, payload);
+    } catch (error) {
+      const isLastAttempt = attempt === FAL_SUBMIT_ATTEMPTS;
+      const isAuthError =
+        error != null &&
+        typeof error === "object" &&
+        "status" in error &&
+        (error.status === 401 || error.status === 403);
+
+      if (isLastAttempt || isAuthError) {
+        throw error;
+      }
+
+      const delayMs = FAL_SUBMIT_BASE_DELAY_MS * Math.pow(2, attempt - 1);
+      console.error(
+        JSON.stringify({
+          event: "fal_submit_retry",
+          attempt,
+          attempts: FAL_SUBMIT_ATTEMPTS,
+          delayMs,
+        }),
+        error
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  // Satisfy TypeScript: this is unreachable because the loop always returns
+  // or throws, but the return type requires a value.
+  throw new Error("submitWithRetry: unexpected exit");
 }
 
 export async function POST(request: NextRequest) {
@@ -215,19 +268,25 @@ export async function POST(request: NextRequest) {
 
     // Fire-and-forget submit: returns as soon as the job is queued (~2s),
     // instead of holding the request open for the full generation.
-    const falQueueSubmit = fal.queue.submit as FalQueueSubmitFunction;
-    const submission = await falQueueSubmit(FAL_FLUX_FILL_MODEL, {
-      input: buildFalFillPayload({
-        imageUrl,
-        maskUrl,
-        prompt,
-        negativePrompt,
-        promptStrength,
-        maskBlur,
-        seed,
-        creativeMode,
-      }),
-    });
+    // submitWithRetry handles transient errors; the circuit breaker wrapper
+    // (falQueueSubmitWithCircuitBreaker) prevents cascading failures when
+    // the service is degraded.
+    const submission = await submitWithRetry(
+      falQueueSubmitWithCircuitBreaker,
+      FAL_FLUX_FILL_MODEL,
+      {
+        input: buildFalFillPayload({
+          imageUrl,
+          maskUrl,
+          prompt,
+          negativePrompt,
+          promptStrength,
+          maskBlur,
+          seed,
+          creativeMode,
+        }),
+      }
+    );
 
     // Persist the requestId → room mapping before responding so the status
     // route can attribute requests and a refresh can resume polling.
@@ -287,6 +346,7 @@ export async function POST(request: NextRequest) {
         error: classified.error,
         message: classified.message,
         retryable: classified.retryable,
+        code: classified.code,
       },
       { status: classified.status }
     );

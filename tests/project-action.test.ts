@@ -16,7 +16,17 @@ vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));
 
-const mockUser = { id: "user-1", email: "test@example.com", firmName: "Test Firm", firmLogoUrl: null, pageTemplate: null, darkMode: false };
+const mockUser = {
+  id: "user-1",
+  email: "test@example.com",
+  firmName: "Test Firm",
+  ownerName: "Test Owner",
+  logoUrl: null,
+  psychologyPageContent: null,
+  signoffContent: null,
+  darkMode: false,
+  createdAt: new Date(),
+};
 
 // Project IDs must match PROJECT_ID_PATTERN: /^c[a-z0-9]{24}$/
 const validProjectId = "c123456789012345678901234";
@@ -53,14 +63,14 @@ describe("saveProjectMetadata", () => {
     vi.mocked(prisma.project.update).mockResolvedValue({
       id: validProjectId,
       userId: mockUser.id,
-      address: "123 Main St",
+      propertyAddress: "123 Main St",
       clientName: "John Doe",
       targetBuyer: "Young professional",
       stagingAesthetic: "modern",
       stagingPackage: "full",
       stagingDirectives: "Make it pop",
       buyerDemographics: {},
-      roiSalesPricePremium: 0,
+      roiSalesPricePremium: "0",
       roiTransactionVelocity: "faster",
       roiInvestmentTier: "mid",
       clientSignature: null,
@@ -128,14 +138,14 @@ describe("saveProjectSignature", () => {
     vi.mocked(prisma.project.update).mockResolvedValue({
       id: validProjectId,
       userId: mockUser.id,
-      address: "123 Main St",
+      propertyAddress: "123 Main St",
       clientName: "John Doe",
       targetBuyer: "Young professional",
       stagingAesthetic: "modern",
       stagingPackage: "full",
       stagingDirectives: "Make it pop",
       buyerDemographics: {},
-      roiSalesPricePremium: 0,
+      roiSalesPricePremium: "0",
       roiTransactionVelocity: "faster",
       roiInvestmentTier: "mid",
       clientSignature: "data:image/png;base64,abc123",

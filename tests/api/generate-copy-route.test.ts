@@ -1,17 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { z } from "zod";
 import type { NextRequest } from "next/server";
 import { POST } from "@/app/api/generate-copy/route";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
-import { generateWithRetry } from "@/lib/ai";
 import { saveRoomCopy } from "@/app/actions/room";
+import { generateWithCircuitBreaker } from "@/lib/ai";
 
 const MOCK_USER_ID = "cuser12345678901234567890";
 const MOCK_ROOM_ID = "croom12345678901234567890";
 const MOCK_PROJECT_ID = "cproj12345678901234567890";
 
-const mockUser = { id: MOCK_USER_ID, email: "test@example.com", name: "Test User" };
+const mockUser = {
+  id: MOCK_USER_ID,
+  email: "test@example.com",
+  firmName: "Test Firm",
+  ownerName: "Test Owner",
+  logoUrl: null,
+  psychologyPageContent: null,
+  signoffContent: null,
+  darkMode: false,
+  createdAt: new Date(),
+};
 
 function buildRequest(body: unknown): NextRequest {
   return {
@@ -37,32 +46,36 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/ai", () => ({
   aiModel: "gpt-4o-mini",
   assertOpenAIConfigured: vi.fn(),
-  generateWithRetry: vi.fn(),
+  generateWithCircuitBreaker: vi.fn(),
 }));
 
-vi.mock("@/lib/api-quota", async (importOriginal) => {
-  const actual = await importOriginal();
-  return {
-    ...actual,
-    getDailyUsage: vi.fn(() => Promise.resolve(0)),
-    evaluateDailyQuota: vi.fn(() => ({
-      allowed: true,
-      used: 0,
-      limit: 50,
-      remaining: 50,
-    })),
-    resolveDailyLimit: vi.fn((_raw: string | undefined, fallback: number) => fallback),
-    recordDailyUsage: vi.fn(() => Promise.resolve(1)),
-    dailyQuotaExceededPayload: vi.fn(() => ({
-      error: "Daily limit reached",
-      message: "Please try again tomorrow.",
-      retryable: true,
-      used: 50,
-      limit: 50,
-      resetsAt: "2026-09-25T00:00:00.000Z",
-    })),
-  };
-});
+vi.mock("@/lib/api-quota", () => ({
+  DEFAULT_DAILY_COPY_LIMIT: 50,
+  DAILY_LIMIT_ENV_VAR: {
+    inpaint: "DAILY_INPAINT_LIMIT",
+    copy: "DAILY_COPY_LIMIT",
+    label: "DAILY_LABEL_LIMIT",
+    export: "DAILY_EXPORT_LIMIT",
+    segment: "DAILY_SEGMENT_LIMIT",
+  },
+  getDailyUsage: vi.fn(() => Promise.resolve(0)),
+  evaluateDailyQuota: vi.fn(() => ({
+    allowed: true,
+    used: 0,
+    limit: 50,
+    remaining: 50,
+  })),
+  resolveDailyLimit: vi.fn((_raw: string | undefined, fallback: number) => fallback),
+  recordDailyUsage: vi.fn(() => Promise.resolve(1)),
+  dailyQuotaExceededPayload: vi.fn(() => ({
+    error: "Daily limit reached",
+    message: "Please try again tomorrow.",
+    retryable: true,
+    used: 50,
+    limit: 50,
+    resetsAt: "2026-09-25T00:00:00.000Z",
+  })),
+}));
 
 vi.mock("@/app/actions/room", () => ({
   saveRoomCopy: vi.fn(),
@@ -75,22 +88,19 @@ describe("POST /api/generate-copy", () => {
     vi.mocked(prisma.room.findFirst).mockResolvedValue({
       id: MOCK_ROOM_ID,
       name: "Living Room",
+      projectId: MOCK_PROJECT_ID,
+      beforeImageUrl: null,
+      beforeImageUrl2: null,
+      afterImageUrl: null,
+      afterImageUrl2: null,
+      selectedVariantIndex: 0,
       rawDirectives: "Make it modern and bright",
-      project: {
-        id: MOCK_PROJECT_ID,
-        userId: MOCK_USER_ID,
-        stagingAesthetic: "modern",
-        targetBuyer: "young professional",
-        stagingDirectives: "Keep it minimal",
-        buyerDemographics: {
-          designPreferences: ["open_plan", "natural_light"],
-          budgetMin: 400,
-          budgetMax: 600,
-          mustHaveFeatures: ["garage", "backyard"],
-          sellTimeline: "1-3_months",
-          buyerType: "first_time_buyer",
-        },
-      },
+      observedChallenge: null,
+      recommendation: null,
+      buyerPsychology: null,
+      checklistItems: null,
+      sortOrder: 0,
+      createdAt: new Date(),
     });
   });
 
@@ -142,23 +152,38 @@ describe("POST /api/generate-copy", () => {
     vi.mocked(prisma.room.findFirst).mockResolvedValue({
       id: MOCK_ROOM_ID,
       name: "Living Room",
+      projectId: MOCK_PROJECT_ID,
+      beforeImageUrl: null,
+      beforeImageUrl2: null,
+      afterImageUrl: null,
+      afterImageUrl2: null,
+      selectedVariantIndex: 0,
       rawDirectives: null,
+      observedChallenge: null,
+      recommendation: null,
+      buyerPsychology: null,
+      checklistItems: null,
+      sortOrder: 0,
+      createdAt: new Date(),
       project: {
         id: MOCK_PROJECT_ID,
-        userId: MOCK_USER_ID,
-        stagingAesthetic: "modern",
-        targetBuyer: "young professional",
+        name: "Test Project",
         stagingDirectives: null,
-        buyerDemographics: {
-          designPreferences: ["open_plan", "natural_light"],
-          budgetMin: 400,
-          budgetMax: 600,
-          mustHaveFeatures: ["garage", "backyard"],
-          sellTimeline: "1-3_months",
-          buyerType: "first_time_buyer",
-        },
+        userId: MOCK_USER_ID,
+        clientName: null,
+        buyerDemographics: null,
+        stagingAesthetic: null,
+        stagingPackage: null,
+        roiSalesPricePremium: null,
+        roiTransactionVelocity: null,
+        roiInvestmentTier: null,
+        clientSignature: null,
+        clientSignatureStatus: "Pending",
+        clientSignatureTimestamp: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
       },
-    });
+    } as Awaited<ReturnType<typeof prisma.room.findFirst>>);
 
     const response = await POST(buildRequest({ roomId: MOCK_ROOM_ID }));
     const json = await response.json();
@@ -181,7 +206,7 @@ describe("POST /api/generate-copy", () => {
       ],
     };
 
-    vi.mocked(generateWithRetry).mockResolvedValue({
+    vi.mocked(generateWithCircuitBreaker).mockResolvedValue({
       object: mockCopy,
       finishReason: "stop",
       usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
@@ -209,7 +234,7 @@ describe("POST /api/generate-copy", () => {
       ],
     };
 
-    vi.mocked(generateWithRetry).mockResolvedValue({
+    vi.mocked(generateWithCircuitBreaker).mockResolvedValue({
       object: mockCopy,
       finishReason: "stop",
       usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 },

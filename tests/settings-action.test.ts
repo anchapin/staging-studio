@@ -16,7 +16,17 @@ vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));
 
-const mockUser = { id: "user-1", email: "test@example.com", firmName: "Test Firm", firmLogoUrl: null, pageTemplate: null, darkMode: false };
+const mockUser = {
+  id: "user-1",
+  email: "test@example.com",
+  firmName: "Test Firm",
+  ownerName: "Test Owner",
+  logoUrl: null,
+  psychologyPageContent: null,
+  signoffContent: null,
+  darkMode: false,
+  createdAt: new Date(),
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -53,8 +63,10 @@ describe("updateUserSettings", () => {
       firmName: validSettings.firmName,
       ownerName: validSettings.ownerName,
       logoUrl: validSettings.logoUrl,
-      pageTemplate: null,
+      psychologyPageContent: null,
+      signoffContent: null,
       darkMode: validSettings.darkMode,
+      createdAt: new Date(),
     });
 
     const result = await updateUserSettings(validSettings);

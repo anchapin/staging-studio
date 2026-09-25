@@ -15,7 +15,17 @@ vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
 }));
 
-const mockUser = { id: "user-1", email: "test@example.com", firmName: "Test Firm", firmLogoUrl: null, pageTemplate: null, darkMode: false };
+const mockUser = {
+  id: "user-1",
+  email: "test@example.com",
+  firmName: "Test Firm",
+  ownerName: "Test Owner",
+  logoUrl: null,
+  psychologyPageContent: null,
+  signoffContent: null,
+  darkMode: false,
+  createdAt: new Date(),
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -52,7 +62,7 @@ describe("logSelectionEvent", () => {
 
   it("creates selection log entry on success", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.room.findFirst).mockResolvedValue({ id: "room-1" });
+    vi.mocked(prisma.room.findFirst).mockResolvedValue({ id: "room-1" } as any);
     vi.mocked(prisma.selectionLog.create).mockResolvedValue({
       id: "log-1",
       roomId: baseEvent.roomId,
@@ -60,11 +70,7 @@ describe("logSelectionEvent", () => {
       instanceIndex: baseEvent.instanceIndex,
       score: baseEvent.score,
       editedLabel: null,
-      userId: mockUser.id,
-      imageUrl: "",
-      imageUrlHash: "",
-      projectId: "",
-      timestamp: new Date(),
+      createdAt: new Date(),
     });
 
     const result = await logSelectionEvent(baseEvent);
@@ -82,7 +88,7 @@ describe("logSelectionEvent", () => {
 
   it("passes through database errors", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.room.findFirst).mockResolvedValue({ id: "room-1" });
+    vi.mocked(prisma.room.findFirst).mockResolvedValue({ id: "room-1" } as any);
     vi.mocked(prisma.selectionLog.create).mockRejectedValue(new Error("Connection lost"));
 
     const result = await logSelectionEvent(baseEvent);
@@ -92,7 +98,7 @@ describe("logSelectionEvent", () => {
 
   it("accepts optional editedLabel", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.room.findFirst).mockResolvedValue({ id: "room-1" });
+    vi.mocked(prisma.room.findFirst).mockResolvedValue({ id: "room-1" } as any);
     vi.mocked(prisma.selectionLog.create).mockResolvedValue({
       id: "log-1",
       roomId: baseEvent.roomId,
@@ -100,11 +106,7 @@ describe("logSelectionEvent", () => {
       instanceIndex: baseEvent.instanceIndex,
       score: baseEvent.score,
       editedLabel: "Modern Sectional",
-      userId: mockUser.id,
-      imageUrl: "",
-      imageUrlHash: "",
-      projectId: "",
-      timestamp: new Date(),
+      createdAt: new Date(),
     });
 
     const result = await logSelectionEvent({ ...baseEvent, editedLabel: "Modern Sectional" });
@@ -119,13 +121,13 @@ describe("logSelectionEvent", () => {
 
   it("returns validation error for invalid concept", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.room.findFirst).mockResolvedValue({ id: "room-1" });
+    vi.mocked(prisma.room.findFirst).mockResolvedValue({ id: "room-1" } as any);
 
     // concept > 30 chars should fail
     const longConcept = "a".repeat(31);
     const result = await logSelectionEvent({ ...baseEvent, concept: longConcept });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("30 characters");
+    expect((result as any).error).toContain("30 characters");
   });
 });

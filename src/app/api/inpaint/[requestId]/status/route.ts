@@ -6,19 +6,47 @@ import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { decideInpaintPersistence } from "@/lib/inpaint-persistence";
 import { classifyIntegrationError } from "@/lib/error-classify";
 import { FAL_FLUX_FILL_MODEL } from "@/lib/prompts";
-import { slidingWindowRateLimit } from "@/lib/sliding-window-ratelimit";
+import {
+  API_ERROR_UNAUTHORIZED,
+  API_ERROR_TOO_MANY_REQUESTS,
+  API_ERROR_INVALID_REQUEST,
+  API_ERROR_REQUEST_NOT_FOUND,
+  API_ERROR_INPAINT_STATUS_FAILED,
+  API_ERROR_INPAINT_TERMINAL,
+} from "@/lib/api-errors";
 
 const INPAINT_STATUS_RATE_LIMIT = 60;
 const INPAINT_STATUS_RATE_WINDOW_MS = 60_000;
+
+type RateLimitEntry = { count: number; windowStart: number };
+
+const inpaintStatusRateLimitMap = new Map<string, RateLimitEntry>();
+
+function checkInpaintStatusRateLimit(userId: string): { allowed: boolean; remaining: number; retryAfterMs: number } {
+  const now = Date.now();
+  const entry = inpaintStatusRateLimitMap.get(userId);
+  if (!entry || now - entry.windowStart >= INPAINT_STATUS_RATE_WINDOW_MS) {
+    inpaintStatusRateLimitMap.set(userId, { count: 1, windowStart: now });
+    return { allowed: true, remaining: INPAINT_STATUS_RATE_LIMIT - 1, retryAfterMs: INPAINT_STATUS_RATE_WINDOW_MS };
+  }
+  if (entry.count >= INPAINT_STATUS_RATE_LIMIT) {
+    const retryAfterMs = INPAINT_STATUS_RATE_WINDOW_MS - (now - entry.windowStart);
+    return { allowed: false, remaining: 0, retryAfterMs: Math.ceil(retryAfterMs / 1000) };
+  }
+  entry.count++;
+  return { allowed: true, remaining: INPAINT_STATUS_RATE_LIMIT - entry.count, retryAfterMs: INPAINT_STATUS_RATE_WINDOW_MS - (now - entry.windowStart) };
+}
 
 const INPAINT_STATUS_ERROR_COPY = {
   notFound: {
     error: "Request not found",
     message: "This image processing request could not be found. It may have expired.",
+    code: API_ERROR_REQUEST_NOT_FOUND,
   },
   unknown: {
     error: "Status check failed",
     message: "Unable to check image processing status. Please try again.",
+    code: API_ERROR_INPAINT_STATUS_FAILED,
   },
 };
 
@@ -30,6 +58,7 @@ const INPAINT_TERMINAL_ERROR_BODY = {
   error: "Inpainting failed",
   message: "The image editing process encountered an error. Please try again.",
   retryable: false,
+  code: API_ERROR_INPAINT_TERMINAL,
 };
 
 interface FalStatusResult {
@@ -62,31 +91,26 @@ export async function GET(
         {
           error: "Unauthorized",
           message: "You must be signed in to check inpainting status.",
+          code: API_ERROR_UNAUTHORIZED,
         },
         { status: 401 }
       );
     }
 
-    const rateLimit = await slidingWindowRateLimit(
-      user.id,
-      INPAINT_STATUS_RATE_LIMIT,
-      INPAINT_STATUS_RATE_WINDOW_MS
-    );
-
+    const rateLimit = checkInpaintStatusRateLimit(user.id);
     if (!rateLimit.allowed) {
-      const retryAfter = Math.ceil((rateLimit.resetsAt.getTime() - Date.now()) / 1000);
       return NextResponse.json(
         {
           error: "Too many requests",
-          message: `Rate limit exceeded. Please wait ${retryAfter} seconds before trying again.`,
+          message: `Rate limit exceeded. Please wait ${rateLimit.retryAfterMs} seconds before trying again.`,
+          code: API_ERROR_TOO_MANY_REQUESTS,
         },
         {
           status: 429,
           headers: {
-            "Retry-After": String(retryAfter),
+            "Retry-After": String(rateLimit.retryAfterMs),
             "X-RateLimit-Limit": String(INPAINT_STATUS_RATE_LIMIT),
-            "X-RateLimit-Remaining": String(rateLimit.remaining),
-            "X-RateLimit-Reset": String(Math.floor(rateLimit.resetsAt.getTime() / 1000)),
+            "X-RateLimit-Remaining": "0",
           },
         }
       );
@@ -100,6 +124,7 @@ export async function GET(
         {
           error: "Missing requestId",
           message: "Request ID is required to check status",
+          code: API_ERROR_INVALID_REQUEST,
         },
         { status: 400 }
       );
@@ -120,8 +145,8 @@ export async function GET(
       return NextResponse.json(
         {
           error: "Request not found",
-          message:
-            "This image processing request could not be found or you don't have access to it.",
+          message: "This image processing request could not be found or you don't have access to it.",
+          code: API_ERROR_REQUEST_NOT_FOUND,
         },
         { status: 404 }
       );
@@ -391,6 +416,7 @@ export async function GET(
         error: classified.error,
         message: classified.message,
         retryable: classified.retryable,
+        code: classified.code,
       },
       { status: classified.status }
     );

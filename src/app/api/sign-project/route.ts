@@ -4,32 +4,46 @@ import type { ZodError } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { verifyPreviewToken } from "@/lib/preview-token";
+import { withRetry } from "@/lib/retry";
 import {
   signProjectRequestSchema,
   tokenMatchesProject,
 } from "@/lib/sign-project-schema";
+import {
+  API_ERROR_INVALID_TOKEN,
+  API_ERROR_INVALID_PROJECT,
+  API_ERROR_INVALID_SIGNATURE,
+  API_ERROR_ALREADY_SIGNED,
+  API_ERROR_SAVE_FAILED,
+  API_ERROR_INTERNAL_SERVER,
+} from "@/lib/api-errors";
 
 const SIGN_ERROR_COPY = {
   invalidToken: {
     error: "Invalid token",
     message: "The preview link has expired or is invalid. Please request a new one from the staging firm.",
+    code: API_ERROR_INVALID_TOKEN,
   },
   invalidProject: {
     error: "Invalid project",
     message: "The project could not be found.",
+    code: API_ERROR_INVALID_PROJECT,
   },
   invalidSignature: {
     error: "Invalid signature",
     message: "Signature must be a PNG data URL of at most 1 MB.",
+    code: API_ERROR_INVALID_SIGNATURE,
   },
   alreadySigned: {
     error: "Already signed",
     message:
       "This project has already been signed. The staging firm must reset the signature before it can be signed again.",
+    code: API_ERROR_ALREADY_SIGNED,
   },
   saveFailed: {
     error: "Save failed",
     message: "Unable to save the signature. Please try again.",
+    code: API_ERROR_SAVE_FAILED,
   },
 } as const;
 
@@ -102,14 +116,19 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      await prisma.project.update({
-        where: { id: projectId },
-        data: {
-          clientSignature: signatureDataUrl,
-          clientSignatureStatus: "Signed",
-          clientSignatureTimestamp: new Date(),
-        },
-      });
+      await withRetry(
+        async () =>
+          prisma.project.update({
+            where: { id: projectId },
+            data: {
+              clientSignature: signatureDataUrl,
+              clientSignatureStatus: "Signed",
+              clientSignatureTimestamp: new Date(),
+            },
+          }),
+        3,
+        200
+      );
     } catch (error) {
       console.error("sign_project_save_failed", {
         projectId,
@@ -121,7 +140,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true });
   } catch {
     return NextResponse.json(
-      { error: "Server error", message: "An unexpected error occurred." },
+      { error: "Server error", message: "An unexpected error occurred.", code: API_ERROR_INTERNAL_SERVER },
       { status: 500 }
     );
   }
