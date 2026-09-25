@@ -17,7 +17,17 @@ vi.mock("@/lib/prisma", () => ({
       create: vi.fn(),
       update: vi.fn(),
     },
+    setupRateLimit: {
+      upsert: vi.fn().mockResolvedValue({ ipHash: "test", attemptCount: 1, windowStart: new Date() }),
+      findUnique: vi.fn().mockResolvedValue({ ipHash: "test", attemptCount: 1, windowStart: new Date() }),
+      deleteMany: vi.fn(),
+    },
+    $transaction: vi.fn((cb) => cb(prisma)),
   },
+}));
+
+vi.mock("@/lib/env", () => ({
+  requireEnvVars: vi.fn().mockReturnValue(undefined),
 }));
 
 const mockUser = {
@@ -42,6 +52,9 @@ function buildRequest(body?: unknown): NextRequest {
     cookies: {
       getAll: vi.fn().mockReturnValue([]),
       set: vi.fn(),
+    },
+    headers: {
+      get: vi.fn().mockReturnValue(null),
     },
     json: body ? () => Promise.resolve(body) : undefined,
   } as unknown as NextRequest;
@@ -107,18 +120,18 @@ describe("GET /api/setup/check", () => {
     vi.mocked(prisma.user.findUnique).mockReset();
   });
 
-  it("returns 401 when unauthenticated", async () => {
+  it("returns 200 with setupComplete=false when unauthenticated", async () => {
     mockCreateServerClient.mockReturnValue(mockSupabaseGetUser(null));
 
     const req = buildRequest();
     const res = await GET(req);
 
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.exists).toBe(false);
+    expect(json.setupComplete).toBe(false);
   });
 
-  it("returns 404 when authenticated but no user row exists", async () => {
+  it("returns 200 with setupComplete=false when authenticated but no user row exists", async () => {
     mockCreateServerClient.mockReturnValue(mockSupabaseGetUser({ id: "user-123", email: "test@example.com" }));
     vi.mocked(prisma.user.findUnique).mockResolvedValue(null as never);
 
@@ -126,11 +139,11 @@ describe("GET /api/setup/check", () => {
     const res = await GET(req);
     const json = await res.json();
 
-    expect(res.status).toBe(404);
-    expect(json.exists).toBe(false);
+    expect(res.status).toBe(200);
+    expect(json.setupComplete).toBe(false);
   });
 
-  it("returns 200 with exists=true when user row exists", async () => {
+  it("returns 200 with setupComplete=true when user row exists", async () => {
     mockCreateServerClient.mockReturnValue(mockSupabaseGetUser({ id: "user-123", email: "test@example.com" }));
     vi.mocked(prisma.user.findUnique).mockResolvedValue(mockUser as never);
 
@@ -139,6 +152,6 @@ describe("GET /api/setup/check", () => {
 
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.exists).toBe(true);
+    expect(json.setupComplete).toBe(true);
   });
 });
