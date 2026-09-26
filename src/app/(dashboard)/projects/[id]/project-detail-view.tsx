@@ -291,7 +291,12 @@ function roomEditorInputs(
     room,
     inpaintSourceByRoom[room.id] ?? { kind: "original" as const }
   );
-  const pendingRequest = room.inpaintRequests?.[0] ?? null;
+  const pendingRequest =
+    room.inpaintRequests?.[0] != null &&
+    (room.inpaintRequests[0].status === "IN_QUEUE" ||
+      room.inpaintRequests[0].status === "IN_PROGRESS")
+      ? room.inpaintRequests[0]
+      : null;
   return {
     pairs,
     selectedIndex,
