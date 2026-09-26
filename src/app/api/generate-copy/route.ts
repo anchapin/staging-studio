@@ -3,7 +3,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { aiModel, assertOpenAIConfigured, generateWithCircuitBreaker } from "@/lib/ai";
 import { prisma } from "@/lib/prisma";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import {
+  getAuthedPrismaUser,
+  requireProjectOwnershipOrThrow,
+  ProjectNotFoundError,
+  ProjectForbiddenError,
+} from "@/lib/api-auth";
 import {
   generateCopyRequestSchema,
   copyQualityGateSchema,
@@ -115,8 +120,40 @@ export async function POST(request: NextRequest) {
     // (`getOwnedRoomWhere` in `app/actions/room.ts`): a roomId owned by
     // another user matches nothing, so a foreign room is indistinguishable
     // from a missing one and both return 404.
-    const room = await prisma.room.findFirst({
-      where: { id: roomId, project: { userId: user.id } },
+    const roomBasic = await prisma.room.findFirst({
+      where: { id: roomId },
+      select: { id: true, projectId: true },
+    });
+    if (!roomBasic) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Room not found",
+          message: "Room not found.",
+          code: API_ERROR_ROOM_NOT_FOUND,
+        },
+        { status: 404 }
+      );
+    }
+    try {
+      await requireProjectOwnershipOrThrow(roomBasic.projectId, user);
+    } catch (e) {
+      if (e instanceof ProjectNotFoundError) {
+        return NextResponse.json(
+          { success: false, error: "Project not found", message: "Project not found.", code: API_ERROR_ROOM_NOT_FOUND },
+          { status: 404 }
+        );
+      }
+      if (e instanceof ProjectForbiddenError) {
+        return NextResponse.json(
+          { success: false, error: "Forbidden", message: "Forbidden." },
+          { status: 403 }
+        );
+      }
+      throw e;
+    }
+    const room = await prisma.room.findUnique({
+      where: { id: roomId },
       include: {
         project: {
           select: {
@@ -130,12 +167,7 @@ export async function POST(request: NextRequest) {
     });
     if (!room) {
       return NextResponse.json(
-        {
-          success: false,
-          error: "Room not found",
-          message: "Room not found.",
-          code: API_ERROR_ROOM_NOT_FOUND,
-        },
+        { success: false, error: "Room not found", message: "Room not found.", code: API_ERROR_ROOM_NOT_FOUND },
         { status: 404 }
       );
     }

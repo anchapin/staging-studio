@@ -1,12 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import { POST } from "@/app/api/sign-project/route";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { getAuthedPrismaUser, ProjectForbiddenError, ProjectNotFoundError, requireProjectOwnershipOrThrow } from "@/lib/api-auth";
 import { verifyPreviewToken } from "@/lib/preview-token";
 import { prisma } from "@/lib/prisma";
 
 const MOCK_USER_ID = "cuser12345678901234567890";
-const MOCK_OTHER_USER_ID = "cuser22345678901234567890";
 const MOCK_PROJECT_ID = "cproj12345678901234567890";
 const MOCK_SIGNATURE = "data:image/png;base64,mock-signature-data";
 const MOCK_TOKEN = "valid-hmac-token";
@@ -21,6 +20,9 @@ function buildRequest(body: unknown): NextRequest {
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
+  requireProjectOwnershipOrThrow: vi.fn(async () => {}),
+  ProjectNotFoundError: class ProjectNotFoundError extends Error {},
+  ProjectForbiddenError: class ProjectForbiddenError extends Error {},
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -56,11 +58,7 @@ describe("POST /api/sign-project", () => {
 
   it("rejects authenticated user who does not own the project with 403", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser as never);
-    vi.mocked(prisma.project.findUnique).mockResolvedValue({
-      id: MOCK_PROJECT_ID,
-      userId: MOCK_OTHER_USER_ID,
-      clientSignatureStatus: "Pending",
-    } as never);
+    vi.mocked(requireProjectOwnershipOrThrow).mockRejectedValueOnce(new ProjectForbiddenError("not owner"));
     vi.mocked(verifyPreviewToken).mockResolvedValue({ valid: true, projectId: MOCK_PROJECT_ID });
 
     const req = buildRequest({ projectId: MOCK_PROJECT_ID, signatureDataUrl: MOCK_SIGNATURE, token: MOCK_TOKEN });
@@ -73,7 +71,7 @@ describe("POST /api/sign-project", () => {
 
   it("returns 404 when project does not exist", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser as never);
-    vi.mocked(prisma.project.findUnique).mockResolvedValue(null);
+    vi.mocked(requireProjectOwnershipOrThrow).mockRejectedValueOnce(new ProjectNotFoundError("missing"));
     vi.mocked(verifyPreviewToken).mockResolvedValue({ valid: true, projectId: MOCK_PROJECT_ID });
 
     const req = buildRequest({ projectId: MOCK_PROJECT_ID, signatureDataUrl: MOCK_SIGNATURE, token: MOCK_TOKEN });
