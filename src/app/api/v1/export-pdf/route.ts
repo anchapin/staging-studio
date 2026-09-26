@@ -7,9 +7,13 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import {
+  ProjectForbiddenError,
+  ProjectNotFoundError,
+  getAuthedPrismaUser,
+  requireProjectOwnershipOrThrow,
+} from "@/lib/api-auth";
 import { buildVersionHeaders } from "@/lib/api-version";
-import { prisma } from "@/lib/prisma";
 import {
   DEFAULT_DAILY_EXPORT_LIMIT,
   DAILY_LIMIT_ENV_VAR,
@@ -99,20 +103,31 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch project and verify ownership
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
-      select: { userId: true },
-    });
-    if (!project || project.userId !== user.id) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Project not found",
-          message: "Project does not exist",
-          code: API_ERROR_PROJECT_NOT_FOUND,
-        },
-        { status: 404, headers: versionInfo }
-      );
+    try {
+      await requireProjectOwnershipOrThrow(projectId, user);
+    } catch (e) {
+      if (e instanceof ProjectNotFoundError) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Project not found",
+            message: "Project does not exist",
+            code: API_ERROR_PROJECT_NOT_FOUND,
+          },
+          { status: 404, headers: versionInfo }
+        );
+      }
+      if (e instanceof ProjectForbiddenError) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Forbidden",
+            message: "You do not have permission to access this project.",
+          },
+          { status: 403, headers: versionInfo }
+        );
+      }
+      throw e;
     }
 
     // App URL: the cloud browser must be able to reach this deployment

@@ -1,7 +1,8 @@
 import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createServerClientSingleton } from "@/lib/supabase";
-import type { PrismaClient, Project } from "@prisma/client";
+import type { PrismaClient, Project, User } from "@prisma/client";
 
 /**
  * Resolves the current request's authenticated user as a Prisma `User`.
@@ -68,4 +69,67 @@ export async function requireProjectOwnershipSafe(
   });
   if (!project) return null;
   return { project };
+}
+
+export class ProjectNotFoundError extends Error {
+  constructor(public projectId: string) {
+    super(`Project not found: ${projectId}`);
+    this.name = "ProjectNotFoundError";
+  }
+}
+
+export class ProjectForbiddenError extends Error {
+  constructor(public projectId: string) {
+    super(`Forbidden: ${projectId}`);
+    this.name = "ProjectForbiddenError";
+  }
+}
+
+export async function requireProjectOwnershipNonThrowing(
+  projectId: string,
+  user: User,
+): Promise<
+  | { ok: true; projectId: string }
+  | { ok: false; reason: "not_found" | "forbidden"; response: NextResponse }
+> {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { userId: true },
+  });
+
+  if (!project) {
+    return {
+      ok: false,
+      reason: "not_found",
+      response: NextResponse.json(
+        { error: "Project not found", message: "Project does not exist" },
+        { status: 404 },
+      ),
+    };
+  }
+
+  if (project.userId !== user.id) {
+    return {
+      ok: false,
+      reason: "forbidden",
+      response: NextResponse.json(
+        { error: "Forbidden", message: "You do not have permission to access this project." },
+        { status: 403 },
+      ),
+    };
+  }
+
+  return { ok: true, projectId };
+}
+
+export async function requireProjectOwnershipOrThrow(
+  projectId: string,
+  user: User,
+): Promise<{ ok: true; projectId: string }> {
+  const result = await requireProjectOwnershipNonThrowing(projectId, user);
+  if (!result.ok) {
+    if (result.reason === "not_found") throw new ProjectNotFoundError(projectId);
+    throw new ProjectForbiddenError(projectId);
+  }
+  return result;
 }
