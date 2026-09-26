@@ -63,7 +63,7 @@ beforeEach(() => {
     BROWSERLESS_API_KEY: "test-browserless-key",
   };
   authedUser.mockResolvedValue({ id: USER_ID });
-  vi.mocked(requireProjectOwnershipThrow).mockResolvedValue({ id: PROJECT_ID, userId: USER_ID });
+  vi.mocked(requireProjectOwnershipThrow).mockResolvedValue({ id: PROJECT_ID, userId: USER_ID } as any);
   projectFindUnique.mockResolvedValue({ id: PROJECT_ID, userId: USER_ID });
   dailyApiUsageFindUnique.mockResolvedValue({ count: 0 });
   dailyApiUsageUpsert.mockResolvedValue({ count: 1 });
@@ -177,7 +177,7 @@ describe("POST /api/export-pdf — quota", () => {
 describe("POST /api/export-pdf — ownership", () => {
   it("returns 404 when project does not exist", async () => {
     vi.mocked(requireProjectOwnershipThrow).mockRejectedValue(
-      new ApiError({ code: API_ERROR_PROJECT_NOT_FOUND, message: "Project not found", status: 404 })
+      new ApiError({ code: API_ERROR_PROJECT_NOT_FOUND, message: "Project not found", status: 404 }) as any
     );
 
     const response = await callExportRoute(validBody());
@@ -188,7 +188,7 @@ describe("POST /api/export-pdf — ownership", () => {
 
   it("returns 404 when project belongs to a different user", async () => {
     vi.mocked(requireProjectOwnershipThrow).mockRejectedValue(
-      new ApiError({ code: API_ERROR_PROJECT_NOT_FOUND, message: "Project not found", status: 404 })
+      new ApiError({ code: API_ERROR_PROJECT_NOT_FOUND, message: "Project not found", status: 404 }) as any
     );
 
     const response = await callExportRoute(validBody());
