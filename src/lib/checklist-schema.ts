@@ -36,7 +36,7 @@ export type ChecklistItem = {
  * rows (alias normalization, drop-on-invalid).
  */
 export const checklistItemSchema = z.object({
-  item: z.string(),
+  item: z.string().min(1, "Item text is required").max(500, "Item text must be 500 characters or less"),
   category: z.enum(CHECKLIST_CATEGORIES),
   priority: z.enum(CHECKLIST_PRIORITIES),
 });
