@@ -40,6 +40,7 @@ describe("buildBrowserlessPdfBody", () => {
           left: "0",
         },
       },
+      timeout: 55000,
     });
   });
 
