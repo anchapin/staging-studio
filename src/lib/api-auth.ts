@@ -122,7 +122,7 @@ export async function requireProjectOwnershipNonThrowing(
   return { ok: true, projectId };
 }
 
-export async function requireProjectOwnershipOrThrow(
+export async function requireProjectOwnership(
   projectId: string,
   user: User,
 ): Promise<{ ok: true; projectId: string }> {

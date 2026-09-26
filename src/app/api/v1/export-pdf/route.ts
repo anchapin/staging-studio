@@ -11,7 +11,7 @@ import {
   ProjectForbiddenError,
   ProjectNotFoundError,
   getAuthedPrismaUser,
-  requireProjectOwnershipOrThrow,
+  requireProjectOwnership,
 } from "@/lib/api-auth";
 import { buildVersionHeaders } from "@/lib/api-version";
 import {
@@ -104,7 +104,7 @@ export async function GET(request: NextRequest) {
 
     // Fetch project and verify ownership
     try {
-      await requireProjectOwnershipOrThrow(projectId, user);
+      await requireProjectOwnership(projectId, user);
     } catch (e) {
       if (e instanceof ProjectNotFoundError) {
         return NextResponse.json(

@@ -9,7 +9,7 @@ vi.mock("@/lib/supabase", () => ({
 }));
 
 vi.mock("@/lib/prisma", () => ({
-  prisma: { user: { findUnique: vi.fn() } },
+  prisma: { user: { findUnique: vi.fn() }, project: { findUnique: vi.fn() } },
 }));
 
 import { cookies } from "next/headers";
@@ -109,5 +109,43 @@ describe("getAuthedPrismaUser", () => {
 
     const result = await getAuthedPrismaUser();
     expect(result).toMatchObject({ id: "user-1", email: "alex@example.com" });
+  });
+});
+
+const mockProjectFindUnique = vi.mocked(prisma.project.findUnique) as unknown as Mock<
+  () => Promise<unknown>
+>;
+
+describe("requireProjectOwnership", () => {
+  const mockUser = { id: "user-1", email: "alex@example.com", role: "authenticated" } as const;
+  const PROJECT_ID = "project-123";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("throws ProjectNotFoundError when project does not exist", async () => {
+    mockProjectFindUnique.mockResolvedValue(null);
+
+    const { requireProjectOwnership, ProjectNotFoundError } = await import("@/lib/api-auth");
+
+    await expect(requireProjectOwnership(PROJECT_ID, mockUser as any)).rejects.toThrow(ProjectNotFoundError);
+  });
+
+  it("throws ProjectForbiddenError when project exists but user does not own it", async () => {
+    mockProjectFindUnique.mockResolvedValue({ id: PROJECT_ID, userId: "other-user" });
+
+    const { requireProjectOwnership, ProjectForbiddenError } = await import("@/lib/api-auth");
+
+    await expect(requireProjectOwnership(PROJECT_ID, mockUser as any)).rejects.toThrow(ProjectForbiddenError);
+  });
+
+  it("returns {ok: true, projectId} when project exists and user owns it", async () => {
+    mockProjectFindUnique.mockResolvedValue({ id: PROJECT_ID, userId: mockUser.id });
+
+    const { requireProjectOwnership } = await import("@/lib/api-auth");
+
+    const result = await requireProjectOwnership(PROJECT_ID, mockUser as any);
+    expect(result).toEqual({ ok: true, projectId: PROJECT_ID });
   });
 });

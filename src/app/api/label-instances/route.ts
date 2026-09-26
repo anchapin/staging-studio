@@ -1,7 +1,12 @@
 import { generateObject } from "ai";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import {
+  getAuthedPrismaUser,
+  requireProjectOwnership,
+  ProjectNotFoundError,
+  ProjectForbiddenError,
+} from "@/lib/api-auth";
 import { aiModel, assertOpenAIConfigured, generateWithCircuitBreaker } from "@/lib/ai";
 import {
   visionLabelRequestSchema,
@@ -78,8 +83,8 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   const concept = sanitizePromptValue(rawConcept);
 
   const room = await prisma.room.findFirst({
-    where: { id: roomId, project: { userId: user.id } },
-    select: { id: true },
+    where: { id: roomId },
+    select: { id: true, projectId: true },
   });
   if (!room) {
     throw new ApiError({
@@ -87,6 +92,17 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
       message: "The requested room could not be found.",
       status: 404,
     });
+  }
+  try {
+    await requireProjectOwnership(room.projectId, user);
+  } catch (e) {
+    if (e instanceof ProjectNotFoundError) {
+      throw new ApiError({ code: API_ERROR_ROOM_NOT_FOUND, message: "Project not found.", status: 404 });
+    }
+    if (e instanceof ProjectForbiddenError) {
+      throw new ApiError({ code: "forbidden", message: "Forbidden.", status: 403 });
+    }
+    throw e;
   }
 
   assertOpenAIConfigured();

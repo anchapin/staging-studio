@@ -8,7 +8,7 @@ import {
   ProjectForbiddenError,
   ProjectNotFoundError,
   getAuthedPrismaUser,
-  requireProjectOwnershipOrThrow,
+  requireProjectOwnership,
 } from "@/lib/api-auth";
 import { buildDeprecationHeaders } from "@/lib/api-version";
 import { PREVIEW_TOKEN_QUERY_PARAM, signPreviewToken } from "@/lib/preview-token";
@@ -130,7 +130,7 @@ export async function POST(req: NextRequest) {
 
     // 3. Ownership check — before spending Browserless quota.
     try {
-      await requireProjectOwnershipOrThrow(projectId, user);
+      await requireProjectOwnership(projectId, user);
     } catch (e) {
       if (e instanceof ProjectNotFoundError) {
         return NextResponse.json(

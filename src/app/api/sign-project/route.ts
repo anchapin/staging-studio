@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import type { ZodError } from "zod";
 import { prisma } from "@/lib/prisma";
 import { createPreflightResponse, withCors } from "@/lib/cors";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import {
+  getAuthedPrismaUser,
+  requireProjectOwnership,
+  ProjectNotFoundError,
+  ProjectForbiddenError,
+} from "@/lib/api-auth";
 import { verifyPreviewToken } from "@/lib/preview-token";
 import { withRetry } from "@/lib/retry";
 import {
@@ -100,18 +105,30 @@ export async function POST(req: NextRequest) {
 
     const existing = await prisma.project.findUnique({
       where: { id: projectId },
-      select: { clientSignatureStatus: true, userId: true },
+      select: { id: true },
     });
     if (!existing) {
       return withCors(NextResponse.json(SIGN_ERROR_COPY.invalidProject, { status: 404 }));
     }
-    if (existing.userId !== user.id) {
-      return withCors(NextResponse.json(
-        { error: "Forbidden", message: "You do not have permission to sign this project." },
-        { status: 403 }
-      ));
+    try {
+      await requireProjectOwnership(projectId, user);
+    } catch (e) {
+      if (e instanceof ProjectNotFoundError) {
+        return withCors(NextResponse.json(SIGN_ERROR_COPY.invalidProject, { status: 404 }));
+      }
+      if (e instanceof ProjectForbiddenError) {
+        return withCors(NextResponse.json(
+          { error: "Forbidden", message: "You do not have permission to sign this project." },
+          { status: 403 }
+        ));
+      }
+      throw e;
     }
-    if (existing.clientSignatureStatus === "Signed") {
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { clientSignatureStatus: true, userId: true },
+    });
+    if (project!.clientSignatureStatus === "Signed") {
       return withCors(NextResponse.json(SIGN_ERROR_COPY.alreadySigned, { status: 409 }));
     }
 

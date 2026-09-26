@@ -11,7 +11,7 @@ const {
   buildBrowserlessPdfUrl,
   buildBrowserlessPdfBody,
   fetchBrowserlessPdfWithCircuitBreaker,
-  requireProjectOwnershipOrThrow,
+  requireProjectOwnership,
   ProjectNotFoundError,
   ProjectForbiddenError,
 } = vi.hoisted(() => {
@@ -41,7 +41,7 @@ const {
       },
     })),
     fetchBrowserlessPdfWithCircuitBreaker: vi.fn(),
-    requireProjectOwnershipOrThrow: vi.fn(),
+    requireProjectOwnership: vi.fn(),
     ProjectNotFoundError: MockProjectNotFoundError,
     ProjectForbiddenError: MockProjectForbiddenError,
   };
@@ -49,7 +49,7 @@ const {
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
-  requireProjectOwnershipOrThrow,
+  requireProjectOwnership,
   ProjectNotFoundError,
   ProjectForbiddenError,
 }));
@@ -88,7 +88,7 @@ beforeEach(() => {
     };
     authedUser.mockResolvedValue({ id: USER_ID });
     projectFindUnique.mockResolvedValue({ id: PROJECT_ID, userId: USER_ID });
-    requireProjectOwnershipOrThrow.mockResolvedValue({ ok: true, projectId: PROJECT_ID });
+    requireProjectOwnership.mockResolvedValue({ ok: true, projectId: PROJECT_ID });
     dailyApiUsageFindUnique.mockResolvedValue({ count: 0 });
   dailyApiUsageUpsert.mockResolvedValue({ count: 1 });
   // Reset hoisted mock and delegate to global.fetch so per-test overrides work
@@ -200,7 +200,7 @@ describe("POST /api/export-pdf — quota", () => {
 
 describe("POST /api/export-pdf — ownership", () => {
   it("returns 404 when project does not exist", async () => {
-    requireProjectOwnershipOrThrow.mockRejectedValue(new ProjectNotFoundError(PROJECT_ID));
+    requireProjectOwnership.mockRejectedValue(new ProjectNotFoundError(PROJECT_ID));
 
     const response = await callExportRoute(validBody());
     expect(response.status).toBe(404);
@@ -209,7 +209,7 @@ describe("POST /api/export-pdf — ownership", () => {
   });
 
   it("returns 403 when project belongs to a different user", async () => {
-    requireProjectOwnershipOrThrow.mockRejectedValue(new ProjectForbiddenError(PROJECT_ID));
+    requireProjectOwnership.mockRejectedValue(new ProjectForbiddenError(PROJECT_ID));
 
     const response = await callExportRoute(validBody());
     expect(response.status).toBe(403);
