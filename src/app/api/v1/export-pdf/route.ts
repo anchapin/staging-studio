@@ -213,7 +213,6 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("Export PDF error:", error);
     if (error instanceof ApiError) {
-      await recordUsage(projectId, user.id, false);
       if (error.code === API_ERROR_PROJECT_NOT_FOUND) {
         return NextResponse.json(
           {

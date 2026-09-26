@@ -23,9 +23,13 @@ const { buildBrowserlessPdfUrl, buildBrowserlessPdfBody, fetchBrowserlessPdfWith
   };
 });
 
+const { requireProjectOwnership } = vi.hoisted(() => ({
+  requireProjectOwnership: vi.fn(),
+}));
+
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
-  requireProjectOwnership: vi.fn(),
+  requireProjectOwnership,
 }));
 
 vi.mock("@/lib/prisma", () => ({
