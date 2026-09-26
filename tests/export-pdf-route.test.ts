@@ -27,9 +27,28 @@ function buildRequest(body: unknown): NextRequest {
 // state from the full suite run (avoids fetchBrowserlessPdfWithCircuitBreaker
 // pollution from api/export-pdf-route.test.ts)
 const mockFetchBrowserless = vi.hoisted(() => vi.fn());
+const mockRequireProjectOwnershipOrThrow = vi.hoisted(() => vi.fn());
+const { MockProjectNotFoundError, MockProjectForbiddenError } = vi.hoisted(() => {
+  class MockProjectNotFoundError extends Error {
+    constructor(public projectId: string) {
+      super(`Project not found: ${projectId}`);
+      this.name = "ProjectNotFoundError";
+    }
+  }
+  class MockProjectForbiddenError extends Error {
+    constructor(public projectId: string) {
+      super(`Forbidden: ${projectId}`);
+      this.name = "ProjectForbiddenError";
+    }
+  }
+  return { MockProjectNotFoundError, MockProjectForbiddenError };
+});
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
+  requireProjectOwnershipOrThrow: mockRequireProjectOwnershipOrThrow,
+  ProjectNotFoundError: MockProjectNotFoundError,
+  ProjectForbiddenError: MockProjectForbiddenError,
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -166,7 +185,7 @@ describe("POST /api/export-pdf", () => {
   });
 
   it("returns 404 when project not found", async () => {
-    vi.mocked(prisma.project.findUnique).mockResolvedValue(null);
+    mockRequireProjectOwnershipOrThrow.mockRejectedValue(new MockProjectNotFoundError(MOCK_PROJECT_ID));
 
     const req = buildRequest({ projectId: MOCK_PROJECT_ID });
     const res = await POST(req);
@@ -176,33 +195,15 @@ describe("POST /api/export-pdf", () => {
     expect(json.error).toBe("Project not found");
   });
 
-  it("returns 404 when user does not own project", async () => {
-    vi.mocked(prisma.project.findUnique).mockResolvedValue({
-      id: MOCK_PROJECT_ID,
-      userId: "different-user-id",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      propertyAddress: "123 Test St",
-      clientName: "Test Client",
-      targetBuyer: "Family",
-      stagingAesthetic: "Modern",
-      roiSalesPricePremium: null,
-      roiTransactionVelocity: null,
-      roiInvestmentTier: null,
-      stagingDirectives: null,
-      buyerDemographics: null,
-      stagingPackage: null,
-      clientSignature: null,
-      clientSignatureStatus: null,
-      clientSignatureTimestamp: null,
-    } as never);
+  it("returns 403 when user does not own project", async () => {
+    mockRequireProjectOwnershipOrThrow.mockRejectedValue(new MockProjectForbiddenError(MOCK_PROJECT_ID));
 
     const req = buildRequest({ projectId: MOCK_PROJECT_ID });
     const res = await POST(req);
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
     const json = await res.json();
-    expect(json.error).toBe("Project not found");
+    expect(json.error).toBe("Forbidden");
   });
 
   it("returns 500 when BROWSERLESS_API_KEY is missing", async () => {
