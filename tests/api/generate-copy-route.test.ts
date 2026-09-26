@@ -30,12 +30,16 @@ function buildRequest(body: unknown): NextRequest {
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
+  requireProjectOwnershipOrThrow: vi.fn(async () => {}),
+  ProjectNotFoundError: class ProjectNotFoundError extends Error {},
+  ProjectForbiddenError: class ProjectForbiddenError extends Error {},
 }));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     room: {
       findFirst: vi.fn(),
+      findUnique: vi.fn(),
     },
     dailyApiUsage: {
       findUnique: vi.fn(),
@@ -87,6 +91,10 @@ describe("POST /api/generate-copy", () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
     vi.mocked(prisma.room.findFirst).mockResolvedValue({
       id: MOCK_ROOM_ID,
+      projectId: MOCK_PROJECT_ID,
+    } as any);
+    vi.mocked(prisma.room.findUnique).mockResolvedValue({
+      id: MOCK_ROOM_ID,
       name: "Living Room",
       projectId: MOCK_PROJECT_ID,
       beforeImageUrl: null,
@@ -101,7 +109,27 @@ describe("POST /api/generate-copy", () => {
       checklistItems: null,
       sortOrder: 0,
       createdAt: new Date(),
-    });
+      updatedAt: new Date(),
+      project: {
+        id: MOCK_PROJECT_ID,
+        name: "Test Project",
+        stagingAesthetic: null,
+        targetBuyer: null,
+        stagingDirectives: null,
+        buyerDemographics: null,
+        userId: MOCK_USER_ID,
+        clientName: null,
+        stagingPackage: null,
+        roiSalesPricePremium: null,
+        roiTransactionVelocity: null,
+        roiInvestmentTier: null,
+        clientSignature: null,
+        clientSignatureStatus: "Pending",
+        clientSignatureTimestamp: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    } as any);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -149,7 +177,11 @@ describe("POST /api/generate-copy", () => {
   });
 
   it("returns 400 when room has no directives", async () => {
-    vi.mocked(prisma.room.findFirst).mockResolvedValue({
+    const mockRoomForFindFirst: any = {
+      id: MOCK_ROOM_ID,
+      projectId: MOCK_PROJECT_ID,
+    };
+    const mockRoomForFindUnique: any = {
       id: MOCK_ROOM_ID,
       name: "Living Room",
       projectId: MOCK_PROJECT_ID,
@@ -168,11 +200,12 @@ describe("POST /api/generate-copy", () => {
       project: {
         id: MOCK_PROJECT_ID,
         name: "Test Project",
+        stagingAesthetic: null,
+        targetBuyer: null,
         stagingDirectives: null,
+        buyerDemographics: null,
         userId: MOCK_USER_ID,
         clientName: null,
-        buyerDemographics: null,
-        stagingAesthetic: null,
         stagingPackage: null,
         roiSalesPricePremium: null,
         roiTransactionVelocity: null,
@@ -183,7 +216,9 @@ describe("POST /api/generate-copy", () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       },
-    } as Awaited<ReturnType<typeof prisma.room.findFirst>>);
+    };
+    vi.mocked(prisma.room.findFirst).mockResolvedValue(mockRoomForFindFirst as any);
+    vi.mocked(prisma.room.findUnique).mockResolvedValue(mockRoomForFindUnique as any);
 
     const response = await POST(buildRequest({ roomId: MOCK_ROOM_ID }));
     const json = await response.json();
