@@ -9,13 +9,16 @@ vi.mock("@/lib/supabase", () => ({
 }));
 
 vi.mock("@/lib/prisma", () => ({
-  prisma: { user: { findUnique: vi.fn() } },
+  prisma: {
+    user: { findUnique: vi.fn() },
+    project: { findUnique: vi.fn() },
+  },
 }));
 
 import { cookies } from "next/headers";
 import { createServerClientSingleton } from "@/lib/supabase";
 import { prisma } from "@/lib/prisma";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { getAuthedPrismaUser, requireProjectOwnershipThrow, ApiError } from "@/lib/api-auth";
 
 const mockCookies = vi.mocked(cookies);
 const mockCreateServerClient = vi.mocked(createServerClientSingleton);
@@ -109,5 +112,46 @@ describe("getAuthedPrismaUser", () => {
 
     const result = await getAuthedPrismaUser();
     expect(result).toMatchObject({ id: "user-1", email: "alex@example.com" });
+  });
+});
+
+describe("requireProjectOwnershipThrow", () => {
+  const mockProjectFindUnique = vi.mocked(prisma.project.findUnique) as unknown as Mock<
+    () => Promise<unknown>
+  >;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("returns project when user owns it", async () => {
+    const mockProject = { id: "project-1", userId: "user-1", propertyAddress: "123 Main St" };
+    mockProjectFindUnique.mockResolvedValue(mockProject);
+
+    const result = await requireProjectOwnershipThrow("project-1", "user-1");
+    expect(result).toEqual(mockProject);
+    expect(mockProjectFindUnique).toHaveBeenCalledWith({
+      where: { id: "project-1", userId: "user-1" },
+    });
+  });
+
+  it("throws ApiError with 404 when project not found", async () => {
+    mockProjectFindUnique.mockResolvedValue(null);
+
+    await expect(requireProjectOwnershipThrow("project-1", "user-1")).rejects.toThrow(ApiError);
+    await expect(requireProjectOwnershipThrow("project-1", "user-1")).rejects.toMatchObject({
+      statusCode: 404,
+      message: "Project not found",
+    });
+  });
+
+  it("throws ApiError with 404 when user does not own project", async () => {
+    mockProjectFindUnique.mockResolvedValue(null);
+
+    await expect(requireProjectOwnershipThrow("project-1", "other-user")).rejects.toThrow(ApiError);
+    await expect(requireProjectOwnershipThrow("project-1", "other-user")).rejects.toMatchObject({
+      statusCode: 404,
+      message: "Project not found",
+    });
   });
 });

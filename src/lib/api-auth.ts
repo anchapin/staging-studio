@@ -3,6 +3,17 @@ import { prisma } from "@/lib/prisma";
 import { createServerClientSingleton } from "@/lib/supabase";
 import type { PrismaClient, Project } from "@prisma/client";
 
+export class ApiError extends Error {
+  constructor(
+    public statusCode: number,
+    message: string,
+    public code?: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 /**
  * Resolves the current request's authenticated user as a Prisma `User`.
  *
@@ -68,4 +79,21 @@ export async function requireProjectOwnershipSafe(
   });
   if (!project) return null;
   return { project };
+}
+
+/**
+ * Loads a project and verifies ownership.
+ * Throws ApiError with 404 when project not found OR user does not own it (fail-closed).
+ */
+export async function requireProjectOwnershipThrow(
+  projectId: string,
+  userId: string,
+): Promise<Project> {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId, userId },
+  });
+  if (!project) {
+    throw new ApiError(404, "Project not found");
+  }
+  return project;
 }
