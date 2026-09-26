@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { getAuthedPrismaUser, requireProjectOwnershipOrThrow } from "@/lib/api-auth";
 import { API_ERROR_PROJECT_NOT_FOUND, API_ERROR_UNAUTHORIZED } from "@/lib/api-errors";
 import { withErrorHandler, ApiError } from "@/lib/api-error-handler";
 
@@ -18,8 +18,29 @@ export const GET = withErrorHandler(async (
   }
 
   const { id } = await params;
+
+  try {
+    await requireProjectOwnershipOrThrow(id, userRow);
+  } catch (e) {
+    if (e instanceof Error && e.name === "ProjectNotFoundError") {
+      throw new ApiError({
+        code: API_ERROR_PROJECT_NOT_FOUND,
+        message: "The requested project could not be found.",
+        status: 404,
+      });
+    }
+    if (e instanceof Error && e.name === "ProjectForbiddenError") {
+      throw new ApiError({
+        code: "forbidden",
+        message: "You do not have access to this project.",
+        status: 403,
+      });
+    }
+    throw e;
+  }
+
   const project = await prisma.project.findUnique({
-    where: { id, userId: userRow.id },
+    where: { id },
     select: {
       id: true,
       propertyAddress: true,
