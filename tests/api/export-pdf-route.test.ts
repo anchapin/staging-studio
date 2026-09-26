@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 
 import { POST } from "@/app/api/export-pdf/route";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
@@ -23,8 +24,11 @@ const { buildBrowserlessPdfUrl, buildBrowserlessPdfBody, fetchBrowserlessPdfWith
   };
 });
 
+const mockRequireProjectOwnership = vi.hoisted(() => vi.fn());
+
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
+  requireProjectOwnership: mockRequireProjectOwnership,
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -60,6 +64,7 @@ beforeEach(() => {
     BROWSERLESS_API_KEY: "test-browserless-key",
   };
   authedUser.mockResolvedValue({ id: USER_ID });
+  mockRequireProjectOwnership.mockResolvedValue({ ok: true, projectId: PROJECT_ID });
   projectFindUnique.mockResolvedValue({ id: PROJECT_ID, userId: USER_ID });
   dailyApiUsageFindUnique.mockResolvedValue({ count: 0 });
   dailyApiUsageUpsert.mockResolvedValue({ count: 1 });
@@ -85,6 +90,7 @@ async function callExportRoute(body: unknown): Promise<Response> {
 beforeEach(() => {
   vi.resetAllMocks();
   authedUser.mockResolvedValue({ id: USER_ID });
+  mockRequireProjectOwnership.mockResolvedValue({ ok: true, projectId: PROJECT_ID });
   projectFindUnique.mockResolvedValue({ id: PROJECT_ID, userId: USER_ID });
   dailyApiUsageFindUnique.mockResolvedValue({ count: 0 });
   dailyApiUsageUpsert.mockResolvedValue({ count: 1 });
@@ -172,7 +178,11 @@ describe("POST /api/export-pdf — quota", () => {
 
 describe("POST /api/export-pdf — ownership", () => {
   it("returns 404 when project does not exist", async () => {
-    projectFindUnique.mockResolvedValue(null);
+    mockRequireProjectOwnership.mockResolvedValue({
+      ok: false,
+      reason: "not_found",
+      response: NextResponse.json({ error: "Project not found" }, { status: 404 }),
+    });
 
     const response = await callExportRoute(validBody());
     expect(response.status).toBe(404);
@@ -180,13 +190,17 @@ describe("POST /api/export-pdf — ownership", () => {
     expect(body.error).toBe("Project not found");
   });
 
-  it("returns 404 when project belongs to a different user", async () => {
-    projectFindUnique.mockResolvedValue({ id: PROJECT_ID, userId: "other-user" });
+  it("returns 403 when project belongs to a different user", async () => {
+    mockRequireProjectOwnership.mockResolvedValue({
+      ok: false,
+      reason: "forbidden",
+      response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
+    });
 
     const response = await callExportRoute(validBody());
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(403);
     const body = await response.json();
-    expect(body.error).toBe("Project not found");
+    expect(body.error).toBe("Forbidden");
   });
 });
 

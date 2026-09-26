@@ -16,6 +16,7 @@ const MOCK_PROJECT_ID = "cproj12345678901234567890";
 const MOCK_API_KEY = "test-browserless-key";
 
 const mockUser = { id: MOCK_USER_ID, email: "test@example.com", name: "Test User" };
+const mockRequireProjectOwnership = vi.hoisted(() => vi.fn());
 
 function buildRequest(body: unknown): NextRequest {
   return {
@@ -30,6 +31,7 @@ const mockFetchBrowserless = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
+  requireProjectOwnership: mockRequireProjectOwnership,
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -79,6 +81,7 @@ describe("POST /api/export-pdf", () => {
       (url: string, opts?: RequestInit) => global.fetch(url, opts) as Promise<Response>,
     );
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser as never);
+    mockRequireProjectOwnership.mockResolvedValue({ ok: true, projectId: MOCK_PROJECT_ID });
     vi.mocked(getDailyUsage).mockResolvedValue(0);
     vi.mocked(evaluateDailyQuota).mockReturnValue({
       allowed: true,

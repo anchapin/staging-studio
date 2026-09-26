@@ -1,7 +1,8 @@
 import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createServerClientSingleton } from "@/lib/supabase";
-import type { PrismaClient, Project } from "@prisma/client";
+import type { PrismaClient, Project, User } from "@prisma/client";
 
 /**
  * Resolves the current request's authenticated user as a Prisma `User`.
@@ -52,6 +53,55 @@ export async function getAuthedPrismaUser() {
   return prisma.user.findUnique({
     where: { email: user.email },
   });
+}
+
+/**
+ * Verifies the authenticated user owns the given project.
+ * Returns `{ ok: true, projectId }` on success.
+ * Returns `{ ok: false, reason, response }` with a JSON error response on failure.
+ * The caller should `return response` on failure without further processing.
+ *
+ * @param wrapResponse - Optional wrapper applied to the error response. For example,
+ *   pass `(r) => withCors(r)` when the current code uses `withCors(NextResponse.json(...))`.
+ */
+export async function requireProjectOwnership(
+  projectId: string,
+  user: User,
+  wrapResponse?: (r: NextResponse) => NextResponse,
+): Promise<
+  | { ok: true; projectId: string }
+  | { ok: false; reason: "not_found" | "forbidden"; response: NextResponse }
+> {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { userId: true },
+  });
+
+  if (!project) {
+    const response = NextResponse.json(
+      { error: "Project not found", message: "Project does not exist" },
+      { status: 404 },
+    );
+    return {
+      ok: false,
+      reason: "not_found",
+      response: wrapResponse ? wrapResponse(response) : response,
+    };
+  }
+
+  if (project.userId !== user.id) {
+    const response = NextResponse.json(
+      { error: "Forbidden", message: "You do not have permission to access this project." },
+      { status: 403 },
+    );
+    return {
+      ok: false,
+      reason: "forbidden",
+      response: wrapResponse ? wrapResponse(response) : response,
+    };
+  }
+
+  return { ok: true, projectId };
 }
 
 /**

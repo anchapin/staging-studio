@@ -7,9 +7,8 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { getAuthedPrismaUser, requireProjectOwnership } from "@/lib/api-auth";
 import { buildVersionHeaders } from "@/lib/api-version";
-import { prisma } from "@/lib/prisma";
 import {
   DEFAULT_DAILY_EXPORT_LIMIT,
   DAILY_LIMIT_ENV_VAR,
@@ -29,7 +28,6 @@ import {
   API_ERROR_UNAUTHORIZED,
   API_ERROR_RATE_LIMIT_EXCEEDED,
   API_ERROR_INVALID_REQUEST,
-  API_ERROR_PROJECT_NOT_FOUND,
 } from "@/lib/api-errors";
 import { signPreviewToken } from "@/lib/preview-token";
 
@@ -98,22 +96,9 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Fetch project and verify ownership
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
-      select: { userId: true },
-    });
-    if (!project || project.userId !== user.id) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Project not found",
-          message: "Project does not exist",
-          code: API_ERROR_PROJECT_NOT_FOUND,
-        },
-        { status: 404, headers: versionInfo }
-      );
-    }
+    // Ownership check — before spending Browserless quota.
+    const ownership = await requireProjectOwnership(projectId, user);
+    if (!ownership.ok) return ownership.response;
 
     // App URL: the cloud browser must be able to reach this deployment
     let appUrl = process.env.NEXT_PUBLIC_APP_URL;
