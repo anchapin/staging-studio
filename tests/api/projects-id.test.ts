@@ -10,7 +10,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import { GET } from "@/app/api/projects/[id]/route";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { getAuthedPrismaUser, requireProjectOwnershipThrow } from "@/lib/api-auth";
+import { ApiError } from "@/lib/api-error-handler";
+import { API_ERROR_PROJECT_NOT_FOUND } from "@/lib/api-errors";
 import { prisma } from "@/lib/prisma";
 
 // ---------------------------------------------------------------------------
@@ -65,6 +67,7 @@ const mockProject = {
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
+  requireProjectOwnershipThrow: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -105,7 +108,9 @@ describe("GET /api/projects/[id]", () => {
 
   it("returns 404 when the project does not exist", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.findUnique).mockResolvedValue(null);
+    vi.mocked(requireProjectOwnershipThrow).mockRejectedValue(
+      new ApiError({ code: API_ERROR_PROJECT_NOT_FOUND, message: "Project not found", status: 404 })
+    );
 
     const res = await GET(
       new Request("http://localhost/api/projects/" + MOCK_PROJECT_ID) as unknown as NextRequest,
@@ -119,7 +124,9 @@ describe("GET /api/projects/[id]", () => {
 
   it("returns 404 when the project exists but user does not own it", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.findUnique).mockResolvedValue(null);
+    vi.mocked(requireProjectOwnershipThrow).mockRejectedValue(
+      new ApiError({ code: API_ERROR_PROJECT_NOT_FOUND, message: "Project not found", status: 404 })
+    );
 
     const res = await GET(
       new Request("http://localhost/api/projects/some-other-project-id") as unknown as NextRequest,
@@ -137,6 +144,7 @@ describe("GET /api/projects/[id]", () => {
 
   it("returns 200 with the correct response shape when authorized", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
+    vi.mocked(requireProjectOwnershipThrow).mockResolvedValue(mockProject);
     vi.mocked(prisma.project.findUnique).mockResolvedValue(mockProject);
 
     const res = await GET(

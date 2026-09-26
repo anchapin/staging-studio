@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type { NextRequest } from "next/server";
 
 import { POST } from "@/app/api/export-pdf/route";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { getAuthedPrismaUser, requireProjectOwnershipThrow } from "@/lib/api-auth";
+import { ApiError } from "@/lib/api-error-handler";
+import { API_ERROR_PROJECT_NOT_FOUND } from "@/lib/api-errors";
 import { prisma } from "@/lib/prisma";
 
 // Use vi.hoisted so the mock is fresh for each test run and doesn't retain
@@ -25,6 +27,7 @@ const { buildBrowserlessPdfUrl, buildBrowserlessPdfBody, fetchBrowserlessPdfWith
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
+  requireProjectOwnershipThrow: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -53,13 +56,14 @@ const PROJECT_ID = "c1234567890abcdef12345678";
 const ORIGINAL_ENV = { ...process.env };
 
 beforeEach(() => {
-  vi.restoreAllMocks();
+  vi.resetAllMocks();
   process.env = {
     ...ORIGINAL_ENV,
     NEXT_PUBLIC_APP_URL: "http://localhost",
     BROWSERLESS_API_KEY: "test-browserless-key",
   };
   authedUser.mockResolvedValue({ id: USER_ID });
+  requireProjectOwnershipThrow.mockResolvedValue({ id: PROJECT_ID, userId: USER_ID });
   projectFindUnique.mockResolvedValue({ id: PROJECT_ID, userId: USER_ID });
   dailyApiUsageFindUnique.mockResolvedValue({ count: 0 });
   dailyApiUsageUpsert.mockResolvedValue({ count: 1 });
@@ -172,7 +176,9 @@ describe("POST /api/export-pdf — quota", () => {
 
 describe("POST /api/export-pdf — ownership", () => {
   it("returns 404 when project does not exist", async () => {
-    projectFindUnique.mockResolvedValue(null);
+    requireProjectOwnershipThrow.mockRejectedValue(
+      new ApiError({ code: API_ERROR_PROJECT_NOT_FOUND, message: "Project not found", status: 404 })
+    );
 
     const response = await callExportRoute(validBody());
     expect(response.status).toBe(404);
@@ -181,7 +187,9 @@ describe("POST /api/export-pdf — ownership", () => {
   });
 
   it("returns 404 when project belongs to a different user", async () => {
-    projectFindUnique.mockResolvedValue({ id: PROJECT_ID, userId: "other-user" });
+    requireProjectOwnershipThrow.mockRejectedValue(
+      new ApiError({ code: API_ERROR_PROJECT_NOT_FOUND, message: "Project not found", status: 404 })
+    );
 
     const response = await callExportRoute(validBody());
     expect(response.status).toBe(404);
