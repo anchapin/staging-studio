@@ -30,6 +30,7 @@ import {
   API_ERROR_PDF_GENERATION_FAILED,
   API_ERROR_EXPORT_FAILED,
   API_ERROR_INVALID_REQUEST,
+  API_ERROR_PROJECT_NOT_FOUND,
 } from "@/lib/api-errors";
 
 const EXPORT_PDF_ERROR_COPY = {
@@ -47,6 +48,11 @@ const EXPORT_PDF_ERROR_COPY = {
     error: "Network error",
     message: "Unable to reach the PDF export service. Please check your connection and try again.",
     code: API_ERROR_EXPORT_FAILED,
+  },
+  notFound: {
+    error: "Project not found",
+    message: "The requested project could not be found.",
+    code: API_ERROR_PROJECT_NOT_FOUND,
   },
   unknown: {
     error: "PDF export failed",

@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import { POST } from "@/app/api/export-pdf/route";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { getAuthedPrismaUser, requireProjectOwnershipThrow } from "@/lib/api-auth";
+import { ApiError } from "@/lib/api-error-handler";
 import { prisma } from "@/lib/prisma";
 import { signPreviewToken } from "@/lib/preview-token";
 import {
@@ -27,9 +28,16 @@ function buildRequest(body: unknown): NextRequest {
 // state from the full suite run (avoids fetchBrowserlessPdfWithCircuitBreaker
 // pollution from api/export-pdf-route.test.ts)
 const mockFetchBrowserless = vi.hoisted(() => vi.fn());
+const mockRequireProjectOwnershipThrow = vi.hoisted(
+  () => vi.fn<typeof requireProjectOwnershipThrow>(),
+);
+const mockAuthedPrismaUser = vi.hoisted(
+  () => vi.fn<typeof getAuthedPrismaUser>(),
+);
 
 vi.mock("@/lib/api-auth", () => ({
-  getAuthedPrismaUser: vi.fn(),
+  getAuthedPrismaUser: mockAuthedPrismaUser,
+  requireProjectOwnershipThrow: mockRequireProjectOwnershipThrow,
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -79,6 +87,10 @@ describe("POST /api/export-pdf", () => {
       (url: string, opts?: RequestInit) => global.fetch(url, opts) as Promise<Response>,
     );
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser as never);
+    vi.mocked(mockRequireProjectOwnershipThrow).mockResolvedValue({
+      id: MOCK_PROJECT_ID,
+      userId: MOCK_USER_ID,
+    } as never);
     vi.mocked(getDailyUsage).mockResolvedValue(0);
     vi.mocked(evaluateDailyQuota).mockReturnValue({
       allowed: true,
@@ -166,7 +178,9 @@ describe("POST /api/export-pdf", () => {
   });
 
   it("returns 404 when project not found", async () => {
-    vi.mocked(prisma.project.findUnique).mockResolvedValue(null);
+    vi.mocked(mockRequireProjectOwnershipThrow).mockRejectedValue(
+      new ApiError({ code: "PROJECT_NOT_FOUND", message: "Project not found", status: 404 }),
+    );
 
     const req = buildRequest({ projectId: MOCK_PROJECT_ID });
     const res = await POST(req);
@@ -177,25 +191,9 @@ describe("POST /api/export-pdf", () => {
   });
 
   it("returns 404 when user does not own project", async () => {
-    vi.mocked(prisma.project.findUnique).mockResolvedValue({
-      id: MOCK_PROJECT_ID,
-      userId: "different-user-id",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      propertyAddress: "123 Test St",
-      clientName: "Test Client",
-      targetBuyer: "Family",
-      stagingAesthetic: "Modern",
-      roiSalesPricePremium: null,
-      roiTransactionVelocity: null,
-      roiInvestmentTier: null,
-      stagingDirectives: null,
-      buyerDemographics: null,
-      stagingPackage: null,
-      clientSignature: null,
-      clientSignatureStatus: null,
-      clientSignatureTimestamp: null,
-    } as never);
+    vi.mocked(mockRequireProjectOwnershipThrow).mockRejectedValue(
+      new ApiError({ code: "PROJECT_NOT_FOUND", message: "Project not found", status: 404 }),
+    );
 
     const req = buildRequest({ projectId: MOCK_PROJECT_ID });
     const res = await POST(req);
