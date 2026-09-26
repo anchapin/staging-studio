@@ -24,7 +24,20 @@ const { buildBrowserlessPdfUrl, buildBrowserlessPdfBody, fetchBrowserlessPdfWith
 });
 
 const { requireProjectOwnership } = vi.hoisted(() => ({
-  requireProjectOwnership: vi.fn(),
+  requireProjectOwnership: vi.fn(async (projectId: string) => {
+    const user = await getAuthedPrismaUser();
+    if (!user) {
+      throw new Error("Unauthorized");
+    }
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { userId: true },
+    });
+    if (!project || project.userId !== user.id) {
+      throw Object.assign(new Error("Forbidden"), { code: "API_ERROR_PROJECT_NOT_FOUND", status: 403 });
+    }
+    return user;
+  }),
 }));
 
 vi.mock("@/lib/api-auth", () => ({

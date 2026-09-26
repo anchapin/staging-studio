@@ -87,7 +87,7 @@ export async function requireProjectOwnership(projectId: string): Promise<void> 
     select: { userId: true },
   });
   if (!project || project.userId !== user.id) {
-    throw new ApiError({ code: API_ERROR_PROJECT_NOT_FOUND, message: "Forbidden", status: 404 });
+    throw new ApiError({ code: API_ERROR_PROJECT_NOT_FOUND, message: "Forbidden", status: 403 });
   }
 }
 

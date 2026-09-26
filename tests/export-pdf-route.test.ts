@@ -27,9 +27,26 @@ function buildRequest(body: unknown): NextRequest {
 // state from the full suite run (avoids fetchBrowserlessPdfWithCircuitBreaker
 // pollution from api/export-pdf-route.test.ts)
 const mockFetchBrowserless = vi.hoisted(() => vi.fn());
+const { requireProjectOwnership } = vi.hoisted(() => ({
+  requireProjectOwnership: vi.fn(async (projectId: string) => {
+    const user = await getAuthedPrismaUser();
+    if (!user) {
+      throw new Error("Unauthorized");
+    }
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { userId: true },
+    });
+    if (!project || project.userId !== user.id) {
+      throw Object.assign(new Error("Forbidden"), { code: "API_ERROR_PROJECT_NOT_FOUND", status: 403 });
+    }
+    return user;
+  }),
+}));
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
+  requireProjectOwnership,
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -72,6 +89,22 @@ vi.mock("@/lib/api-quota", () => ({
 describe("POST /api/export-pdf", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    // Set up requireProjectOwnership AFTER reset - it delegates to real getAuthedPrismaUser
+    // and prisma so that project ownership checks use the per-test mocks.
+    vi.mocked(requireProjectOwnership).mockImplementation(async (projectId: string) => {
+      const user = await getAuthedPrismaUser();
+      if (!user) {
+        throw new Error("Unauthorized");
+      }
+      const project = await prisma.project.findUnique({
+        where: { id: projectId },
+        select: { userId: true },
+      });
+      if (!project || project.userId !== user.id) {
+        throw Object.assign(new Error("Forbidden"), { code: "API_ERROR_PROJECT_NOT_FOUND", status: 403 });
+      }
+      return user;
+    });
     // Reset the hoisted mock and give it a default implementation that delegates to
     // global.fetch (so per-test global.fetch assignments work). Tests that need a
     // different fetch behaviour override mockFetchBrowserless.mockResolvedValue themselves.
@@ -165,18 +198,18 @@ describe("POST /api/export-pdf", () => {
     expect(json.error).toBe("Invalid projectId");
   });
 
-  it("returns 403 when project not found", async () => {
+  it("returns 404 when project not found", async () => {
     vi.mocked(prisma.project.findUnique).mockResolvedValue(null);
 
     const req = buildRequest({ projectId: MOCK_PROJECT_ID });
     const res = await POST(req);
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
     const json = await res.json();
     expect(json.error).toBe("Forbidden");
   });
 
-  it("returns 403 when user does not own project", async () => {
+  it("returns 404 when user does not own project", async () => {
     vi.mocked(prisma.project.findUnique).mockResolvedValue({
       id: MOCK_PROJECT_ID,
       userId: "different-user-id",
@@ -200,7 +233,7 @@ describe("POST /api/export-pdf", () => {
     const req = buildRequest({ projectId: MOCK_PROJECT_ID });
     const res = await POST(req);
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
     const json = await res.json();
     expect(json.error).toBe("Forbidden");
   });
