@@ -206,55 +206,7 @@ export function useMaskBuffer({
   }, [canvasRef]);
 
   // Issue #378: restore a previously captured undo state back onto the canvas.
-  const restoreUndoState = useCallback((dataUrl: string) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return false;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return false;
-    const img = new Image();
-    img.onload = () => {
-      ctx.fillStyle = "black";
-      ctx.fillRect(0, 0, dims.width, dims.height);
-      ctx.drawImage(img, 0, 0, dims.width, dims.height);
-    };
-    img.src = dataUrl;
-    return true;
-  }, [dims.width, dims.height, canvasRef]);
-
-  // Issue #378: pop the most recent undo state and restore it. Called both
-  // from the explicit Undo button and from the Cmd/Ctrl+Z keyboard shortcut.
-  const handleUndo = useCallback(() => {
-    const { history, snapshot: previousState } = undoMaskSnapshot(undoHistory);
-    if (previousState === null) return;
-    if (restoreUndoState(previousState)) {
-      setUndoHistory(history);
-      // After restore, re-export to notify parent and update coverage warning
-      // Use a microtask to ensure canvas is painted before exporting
-      queueMicrotask(() => {
-        const currentDataUrl = canvasRef.current?.toDataURL("image/png") ?? null;
-        setMaskDataUrl(currentDataUrl);
-        onMaskChange?.(currentDataUrl);
-        // Update hasPainted based on whether there's any content
-        const canvas = canvasRef.current;
-        if (canvas) {
-          const ctx = canvas.getContext("2d");
-          if (ctx) {
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const data = imageData.data;
-            let hasContent = false;
-            for (let i = 0; i < data.length; i += 4) {
-              if (data[i] > 0 || data[i + 1] > 0 || data[i + 2] > 0) {
-                hasContent = true;
-                break;
-              }
-            }
-            setHasPainted(hasContent);
-          }
-        }
-      });
-    }
-  }, [undoHistory, restoreUndoState, onMaskChange, canvasRef]);
-
+  // Returns a promise that resolves after the canvas has been painted.
   const exportMask = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -343,6 +295,36 @@ export function useMaskBuffer({
       setLowCoverage(shouldWarnLowCoverage(coverage));
     }
   }, [naturalWidth, naturalHeight, onMaskChange, expansionRadius, includeFloorShadow, dims.width, dims.height, canvasRef]);
+
+  const restoreUndoState = useCallback((dataUrl: string): Promise<void> => {
+    const canvas = canvasRef.current;
+    if (!canvas) return Promise.resolve();
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return Promise.resolve();
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        ctx.fillStyle = "black";
+        ctx.fillRect(0, 0, dims.width, dims.height);
+        ctx.drawImage(img, 0, 0, dims.width, dims.height);
+        resolve();
+      };
+      img.src = dataUrl;
+    });
+  }, [dims.width, dims.height, canvasRef]);
+
+  // Issue #378: pop the most recent undo state and restore it. Called both
+  // from the explicit Undo button and from the Cmd/Ctrl+Z keyboard shortcut.
+  // Issue #1033: await restoreUndoState so the canvas is painted before export,
+  // and call exportMask() instead of raw toDataURL to preserve dilation/hole-fill/rescale.
+  const handleUndo = useCallback(async () => {
+    const { history, snapshot: previousState } = undoMaskSnapshot(undoHistory);
+    if (previousState === null) return;
+    await restoreUndoState(previousState);
+    setUndoHistory(history);
+    exportMask();
+  }, [undoHistory, restoreUndoState, exportMask]);
+
 
   // Keep a ref to the latest exportMask so copy/paste callbacks don't go stale
   const exportMaskRef = useRef(exportMask);
