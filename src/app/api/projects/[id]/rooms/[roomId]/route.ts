@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { getAuthedPrismaUser, requireProjectOwnershipOrThrow } from "@/lib/api-auth";
 import { roomPatchSchema } from "@/lib/room-patch-schema";
 import {
   API_ERROR_ROOM_NOT_FOUND,
@@ -24,6 +24,26 @@ export const PATCH = withErrorHandler(async (
     });
   }
 
+  try {
+    await requireProjectOwnershipOrThrow(projectId, user);
+  } catch (e) {
+    if (e instanceof Error && e.name === "ProjectNotFoundError") {
+      throw new ApiError({
+        code: API_ERROR_ROOM_NOT_FOUND,
+        message: "The requested room could not be found.",
+        status: 404,
+      });
+    }
+    if (e instanceof Error && e.name === "ProjectForbiddenError") {
+      throw new ApiError({
+        code: "forbidden",
+        message: "You do not have access to this project.",
+        status: 403,
+      });
+    }
+    throw e;
+  }
+
   const parsed = roomPatchSchema.safeParse(await request.json());
   if (!parsed.success) {
     throw new ApiError({
@@ -42,13 +62,13 @@ export const PATCH = withErrorHandler(async (
     });
   }
 
-  const ownershipWhere = {
+  const roomWhere = {
     id: roomId,
-    project: { id: projectId, userId: user.id },
+    projectId,
   };
 
   const { count } = await prisma.room.updateMany({
-    where: ownershipWhere,
+    where: roomWhere,
     data: parsed.data,
   });
 
@@ -60,7 +80,7 @@ export const PATCH = withErrorHandler(async (
     });
   }
 
-  const room = await prisma.room.findFirst({ where: ownershipWhere });
+  const room = await prisma.room.findFirst({ where: roomWhere });
   if (!room) {
     throw new ApiError({
       code: API_ERROR_ROOM_NOT_FOUND,

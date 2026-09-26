@@ -10,12 +10,26 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import { GET } from "@/app/api/projects/[id]/route";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { getAuthedPrismaUser, requireProjectOwnershipOrThrow } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Mock helpers — accessible after vi.mock()
 // ---------------------------------------------------------------------------
+
+class ProjectNotFoundError extends Error {
+  constructor() {
+    super("Project not found");
+    this.name = "ProjectNotFoundError";
+  }
+}
+
+class ProjectForbiddenError extends Error {
+  constructor() {
+    super("Forbidden");
+    this.name = "ProjectForbiddenError";
+  }
+}
 
 const MOCK_USER_ID = "cuser12345678901234567890";
 const MOCK_PROJECT_ID = "cproj12345678901234567890";
@@ -65,6 +79,17 @@ const mockProject = {
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
+  requireProjectOwnershipOrThrow: vi.fn(() => Promise.resolve()),
+  ProjectNotFoundError: class ProjectNotFoundError extends Error {
+    constructor() {
+      super("Project not found");
+    }
+  },
+  ProjectForbiddenError: class ProjectForbiddenError extends Error {
+    constructor() {
+      super("Forbidden");
+    }
+  },
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -80,6 +105,7 @@ vi.mock("@/lib/prisma", () => ({
 describe("GET /api/projects/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(requireProjectOwnershipOrThrow).mockImplementation(() => Promise.resolve() as unknown as ReturnType<typeof requireProjectOwnershipOrThrow>);
   });
 
   // -------------------------------------------------------------------------
@@ -105,7 +131,9 @@ describe("GET /api/projects/[id]", () => {
 
   it("returns 404 when the project does not exist", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.findUnique).mockResolvedValue(null);
+    vi.mocked(requireProjectOwnershipOrThrow).mockImplementation(() => {
+      return Promise.reject(new ProjectNotFoundError());
+    });
 
     const res = await GET(
       new Request("http://localhost/api/projects/" + MOCK_PROJECT_ID) as unknown as NextRequest,
@@ -117,18 +145,20 @@ describe("GET /api/projects/[id]", () => {
     expect(json.error.code).toBe("project-not-found");
   });
 
-  it("returns 404 when the project exists but user does not own it", async () => {
+  it("returns 403 when the project exists but user does not own it", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.findUnique).mockResolvedValue(null);
+    vi.mocked(requireProjectOwnershipOrThrow).mockImplementation(() => {
+      return Promise.reject(new ProjectForbiddenError());
+    });
 
     const res = await GET(
       new Request("http://localhost/api/projects/some-other-project-id") as unknown as NextRequest,
       { params: Promise.resolve({ id: "some-other-project-id" }) }
     );
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
     const json = await res.json();
-    expect(json.error.code).toBe("project-not-found");
+    expect(json.error.code).toBe("forbidden");
   });
 
   // -------------------------------------------------------------------------
