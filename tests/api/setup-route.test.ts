@@ -4,28 +4,13 @@ import { POST } from "@/app/api/setup/route";
 import { GET } from "@/app/api/setup/check/route";
 import { prisma } from "@/lib/prisma";
 
-const { mockCreateServerClient } = vi.hoisted(() => ({
-  mockCreateServerClient: vi.fn(),
-}));
-
-const mockCreateSupabaseRequestClient = vi.hoisted(() => vi.fn());
-
+const mockCreateServerClient = vi.fn();
 vi.mock("@supabase/ssr", () => ({
   createServerClient: (...args: unknown[]) => mockCreateServerClient(...args),
 }));
 
-vi.mock("next/headers", () => ({
-  cookies: vi.fn(() => ({
-    getAll: vi.fn(() => []),
-  })),
-}));
-
-vi.mock("@/lib/supabase", () => ({
-  createSupabaseRequestClient: mockCreateSupabaseRequestClient,
-}));
-
-vi.mock("@/lib/prisma", () => {
-  const prisma = {
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
     user: {
       findUnique: vi.fn(),
       findUniqueOrThrow: vi.fn(),
@@ -33,19 +18,17 @@ vi.mock("@/lib/prisma", () => {
       update: vi.fn(),
     },
     setupRateLimit: {
-      upsert: vi.fn(),
-      findUnique: vi.fn(),
-      update: vi.fn(),
+      upsert: vi.fn().mockResolvedValue({ ipHash: "test", attemptCount: 1, windowStart: new Date() }),
+      findUnique: vi.fn().mockResolvedValue({ ipHash: "test", attemptCount: 1, windowStart: new Date() }),
       deleteMany: vi.fn(),
     },
-  };
-  return {
-    prisma: {
-      $transaction: vi.fn().mockImplementation(async (fn: (tx: typeof prisma) => Promise<unknown>) => fn(prisma)),
-      ...prisma,
-    },
-  };
-});
+    $transaction: vi.fn((cb) => cb(prisma)),
+  },
+}));
+
+vi.mock("@/lib/env", () => ({
+  requireEnvVars: vi.fn().mockReturnValue(undefined),
+}));
 
 const mockUser = {
   id: "user-123",
@@ -55,9 +38,6 @@ const mockUser = {
   createdAt: new Date(),
   updatedAt: new Date(),
 };
-
-process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
-process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "test-anon-key";
 
 function mockSupabaseGetUser(user: object | null) {
   return {
@@ -84,15 +64,6 @@ describe("POST /api/setup", () => {
   beforeEach(() => {
     mockCreateServerClient.mockReset();
     vi.mocked(prisma.user.create).mockReset();
-    vi.mocked(prisma.setupRateLimit.upsert).mockReset();
-    vi.mocked(prisma.setupRateLimit.upsert).mockResolvedValue({
-      id: "rate-limit-id",
-      ipHash: "test-ip",
-      attemptCount: 1,
-      windowStart: new Date(),
-      lockedUntil: null,
-      updatedAt: new Date(),
-    });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -146,52 +117,34 @@ describe("POST /api/setup", () => {
 describe("GET /api/setup/check", () => {
   beforeEach(() => {
     mockCreateServerClient.mockReset();
-    mockCreateSupabaseRequestClient.mockReset();
     vi.mocked(prisma.user.findUnique).mockReset();
-    vi.mocked(prisma.setupRateLimit.upsert).mockReset();
-    vi.mocked(prisma.setupRateLimit.upsert).mockResolvedValue({
-      id: "rate-limit-id",
-      ipHash: "test-ip",
-      attemptCount: 1,
-      windowStart: new Date(),
-      lockedUntil: null,
-      updatedAt: new Date(),
-    });
   });
 
   it("returns 200 with setupComplete=false when unauthenticated", async () => {
-    mockCreateServerClient.mockReturnValue({
-      auth: { getUser: async () => ({ data: { user: null }, error: null }) },
-    });
+    mockCreateServerClient.mockReturnValue(mockSupabaseGetUser(null));
 
     const req = buildRequest();
     const res = await GET(req);
-    const json = await res.json();
 
-    // Route returns 200 to prevent user enumeration
     expect(res.status).toBe(200);
+    const json = await res.json();
     expect(json.setupComplete).toBe(false);
   });
 
   it("returns 200 with setupComplete=false when authenticated but no user row exists", async () => {
-    mockCreateServerClient.mockReturnValue({
-      auth: { getUser: async () => ({ data: { user: { id: "user-123", email: "test@example.com" } }, error: null }) },
-    });
+    mockCreateServerClient.mockReturnValue(mockSupabaseGetUser({ id: "user-123", email: "test@example.com" }));
     vi.mocked(prisma.user.findUnique).mockResolvedValue(null as never);
 
     const req = buildRequest();
     const res = await GET(req);
     const json = await res.json();
 
-    // Route returns 200 to prevent user enumeration
     expect(res.status).toBe(200);
     expect(json.setupComplete).toBe(false);
   });
 
-  it("returns 200 with setupComplete=true when authenticated and user row exists", async () => {
-    mockCreateServerClient.mockReturnValue({
-      auth: { getUser: async () => ({ data: { user: { id: "user-123", email: "test@example.com" } }, error: null }) },
-    });
+  it("returns 200 with setupComplete=true when user row exists", async () => {
+    mockCreateServerClient.mockReturnValue(mockSupabaseGetUser({ id: "user-123", email: "test@example.com" }));
     vi.mocked(prisma.user.findUnique).mockResolvedValue(mockUser as never);
 
     const req = buildRequest();
