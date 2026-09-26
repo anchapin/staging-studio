@@ -16,7 +16,7 @@
  */
 
 export const CURRENT_API_VERSION = "v1" as const;
-export const VERSION_HEADER = "API-Version" as const;
+export const VERSION_HEADER = "X-Supabase-API-Version" as const;
 export const DEPRECATION_HEADER = "Deprecation" as const;
 export const SUNSET_HEADER = "Sunset" as const;
 
@@ -54,7 +54,7 @@ export function buildDeprecationHeaders(): Record<string, string> {
   return {
     [DEPRECATION_HEADER]: `true; rel="deprecation"`,
     [SUNSET_HEADER]: getSunsetDate(),
-    [VERSION_HEADER]: "unversioned",
+    [VERSION_HEADER]: "deprecated",
     Link: "</api/v1>; rel=\"successor-version\"",
   };
 }
