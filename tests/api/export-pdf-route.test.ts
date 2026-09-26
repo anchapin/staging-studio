@@ -7,7 +7,28 @@ import { prisma } from "@/lib/prisma";
 
 // Use vi.hoisted so the mock is fresh for each test run and doesn't retain
 // state from the full suite run (avoids global.fetch pollution from sibling test files)
-const { buildBrowserlessPdfUrl, buildBrowserlessPdfBody, fetchBrowserlessPdfWithCircuitBreaker } = vi.hoisted(() => {
+const {
+  buildBrowserlessPdfUrl,
+  buildBrowserlessPdfBody,
+  fetchBrowserlessPdfWithCircuitBreaker,
+  requireProjectOwnershipOrThrow,
+  ProjectNotFoundError,
+  ProjectForbiddenError,
+} = vi.hoisted(() => {
+  class MockProjectNotFoundError extends Error {
+    constructor(public projectId: string) {
+      super(`Project not found: ${projectId}`);
+      this.name = "ProjectNotFoundError";
+    }
+  }
+
+  class MockProjectForbiddenError extends Error {
+    constructor(public projectId: string) {
+      super(`Forbidden: ${projectId}`);
+      this.name = "ProjectForbiddenError";
+    }
+  }
+
   return {
     buildBrowserlessPdfUrl: vi.fn(() => "https://chrome.browserless.io/pdf"),
     buildBrowserlessPdfBody: vi.fn((url: string) => ({
@@ -20,11 +41,17 @@ const { buildBrowserlessPdfUrl, buildBrowserlessPdfBody, fetchBrowserlessPdfWith
       },
     })),
     fetchBrowserlessPdfWithCircuitBreaker: vi.fn(),
+    requireProjectOwnershipOrThrow: vi.fn(),
+    ProjectNotFoundError: MockProjectNotFoundError,
+    ProjectForbiddenError: MockProjectForbiddenError,
   };
 });
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
+  requireProjectOwnershipOrThrow,
+  ProjectNotFoundError,
+  ProjectForbiddenError,
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -53,15 +80,16 @@ const PROJECT_ID = "c1234567890abcdef12345678";
 const ORIGINAL_ENV = { ...process.env };
 
 beforeEach(() => {
-  vi.restoreAllMocks();
-  process.env = {
-    ...ORIGINAL_ENV,
-    NEXT_PUBLIC_APP_URL: "http://localhost",
-    BROWSERLESS_API_KEY: "test-browserless-key",
-  };
-  authedUser.mockResolvedValue({ id: USER_ID });
-  projectFindUnique.mockResolvedValue({ id: PROJECT_ID, userId: USER_ID });
-  dailyApiUsageFindUnique.mockResolvedValue({ count: 0 });
+    vi.restoreAllMocks();
+    process.env = {
+      ...ORIGINAL_ENV,
+      NEXT_PUBLIC_APP_URL: "http://localhost",
+      BROWSERLESS_API_KEY: "test-browserless-key",
+    };
+    authedUser.mockResolvedValue({ id: USER_ID });
+    projectFindUnique.mockResolvedValue({ id: PROJECT_ID, userId: USER_ID });
+    requireProjectOwnershipOrThrow.mockResolvedValue({ ok: true, projectId: PROJECT_ID });
+    dailyApiUsageFindUnique.mockResolvedValue({ count: 0 });
   dailyApiUsageUpsert.mockResolvedValue({ count: 1 });
   // Reset hoisted mock and delegate to global.fetch so per-test overrides work
   vi.mocked(fetchBrowserlessPdfWithCircuitBreaker).mockReset().mockImplementation(
@@ -172,7 +200,7 @@ describe("POST /api/export-pdf — quota", () => {
 
 describe("POST /api/export-pdf — ownership", () => {
   it("returns 404 when project does not exist", async () => {
-    projectFindUnique.mockResolvedValue(null);
+    requireProjectOwnershipOrThrow.mockRejectedValue(new ProjectNotFoundError(PROJECT_ID));
 
     const response = await callExportRoute(validBody());
     expect(response.status).toBe(404);
@@ -180,13 +208,13 @@ describe("POST /api/export-pdf — ownership", () => {
     expect(body.error).toBe("Project not found");
   });
 
-  it("returns 404 when project belongs to a different user", async () => {
-    projectFindUnique.mockResolvedValue({ id: PROJECT_ID, userId: "other-user" });
+  it("returns 403 when project belongs to a different user", async () => {
+    requireProjectOwnershipOrThrow.mockRejectedValue(new ProjectForbiddenError(PROJECT_ID));
 
     const response = await callExportRoute(validBody());
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(403);
     const body = await response.json();
-    expect(body.error).toBe("Project not found");
+    expect(body.error).toBe("Forbidden");
   });
 });
 

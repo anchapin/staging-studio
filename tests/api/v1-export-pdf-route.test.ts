@@ -20,6 +20,22 @@ const { buildBrowserlessPdfUrl, buildBrowserlessPdfBody, fetchBrowserlessPdfWith
 });
 
 const mockGetAuthedPrismaUser = vi.hoisted(() => vi.fn());
+const mockRequireProjectOwnershipOrThrow = vi.hoisted(() => vi.fn());
+const { MockProjectNotFoundError, MockProjectForbiddenError } = vi.hoisted(() => {
+  class MockProjectNotFoundError extends Error {
+    constructor(public projectId: string) {
+      super(`Project not found: ${projectId}`);
+      this.name = "ProjectNotFoundError";
+    }
+  }
+  class MockProjectForbiddenError extends Error {
+    constructor(public projectId: string) {
+      super(`Forbidden: ${projectId}`);
+      this.name = "ProjectForbiddenError";
+    }
+  }
+  return { MockProjectNotFoundError, MockProjectForbiddenError };
+});
 const mockProjectFindUnique = vi.hoisted(() => vi.fn());
 const mockDailyApiUsageUpsert = vi.hoisted(() => vi.fn());
 const mockDailyApiUsageFindUnique = vi.hoisted(() => vi.fn());
@@ -27,6 +43,9 @@ const mockSignPreviewToken = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: mockGetAuthedPrismaUser,
+  requireProjectOwnershipOrThrow: mockRequireProjectOwnershipOrThrow,
+  ProjectNotFoundError: MockProjectNotFoundError,
+  ProjectForbiddenError: MockProjectForbiddenError,
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -56,22 +75,23 @@ const PROJECT_ID = "c1234567890abcdef12345678";
 
 const ORIGINAL_ENV = { ...process.env };
 
-beforeEach(() => {
-  vi.restoreAllMocks();
-  process.env = {
-    ...ORIGINAL_ENV,
-    NEXT_PUBLIC_APP_URL: "http://localhost",
-    BROWSERLESS_API_KEY: "test-browserless-key",
-    NODE_ENV: "development",
-  };
-  mockGetAuthedPrismaUser.mockResolvedValue({ id: USER_ID });
-  mockProjectFindUnique.mockResolvedValue({ id: PROJECT_ID, userId: USER_ID });
-  mockDailyApiUsageUpsert.mockResolvedValue({});
-  mockDailyApiUsageFindUnique.mockResolvedValue({ count: 0 });
-  mockSignPreviewToken.mockResolvedValue("test-preview-token");
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    process.env = {
+      ...ORIGINAL_ENV,
+      NEXT_PUBLIC_APP_URL: "http://localhost",
+      BROWSERLESS_API_KEY: "test-browserless-key",
+      NODE_ENV: "development",
+    };
+    mockGetAuthedPrismaUser.mockResolvedValue({ id: USER_ID });
+    mockRequireProjectOwnershipOrThrow.mockResolvedValue({ ok: true, projectId: PROJECT_ID });
+    mockProjectFindUnique.mockResolvedValue({ id: PROJECT_ID, userId: USER_ID });
+    mockDailyApiUsageUpsert.mockResolvedValue({});
+    mockDailyApiUsageFindUnique.mockResolvedValue({ count: 0 });
+    mockSignPreviewToken.mockResolvedValue("test-preview-token");
 
-  // Default: successful PDF generation
-  fetchBrowserlessPdfWithCircuitBreaker.mockReset().mockImplementation((url: string | URL | Request) => {
+    // Default: successful PDF generation
+    fetchBrowserlessPdfWithCircuitBreaker.mockReset().mockImplementation((url: string | URL | Request) => {
     if (String(url).includes("chrome.browserless.io")) {
       return Promise.resolve(
         new Response(Buffer.from("%PDF-1.4 fake pdf content"), {
@@ -136,7 +156,7 @@ describe("GET /api/v1/export-pdf — auth", () => {
 
 describe("GET /api/v1/export-pdf — ownership", () => {
   it("returns 404 when project does not exist", async () => {
-    mockProjectFindUnique.mockResolvedValue(null);
+    mockRequireProjectOwnershipOrThrow.mockRejectedValue(new MockProjectNotFoundError(PROJECT_ID));
 
     const response = await callExportRoute(PROJECT_ID);
     expect(response.status).toBe(404);
@@ -144,13 +164,13 @@ describe("GET /api/v1/export-pdf — ownership", () => {
     expect(body.code).toBe("project-not-found");
   });
 
-  it("returns 404 when project belongs to a different user", async () => {
-    mockProjectFindUnique.mockResolvedValue({ id: PROJECT_ID, userId: "other-user" });
+  it("returns 403 when project belongs to a different user", async () => {
+    mockRequireProjectOwnershipOrThrow.mockRejectedValue(new MockProjectForbiddenError(PROJECT_ID));
 
     const response = await callExportRoute(PROJECT_ID);
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(403);
     const body = await response.json();
-    expect(body.code).toBe("project-not-found");
+    expect(body.error).toBe("Forbidden");
   });
 });
 

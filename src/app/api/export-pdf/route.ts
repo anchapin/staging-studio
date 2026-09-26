@@ -4,9 +4,13 @@ import { NextRequest, NextResponse } from "next/server";
 // Default App Router limit is 10s, which is too short for PDF export.
 export const maxDuration = 90;
 
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import {
+  ProjectForbiddenError,
+  ProjectNotFoundError,
+  getAuthedPrismaUser,
+  requireProjectOwnershipOrThrow,
+} from "@/lib/api-auth";
 import { buildDeprecationHeaders } from "@/lib/api-version";
-import { prisma } from "@/lib/prisma";
 import { PREVIEW_TOKEN_QUERY_PARAM, signPreviewToken } from "@/lib/preview-token";
 import { classifyIntegrationError } from "@/lib/error-classify";
 import {
@@ -125,15 +129,22 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. Ownership check — before spending Browserless quota.
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
-      select: { userId: true },
-    });
-    if (!project || project.userId !== user.id) {
-      return NextResponse.json(
-        { error: "Project not found", message: "Project does not exist" },
-        { status: 404 }
-      );
+    try {
+      await requireProjectOwnershipOrThrow(projectId, user);
+    } catch (e) {
+      if (e instanceof ProjectNotFoundError) {
+        return NextResponse.json(
+          { error: "Project not found", message: "Project does not exist" },
+          { status: 404 }
+        );
+      }
+      if (e instanceof ProjectForbiddenError) {
+        return NextResponse.json(
+          { error: "Forbidden", message: "You do not have permission to access this project." },
+          { status: 403 }
+        );
+      }
+      throw e;
     }
 
     // 4. App URL: the cloud browser must be able to reach this deployment.
