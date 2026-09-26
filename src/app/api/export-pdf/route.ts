@@ -183,9 +183,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 5. Signed, short-lived, projectId-scoped token lets the cookie-less
-    //    headless browser through middleware auth for THIS project only.
-    const token = await signPreviewToken(projectId);
+    // 5. Signed, projectId-scoped token lets the cookie-less headless browser
+    //    through middleware auth for THIS project only. 15-minute TTL accommodates
+    //    Browserless queueing delays that can exceed the default 5-minute TTL
+    //    (issue #1036).
+    const token = await signPreviewToken(projectId, 15 * 60);
     const previewUrl = `${appUrl}/preview/${projectId}?${PREVIEW_TOKEN_QUERY_PARAM}=${encodeURIComponent(token)}`;
 
     // 6. Credential rides in a header (Basic auth, `apiKey:`), never the
