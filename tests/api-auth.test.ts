@@ -15,7 +15,7 @@ vi.mock("@/lib/prisma", () => ({
 import { cookies } from "next/headers";
 import { createServerClientSingleton } from "@/lib/supabase";
 import { prisma } from "@/lib/prisma";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { getAuthedPrismaUser, requireProjectOwnership } from "@/lib/api-auth";
 
 const mockCookies = vi.mocked(cookies);
 const mockCreateServerClient = vi.mocked(createServerClientSingleton);
@@ -109,5 +109,62 @@ describe("getAuthedPrismaUser", () => {
 
     const result = await getAuthedPrismaUser();
     expect(result).toMatchObject({ id: "user-1", email: "alex@example.com" });
+  });
+
+  describe("requireProjectOwnership", () => {
+    it("throws 401 when no session cookie is present", async () => {
+      vi.mocked(mockCookies).mockReturnValue({
+        getAll: vi.fn().mockReturnValue([]),
+      } as unknown as ReturnType<typeof cookies>);
+      await expect(requireProjectOwnership("project-1")).rejects.toMatchObject({
+        status: 401,
+        message: "Unauthorized",
+      });
+    });
+
+    it("throws 403 when project does not exist", async () => {
+      vi.mocked(mockCookies).mockReturnValue({
+        getAll: vi.fn().mockReturnValue([{ name: "sb-token", value: "t" }]),
+      } as unknown as ReturnType<typeof cookies>);
+      vi.mocked(mockCreateServerClient).mockReturnValue(
+        buildSupabaseClient({ id: "user-1", email: "alex@example.com" }) as never
+      );
+      vi.mocked(prisma.project.findUnique).mockResolvedValue(null);
+      await expect(requireProjectOwnership("project-1")).rejects.toMatchObject({
+        status: 403,
+        message: "Forbidden",
+      });
+    });
+
+    it("throws 403 when authenticated user does not own the project", async () => {
+      vi.mocked(mockCookies).mockReturnValue({
+        getAll: vi.fn().mockReturnValue([{ name: "sb-token", value: "t" }]),
+      } as unknown as ReturnType<typeof cookies>);
+      vi.mocked(mockCreateServerClient).mockReturnValue(
+        buildSupabaseClient({ id: "user-1", email: "alex@example.com" }) as never
+      );
+      vi.mocked(prisma.project.findUnique).mockResolvedValue({
+        id: "project-1",
+        userId: "other-user",
+      } as never);
+      await expect(requireProjectOwnership("project-1")).rejects.toMatchObject({
+        status: 403,
+        message: "Forbidden",
+      });
+    });
+
+    it("does not throw when authenticated user owns the project", async () => {
+      vi.mocked(mockCookies).mockReturnValue({
+        getAll: vi.fn().mockReturnValue([{ name: "sb-token", value: "t" }]),
+      } as unknown as ReturnType<typeof cookies>);
+      vi.mocked(mockCreateServerClient).mockReturnValue(
+        buildSupabaseClient({ id: "user-1", email: "alex@example.com" }) as never
+      );
+      vi.mocked(prisma.project.findUnique).mockResolvedValue({
+        id: "project-1",
+        userId: "user-1",
+      } as never);
+      await expect(requireProjectOwnership("project-1")).resolves.toBeUndefined();
+    });
   });
 });

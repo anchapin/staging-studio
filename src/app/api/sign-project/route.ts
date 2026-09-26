@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type { ZodError } from "zod";
 import { prisma } from "@/lib/prisma";
 import { createPreflightResponse, withCors } from "@/lib/cors";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { getAuthedPrismaUser, requireProjectOwnership } from "@/lib/api-auth";
 import { verifyPreviewToken } from "@/lib/preview-token";
 import { withRetry } from "@/lib/retry";
 import {
@@ -98,20 +98,13 @@ export async function POST(req: NextRequest) {
       return withCors(NextResponse.json(SIGN_ERROR_COPY.invalidToken, { status: 401 }));
     }
 
+    await requireProjectOwnership(projectId);
+
     const existing = await prisma.project.findUnique({
       where: { id: projectId },
-      select: { clientSignatureStatus: true, userId: true },
+      select: { clientSignatureStatus: true },
     });
-    if (!existing) {
-      return withCors(NextResponse.json(SIGN_ERROR_COPY.invalidProject, { status: 404 }));
-    }
-    if (existing.userId !== user.id) {
-      return withCors(NextResponse.json(
-        { error: "Forbidden", message: "You do not have permission to sign this project." },
-        { status: 403 }
-      ));
-    }
-    if (existing.clientSignatureStatus === "Signed") {
+    if (existing?.clientSignatureStatus === "Signed") {
       return withCors(NextResponse.json(SIGN_ERROR_COPY.alreadySigned, { status: 409 }));
     }
 

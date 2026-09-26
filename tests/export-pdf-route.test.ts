@@ -165,18 +165,18 @@ describe("POST /api/export-pdf", () => {
     expect(json.error).toBe("Invalid projectId");
   });
 
-  it("returns 404 when project not found", async () => {
+  it("returns 403 when project not found", async () => {
     vi.mocked(prisma.project.findUnique).mockResolvedValue(null);
 
     const req = buildRequest({ projectId: MOCK_PROJECT_ID });
     const res = await POST(req);
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
     const json = await res.json();
-    expect(json.error).toBe("Project not found");
+    expect(json.error).toBe("Forbidden");
   });
 
-  it("returns 404 when user does not own project", async () => {
+  it("returns 403 when user does not own project", async () => {
     vi.mocked(prisma.project.findUnique).mockResolvedValue({
       id: MOCK_PROJECT_ID,
       userId: "different-user-id",
@@ -200,9 +200,9 @@ describe("POST /api/export-pdf", () => {
     const req = buildRequest({ projectId: MOCK_PROJECT_ID });
     const res = await POST(req);
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
     const json = await res.json();
-    expect(json.error).toBe("Project not found");
+    expect(json.error).toBe("Forbidden");
   });
 
   it("returns 500 when BROWSERLESS_API_KEY is missing", async () => {

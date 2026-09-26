@@ -1,6 +1,8 @@
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { createServerClientSingleton } from "@/lib/supabase";
+import { ApiError } from "@/lib/api-error-handler";
+import { API_ERROR_UNAUTHORIZED, API_ERROR_PROJECT_NOT_FOUND } from "@/lib/api-errors";
 import type { PrismaClient, Project } from "@prisma/client";
 
 /**
@@ -69,3 +71,23 @@ export async function requireProjectOwnershipSafe(
   if (!project) return null;
   return { project };
 }
+
+/**
+ * Looks up a project and verifies the authenticated user owns it.
+ * Throws ApiError(403) if the user does not own the project.
+ * Throws ApiError(401) if the user is not authenticated.
+ */
+export async function requireProjectOwnership(projectId: string): Promise<void> {
+  const user = await getAuthedPrismaUser();
+  if (!user) {
+    throw new ApiError({ code: API_ERROR_UNAUTHORIZED, message: "Unauthorized", status: 401 });
+  }
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { userId: true },
+  });
+  if (!project || project.userId !== user.id) {
+    throw new ApiError({ code: API_ERROR_PROJECT_NOT_FOUND, message: "Forbidden", status: 403 });
+  }
+}
+
