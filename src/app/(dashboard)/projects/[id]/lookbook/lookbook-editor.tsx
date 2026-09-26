@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import {
@@ -303,6 +303,17 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
     user: project.user,
   }));
 
+  const previewProject = useMemo<PreviewProject>(
+    () => ({
+      ...project,
+      rooms: project.rooms.map((room) => ({
+        ...room,
+        ...overrides[room.id],
+      })),
+    }),
+    [project, overrides],
+  );
+
   // ─── Render ───────────────────────────────────────────────────────
   return (
     <div>
@@ -410,7 +421,7 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
             hasSwatches={project.materialSwatches.length > 0}
           />
           <div className="paper-preview">
-            <LookbookPreviewView project={project} />
+            <LookbookPreviewView project={previewProject} />
           </div>
         </div>
       ) : (
