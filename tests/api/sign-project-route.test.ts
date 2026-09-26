@@ -21,6 +21,7 @@ function buildRequest(body: unknown): NextRequest {
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
+  requireProjectOwnership: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({

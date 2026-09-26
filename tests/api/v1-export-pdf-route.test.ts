@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "@/lib/api-error-handler";
 import type { NextRequest } from "next/server";
 
 // Use vi.hoisted so the mock is fresh for each test run and doesn't retain
@@ -27,6 +28,7 @@ const mockSignPreviewToken = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: mockGetAuthedPrismaUser,
+  requireProjectOwnership: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({

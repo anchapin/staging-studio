@@ -7,6 +7,8 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 
+import { ApiError } from "@/lib/api-error-handler";
+import { API_ERROR_PROJECT_NOT_FOUND } from "@/lib/api-errors";
 import { getAuthedPrismaUser, requireProjectOwnership } from "@/lib/api-auth";
 import { buildVersionHeaders } from "@/lib/api-version";
 import {
@@ -210,6 +212,20 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error("Export PDF error:", error);
+    if (error instanceof ApiError) {
+      await recordUsage(projectId, user.id, false);
+      if (error.code === API_ERROR_PROJECT_NOT_FOUND) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Project not found or access denied",
+            message: "Project not found or access denied",
+            code: "project-not-found",
+          },
+          { status: 404, headers: versionInfo }
+        );
+      }
+    }
     return NextResponse.json(
       {
         success: false,

@@ -25,6 +25,7 @@ const { buildBrowserlessPdfUrl, buildBrowserlessPdfBody, fetchBrowserlessPdfWith
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
+  requireProjectOwnership: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -60,6 +61,7 @@ beforeEach(() => {
     BROWSERLESS_API_KEY: "test-browserless-key",
   };
   authedUser.mockResolvedValue({ id: USER_ID });
+  requireProjectOwnership.mockResolvedValue(undefined);
   projectFindUnique.mockResolvedValue({ id: PROJECT_ID, userId: USER_ID });
   dailyApiUsageFindUnique.mockResolvedValue({ count: 0 });
   dailyApiUsageUpsert.mockResolvedValue({ count: 1 });
@@ -85,6 +87,7 @@ async function callExportRoute(body: unknown): Promise<Response> {
 beforeEach(() => {
   vi.resetAllMocks();
   authedUser.mockResolvedValue({ id: USER_ID });
+  requireProjectOwnership.mockResolvedValue(undefined);
   projectFindUnique.mockResolvedValue({ id: PROJECT_ID, userId: USER_ID });
   dailyApiUsageFindUnique.mockResolvedValue({ count: 0 });
   dailyApiUsageUpsert.mockResolvedValue({ count: 1 });
