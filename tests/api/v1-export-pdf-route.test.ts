@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError } from "@/lib/api-error-handler";
 import type { NextRequest } from "next/server";
 
 // Use vi.hoisted so the mock is fresh for each test run and doesn't retain
