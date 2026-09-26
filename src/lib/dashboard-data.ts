@@ -115,11 +115,12 @@ const projectDetailSelect = {
       buyerPsychology: true,
       checklistItems: true,
       inpaintRequests: {
+        where: { status: { in: ["IN_QUEUE", "IN_PROGRESS"] } },
         orderBy: { createdAt: "desc" as const },
         take: 1,
         // sourceSlot (issue #170) lets a pendingRequestId resume persist the
         // result with the same source semantics the run was started with.
-        select: { id: true, status: true, variantSlot: true, sourceSlot: true },
+        select: { id: true, variantSlot: true, sourceSlot: true },
       },
     },
   },
