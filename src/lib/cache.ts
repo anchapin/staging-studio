@@ -43,6 +43,8 @@ export class Cache<K, V> {
   private readonly maxSize: number;
   private readonly maxAge: number;
   private readonly store = new Map<K, CacheEntry<V>>();
+  private readonly inflight = new Map<K, Promise<V>>();
+  private readonly inflightIncr = new Map<K, Promise<number>>();
 
   constructor(options: CacheOptions = {}) {
     this.ttl = options.ttl ?? Infinity;
@@ -174,6 +176,89 @@ export class Cache<K, V> {
       void this.get(first);
     }
     return this.store.size;
+  }
+
+  async getOrSet(
+    key: K,
+    factory: () => Promise<V>,
+    ttlMs: number,
+  ): Promise<V> {
+    const strKey = String(key);
+    const existing = this.get(key);
+    if (existing !== undefined) {
+      this.set(key, existing);
+      return existing;
+    }
+    const inflight = this.inflight.get(key as K);
+    if (inflight) return inflight;
+    const promise = factory().finally(() => {
+      this.inflight.delete(key as K);
+    });
+    this.inflight.set(key as K, promise as Promise<V>);
+    const value = await promise;
+    const alsStore = this.getAlsStore();
+    if (alsStore) {
+      if (alsStore.has(strKey)) {
+        const entry = alsStore.get(strKey)!;
+        alsStore.delete(strKey);
+        alsStore.set(strKey, { value, expiresAt: entry.expiresAt });
+      } else {
+        const expiresAt = ttlMs === Infinity ? Infinity : Date.now() + ttlMs;
+        alsStore.set(strKey, { value, expiresAt, insertedAt: Date.now() });
+      }
+    } else {
+      if (this.store.has(key)) {
+        const entry = this.store.get(key)!;
+        this.store.delete(key);
+        this.store.set(key, { value, expiresAt: entry.expiresAt, insertedAt: entry.insertedAt });
+      } else {
+        const expiresAt = ttlMs === Infinity ? Infinity : Date.now() + ttlMs;
+        this.store.set(key, { value, expiresAt, insertedAt: Date.now() });
+      }
+    }
+    return value;
+  }
+
+  async incr(key: K, max: number, ttlMs: number): Promise<number> {
+    const inflight = this.inflightIncr.get(key as K);
+    if (inflight) {
+      await inflight;
+      const alsStore = this.getAlsStore();
+      if (alsStore) {
+        const strKey = String(key);
+        const entry = alsStore.get(strKey);
+        if (entry) return Math.min((entry.value as number) + 1, max);
+      }
+      const entry = this.store.get(key);
+      if (entry) return Math.min((entry.value as number) + 1, max);
+      return Math.min(1, max);
+    }
+    const promise = this._doIncr(key, max, ttlMs).finally(() => {
+      this.inflightIncr.delete(key as K);
+    });
+    this.inflightIncr.set(key as K, promise);
+    return promise;
+  }
+
+  private async _doIncr(key: K, max: number, ttlMs: number): Promise<number> {
+    const strKey = String(key);
+    const alsStore = this.getAlsStore();
+    if (alsStore) {
+      const entry = alsStore.get(strKey);
+      const current = entry ? (entry.value as number) : 0;
+      if (current >= max) return max;
+      const newVal = current + 1;
+      const expiresAt = ttlMs === Infinity ? Infinity : Date.now() + ttlMs;
+      alsStore.set(strKey, { value: newVal as V, expiresAt, insertedAt: Date.now() });
+      return newVal;
+    }
+    const entry = this.store.get(key);
+    const current = entry ? (entry.value as number) : 0;
+    if (current >= max) return max;
+    const newVal = current + 1;
+    const expiresAt = ttlMs === Infinity ? Infinity : Date.now() + ttlMs;
+    this.store.set(key, { value: newVal as V, expiresAt, insertedAt: Date.now() });
+    return newVal;
   }
 }
 

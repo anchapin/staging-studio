@@ -155,9 +155,9 @@ describe("GET /api/v1/export-pdf — ownership", () => {
 });
 
 describe("GET /api/v1/export-pdf — response headers", () => {
-  it("includes API-Version header in response", async () => {
+  it("includes X-Supabase-API-Version header in response", async () => {
     const response = await callExportRoute(PROJECT_ID);
     expect(response.status).toBe(200);
-    expect(response.headers.get("API-Version")).toBe("v1");
+    expect(response.headers.get("X-Supabase-API-Version")).toBe("v1");
   });
 });

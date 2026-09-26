@@ -15,6 +15,7 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
+  requireProjectOwnershipSafe: vi.fn(),
 }));
 
 vi.mock("next/cache", () => ({
@@ -57,7 +58,7 @@ beforeEach(() => {
 
 import { saveRoomMetadata } from "@/app/actions/room";
 import { reorderRooms } from "@/app/actions/room";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { getAuthedPrismaUser, requireProjectOwnershipSafe } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 
 describe("saveRoomMetadata", () => {
@@ -127,7 +128,7 @@ describe("reorderRooms", () => {
 
   it("returns error when project not found", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.findUnique).mockResolvedValue(null);
+    vi.mocked(requireProjectOwnershipSafe).mockResolvedValue(null);
 
     const result = await reorderRooms("proj-1", ["room-2", "room-1"]);
 
@@ -136,7 +137,7 @@ describe("reorderRooms", () => {
 
   it("reorders rooms on success", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: "proj-1" } as any);
+    vi.mocked(requireProjectOwnershipSafe).mockResolvedValue({ project: { id: "proj-1" } as any });
     vi.mocked(prisma.room.updateMany).mockResolvedValue({ count: 1 });
 
     const result = await reorderRooms("proj-1", ["room-2", "room-1"]);
@@ -155,7 +156,7 @@ describe("reorderRooms", () => {
 
   it("propagates database errors", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.findUnique).mockResolvedValue({ id: "proj-1" } as any);
+    vi.mocked(requireProjectOwnershipSafe).mockResolvedValue({ project: { id: "proj-1" } as any });
     vi.mocked(prisma.room.updateMany).mockRejectedValue(new Error("DB error"));
 
     const result = await reorderRooms("proj-1", ["room-2", "room-1"]);

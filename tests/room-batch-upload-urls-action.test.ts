@@ -15,6 +15,7 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
+  requireProjectOwnershipSafe: vi.fn(),
 }));
 
 vi.mock("next/cache", () => ({
@@ -38,8 +39,7 @@ beforeEach(() => {
 });
 
 import { getBatchRoomUploadUrls } from "@/app/actions/room-batch";
-import { getAuthedPrismaUser } from "@/lib/api-auth";
-import { prisma } from "@/lib/prisma";
+import { getAuthedPrismaUser, requireProjectOwnershipSafe } from "@/lib/api-auth";
 
 describe("getBatchRoomUploadUrls", () => {
   const projectId = "c123456789012345678901234";
@@ -58,7 +58,7 @@ describe("getBatchRoomUploadUrls", () => {
 
   it("returns error when project not found", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.findUnique).mockResolvedValue(null);
+    vi.mocked(requireProjectOwnershipSafe).mockResolvedValue(null);
 
     const result = await getBatchRoomUploadUrls(projectId, files);
 
