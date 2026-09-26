@@ -18,9 +18,9 @@ import { checklistItemSchema } from "@/lib/checklist-schema";
  */
 export const roomCopyEditSchema = z
   .object({
-    observedChallenge: z.string().min(1).max(2000),
-    recommendation: z.string().min(1).max(2000),
-    buyerPsychology: z.string().min(1).max(2000),
+    observedChallenge: z.string().min(0).max(2000),
+    recommendation: z.string().min(0).max(2000),
+    buyerPsychology: z.string().min(0).max(2000),
     checklistItems: z.array(checklistItemSchema),
   })
   .partial()
