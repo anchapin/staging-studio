@@ -6,7 +6,7 @@ import { getCircuitBreaker } from "@/lib/circuit-breaker";
 
 export interface BrowserlessPdfBody {
   url: string;
-  gotoOptions: { waitUntil: "networkidle0" };
+  gotoOptions: { waitUntil: "networkidle0"; timeout?: number };
   options: {
     printBackground: boolean;
     format: "Letter";
@@ -17,6 +17,7 @@ export interface BrowserlessPdfBody {
       left: string;
     };
   };
+  timeout?: number;
 }
 
 /**
@@ -61,6 +62,7 @@ export function buildBrowserlessPdfBody(previewUrl: string): BrowserlessPdfBody 
         left: "0",
       },
     },
+    timeout: 55000,
   };
 }
 
