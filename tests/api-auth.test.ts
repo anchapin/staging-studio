@@ -140,7 +140,8 @@ describe("requireProjectOwnershipThrow", () => {
 
     await expect(requireProjectOwnershipThrow("project-1", "user-1")).rejects.toThrow(ApiError);
     await expect(requireProjectOwnershipThrow("project-1", "user-1")).rejects.toMatchObject({
-      statusCode: 404,
+      status: 404,
+      code: "project-not-found",
       message: "Project not found",
     });
   });
@@ -150,7 +151,8 @@ describe("requireProjectOwnershipThrow", () => {
 
     await expect(requireProjectOwnershipThrow("project-1", "other-user")).rejects.toThrow(ApiError);
     await expect(requireProjectOwnershipThrow("project-1", "other-user")).rejects.toMatchObject({
-      statusCode: 404,
+      status: 404,
+      code: "project-not-found",
       message: "Project not found",
     });
   });

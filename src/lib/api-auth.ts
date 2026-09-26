@@ -1,18 +1,11 @@
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { createServerClientSingleton } from "@/lib/supabase";
+import { ApiError } from "@/lib/api-error-handler";
+import { API_ERROR_PROJECT_NOT_FOUND } from "@/lib/api-errors";
 import type { PrismaClient, Project } from "@prisma/client";
 
-export class ApiError extends Error {
-  constructor(
-    public statusCode: number,
-    message: string,
-    public code?: string,
-  ) {
-    super(message);
-    this.name = "ApiError";
-  }
-}
+export { ApiError } from "@/lib/api-error-handler";
 
 /**
  * Resolves the current request's authenticated user as a Prisma `User`.
@@ -93,7 +86,7 @@ export async function requireProjectOwnershipThrow(
     where: { id: projectId, userId },
   });
   if (!project) {
-    throw new ApiError(404, "Project not found");
+    throw new ApiError({ code: API_ERROR_PROJECT_NOT_FOUND, message: "Project not found", status: 404 });
   }
   return project;
 }
