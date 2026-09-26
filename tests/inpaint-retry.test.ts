@@ -36,13 +36,13 @@ describe("resolveInpaintRetry", () => {
       expect(action).toEqual({ kind: "resume", requestId: "req_123" });
     });
 
-    it("resumes the existing requestId after a terminal failure (no second billed job)", () => {
+    it("resubmits a new request after a terminal failure (dead fal job — re-polling is a doomed 5-min poll)", () => {
       const action = resolveInpaintRetry(
         new InpaintPollError("terminal", "The image editing process encountered an error."),
         "req_123"
       );
 
-      expect(action).toEqual({ kind: "resume", requestId: "req_123" });
+      expect(action).toEqual({ kind: "resubmit" });
     });
 
     it("classifies an aborted poll error as resume (defensive; the hook returns early on abort)", () => {
