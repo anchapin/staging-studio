@@ -32,7 +32,13 @@ describe("eventBus", () => {
 
       await eventBus.emit(event);
       expect(handler).toHaveBeenCalledTimes(1);
-      expect(handler).toHaveBeenCalledWith(event);
+      expect(handler).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: event.name,
+          payload: event.payload,
+        }),
+      );
+      expect(handler.mock.calls[0][0].occurredAt).toBeInstanceOf(Date);
 
       unsubscribe();
     });
