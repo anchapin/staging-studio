@@ -39,8 +39,15 @@ interface GeneratedVariationGridProps {
   generationProgress: string;
   /** Called when the user clicks a variation thumbnail. */
   onSelect: (id: string) => void;
-  /** Called when the user clicks "Generate More Variations". */
-  onGenerateMore: () => void;
+  /**
+   * Called when the user clicks "Generate More Variations".
+   *
+   * Issue #1058: when this handler is omitted (the current production
+   * state), the button renders disabled with a "Coming soon" badge so it
+   * can't be clicked into a stuck-loading state. The grid still supports
+   * selecting/applying pre-existing variations regardless.
+   */
+  onGenerateMore?: () => void;
   /** Called when the user clicks "Use This" on a variation. */
   onUse: (variation: GeneratedVariation) => void;
   className?: string;
@@ -217,20 +224,37 @@ export default function GeneratedVariationGrid({
         </p>
       )}
 
-      {/* Generate More Variations button */}
+      {/* Generate More Variations button.
+          Issue #1058: when no `onGenerateMore` handler is provided (current
+          production state), render the button disabled with a visible
+          "Coming soon" badge — matches the #692 pattern. */}
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={onGenerateMore}
-        disabled={isGenerating}
+        disabled={isGenerating || !onGenerateMore}
+        title={
+          onGenerateMore ? undefined : "Generate more variations — coming soon"
+        }
+        aria-label={
+          onGenerateMore
+            ? "Generate more variations"
+            : "Generate more variations (coming soon)"
+        }
         className={cn(
           "w-full justify-center gap-1.5 text-atelier-taupe",
-          "hover:text-atelier-primary hover:bg-atelier-canvas"
+          onGenerateMore &&
+            "hover:text-atelier-primary hover:bg-atelier-canvas"
         )}
       >
         <Images className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         <span className="label-sm">Generate More Variations</span>
+        {!onGenerateMore && (
+          <span className="label-xs ml-1 rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
+            Coming soon
+          </span>
+        )}
       </Button>
     </div>
   );

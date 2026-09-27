@@ -98,14 +98,16 @@ export default function InpaintEditor({
   // lib/inspector-panel.ts.
   const inspectorPanel = useCollapsiblePanel(INSPECTOR_PANEL_STORAGE_KEY, false);
 
-  // Issue #630: Generated Variation Grid state
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- placeholder: setGeneratedVariations will be called by the parent's variation generation logic
-  const [generatedVariations, setGeneratedVariations] = useState<
-    readonly GeneratedVariation[]
-  >([]);
+  // Issue #630: Generated Variation Grid state. Issue #1058 removed the
+  // dead placeholder `onGenerateMore` handler that stranded the UI; the
+  // grid now renders its "Generate More Variations" button disabled with a
+  // "Coming soon" badge until a real generation pipeline is wired in.
+  const [generatedVariations] = useState<readonly GeneratedVariation[]>([]);
   const [selectedVariationId, setSelectedVariationId] = useState<string | null>(null);
-  const [isGeneratingVariations, setIsGeneratingVariations] = useState(false);
-  const [variationProgress, setVariationProgress] = useState("");
+  // Issue #1058: until generation is wired, these stay constant — the
+  // grid's skeleton/progress UI never fires.
+  const [isGeneratingVariations] = useState(false);
+  const [variationProgress] = useState("");
 
   // Issue #561: tracks the active result URL for the version history panel.
   // Updated on inpaint completion; also initialized from prop when provided.
@@ -456,8 +458,6 @@ export default function InpaintEditor({
             setSelectedVariationId={setSelectedVariationId}
             isGeneratingVariations={isGeneratingVariations}
             variationProgress={variationProgress}
-            setIsGeneratingVariations={setIsGeneratingVariations}
-            setVariationProgress={setVariationProgress}
             activeResultUrl={activeResultUrl}
             setActiveResultUrl={setActiveResultUrl}
             generatedVariationsPanel={generatedVariationsPanel}
@@ -467,16 +467,6 @@ export default function InpaintEditor({
             showError={showError}
             markRunCompletionRebase={markRunCompletionRebase}
             onInpaintComplete={onInpaintComplete}
-            onGenerateMore={() => {
-              setIsGeneratingVariations(true);
-              setVariationProgress("Generating variation 1 of 4…");
-            }}
-            /* eslint-disable @typescript-eslint/no-explicit-any */
-            onUseVariation={(variation: any) => {
-              setSelectedVariationId(variation.id);
-              markRunCompletionRebase();
-              onInpaintComplete?.(variation.resultUrl, source);
-            }}
           />
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
