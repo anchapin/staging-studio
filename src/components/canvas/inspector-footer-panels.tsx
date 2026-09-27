@@ -16,7 +16,12 @@ export interface InspectorFooterPanelsProps {
   onSelectVariation: (id: string) => void;
   isGeneratingVariations: boolean;
   variationProgress: string;
-  onGenerateMore: () => void;
+  /**
+   * Issue #1058: optional — when omitted, the Generated Variation Grid
+   * renders its "Generate More Variations" button disabled with a "Coming
+   * soon" badge instead of firing a broken placeholder handler.
+   */
+  onGenerateMore?: () => void;
   onUseVariation: (variation: GeneratedVariation) => void;
   /** Issue #561 version history. */
   activeResultUrl: string | null;
