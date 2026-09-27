@@ -87,7 +87,7 @@ services:
       OPENAI_API_KEY: uxproto-dummy
       FAL_KEY: uxproto-dummy
       BROWSERLESS_API_KEY: uxproto-dummy
-      NEXT_PUBLIC_APP_URL: http://web:39901
+      NEXT_PUBLIC_APP_URL: http://127.0.0.1:39901
       PREVIEW_TOKEN_SECRET: uxproto-dev-secret-not-real
       UX_PROTO_MOCK_FAL: "1"
       UX_PROTO_MOCK_RESULT_URL: http://mock:39912/storage/v1/object/public/staged-results/e2e-staged.png
@@ -122,7 +122,7 @@ services:
       - ./docker/shots:/shots
     environment:
       HOME: /tmp
-      UX_PROTO_APP_URL: http://web:39901
+      UX_PROTO_APP_URL: ${UX_PROTO_APP_URL:-http://127.0.0.1:39901}
       UX_PROTO_RELAY_HOST: 0.0.0.0
       UX_PROTO_SHOT_DIR: /shots
       UX_PROTO_CHROMIUM_ARGS: --no-sandbox

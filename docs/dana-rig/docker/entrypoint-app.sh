@@ -1,9 +1,21 @@
 #!/bin/bash
-# App container entrypoint: install deps (first run only), apply the
-# TEMPORARY test-only bypasses, start the Next.js dev server.
+# App container entrypoint: install deps, apply TEMPORARY test-only
+# bypasses, build a production bundle, then start the production server.
 # The bypasses are reverted on container stop so the checkout stays clean.
+#
+# Why production-mode by default (vs `next dev`):
+# - `next dev` ships an HMR WebSocket client that, in this Docker rig's
+#   Playwright Chromium 153, gets auto-upgraded ws:// -> wss://, fails
+#   the dev-server's nonexistent `wss://_next/hmr` endpoint, and stalls
+#   React's dev-mode hydration indefinitely. Dana walker (Sept 2026)
+#   hit this and the form submit handler never attached.
+# - Production build has no HMR client. Hydration completes cleanly.
+#   The 30-60s cold-start cost is irrelevant for an overnight session.
+# Override with UX_PROTO_USE_DEV=1 to fall back to the old dev path.
 set -euo pipefail
 cd /repo
+
+USE_DEV="${UX_PROTO_USE_DEV:-0}"
 
 # The /repo mount is the project's worktree. The worktree's `.git`
 # file points to a parent-repo gitdir that isn't reachable from inside
@@ -33,6 +45,10 @@ done
 # insertion is structurally tricky (a naive "insert after hostname:
 # 127.0.0.1" lands inside that block's closing brace, producing
 # invalid TS — verified the hard way).
+#
+# Note: 'unsafe-eval' is dev-only (production never reads it). We still
+# inject it because the entrypoint applies patches in both modes, and
+# the production build is unaffected.
 node -e "
 const fs = require('fs');
 let s = fs.readFileSync('next.config.ts', 'utf8');
@@ -73,11 +89,6 @@ if (!s.includes(\"form-action 'self' http://mock\")) {
   changed = true;
 }
 
-// Issue #1063 dev-mode hydration: React 19 in dev mode uses eval() to
-// reconstruct callstacks for debugging. CSP must allow it or React
-// never hydrates, which means form submissions default to a browser
-// navigation (no onSubmit handler fires). Adding 'unsafe-eval' to
-// script-src is dev-only and never reaches production builds.
 if (!s.includes(\"'unsafe-eval'\")) {
   s = s.replace(
     \"script-src 'self' 'unsafe-inline' https://\",
@@ -113,12 +124,24 @@ if [ ! -x node_modules/.bin/next ]; then
 fi
 npx prisma generate
 
-# Remove stale dev locks from interrupted container runs
+# Remove stale dev locks from interrupted container runs (no-op in prod).
 rm -f .next/dev/lock
 
-# Run next directly (not via npm) so SIGTERM reaches the server process.
-node_modules/.bin/next dev --port 39901 --hostname 0.0.0.0 &
-SERVER_PID=$!
+if [ "$USE_DEV" = "1" ]; then
+  echo "[dana-rig] UX_PROTO_USE_DEV=1 → starting in dev mode (slower hydration path; HMR may stall)"
+  # Run next directly (not via npm) so SIGTERM reaches the server process.
+  node_modules/.bin/next dev --port 39901 --hostname 0.0.0.0 &
+  SERVER_PID=$!
+else
+  echo "[dana-rig] building production bundle (no HMR client; hydration is clean)"
+  # Build offline-friendly: no telemetry, no typecheck during build.
+  NEXT_TELEMETRY_DISABLED=1 npx next build 2>&1 | tail -20
+  echo "[dana-rig] starting next start on :39901"
+  # Run next directly (not via npm) so SIGTERM reaches the server process.
+  node_modules/.bin/next start --port 39901 --hostname 0.0.0.0 &
+  SERVER_PID=$!
+fi
+
 shutdown() {
   kill -TERM "$SERVER_PID" 2>/dev/null || true
   wait "$SERVER_PID" 2>/dev/null || true

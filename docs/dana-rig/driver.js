@@ -100,7 +100,12 @@ async function ensurePage() {
   // walker report 2026-09-27 for the residual HMR-stall issue and
   // possible remediation paths.)
   await context.route(
-    /^https?:\/\/(web|mock|127\.0\.0\.1)(:\d+)?\//,
+    // Match any host the rig uses (docker network aliases OR the
+    // docker bridge gateway IP the rig now navigates to). Chrome 153
+    // auto-upgrades ALL of these to https:// (and ws:// to wss://);
+    // the route intercept rewrites the URL back to plain http before
+    // fetching the real local stack.
+    /^https?:\/\/(web|mock|127\.0\.0\.1|172\.21\.0\.\d+)(:\d+)?\//,
     async (route) => {
       const req = route.request();
       const downgradedUrl = req
@@ -113,9 +118,19 @@ async function ensurePage() {
           headers: req.allHeaders(),
           data: req.postData() ?? undefined,
         });
+        // Strip transfer-encoding/content-encoding headers so the browser
+        // doesn't try to decode an already-decoded body (Playwright's
+        // `route.fulfill` doesn't auto-decompress). Without this, the
+        // browser gets raw bytes labeled as gzipped and either errors
+        // out or renders corrupted HTML, which in turn breaks Next.js's
+        // React hydration.
+        const responseHeaders = { ...resp.headers() };
+        delete responseHeaders["content-encoding"];
+        delete responseHeaders["content-length"];
+        delete responseHeaders["transfer-encoding"];
         await route.fulfill({
           status: resp.status(),
-          headers: resp.headers(),
+          headers: responseHeaders,
           body: await resp.body(),
         });
       } catch (e) {
