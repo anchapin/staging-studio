@@ -73,6 +73,19 @@ if (!s.includes(\"form-action 'self' http://mock\")) {
   changed = true;
 }
 
+// Issue #1063 dev-mode hydration: React 19 in dev mode uses eval() to
+// reconstruct callstacks for debugging. CSP must allow it or React
+// never hydrates, which means form submissions default to a browser
+// navigation (no onSubmit handler fires). Adding 'unsafe-eval' to
+// script-src is dev-only and never reaches production builds.
+if (!s.includes(\"'unsafe-eval'\")) {
+  s = s.replace(
+    \"script-src 'self' 'unsafe-inline' https://\",
+    \"script-src 'self' 'unsafe-inline' 'unsafe-eval' https://\"
+  );
+  changed = true;
+}
+
 if (changed) {
   fs.writeFileSync('next.config.ts', s);
   console.log('[dana-rig] applied next.config.ts patches (idempotent node script)');

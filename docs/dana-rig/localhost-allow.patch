@@ -1,5 +1,5 @@
 diff --git a/next.config.ts b/next.config.ts
-index 8e0a08fb..38ec3ea1 100644
+index 8e0a08fb..3512ae42 100644
 --- a/next.config.ts
 +++ b/next.config.ts
 @@ -3,7 +3,7 @@ import type { NextConfig } from "next";
@@ -7,26 +7,7 @@ index 8e0a08fb..38ec3ea1 100644
    {
      key: "Content-Security-Policy",
 -    value: "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.supabase.co https://*.fal.ai https://*.openai.com https://*.openai-api.com https://picsum.photos https://browserless.io; connect-src 'self' https://*.supabase.co https://*.fal.ai https://api.openai.com https://api.openai-api.com wss://*.supabase.co; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests",
-+    value: "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.supabase.co https://*.fal.ai https://*.openai.com https://*.openai-api.com https://picsum.photos https://browserless.io; connect-src 'self' https://*.supabase.co https://*.fal.ai https://api.openai.com https://api.openai-api.com wss://*.supabase.co http://mock:* http://web:* http://127.0.0.1:* ws://mock:* ws://web:* ws://127.0.0.1:*; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self' http://mock:* http://web:* http://127.0.0.1:*; upgrade-insecure-requests",
++    value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.googletagmanager.com https://www.google-analytics.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.supabase.co https://*.fal.ai https://*.openai.com https://*.openai-api.com https://picsum.photos https://browserless.io; connect-src 'self' https://*.supabase.co https://*.fal.ai https://api.openai.com https://api.openai-api.com wss://*.supabase.co; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests",
    },
    {
      key: "X-Frame-Options",
-@@ -24,6 +24,7 @@ const securityHeaders = [
- ];
- 
- const nextConfig: NextConfig = {
-+  allowedDevOrigins: ["web", "127.0.0.1", "localhost"],
-   // @ts-expect-error maxDuration is a valid Next.js config key but may not be in the published types yet
-   maxDuration: 90,
-   async headers() {
-@@ -62,6 +63,10 @@ const nextConfig: NextConfig = {
-         protocol: "http",
-         hostname: "localhost",
-       },
-+      {
-+        protocol: "http",
-+        hostname: "mock",
-+      },
-     ],
-   },
- };
