@@ -47,6 +47,22 @@ const SHOT_DIR = process.env.UX_PROTO_SHOT_DIR || "/tmp/uxshots";
 const CHROMIUM_ARGS = (process.env.UX_PROTO_CHROMIUM_ARGS || "")
   .split(" ")
   .filter(Boolean);
+// CDP target. Defaults to the `obscura` docker-compose sidecar. Override with
+// UX_PROTO_CDP_URL to point at a host-local browser (e.g.
+// `ws://127.0.0.1:9222`) or a hosted Obscura endpoint. Set UX_PROTO_CDP_URL=''
+// to force the legacy chromium.launch() path.
+const CDP_URL = process.env.UX_PROTO_CDP_URL ?? "ws://obscura:9222";
+// Obscura's CDP auth token. Empty string disables auth (use only for trusted
+// localhost sidecars; Obscura's OBSCURA_CDP_TOKEN must match).
+const CDP_TOKEN = process.env.UX_PROTO_CDP_TOKEN || "";
+
+// When the browser runs in a separate container (Obscura), the docker-network
+// hostname (`web:39901`) is what the BROWSER must navigate to — the browser's
+// 127.0.0.1 is itself, not the host. Set UX_PROTO_BROWSER_APP_URL to override
+// the navigation target when CDP mode is active. Falls back to APP_URL when
+// not using CDP (legacy Chromium launches in the same container).
+const BROWSER_APP_URL =
+  process.env.UX_PROTO_BROWSER_APP_URL || (CDP_URL ? null : APP_URL);
 
 let browser = null;
 let page = null;
@@ -61,27 +77,47 @@ function json(res, status, body) {
 async function ensurePage() {
   if (page && !page.isClosed()) return page;
   if (!browser || !browser.isConnected()) {
-    const launchOpts = { headless: true, args: CHROMIUM_ARGS };
-    try {
-      browser = await chromium.launch(launchOpts);
-    } catch (e) {
-      // Fall back to the full Chromium build when the headless shell
-      // is unavailable (e.g. flaky browser download). Override with
-      // UX_PROTO_CHROME_PATH if your ms-playwright cache lives elsewhere.
-      const fullChrome =
-        process.env.UX_PROTO_CHROME_PATH ||
-        (process.platform === "darwin"
-          ? require("os").homedir() +
-            "/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium"
-          : require("os").homedir() +
-            "/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome");
-      browser = await chromium.launch({ ...launchOpts, executablePath: fullChrome });
+    if (CDP_URL) {
+      // Connect to a remote browser over CDP (Obscura by default). Obscura
+      // implements a CDP subset; Playwright's `connectOverCDP` is documented
+      // as "lower fidelity" than the native protocol but covers the page
+      // navigation, snapshot, click, fill, upload, paint, and screenshot ops
+      // this relay uses.
+      //
+      // We pass the CDP token via the standard Authorization: Bearer header
+      // (Obscura expects `Bearer <token>`); when CDP_TOKEN is empty we skip
+      // the header so unauthenticated localhost sidecars still work.
+      const connectOpts = {};
+      if (CDP_TOKEN) connectOpts.headers = { Authorization: `Bearer ${CDP_TOKEN}` };
+      // Force use of the chromium namespace (Obscura advertises as Chromium).
+      browser = await chromium.connectOverCDP(CDP_URL, connectOpts);
+    } else {
+      // Legacy path: launch Playwright's bundled Chromium. Kept for
+      // debugging and for hosts where Obscura isn't available.
+      const launchOpts = { headless: true, args: CHROMIUM_ARGS };
+      try {
+        browser = await chromium.launch(launchOpts);
+      } catch (e) {
+        // Fall back to the full Chromium build when the headless shell
+        // is unavailable (e.g. flaky browser download). Override with
+        // UX_PROTO_CHROME_PATH if your ms-playwright cache lives elsewhere.
+        const fullChrome =
+          process.env.UX_PROTO_CHROME_PATH ||
+          (process.platform === "darwin"
+            ? require("os").homedir() +
+              "/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium"
+            : require("os").homedir() +
+              "/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome");
+        browser = await chromium.launch({ ...launchOpts, executablePath: fullChrome });
+      }
     }
   }
-  const context = await browser.newContext({
-    viewport: { width: 1280, height: 800 },
-    acceptDownloads: false,
-  });
+  const context =
+    browser.contexts()[0] ||
+    (await browser.newContext({
+      viewport: { width: 1280, height: 800 },
+      acceptDownloads: false,
+    }));
   page = await context.newPage();
   page.on("console", (msg) => console.log("[browser console]", msg.type(), msg.text()));
   page.on("pageerror", (err) => console.error("[browser pageerror]", err.message));
@@ -99,7 +135,14 @@ async function ensurePage() {
   // For the dev rig this means Next.js HMR still fails — see Dana
   // walker report 2026-09-27 for the residual HMR-stall issue and
   // possible remediation paths.)
-  await context.route(
+  //
+  // Obscura implements a CDP subset — `context.route` is a Playwright-level
+  // abstraction that may not be supported when connecting over CDP. The
+  // intercept is wrapped in a try/catch: if it fails, we proceed with
+  // network requests going through Obscura directly, which is fine when
+  // Obscura is configured to allow plain http:// origins (the default).
+  try {
+    await context.route(
     // Match any host the rig uses (docker network aliases OR the
     // docker bridge gateway IP the rig now navigates to). Chrome 153
     // auto-upgrades ALL of these to https:// (and ws:// to wss://);
@@ -138,6 +181,14 @@ async function ensurePage() {
       }
     }
   );
+  } catch (e) {
+    // context.route is a Playwright-level abstraction. Over CDP (Obscura),
+    // it may throw because the underlying CDP implementation only exposes
+    // a subset. That's fine — Obscura doesn't auto-upgrade plain http://
+    // origins to https:// the way Chrome 153 does, so the intercept is
+    // unnecessary in the Obscura path. Log and continue.
+    console.warn("[uxdrive] context.route not supported over CDP:", String(e && e.message || e).slice(0, 200));
+  }
 
   // WebSocket: there's no route() hook for ws:// in Playwright, so the
   // HMR connection still gets upgraded and fails noisily. Swallow the
@@ -192,7 +243,8 @@ async function doOp(op, args) {
   switch (op) {
     case "start": {
       const p = await ensurePage();
-      await p.goto(args.url || `${APP_URL}/login`, { waitUntil: "domcontentloaded" });
+      const navTarget = args.url || `${BROWSER_APP_URL || APP_URL}/login`;
+      await p.goto(navTarget, { waitUntil: "domcontentloaded" });
       return { url: p.url() };
     }
     case "goto": {

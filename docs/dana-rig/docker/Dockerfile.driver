@@ -1,4 +1,12 @@
-# Keep the playwright npm version in sync with the image tag.
+# Spike: replace Playwright's bundled Chromium with Obscura over CDP.
+# Obscura is a Rust/V8 headless browser that does not share Chromium's
+# ReadableStreamDefaultController close behavior, which is the root cause of
+# Next.js 16 + Turbopack Flight-stream hydration failures under Playwright 1.63
+# + Chrome 153 (see issue #1073).
+#
+# The base image still ships Playwright (the client API); the actual browser
+# process comes from the `obscura` sidecar in docker-compose.yml. Keep the
+# playwright npm version in sync with the image tag for the client.
 FROM mcr.microsoft.com/playwright:v1.63.0-noble
 WORKDIR /rig
 RUN npm init -y >/dev/null 2>&1 && npm i playwright@1.63.0 --no-audit --no-fund

@@ -109,6 +109,21 @@ services:
         aliases:
           - web
 
+  obscura:
+    # Obscura is the Rust/V8 headless browser that replaces Playwright's
+    # bundled Chromium. Exposes CDP on port 9222 over the docker network so
+    # the `driver` service can `chromium.connectOverCDP("ws://obscura:9222")`.
+    # The OBSCURA_CDP_TOKEN gates inbound CDP sessions; the driver passes
+    # the same value in the Authorization header. Image is published on
+    # Docker Hub as h4ckf0r0day/obscura (Apache-2.0).
+    image: h4ckf0r0day/obscura
+    environment:
+      OBSCURA_CDP_TOKEN: ${OBSCURA_CDP_TOKEN:-uxproto-dev-token}
+    # Note: no ports published to the host. The driver connects in-network.
+    # When the browser navigates to the app, it MUST use the docker-network
+    # hostname (e.g. http://web:39901) — Obscura's 127.0.0.1 is itself, not
+    # the host. UX_PROTO_BROWSER_APP_URL below controls that.
+
   driver:
     build:
       context: ./docker
@@ -122,13 +137,26 @@ services:
       - ./docker/shots:/shots
     environment:
       HOME: /tmp
+      # What the relay reports as the "current URL" (driver container's view).
       UX_PROTO_APP_URL: ${UX_PROTO_APP_URL:-http://127.0.0.1:39901}
+      # What the BROWSER actually navigates to. When using Obscura, the
+      # browser is in its own container, so 127.0.0.1 doesn't reach the app;
+      # use the docker-network hostname (`web`, the alias on the default
+      # network from the `app` service).
+      UX_PROTO_BROWSER_APP_URL: ${UX_PROTO_BROWSER_APP_URL:-http://web:39901}
       UX_PROTO_RELAY_HOST: 0.0.0.0
       UX_PROTO_SHOT_DIR: /shots
       UX_PROTO_CHROMIUM_ARGS: --no-sandbox
+      # CDP connection. Set UX_PROTO_CDP_URL=ws://127.0.0.1:9222 to run Obscura
+      # on the host (e.g. via `docker run -p 9222:9222 h4ckf0r0day/obscura`).
+      # Inside compose, the default `ws://obscura:9222` reaches the sidecar.
+      UX_PROTO_CDP_URL: ${UX_PROTO_CDP_URL:-ws://obscura:9222}
+      UX_PROTO_CDP_TOKEN: ${OBSCURA_CDP_TOKEN:-uxproto-dev-token}
     depends_on:
       app:
         condition: service_healthy
+      obscura:
+        condition: service_started
 
 volumes:
   db-data:
