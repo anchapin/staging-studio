@@ -99,8 +99,45 @@ If hydration still fails under Obscura, the spike has eliminated Path B1 and we 
 
 ~3 hours (CDP investigation, Obscura source reading, two smoke tests, compose + driver.js edits). Within the ~4h estimate in #1073's option matrix for Path B1.
 
+## Verification (follow-up, post-handoff)
+
+The follow-up session brought the rig up end-to-end with the spike-branch compose changes and ran the hydration assertion via the driver relay. Two issues surfaced before the assertion could run:
+
+1. **Missing `OBSCURA_CDP_TOKEN` length.** The compose file's default `${OBSCURA_CDP_TOKEN:-uxproto-dev-token}` is only 15 bytes; Obscura refuses to start on `0.0.0.0` with `Error: OBSCURA_CDP_TOKEN must be at least 32 bytes`. The env value used to run the rig was 36 bytes (`uxproto-dev-token-must-be-32-bytes-long`). This was the first of the gotchas documented in the spike doc; it bit us on first launch.
+2. **Missing `OBSCURA_ALLOW_PRIVATE_NETWORK=1`.** After fixing the token, the first `page.goto("http://web:39901/login")` failed with `Network error: error sending request for url (http://web:39901/login)` — Obscura's SSRF guard rejects RFC1918. This was the third gotcha from the spike doc and had not been wired into the compose file. **Added `OBSCURA_ALLOW_PRIVATE_NETWORK: "1"` to the `obscura` service environment** in `docker-compose.yml` (see commit on this branch).
+
+With both fixes applied, the rig came up, the driver connected to Obscura over CDP, and `page.goto` succeeded.
+
+### Hydration assertion result: FAIL
+
+The full hydration probe against `http://web:39901/login`:
+
+```
+readyState:        "complete"
+title:             "Login · StagingStudio"
+formAction:        "http://web:39901/login"
+inputCount:        2
+buttonCount:       4
+hasInteractiveHandlers: false
+flightLen:         2          // Flight chunks streamed
+reactFiberCount:   0          // ZERO elements have a __reactFiber$ / __reactFiber
+totalElements:     47
+```
+
+The Flight payload is fully streamed and present in `window.__next_f` (2 entries: `[0]` bootstrap, `[1]` the React tree literal including `0:{"P":null,"c":["","login"],...,"b":"TTibjwoO0KBgspJWUe7zy"}`). The DOM is fully rendered (title, h1, form, inputs, buttons, all visible text). **No React fiber is attached to any element.** The page is dead — no event handlers wired up, no client navigation, no client-side state.
+
+Console errors: none. The Flight runner silently fails to consume `window.__next_f` and attach fibers. This is **the same failure mode documented in #1073 for Playwright 1.63 + Chrome 153**.
+
+### Interpretation
+
+The CDP integration works perfectly (this session + the two smoke tests prove that), so the Obscura sidecar is a viable drop-in for Chromium from a "is Playwright talking to a browser" standpoint. But the hydration failure is **not a browser-engine bug** — it's a downstream problem in how Turbopack's Flight runtime applies chunks to a React root, and Obscura's V8 has the same problem Chromium's V8 has. Path B1 from #1073's option matrix is **eliminated**.
+
+This is exactly the spike's value: the failure rule from the merge gate (if hydration fails, close PR #1074 without merging) fires cleanly here.
+
 ## Recommendation
 
-Ship the changes as a PR **with a CI smoke step that runs `npm run e2e` against the rig to confirm no regression**, and **with the open question about Flight-stream hydration explicitly noted in the PR description**. The PR closes #1073 only if the hydration assertion above passes; if it doesn't, the spike still has value because it documents Obscura as a working CDP target and removes a class of browser-engine issues from the option matrix.
+**Do not merge PR #1074.** Close it as a "spike report" and pivot to a new path from #1073's option matrix. Likely candidates: Path A1 (Playwright 1.55 downgrade — lowest-risk, smallest scope), Path C3 (webpack bundler instead of Turbopack — addresses the Flight stream bug at the source but is a bigger change).
+
+The spike changes themselves are not wasted: the `OBSCURA_CDP_TOKEN` length fix and `OBSCURA_ALLOW_PRIVATE_NETWORK=1` should land in `develop` regardless so that anyone experimenting with Obscura in the future doesn't repeat the gotchas. `driver.js`'s `ensurePage()` CDP branch can stay in place behind `UX_PROTO_CDP_URL` for the same reason (zero cost when the env var is empty — the legacy Chromium launch path is preserved).
 
 If accepted, also update `docs/dana-rig/nightly.sh` and `nightly-compose.sh` to set `OBSCURA_CDP_TOKEN=$(openssl rand -hex 32)` in the env they hand to compose (or document `OBSCURA_CDP_TOKEN=uxproto-dev-token` as a dev-only override).

@@ -119,6 +119,12 @@ services:
     image: h4ckf0r0day/obscura
     environment:
       OBSCURA_CDP_TOKEN: ${OBSCURA_CDP_TOKEN:-uxproto-dev-token}
+      # Required: Obscura's SSRF guard rejects RFC1918 / link-local by default
+      # when the browser resolves `web` (the docker-network alias) at navigation
+      # time. Without this, `chromium.connectOverCDP` connects fine but the
+      # very first page.goto() throws "Network error: error sending request
+      # for url (http://web:39901/...)".
+      OBSCURA_ALLOW_PRIVATE_NETWORK: "1"
     # Note: no ports published to the host. The driver connects in-network.
     # When the browser navigates to the app, it MUST use the docker-network
     # hostname (e.g. http://web:39901) — Obscura's 127.0.0.1 is itself, not
