@@ -1,16 +1,25 @@
 diff --git a/next.config.ts b/next.config.ts
-index 5f988aa..6ced23d 100644
+index 8e0a08fb..38ec3ea1 100644
 --- a/next.config.ts
 +++ b/next.config.ts
-@@ -1,6 +1,7 @@
- import type { NextConfig } from "next";
+@@ -3,7 +3,7 @@ import type { NextConfig } from "next";
+ const securityHeaders = [
+   {
+     key: "Content-Security-Policy",
+-    value: "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.supabase.co https://*.fal.ai https://*.openai.com https://*.openai-api.com https://picsum.photos https://browserless.io; connect-src 'self' https://*.supabase.co https://*.fal.ai https://api.openai.com https://api.openai-api.com wss://*.supabase.co; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests",
++    value: "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.supabase.co https://*.fal.ai https://*.openai.com https://*.openai-api.com https://picsum.photos https://browserless.io; connect-src 'self' https://*.supabase.co https://*.fal.ai https://api.openai.com https://api.openai-api.com wss://*.supabase.co http://mock:* http://web:* http://127.0.0.1:* ws://mock:* ws://web:* ws://127.0.0.1:*; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self' http://mock:* http://web:* http://127.0.0.1:*; upgrade-insecure-requests",
+   },
+   {
+     key: "X-Frame-Options",
+@@ -24,6 +24,7 @@ const securityHeaders = [
+ ];
  
  const nextConfig: NextConfig = {
 +  allowedDevOrigins: ["web", "127.0.0.1", "localhost"],
-   images: {
-     // Issue #264: allow next/image optimizer to fetch from loopback private IPs
-     // in the e2e harness. The mock Supabase storage runs on 127.0.0.1 and the
-@@ -29,6 +30,10 @@ const nextConfig: NextConfig = {
+   // @ts-expect-error maxDuration is a valid Next.js config key but may not be in the published types yet
+   maxDuration: 90,
+   async headers() {
+@@ -62,6 +63,10 @@ const nextConfig: NextConfig = {
          protocol: "http",
          hostname: "localhost",
        },
@@ -21,30 +30,3 @@ index 5f988aa..6ced23d 100644
      ],
    },
  };
-diff --git a/src/lib/ai-route-schemas.ts b/src/lib/ai-route-schemas.ts
-index 2c70974..d87c8de 100644
---- a/src/lib/ai-route-schemas.ts
-+++ b/src/lib/ai-route-schemas.ts
-@@ -5,6 +5,8 @@ const IMAGE_HOST_PATTERN = /(^|\.)supabase\.co$|(^|\.)fal\.ai$/;
- function isAllowlistedHttpsUrl(value: string) {
-   try {
-     const url = new URL(value);
-+    // UX-PROTO-ONLY (revert before any commit): allow the local mock result URL.
-+    if (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "mock") return true;
-     return url.protocol === "https:" && IMAGE_HOST_PATTERN.test(url.hostname);
-   } catch {
-     return false;
-diff --git a/src/lib/room-patch-schema.ts b/src/lib/room-patch-schema.ts
-index 2213936..80b3d24 100644
---- a/src/lib/room-patch-schema.ts
-+++ b/src/lib/room-patch-schema.ts
-@@ -1,7 +1,7 @@
- import { z } from "zod";
- 
- const IMAGE_HOST_PATTERN = /(^|\.)supabase\.co$|(^|\.)fal\.ai$/;
--const LOCAL_HOST_PATTERN = /^127\.0\.0\.1$|^localhost$/;
-+const LOCAL_HOST_PATTERN = /^127\.0\.0\.1$|^localhost$|^mock$/;
- 
- const imageUrlSchema = z
-   .string()
-

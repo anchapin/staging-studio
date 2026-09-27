@@ -86,6 +86,32 @@ async function ensurePage() {
   page.on("console", (msg) => console.log("[browser console]", msg.type(), msg.text()));
   page.on("pageerror", (err) => console.error("[browser pageerror]", err.message));
   page.setDefaultTimeout(15000);
+
+  // Chrome 153 auto-upgrades http://web:39901/* and http://mock:39912/*
+  // to https:// for navigation-derived requests. The HttpsUpgrades
+  // disable-features flag is silently ignored in this Chrome build,
+  // so the only reliable workaround is to intercept the upgraded
+  // requests at the Playwright network layer and rewrite them back
+  // to http:// before fetching the real local mock.
+  await context.route(/^https:\/\/(web|mock|127\.0\.0\.1)(:\d+)?\//, async (route) => {
+    const req = route.request();
+    const httpUrl = req.url().replace(/^https:\/\//, "http://");
+    try {
+      const resp = await context.request.fetch(httpUrl, {
+        method: req.method(),
+        headers: req.allHeaders(),
+        data: req.postData() ?? undefined,
+      });
+      await route.fulfill({
+        status: resp.status(),
+        headers: resp.headers(),
+        body: await resp.body(),
+      });
+    } catch (e) {
+      await route.abort("failed");
+    }
+  });
+
   return page;
 }
 
