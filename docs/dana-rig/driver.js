@@ -88,28 +88,48 @@ async function ensurePage() {
   page.setDefaultTimeout(15000);
 
   // Chrome 153 auto-upgrades http://web:39901/* and http://mock:39912/*
-  // to https:// for navigation-derived requests. The HttpsUpgrades
-  // disable-features flag is silently ignored in this Chrome build,
-  // so the only reliable workaround is to intercept the upgraded
-  // requests at the Playwright network layer and rewrite them back
-  // to http:// before fetching the real local mock.
-  await context.route(/^https:\/\/(web|mock|127\.0\.0\.1)(:\d+)?\//, async (route) => {
-    const req = route.request();
-    const httpUrl = req.url().replace(/^https:\/\//, "http://");
-    try {
-      const resp = await context.request.fetch(httpUrl, {
-        method: req.method(),
-        headers: req.allHeaders(),
-        data: req.postData() ?? undefined,
-      });
-      await route.fulfill({
-        status: resp.status(),
-        headers: resp.headers(),
-        body: await resp.body(),
-      });
-    } catch (e) {
-      await route.abort("failed");
+  // to https:// (and ws:// to wss://) for navigation-derived requests.
+  // The HttpsUpgrades disable-features flag is silently ignored in this
+  // Chrome build, so the only reliable workaround is to intercept the
+  // upgraded requests at the Playwright network layer and rewrite them
+  // back to http:// (and ws://) before fetching the real local mock.
+  // (Note: Playwright does NOT intercept the WebSocket upgrade itself
+  // — the regex below covers the HTTP upgrade *handshake*, but a
+  // wss:// WebSocket that completes the handshake can't be downgraded.
+  // For the dev rig this means Next.js HMR still fails — see Dana
+  // walker report 2026-09-27 for the residual HMR-stall issue and
+  // possible remediation paths.)
+  await context.route(
+    /^https?:\/\/(web|mock|127\.0\.0\.1)(:\d+)?\//,
+    async (route) => {
+      const req = route.request();
+      const downgradedUrl = req
+        .url()
+        .replace(/^https:\/\//, "http://")
+        .replace(/^wss:\/\//, "ws://");
+      try {
+        const resp = await context.request.fetch(downgradedUrl, {
+          method: req.method(),
+          headers: req.allHeaders(),
+          data: req.postData() ?? undefined,
+        });
+        await route.fulfill({
+          status: resp.status(),
+          headers: resp.headers(),
+          body: await resp.body(),
+        });
+      } catch (e) {
+        await route.abort("failed");
+      }
     }
+  );
+
+  // WebSocket: there's no route() hook for ws:// in Playwright, so the
+  // HMR connection still gets upgraded and fails noisily. Swallow the
+  // socketerror events to keep the console clean; React dev-mode will
+  // eventually time out the HMR handshake and continue (slower path).
+  page.on("websocket", (ws) => {
+    ws.on("socketerror", () => {});
   });
 
   return page;
