@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, useRef } from "react";
 import { X, RefreshCw } from "lucide-react";
+import { applyDismissErrorOnSuccess } from "@/lib/toast-stale-error-dismiss";
 
 export interface Toast {
   id: string;
@@ -156,7 +157,10 @@ export function useToast() {
 
   const addToast = (toast: Omit<Toast, "id">) => {
     const id = Math.random().toString(36).substring(2, 9);
-    setToasts((prev) => [...prev, { ...toast, id }]);
+    const next = { ...toast, id };
+    // Issue #1053: a later success dismisses any lingering error toasts from
+    // the same flow so the stack can't visually contradict the outcome.
+    setToasts((prev) => applyDismissErrorOnSuccess(prev, next));
     return id;
   };
 
