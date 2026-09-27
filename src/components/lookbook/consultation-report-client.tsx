@@ -13,6 +13,12 @@ import {
   type EngagementTier,
 } from "@/lib/engagement-tiers";
 import { formatLongDate } from "@/lib/relative-time";
+import {
+  initialSignatureSaveState,
+  nextSignatureSaveState,
+  signatureSaveFailureMessage,
+  type SignatureSaveState,
+} from "@/lib/signature-save-state";
 
 interface ConsultationReportClientProps {
   user: LookbookRoomData["user"];
@@ -35,10 +41,14 @@ export function ConsultationReportClient({
   const [signed, setSigned] = useState(false);
   const [selectedTier, setSelectedTier] = useState<string | null>(null);
   const [agreed, setAgreed] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Issue #1060: signature save state machine — initial state idle,
+  // transitions to saving → signed (terminal) or failed (retriable).
+  const [saveState, setSaveState] = useState<SignatureSaveState>(
+    initialSignatureSaveState
+  );
 
-  const handleSave = async (dataUrl: string) => {
-    setError(null);
+  const submitSignature = async (dataUrl: string) => {
+    setSaveState((prev) => nextSignatureSaveState(prev, { kind: "save", dataUrl }));
     try {
       const res = await fetch("/api/sign-project", {
         method: "POST",
@@ -47,12 +57,47 @@ export function ConsultationReportClient({
       });
       if (!res.ok) {
         const data = await res.json();
-        throw new Error(data.message || "Failed to save signature");
+        throw new Error(data.message);
       }
+      setSaveState((prev) => nextSignatureSaveState(prev, { kind: "ok" }));
       setSigned(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save signature. Please try again.");
+      const errorMessage = signatureSaveFailureMessage(
+        err instanceof Error ? err.message : undefined
+      );
+      setSaveState((prev) =>
+        nextSignatureSaveState(prev, { kind: "fail", error: errorMessage })
+      );
+      // The canvas pixels stay drawn (the SignatureCanvas <canvas>
+      // element is not unmounted until `signed` flips or the user
+      // explicitly discards) so the user can retry without redrawing.
     }
+  };
+
+  const handleSave = async (dataUrl: string) => {
+    await submitSignature(dataUrl);
+  };
+
+  const handleRetry = () => {
+    // Read the latest state via a ref-like pattern: dispatch the
+    // retry event and read the next state's pendingDataUrl from the
+    // result. The state setter's functional updater returns the
+    // resolved next state, which we capture here.
+    let dataUrlToRetry: string | null = null;
+    setSaveState((prev) => {
+      const next = nextSignatureSaveState(prev, { kind: "retry" });
+      if (next.kind === "saving") {
+        dataUrlToRetry = next.pendingDataUrl;
+      }
+      return next;
+    });
+    if (dataUrlToRetry) {
+      void submitSignature(dataUrlToRetry);
+    }
+  };
+
+  const handleDiscardAndRedraw = () => {
+    setSaveState((prev) => nextSignatureSaveState(prev, { kind: "discard" }));
   };
 
   if (signed) {
@@ -197,8 +242,55 @@ export function ConsultationReportClient({
                 </label>
               </div>
 
-              {error && (
-                <p className="text-red-600 font-jakarta text-sm">{error}</p>
+              {saveState.kind === "failed" && (
+                <div
+                  role="alert"
+                  aria-live="assertive"
+                  className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-3"
+                >
+                  <div className="flex items-start gap-3">
+                    <svg
+                      className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      aria-hidden="true"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M12 9v2m0 4h.01M5.07 19h13.86a2 2 0 001.74-3l-6.93-12a2 2 0 00-3.48 0l-6.93 12a2 2 0 001.74 3z"
+                      />
+                    </svg>
+                    <div className="flex-1 space-y-1">
+                      <p className="font-jakarta text-sm font-medium text-red-800">
+                        We couldn&apos;t save your signature.
+                      </p>
+                      <p className="font-jakarta text-sm text-red-700">{saveState.error}</p>
+                      <p className="font-jakarta text-xs text-red-600">
+                        Your signature is still on the canvas — you can retry, or
+                        clear and sign again.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 pl-8">
+                    <button
+                      type="button"
+                      onClick={handleRetry}
+                      className="px-3 py-1.5 text-sm font-medium rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors"
+                    >
+                      Retry save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDiscardAndRedraw}
+                      className="px-3 py-1.5 text-sm font-medium rounded-md border border-red-300 text-red-700 bg-white hover:bg-red-50 transition-colors"
+                    >
+                      Discard and sign again
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
           </div>
