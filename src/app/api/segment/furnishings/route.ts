@@ -27,11 +27,14 @@ import {
   API_ERROR_ROOM_NOT_FOUND,
 } from "@/lib/api-errors";
 
-const FURNISHINGS_ERROR_COPY = {
+export const INVALID_FURNISHINGS_REQUEST_MESSAGE =
+  "We couldn't read the room details — try reloading the room.";
+
+export const FURNISHINGS_ERROR_COPY = {
   auth: {
     error: "Authentication failed",
     message:
-      "Unable to connect to the furnishings detection service. Please check your configuration.",
+      "We couldn't reach the staging service — please try again in a moment.",
   },
   timeout: {
     error: "Request timeout",
@@ -146,7 +149,7 @@ export async function POST(request: NextRequest) {
           error: conceptInvalid ? INVALID_CONCEPT_COPY.error : "Invalid request",
           message: conceptInvalid
             ? INVALID_CONCEPT_COPY.message
-            : "Please provide a valid roomId and imageUrl.",
+            : INVALID_FURNISHINGS_REQUEST_MESSAGE,
           retryable: false,
           issues: parsed.error.issues,
           code: conceptInvalid ? API_ERROR_INVALID_CONCEPT : API_ERROR_INVALID_REQUEST,
