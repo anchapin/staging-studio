@@ -70,23 +70,29 @@ function classifyErrorType(error: unknown): AppErrorType {
 /**
  * Logs a structured error event with full context for observability.
  * This does NOT throw — it is a fire-and-forget logger that never disrupts
- * the caller's control flow.
+ * the caller's control flow. If the underlying logger throws (e.g. a
+ * transport target is unavailable), the failure is swallowed so the
+ * request path is never derailed by an observability bug.
  */
 export function trackError(error: unknown, context: ErrorContext = {}): void {
   const errorType = classifyErrorType(error);
   const message = error instanceof Error ? error.message : String(error);
   const stack = error instanceof Error ? error.stack : undefined;
 
-  logger.error(
-    {
-      event: "app_error",
-      errorType,
-      message,
-      stack,
-      ...context,
-    },
-    `[${errorType}] ${message}`
-  );
+  try {
+    logger.error(
+      {
+        event: "app_error",
+        errorType,
+        message,
+        stack,
+        ...context,
+      },
+      `[${errorType}] ${message}`
+    );
+  } catch {
+    // Intentionally swallowed — see the JSDoc contract above.
+  }
 }
 
 /**
