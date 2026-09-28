@@ -6,7 +6,7 @@
  *
  * POST /api/v1/generate-copy
  *
- * Version header: API-Version: v1
+ * Version header: X-Supabase-API-Version: v1
  */
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";

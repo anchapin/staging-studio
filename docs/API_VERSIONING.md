@@ -27,7 +27,7 @@ Every API response includes a version header:
 
 | Header | Value | Notes |
 |--------|-------|-------|
-| `API-Version` | `v1` or `unversioned` | Identifies the API version |
+| `X-Supabase-API-Version` | `v1` or `unversioned` | Identifies the API version |
 | `Deprecation` | `true; rel="deprecation"` | Present on deprecated (unversioned) endpoints |
 | `Sunset` | RFC 7231 date | When the endpoint will be removed |
 | `Link` | `</api/v1>; rel="successor-version"` | Migration path on deprecated endpoints |
@@ -35,14 +35,14 @@ Every API response includes a version header:
 ### Example: v1 Response Headers
 
 ```
-API-Version: v1
+X-Supabase-API-Version: v1
 Content-Type: application/json
 ```
 
 ### Example: Deprecated Response Headers
 
 ```
-API-Version: unversioned
+X-Supabase-API-Version: unversioned
 Deprecation: true; rel="deprecation"
 Sunset: Sat, 24 Mar 2027 00:00:00 GMT
 Link: </api/v1>; rel="successor-version"
@@ -61,6 +61,7 @@ The following endpoints have v1 implementations:
 | `/api/v1/segment` | POST | SAM 3.1 segmentation (single click) |
 | `/api/v1/segment/furnishings` | POST | SAM 3.1 bulk furnishing detection |
 | `/api/v1/export-pdf` | POST | Generate lookbook PDF (Browserless) |
+| `/api/v1/sign-project` | POST | Record the client signature (proxy to `/api/sign-project`) |
 
 ## Deprecation Lifecycle
 
@@ -98,7 +99,7 @@ When a client without a versioned path calls a v1-required endpoint:
 ```http
 HTTP/1.1 426 Upgrade Required
 Content-Type: application/json
-API-Version: unversioned
+X-Supabase-API-Version: unversioned
 Deprecation: true; rel="deprecation"
 Sunset: Sat, 24 Mar 2027 00:00:00 GMT
 Link: </api/v1>; rel="successor-version"
@@ -129,7 +130,7 @@ const info = parseApiVersion(request);
 
 // Build response headers for a v1 response
 const headers = buildVersionHeaders("v1");
-// → { "API-Version": "v1" }
+// → { "X-Supabase-API-Version": "v1" }
 
 // Enforce minimum version (returns 426 on failure)
 const result = enforceMinVersion(request, "v1");
