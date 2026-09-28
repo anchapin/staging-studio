@@ -49,6 +49,12 @@ test.describe("export-pdf API route", () => {
     expect(buffer.length).toBeGreaterThan(0);
   });
 
+  // Issue #1080: the route returns the unified API_ERROR_INVALID_REQUEST
+  // code ("invalid-request") for both missing and malformed projectId;
+  // the test was previously asserting the never-shipped
+  // "invalid_project_id" code from an earlier draft of the hardening.
+  // Assert on the stable message instead — it's specific to this route
+  // and won't drift on shared error-handler refactors.
   test("POST with missing projectId returns 400", async ({ page }) => {
     await login(page);
 
@@ -58,7 +64,7 @@ test.describe("export-pdf API route", () => {
 
     expect(response.status()).toBe(400);
     const body = await response.json();
-    expect(body.code).toBe("invalid_project_id");
+    expect(body.message).toContain("projectId must be a valid CUID");
   });
 
   test("POST with malformed projectId returns 400", async ({ page }) => {
@@ -70,7 +76,7 @@ test.describe("export-pdf API route", () => {
 
     expect(response.status()).toBe(400);
     const body = await response.json();
-    expect(body.code).toBe("invalid_project_id");
+    expect(body.message).toContain("projectId must be a valid CUID");
   });
 
   test("unauthenticated POST returns 401", async ({ page }) => {
