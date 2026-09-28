@@ -45,15 +45,22 @@ describe("POST /api/sign-project", () => {
     vi.clearAllMocks();
   });
 
-  it("rejects unauthenticated requests with 401", async () => {
+  it("rejects requests with an invalid token and no session with 401 (issue #1078 token-first gate)", async () => {
+    // No session (cookie-less preview visitor) AND an invalid token:
+    // the token gate runs first and answers 401 with the invalidToken
+    // copy. Pre-#1078 this used to read "Unauthorized" because the
+    // session check ran before the token was ever consulted.
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(null);
+    vi.mocked(verifyPreviewToken).mockResolvedValue({ valid: false });
 
-    const req = buildRequest({ projectId: MOCK_PROJECT_ID, signatureDataUrl: MOCK_SIGNATURE, token: MOCK_TOKEN });
+    const req = buildRequest({ projectId: MOCK_PROJECT_ID, signatureDataUrl: MOCK_SIGNATURE, token: "tampered-token" });
     const res = await POST(req);
 
     expect(res.status).toBe(401);
     const json = await res.json();
-    expect((json as { error: string }).error).toBe("Unauthorized");
+    const body = json as { error: string; message?: string };
+    expect(body.message).toContain("expired or is invalid");
+    expect(body.error).not.toBe("Unauthorized");
   });
 
   it("rejects authenticated user who does not own the project with 403", async () => {

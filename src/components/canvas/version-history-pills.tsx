@@ -279,37 +279,39 @@ export default function VersionHistoryPills({
           >
             <button
               type="button"
-              className="w-full px-3 py-1.5 text-left text-xs hover:bg-muted transition-colors"
-              style={{ color: "hsl(var(--card-foreground))" }}
-              onClick={() => {
-                setMenuOpen(false);
-                // Could open a full version history view
-                showSuccess("View all versions coming soon");
-              }}
+              className="w-full cursor-not-allowed px-3 py-1.5 text-left text-xs text-muted-foreground/70 transition-colors"
+              disabled
+              title="View all versions — coming soon"
+              aria-label="View all versions (coming soon)"
             >
               View All Versions
+              <span className="ml-1 text-[10px] uppercase tracking-wide text-muted-foreground/60">
+                Soon
+              </span>
             </button>
             <button
               type="button"
-              className="w-full px-3 py-1.5 text-left text-xs hover:bg-muted transition-colors"
-              style={{ color: "hsl(var(--card-foreground))" }}
-              onClick={() => {
-                setMenuOpen(false);
-                showSuccess("Compare versions coming soon");
-              }}
+              className="w-full cursor-not-allowed px-3 py-1.5 text-left text-xs text-muted-foreground/70 transition-colors"
+              disabled
+              title="Compare versions — coming soon"
+              aria-label="Compare versions (coming soon)"
             >
               Compare Versions
+              <span className="ml-1 text-[10px] uppercase tracking-wide text-muted-foreground/60">
+                Soon
+              </span>
             </button>
             <button
               type="button"
-              className="w-full px-3 py-1.5 text-left text-xs hover:bg-muted transition-colors text-destructive"
-              onClick={() => {
-                setMenuOpen(false);
-                // Clear history would need confirmation
-                showSuccess("Clear history coming soon");
-              }}
+              className="w-full cursor-not-allowed px-3 py-1.5 text-left text-xs text-destructive/60 transition-colors"
+              disabled
+              title="Clear history — coming soon"
+              aria-label="Clear history (coming soon)"
             >
               Clear History
+              <span className="ml-1 text-[10px] uppercase tracking-wide text-muted-foreground/60">
+                Soon
+              </span>
             </button>
           </div>
         )}

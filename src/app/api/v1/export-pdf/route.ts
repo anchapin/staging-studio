@@ -25,9 +25,11 @@ import {
 } from "@/lib/api-quota";
 import {
   BROWSERLESS_TIMEOUT_MS,
+  E2E_BROWSERLESS_PDF_URL_ENV_VAR,
+  E2E_HERMETIC_ENV_VAR,
   buildBrowserlessPdfBody,
-  buildBrowserlessPdfUrl,
   fetchBrowserlessPdfWithCircuitBreaker,
+  resolveBrowserlessPdfUrl,
 } from "@/lib/browserless";
 import {
   API_ERROR_UNAUTHORIZED,
@@ -178,8 +180,18 @@ export async function GET(request: NextRequest) {
 
     let chromeResponse: Response;
     try {
+      // Issue #1084 follow-up: the endpoint resolves through the same
+      // hermetic-gated resolver the unversioned `/api/export-pdf` route
+      // uses, so a future e2e spec can drive this REAL v1 handler against
+      // a local mock Browserless instead of the paid API. A Playwright
+      // `page.route` cannot do this — the fetch below is server-side, so
+      // browser-context interception never sees it. Outside the e2e
+      // harness (both env vars unset) this is the real endpoint.
       chromeResponse = await fetchBrowserlessPdfWithCircuitBreaker(
-        buildBrowserlessPdfUrl(),
+        resolveBrowserlessPdfUrl(
+          process.env[E2E_HERMETIC_ENV_VAR],
+          process.env[E2E_BROWSERLESS_PDF_URL_ENV_VAR]
+        ),
         {
           method: "POST",
           headers: {

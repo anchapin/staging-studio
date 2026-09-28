@@ -135,7 +135,10 @@ export async function persistFalImage(
     const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     let imageBlob: Blob;
     try {
-      imageBlob = await fetch(falImageUrl, { signal: controller.signal }).then((r) => r.blob());
+      imageBlob = await fetch(falImageUrl, { signal: controller.signal }).then((r) => {
+        if (!r.ok) throw new Error(`fal CDN returned ${r.status} ${r.statusText}`);
+        return r.blob();
+      });
     } finally {
       clearTimeout(timeoutId);
     }

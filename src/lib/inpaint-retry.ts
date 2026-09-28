@@ -35,6 +35,9 @@ export function resolveInpaintRetry(
   requestId: string | null
 ): InpaintRetryAction {
   if (requestId && error instanceof InpaintPollError) {
+    if (error.reason === "terminal") {
+      return { kind: "resubmit" };
+    }
     return { kind: "resume", requestId };
   }
   return { kind: "resubmit" };

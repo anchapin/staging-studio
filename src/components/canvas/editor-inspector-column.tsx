@@ -85,8 +85,6 @@ export function EditorInspectorColumn({
   setSelectedVariationId,
   isGeneratingVariations,
   variationProgress,
-  setIsGeneratingVariations,
-  setVariationProgress,
   activeResultUrl,
   setActiveResultUrl,
   generatedVariationsPanel,
@@ -267,14 +265,14 @@ export function EditorInspectorColumn({
               onSelectVariation={setSelectedVariationId}
               isGeneratingVariations={isGeneratingVariations}
               variationProgress={variationProgress}
-              onGenerateMore={() => {
-                // Issue #630: the parent is responsible for calling the inpaint
-                // API multiple times to produce new variations and updating
-                // generatedVariations / isGeneratingVariations / variationProgress.
-                // Placeholder handler — replace with actual generation logic.
-                setIsGeneratingVariations(true);
-                setVariationProgress("Generating variation 1 of 4…");
-              }}
+              // Issue #1058: don't pass `onGenerateMore` until a real
+              // variation-generation pipeline is wired in. Omitting the
+              // prop makes the button render disabled with a "Coming soon"
+              // badge (mirrors the #692 pattern in
+              // global-staging-directives-bar.tsx). The previous handler
+              // here set isGeneratingVariations=true and never reset it,
+              // stranding the button in a perpetual "Generating…"
+              // state with no API call in flight.
               onUseVariation={(variation: { id: string; resultUrl: string }) => {
                 // Issue #630: apply the selected variation's result URL to the
                 // canvas — typically by calling onInpaintComplete or updating

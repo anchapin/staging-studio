@@ -129,13 +129,13 @@ export default function GenerateCopyForm({
     <div className="space-y-4">
       <div>
         <label
-          htmlFor="staging-directives"
+          htmlFor="copy-brief"
           className="block text-sm font-medium text-foreground mb-1"
         >
           Listing Notes
         </label>
         <textarea
-          id="staging-directives"
+          id="copy-brief"
           value={rawDirectives}
           onChange={(e) => setRawDirectives(e.target.value)}
           placeholder="Describe the key staging priorities and changes needed for this room..."
@@ -148,7 +148,7 @@ export default function GenerateCopyForm({
       <Button
         onClick={handleGenerate}
         disabled={isGenerating || !rawDirectives.trim()}
-        title={!rawDirectives.trim() ? "Enter staging directives above to enable copy generation" : undefined}
+        title={!rawDirectives.trim() ? "Add a copy brief above to enable copy generation" : undefined}
       >
         {isGenerating ? (
           <>
@@ -164,7 +164,13 @@ export default function GenerateCopyForm({
       </Button>
       {!rawDirectives.trim() && !isGenerating && (
         <p className="text-sm text-muted-foreground">
-          Enter staging directives above to enable copy generation
+          Add a copy brief above to brief the AI copywriter.
+          {" "}
+          <span className="block mt-1 text-xs">
+            This is the project-level brief used for marketing copy — it’s
+            distinct from the per-room staging directive in the editor, which
+            briefs the inpainter.
+          </span>
         </p>
       )}
 

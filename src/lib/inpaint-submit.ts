@@ -45,7 +45,7 @@ export const INPAINT_ERROR_COPY = {
   auth: {
     error: "Authentication failed",
     message:
-      "Unable to connect to the image editing service. Please check your configuration.",
+      "We couldn't reach the staging service — please try again in a moment.",
     code: API_ERROR_INPAINT_SUBMIT_FAILED,
   },
   timeout: {

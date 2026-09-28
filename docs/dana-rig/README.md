@@ -44,6 +44,15 @@ Notes:
   forwards that to `:39912` for the other containers. From your laptop the
   app is still `:39901`, relay `:39999`.
 - Login: `e2e@stagingstudio.test` / any password (mock auth accepts anything).
+- **Obscura sidecar**: the rig's driver now talks to an Obscura headless
+  browser (Rust/V8, ~30 MB) over CDP instead of launching Playwright's
+  bundled Chromium. This is a spike for issue #1073 (React never hydrates
+  under Playwright 1.63 + Chrome 153 due to a Flight-stream controller
+  regression). Obscura runs as the `obscura` compose service on port 9222;
+  the driver connects via `ws://obscura:9222`. To run the legacy Chromium
+  path instead, set `UX_PROTO_CDP_URL=` (empty). To point at a host-local
+  Obscura, set `UX_PROTO_CDP_URL=ws://host.docker.internal:9222` or
+  `ws://127.0.0.1:9222`. See `docker-compose.yml` for the full env contract.
 
 ## Option B — three terminals (no Docker)
 

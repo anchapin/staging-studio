@@ -1,6 +1,17 @@
 # Keep the playwright npm version in sync with the image tag.
-FROM mcr.microsoft.com/playwright:v1.63.0-noble
+# v1.55.0 pins Chromium 140.0.7339.16, which predates the Flight stream
+# Array.prototype.push regression (#1073) — the bug is in Chromium 142+ /
+# Chrome 153 behavior. Downgrade unblocks Dana walker hydration without
+# touching the app's @playwright/test (hermetic e2e suite, which works
+# fine with 1.63.0).
+#
+# PR #1074 previously wired an Obscura CDP sidecar in docker-compose.yml
+# and branched driver.js on UX_PROTO_CDP_URL; that path is preserved
+# behind the same env var. When UX_PROTO_CDP_URL is empty, driver.js
+# falls back to launching this image's bundled Chromium (1.55.0), which
+# is the path Path A1 verified working.
+FROM mcr.microsoft.com/playwright:v1.55.0-noble
 WORKDIR /rig
-RUN npm init -y >/dev/null 2>&1 && npm i playwright@1.63.0 --no-audit --no-fund
+RUN npm init -y >/dev/null 2>&1 && npm i playwright@1.55.0 --no-audit --no-fund
 # driver.js is bind-mounted at /rig/driver.js by docker-compose.yml
 CMD ["node", "/rig/driver.js"]

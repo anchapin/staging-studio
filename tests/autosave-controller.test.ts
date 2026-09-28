@@ -122,4 +122,52 @@ describe("AutosaveController", () => {
 
     expect(statuses).toEqual(["dirty", "saving", "saved"]);
   });
+
+  // Issue #1083: a Next.js server action whose fetch was aborted during
+  // revalidation rejects the client-side action promise. The autosave
+  // controller's save() then throws — flush() must still resolve (false,
+  // not hang forever) so the caller can decide whether to surface the
+  // failure instead of leaving the UI stuck in Edit mode.
+  it("flush resolves false (does not hang) when save() throws", async () => {
+    const save = vi
+      .fn<(payload: string) => Promise<boolean>>()
+      .mockRejectedValueOnce(new Error("net::ERR_ABORTED"))
+      .mockResolvedValue(true);
+    const controller = new AutosaveController<string>({ save });
+
+    controller.edit("aborted save");
+
+    const flushed = controller.flush();
+    // Race the flush against a fake-timer microtask flush so a hang
+    // would surface as a test-timeout rather than passing silently.
+    await expect(flushed).resolves.toBe(false);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(controller.status).toBe("error");
+
+    // retry() must still recover — the failed payload is preserved.
+    controller.retry();
+    await vi.runAllTimersAsync();
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(controller.status).toBe("saved");
+  });
+
+  it("an aborted-save retry chains a fresh in-flight save without leaking state", async () => {
+    const save = vi
+      .fn<(payload: string) => Promise<boolean>>()
+      .mockRejectedValueOnce(new Error("net::ERR_ABORTED"))
+      .mockResolvedValue(true);
+    const controller = new AutosaveController<string>({ save });
+
+    controller.edit("first try");
+    await controller.flush();
+    expect(controller.status).toBe("error");
+
+    // A retry must reset inFlight so a follow-up edit() / flush() can
+    // start a new save cleanly — no leaking the previous aborted run().
+    controller.edit("second try");
+    await controller.flush();
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save).toHaveBeenLastCalledWith("second try");
+    expect(controller.status).toBe("saved");
+  });
 });
