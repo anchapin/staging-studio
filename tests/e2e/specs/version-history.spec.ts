@@ -101,7 +101,12 @@ test.describe("version history thumbnails", () => {
     expect(thumbnail!.size, "the thumbnail must carry the generated JPEG bytes").toBeGreaterThan(
       0
     );
-    expect(thumbnail!.path).toMatch(new RegExp(`^${runPrefix}\\d+\\.jpg$`));
+    // Issue #1082: production emits `<unix-ms>-<uuid>.jpg` filenames
+    // (timestamp + UUID for global uniqueness across runs), not bare
+    // digits. The test's intent is "thumbnail landed in the correct
+    // run-prefixed directory with a .jpg extension"; pinning the
+    // filename format would just re-break on the next uniqueness tweak.
+    expect(thumbnail!.path).toMatch(new RegExp(`^${runPrefix}.+\\.jpg$`));
 
     // (2) UI side: open the Version History panel. The CollapsibleSection
     // renders expanded by default (fresh context, empty localStorage), so
