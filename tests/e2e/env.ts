@@ -98,6 +98,24 @@ export const E2E_SIGNOFF_ROOM_ID = "e2esignoffroom00000000000000room";
  */
 export const E2E_ABSENT_PROJECT_ID = "cmissing00000000000000000";
 
+/**
+ * The daily export cap the harness expects the export routes to apply.
+ *
+ * `nextEnv()` deliberately leaves `DAILY_EXPORT_LIMIT` unset so the
+ * routes fall back to `DEFAULT_DAILY_EXPORT_LIMIT` in
+ * `src/lib/api-quota.ts` — this constant MIRRORS that default. It is
+ * duplicated (not imported) because no e2e file imports app source, and
+ * the duplication is a tripwire rather than a hazard: specs assert the
+ * route's own reported `limit` equals this value, so changing the app
+ * default fails the suite loudly instead of silently invalidating the
+ * quota tests.
+ *
+ * Used by `withExportUsageAtLimit` (see `quota.ts`) to pin the
+ * Postgres-backed `DailyApiUsage` counter at the cap and reach the 429
+ * branch, which is otherwise unreachable in a single run.
+ */
+export const E2E_DAILY_EXPORT_LIMIT = 20;
+
 /** Port/host for the mock Supabase (GoTrue auth + Storage). */
 export const MOCK_SUPABASE_PORT = 39911;
 export const MOCK_SUPABASE_HOST = "127.0.0.1";
