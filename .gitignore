@@ -68,5 +68,12 @@ tsconfig.tsbuildinfo
 *.rswp
 .env.local*
 
+# Env patterns stay ignored, but the committed template must stay trackable
+# even if a tool adds a broad `.env*` rule (the Vercel CLI does this on
+# `vercel link`), which would otherwise hide it. AGENTS.md requires a 1:1
+# list of every env var in .env.example. `git add -f` would also work, but
+# the explicit negation survives the next tool that rewrites this file.
+!.env.example
+
 # vitest JSON reporter output (rtk/vitest artifact)
 .vitest/

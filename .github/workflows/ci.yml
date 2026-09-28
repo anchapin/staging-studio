@@ -49,3 +49,25 @@ jobs:
 
       - name: Unit tests (vitest)
         run: npm test
+
+  # Release guard: only fires on PRs that target main, i.e. release PRs.
+  #
+  # A commit that reaches main without reaching develop leaves develop
+  # self-consistent but stale, and that only shows up as test failures at
+  # merge time. This catches it while the release PR is still open, where
+  # the fix (back-merge main into develop) is cheap. Scoped to
+  # `base_ref == 'main'` so ordinary PRs pay nothing for it.
+  release-guard:
+    name: Release guard (develop caught up with main)
+    runs-on: ubuntu-latest
+    if: github.base_ref == 'main'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The ancestor check needs real history, not a shallow clone.
+          fetch-depth: 0
+
+      - name: Fail if the head lacks non-merge commits on main
+        run: scripts/check-develop-catchup.sh "origin/${{ github.base_ref }}" "${{ github.event.pull_request.head.sha }}"
