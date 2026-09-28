@@ -2,6 +2,32 @@ export const BROWSERLESS_PDF_ENDPOINT = "https://chrome.browserless.io/pdf";
 
 export const BROWSERLESS_TIMEOUT_MS = 60_000;
 
+/**
+ * Env var naming the hermetic e2e harness (see `tests/e2e/env.ts`).
+ *
+ * Purpose: a second, independent guard on the endpoint override below —
+ * the override is inert unless this is explicitly set to "1", so a stray
+ * `E2E_BROWSERLESS_PDF_URL` in a production `.env.local` cannot redirect
+ * outbound PDF bytes. Deliberately NOT `NODE_ENV`-gated: the e2e suite
+ * runs a production build (`next build && next start`), so NODE_ENV is
+ * "production" in exactly the run that needs the override.
+ */
+export const E2E_HERMETIC_ENV_VAR = "E2E_HERMETIC";
+
+/**
+ * Env var overriding the Browserless endpoint inside the hermetic e2e
+ * harness, so the real `src/app/api/export-pdf` route handler can be
+ * exercised without ever contacting Browserless (issue #1084).
+ *
+ * Server-only: read via `process.env`, never `NEXT_PUBLIC_`, so it can
+ * never reach a client bundle. Honored only when
+ * {@link E2E_HERMETIC_ENV_VAR} is "1" — see
+ * {@link resolveBrowserlessPdfUrl}. Both vars are set only by
+ * `nextEnv()` in the e2e harness; `.env.example` documents them as
+ * test-only.
+ */
+export const E2E_BROWSERLESS_PDF_URL_ENV_VAR = "E2E_BROWSERLESS_PDF_URL";
+
 import { getCircuitBreaker } from "@/lib/circuit-breaker";
 
 export interface BrowserlessPdfBody {
@@ -31,6 +57,30 @@ export interface BrowserlessPdfBody {
  */
 export function buildBrowserlessPdfUrl(): string {
   return BROWSERLESS_PDF_ENDPOINT;
+}
+
+/**
+ * Resolves the Browserless endpoint to POST to, honoring the hermetic
+ * e2e override.
+ *
+ * Contract: returns {@link E2E_BROWSERLESS_PDF_URL_ENV_VAR}'s value only
+ * when {@link E2E_HERMETIC_ENV_VAR} is "1" AND the override is
+ * non-blank; otherwise returns the real
+ * {@link BROWSERLESS_PDF_ENDPOINT}. Both guards are required, so the
+ * override is inert in production even if the URL var is set by
+ * mistake. The endpoint override does not relax the credential
+ * contract: the API key still rides in the `Authorization` header, never
+ * the URL. Pinned by `tests/browserless.test.ts`.
+ * Side effects: none (pure — raw env values are passed in by the caller,
+ * matching `resolveDailyLimit`'s convention).
+ */
+export function resolveBrowserlessPdfUrl(
+  hermetic: string | undefined,
+  override: string | undefined
+): string {
+  if (hermetic?.trim() !== "1") return buildBrowserlessPdfUrl();
+  if (override === undefined || override.trim() === "") return buildBrowserlessPdfUrl();
+  return override.trim();
 }
 
 /**
