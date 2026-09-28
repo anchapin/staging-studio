@@ -14,14 +14,20 @@
  * `nextEnv()` are dummy strings — the routes that would use them are
  * never actually invoked.
  *
- * The one deliberate exception (issue #1084): `export-pdf.spec.ts` drives
- * the REAL `/api/export-pdf` handler, because the browser-layer pattern
- * cannot cover it — the handler's outbound Browserless fetch runs
+ * The one deliberate exception (issue #1084): `export-pdf.spec.ts` and
+ * `export-pdf-v1.spec.ts` drive the REAL `/api/export-pdf` and
+ * `/api/v1/export-pdf` handlers, because the browser-layer pattern
+ * cannot cover them — the handler's outbound Browserless fetch runs
  * server-side, where `page.route` cannot reach. That fetch is redirected
  * to a local mock (`mock-browserless.ts`) via the hermetic-gated
  * `E2E_BROWSERLESS_PDF_URL` override, so real Browserless is still never
  * contacted. Specs that only need client-side behavior keep using the
  * browser-layer mock.
+ *
+ * Note the mock's captured-request log is process-wide and shared across
+ * the whole suite run, and specs are sequential (`workers: 1`), so a spec
+ * that needs its OWN provider calls must slice the log by a count delta
+ * taken before the request — never index from 0.
  */
 
 /**
@@ -77,6 +83,20 @@ export const E2E_LOOKBOOK_ROOM_ID = "e2elookbookroom00000000000room";
  */
 export const E2E_SIGNOFF_PROJECT_ID = "ce2esignoff00000000000000";
 export const E2E_SIGNOFF_ROOM_ID = "e2esignoffroom00000000000000room";
+
+/**
+ * A cuid-shaped project id that is deliberately NEVER seeded (no matching
+ * row in Postgres), for exercising the ownership lookup's 404 branch.
+ *
+ * Cuid-shaped on purpose: `api/v1/export-pdf` validates `projectId`
+ * against /^c[a-z0-9]{24}$/ *before* the ownership lookup, so a
+ * malformed id would 400 at validation and never reach the 404 branch
+ * this id exists to cover. The 403 (owned-by-another-user) branch is
+ * NOT covered by any spec — every seeded project belongs to
+ * {@link E2E_USER_ID}, and seeding a second user would need a matching
+ * GoTrue identity the mock auth server does not issue.
+ */
+export const E2E_ABSENT_PROJECT_ID = "cmissing00000000000000000";
 
 /** Port/host for the mock Supabase (GoTrue auth + Storage). */
 export const MOCK_SUPABASE_PORT = 39911;
