@@ -143,6 +143,65 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  # Container build (issue #1157).
+  #
+  # The Dockerfile is a deploy path nothing else in this repo exercises —
+  # Vercel builds from source — and it stayed broken for the life of the
+  # project: it copied a `public/` that does not exist (so `docker build`
+  # failed outright) and the runner stage shipped no `node_modules`, so
+  # `npx next start` resolved no local binary and downloaded a floating
+  # `next` from the registry at container boot. Nothing in vitest or
+  # Playwright can see either defect, because neither runs the image —
+  # `tests/dockerfile.test.ts` pins the *file*, this job proves the *image*.
+  #
+  # Runs on pushes and PRs (no `if`), because the rot it prevents is
+  # invisible until someone needs the image. Cheap next to `e2e`: no
+  # Postgres, no browser, no host `npm ci` — the build installs its own
+  # dependencies inside the image.
+  docker-image:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Docker is preinstalled on ubuntu-latest; no other setup is needed.
+      - name: Build the image
+        run: docker build -t staging-studio:ci .
+
+      # The build alone only proves the Dockerfile ASSEMBLES. This proves the
+      # runner is self-sufficient, which is the other half of #1157: with no
+      # local `next`, `npx` would have silently pulled one and served a
+      # version unrelated to the 16.3.5 that produced `.next/`.
+      - name: The runner resolves a local next binary
+        run: docker run --rm --entrypoint ./node_modules/.bin/next staging-studio:ci --version
+
+      # ...and that it actually STARTS. `docker compose up` could never work
+      # before, so a boot-and-serve check is the acceptance that matters.
+      # Env values are dummies: /login renders with no reachable Supabase or
+      # Postgres, and nothing here talks to a paid provider.
+      - name: The image boots and serves a page
+        run: |
+          docker run -d --name staging-studio-ci -p 3000:3000 \
+            -e NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:39911 \
+            -e NEXT_PUBLIC_SUPABASE_ANON_KEY=ci-anon-key \
+            -e DATABASE_URL=postgresql://ci:ci@127.0.0.1:5432/ci \
+            staging-studio:ci
+          for _ in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://127.0.0.1:3000/login; then
+              echo "container served /login"
+              docker rm -f staging-studio-ci
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "container never served /login"
+          docker logs staging-studio-ci
+          docker rm -f staging-studio-ci
+          exit 1
+
   # Release guard: only fires on PRs that target main, i.e. release PRs.
   #
   # A commit that reaches main without reaching develop leaves develop
