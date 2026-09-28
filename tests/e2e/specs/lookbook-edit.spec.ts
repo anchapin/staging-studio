@@ -127,7 +127,16 @@ test.describe("lookbook export (issue #250)", () => {
 
     // Preview mode click flushes pending autosaves; Export then runs
     // over a clean slate (the button does not even exist in Edit mode).
-    await page.getByRole("button", { name: "Preview" }).click();
+    // The Preview toggle's `aria-pressed` is bound to `mode === "preview"` —
+    // wait on its flip so the test fails fast with a clear assertion if
+    // the autosave flush ever hangs instead of timing out at 90s waiting
+    // for an Export PDF button that never renders (issue #1083).
+    const previewButton = page.getByRole("button", { name: "Preview" });
+    await expect(previewButton).toHaveAttribute("aria-pressed", "false");
+    await previewButton.click();
+    await expect(previewButton).toHaveAttribute("aria-pressed", "true", {
+      timeout: 10_000,
+    });
     await page.getByRole("button", { name: "Export PDF" }).click();
     await expect(page.getByText("PDF exported successfully!")).toBeVisible();
 
