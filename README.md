@@ -97,6 +97,8 @@ npx prisma db push
 npm run dev
 ```
 
+`npm install` also activates the repo's pre-commit hook (`.githooks/pre-commit`), which blocks committing the `tsconfig.json` `jsx` flip that `next build`/`next dev` generates on every run. Nothing to do — it sets `core.hooksPath` for you. If you ever need it by hand: `git config core.hooksPath .githooks`.
+
 `.env.example` annotates every key with its reader and source. After editing `prisma/schema.prisma`, regenerate the client with `npm run db:generate` (the project uses `db push`, not migrations).
 
 > **Heads-up: PDF export is the one feature that does not work on plain `localhost`.** Browserless.io's cloud Chrome has to fetch the lookbook preview page over the public internet, and it rejects local URLs outright — export fails with a 403 `Navigation … is not allowed`. The fix is a public tunnel:
