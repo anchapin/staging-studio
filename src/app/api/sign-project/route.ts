@@ -72,6 +72,16 @@ function validationFailure(error: ZodError): NextResponse {
  * PDF export). This allows clients to sign the lookbook without
  * creating an account.
  *
+ * Gate order (issue #1078): the payload and HMAC preview token are
+ * validated FIRST, before any session lookup. A valid token scoped to
+ * `projectId` is the credential — cookie-less preview visitors (the
+ * whole point of the token surface from issue #684) must reach the
+ * Prisma write without being 401'd by `getAuthedPrismaUser`. The
+ * session check still runs as defense-in-depth when no valid token is
+ * presented (a missing/forged token falls through to the session gate,
+ * preserving the prior 401 behavior for unauthenticated requests
+ * without a token).
+ *
  * Thin wrapper (issue #684): the payload is validated by
  * `signProjectRequestSchema` (projectId cuid pattern, PNG data-URL
  * prefix, ~1 MB cap), the token's validity + projectId scope are
@@ -81,14 +91,6 @@ function validationFailure(error: ZodError): NextResponse {
  * with a structured `sign_project_save_failed` event, never swallowed.
  */
 export async function POST(req: NextRequest) {
-  const user = await getAuthedPrismaUser();
-  if (!user) {
-    return withCors(NextResponse.json(
-      { error: "Unauthorized", message: "You must be logged in to sign a project." },
-      { status: 401 }
-    ));
-  }
-
   try {
     const body = await req.json();
 
@@ -98,24 +100,37 @@ export async function POST(req: NextRequest) {
     }
     const { projectId, signatureDataUrl, token } = parsed.data;
 
+    // Token-first gate (issue #1078): the HMAC preview token is the
+    // route's intended credential. Verify it before consulting the
+    // session so cookie-less preview visitors aren't 401'd out of the
+    // mutation that the preview page renders.
     const tokenVerification = await verifyPreviewToken(token);
-    if (!tokenMatchesProject(tokenVerification, projectId)) {
+    const tokenUnlocked = tokenMatchesProject(tokenVerification, projectId);
+    if (!tokenUnlocked) {
       return withCors(NextResponse.json(SIGN_ERROR_COPY.invalidToken, { status: 401 }));
     }
 
-    try {
-      await requireProjectOwnershipOrThrow(projectId, user);
-    } catch (e) {
-      if (e instanceof ProjectNotFoundError) {
-        return withCors(NextResponse.json(SIGN_ERROR_COPY.invalidProject, { status: 404 }));
+    // Defense-in-depth for session-bearing callers: an authenticated
+    // firm user with a (now-validated) token still goes through the
+    // ownership check, preserving the pre-#1078 behavior. Cookie-less
+    // preview visitors reach the write via `tokenUnlocked` alone —
+    // the token IS their credential.
+    const user = await getAuthedPrismaUser();
+    if (user) {
+      try {
+        await requireProjectOwnershipOrThrow(projectId, user);
+      } catch (e) {
+        if (e instanceof ProjectNotFoundError) {
+          return withCors(NextResponse.json(SIGN_ERROR_COPY.invalidProject, { status: 404 }));
+        }
+        if (e instanceof ProjectForbiddenError) {
+          return withCors(NextResponse.json(
+            { error: "Forbidden", message: "You do not have permission to sign this project." },
+            { status: 403 }
+          ));
+        }
+        throw e;
       }
-      if (e instanceof ProjectForbiddenError) {
-        return withCors(NextResponse.json(
-          { error: "Forbidden", message: "You do not have permission to sign this project." },
-          { status: 403 }
-        ));
-      }
-      throw e;
     }
     const project = await prisma.project.findUnique({
       where: { id: projectId },
