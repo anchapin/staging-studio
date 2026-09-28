@@ -13,7 +13,6 @@ import {
   evaluateDailyBatchQuota,
   evaluateDailyQuota,
   getDailyUsage,
-  inpaintDailyUsageWhere,
   recordDailyUsage,
   resolveDailyLimit,
 } from "@/lib/api-quota";
@@ -154,13 +153,17 @@ describe("dailyQuotaExceededPayload", () => {
   });
 });
 
-describe("inpaintDailyUsageWhere", () => {
-  it("scopes the count to the user's rooms within the daily window", () => {
-    const where = inpaintDailyUsageWhere("user_1", midDay);
-    expect(where).toEqual({
-      room: { project: { userId: "user_1" } },
-      createdAt: { gte: new Date(DAY.y, DAY.m, DAY.d, 0, 0, 0, 0) },
-    });
+describe("inpaint surface (FLUX.1 Fill runs, issue #1131)", () => {
+  it("counts charged runs on its own counter row", async () => {
+    await expect(recordDailyUsage("inpaint", "inpaint-user-a", midDay)).resolves.toBe(1);
+    await expect(recordDailyUsage("inpaint", "inpaint-user-a", midDay)).resolves.toBe(2);
+    await expect(getDailyUsage("inpaint", "inpaint-user-a", midDay)).resolves.toBe(2);
+  });
+
+  it("does not share a counter with any other surface", async () => {
+    await recordDailyUsage("inpaint", "inpaint-user-b", midDay);
+    await expect(getDailyUsage("copy", "inpaint-user-b", midDay)).resolves.toBe(0);
+    await expect(getDailyUsage("segment", "inpaint-user-b", midDay)).resolves.toBe(0);
   });
 });
 

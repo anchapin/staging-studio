@@ -14,7 +14,8 @@ import {
   DAILY_LIMIT_ENV_VAR,
   dailyQuotaExceededPayload,
   evaluateDailyQuota,
-  inpaintDailyUsageWhere,
+  getDailyUsage,
+  recordDailyUsage,
   resolveDailyLimit,
   type DailyQuotaExceededPayload,
 } from "@/lib/api-quota";
@@ -162,6 +163,49 @@ export async function createInpaintRequestWithRetry(
   }
 }
 
+// ─── Quota Charge (Issue #1131) ──────────────────────────────────────────────
+
+const INPAINT_QUOTA_CHARGE_ATTEMPTS = 3;
+const INPAINT_QUOTA_CHARGE_RETRY_DELAY_MS = 200;
+
+/**
+ * Records one billable unit against today's `inpaint` quota row.
+ *
+ * Called once the fal.ai job is already queued and billed (issue #1131):
+ * before the counter table existed, the only record of the spend was the
+ * `InpaintRequest` row, which a room delete could remove. The counter is
+ * written with bounded retry for the same reason the record write is
+ * (#688) — a transient DB failure must not discard the charge for work
+ * that was already paid for. Throws after all attempts so the caller can
+ * log it; the caller must NOT convert that into a failed response, because
+ * the client's retry would queue a SECOND billable job (#1111 tracks
+ * closing the window between the submit and this write).
+ */
+export async function recordInpaintQuotaWithRetry(userId: string): Promise<void> {
+  for (let attempt = 1; attempt <= INPAINT_QUOTA_CHARGE_ATTEMPTS; attempt += 1) {
+    try {
+      await recordDailyUsage("inpaint", userId);
+      return;
+    } catch (error) {
+      if (attempt === INPAINT_QUOTA_CHARGE_ATTEMPTS) {
+        throw error;
+      }
+      console.error(
+        JSON.stringify({
+          event: "inpaint_quota_charge_retry",
+          userId,
+          attempt,
+          attempts: INPAINT_QUOTA_CHARGE_ATTEMPTS,
+        }),
+        error
+      );
+      await new Promise((resolve) =>
+        setTimeout(resolve, INPAINT_QUOTA_CHARGE_RETRY_DELAY_MS)
+      );
+    }
+  }
+}
+
 // ─── Quality Gate ─────────────────────────────────────────────────────────────
 
 export interface QualityGateResult {
@@ -258,6 +302,12 @@ export interface QuotaCheckResult {
 
 /**
  * Checks the daily inpaint quota for a user.
+ *
+ * Usage is read from the `DailyApiUsage` counter row, NOT derived by
+ * counting `InpaintRequest` rows (issue #1131): those rows cascade-delete
+ * with their room, so a user who deleted the rooms staged today had the
+ * count — and therefore the whole cap — restored at zero cost. The counter
+ * row is not a child of any user content, so no delete refunds it.
  */
 export async function checkDailyQuota(
   userId: string
@@ -265,9 +315,7 @@ export async function checkDailyQuota(
   const dailyLimit =
     resolveDailyLimit(process.env[DAILY_LIMIT_ENV_VAR.inpaint], DEFAULT_DAILY_INPAINT_LIMIT) ?? 0;
 
-  const inpaintCount = await prisma.inpaintRequest.count({
-    where: inpaintDailyUsageWhere(userId),
-  });
+  const inpaintCount = await getDailyUsage("inpaint", userId);
 
   const decision = evaluateDailyQuota(inpaintCount, dailyLimit);
 
@@ -334,16 +382,22 @@ export interface SubmitInpaintResult {
   requestId: string;
   qualityWarnings: string[];
   recordDegraded: boolean;
+  /** True when the quota counter could not be written for a billed job (#1131). */
+  quotaChargeDegraded: boolean;
 }
 
 /**
- * Combines fal submission, quality gate evaluation, and persistence in a
- * single orchestrating function. Returns submission result and degraded flag
- * if record creation failed (issue #688 — graceful degradation).
+ * Combines fal submission, quality gate evaluation, quota charge, and
+ * persistence in a single orchestrating function. Returns the submission
+ * result plus degraded flags if the record write (#688) or the quota
+ * charge (#1131) failed after the job was already billed — both are logged
+ * and tolerated rather than surfaced as a failure, because the client's
+ * retry would queue a second billable job.
  */
 export async function submitInpaintRequest(
   room: ValidatedRoom,
   params: {
+    userId: string;
     imageUrl: string;
     maskUrl: string;
     aesthetic: string;
@@ -376,6 +430,28 @@ export async function submitInpaintRequest(
     creativeMode: params.creativeMode,
   });
 
+  // The fal job is queued and billed at this point, so the quota unit is
+  // charged BEFORE anything else can fail (#1131). Deliberately still after
+  // the submit, not a reservation before it: reserving first is #1111/#1132
+  // and depends on an atomic claim, which this write is not.
+  let quotaChargeDegraded = false;
+  try {
+    await recordInpaintQuotaWithRetry(params.userId);
+  } catch (chargeError) {
+    quotaChargeDegraded = true;
+    console.error(
+      JSON.stringify({
+        event: "inpaint_quota_charge_failed",
+        requestId: submission.request_id,
+        roomId: room.id,
+        userId: params.userId,
+        attempts: INPAINT_QUOTA_CHARGE_ATTEMPTS,
+        degraded: true,
+      }),
+      chargeError
+    );
+  }
+
   let recordDegraded = false;
   try {
     await createInpaintRequestWithRetry({
@@ -403,5 +479,6 @@ export async function submitInpaintRequest(
     requestId: submission.request_id,
     qualityWarnings,
     recordDegraded,
+    quotaChargeDegraded,
   };
 }

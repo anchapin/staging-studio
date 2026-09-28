@@ -21,7 +21,7 @@ import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { fal, falQueueSubmitWithCircuitBreaker } from "@/lib/fal";
 import { evaluateInpaintQualityGate } from "@/lib/inpaint-quality-gate";
-import { resolveDailyLimit, evaluateDailyQuota } from "@/lib/api-quota";
+import { resolveDailyLimit, evaluateDailyQuota, getDailyUsage, recordDailyUsage } from "@/lib/api-quota";
 import { buildInpaintPrompt } from "@/lib/prompts";
 
 // ---------------------------------------------------------------------------
@@ -161,10 +161,8 @@ vi.mock("@/lib/api-quota", () => ({
     used,
     resetsAt,
   })),
-  inpaintDailyUsageWhere: vi.fn((userId: string) => ({
-    room: { project: { userId } },
-    createdAt: { gte: new Date() },
-  })),
+  getDailyUsage: vi.fn(async () => 0),
+  recordDailyUsage: vi.fn(async () => 1),
 }));
 
 vi.mock("@/lib/error-classify", () => ({
@@ -191,7 +189,7 @@ describe("POST /api/inpaint", () => {
   beforeEach(() => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
     vi.mocked(prisma.room.findFirst).mockResolvedValue(mockRoom as never);
-    vi.mocked(prisma.inpaintRequest.count).mockResolvedValue(0);
+    vi.mocked(getDailyUsage).mockResolvedValue(0);
     vi.mocked(prisma.inpaintRequest.create).mockResolvedValue(mockInpaintRequest());
     vi.mocked(prisma.dailyApiUsage.findFirst).mockResolvedValue(null);
     vi.mocked(prisma.dailyApiUsage.upsert).mockResolvedValue({} as never);
@@ -239,7 +237,7 @@ describe("POST /api/inpaint", () => {
   // -------------------------------------------------------------------------
 
   it("returns 429 when daily inpaint quota is exceeded", async () => {
-    vi.mocked(prisma.inpaintRequest.count).mockResolvedValue(10);
+    vi.mocked(getDailyUsage).mockResolvedValue(10);
     vi.mocked(evaluateDailyQuota).mockImplementation(() => ({
       allowed: false,
       used: 10,
@@ -259,7 +257,7 @@ describe("POST /api/inpaint", () => {
   // -------------------------------------------------------------------------
 
   it("returns 404 when room is not found", async () => {
-    vi.mocked(prisma.inpaintRequest.count).mockResolvedValue(0);
+    vi.mocked(getDailyUsage).mockResolvedValue(0);
     vi.mocked(prisma.room.findFirst).mockResolvedValue(null);
 
     const res = await POST(makeRequest({ roomId: "nonexistent", sourceSlot: 0, variantSlot: 0 }));
@@ -274,7 +272,7 @@ describe("POST /api/inpaint", () => {
   // -------------------------------------------------------------------------
 
   it("returns 400 when sourceSlot 0 is selected but room has no afterImageUrl", async () => {
-    vi.mocked(prisma.inpaintRequest.count).mockResolvedValue(0);
+    vi.mocked(getDailyUsage).mockResolvedValue(0);
     vi.mocked(prisma.room.findFirst).mockResolvedValue({
       ...mockRoom,
       afterImageUrl: null,
@@ -288,7 +286,7 @@ describe("POST /api/inpaint", () => {
   });
 
   it("returns 400 when sourceSlot 1 is selected but room has no afterImageUrl2", async () => {
-    vi.mocked(prisma.inpaintRequest.count).mockResolvedValue(0);
+    vi.mocked(getDailyUsage).mockResolvedValue(0);
     vi.mocked(prisma.room.findFirst).mockResolvedValue({
       ...mockRoom,
       afterImageUrl2: null,
@@ -306,7 +304,7 @@ describe("POST /api/inpaint", () => {
   // -------------------------------------------------------------------------
 
   it("returns 200 and includes quality warnings when creativeMode=true", async () => {
-    vi.mocked(prisma.inpaintRequest.count).mockResolvedValue(0);
+    vi.mocked(getDailyUsage).mockResolvedValue(0);
     vi.mocked(evaluateInpaintQualityGate).mockResolvedValue([]);
     vi.mocked(fal.queue.submit).mockResolvedValue({ request_id: "fal-req-123" });
 
@@ -334,7 +332,7 @@ describe("POST /api/inpaint", () => {
   // -------------------------------------------------------------------------
 
   it("returns 200 when quality gate passes with no warnings", async () => {
-    vi.mocked(prisma.inpaintRequest.count).mockResolvedValue(0);
+    vi.mocked(getDailyUsage).mockResolvedValue(0);
     vi.mocked(evaluateInpaintQualityGate).mockResolvedValue([]);
     vi.mocked(fal.queue.submit).mockResolvedValue({ request_id: "fal-req-123" });
 
@@ -360,7 +358,7 @@ describe("POST /api/inpaint", () => {
   // -------------------------------------------------------------------------
 
   it("returns 200 with qualityWarnings when quality gate returns warnings", async () => {
-    vi.mocked(prisma.inpaintRequest.count).mockResolvedValue(0);
+    vi.mocked(getDailyUsage).mockResolvedValue(0);
     vi.mocked(evaluateInpaintQualityGate).mockResolvedValue([
       "prompt is vague — consider adding more specific style details",
     ]);
@@ -392,7 +390,7 @@ describe("POST /api/inpaint", () => {
   // -------------------------------------------------------------------------
 
   it("returns 500 when fal.queue.submit throws", async () => {
-    vi.mocked(prisma.inpaintRequest.count).mockResolvedValue(0);
+    vi.mocked(getDailyUsage).mockResolvedValue(0);
     vi.mocked(evaluateInpaintQualityGate).mockResolvedValue([]);
     vi.mocked(evaluateDailyQuota).mockReset();
     vi.mocked(evaluateDailyQuota).mockReturnValue({ allowed: true, used: 0, limit: 20, remaining: 20 });
@@ -414,5 +412,41 @@ describe("POST /api/inpaint", () => {
 
     expect(res.status).toBe(500);
     // Note: route no longer calls console.error in catch block
+  });
+
+  // -------------------------------------------------------------------------
+  // Quota ledger (issue #1131)
+  // -------------------------------------------------------------------------
+
+  it("charges the ledger and never counts InpaintRequest rows", async () => {
+    vi.mocked(getDailyUsage).mockResolvedValue(0);
+    vi.mocked(falQueueSubmitWithCircuitBreaker).mockResolvedValue({ request_id: "fal-req-123" });
+
+    const res = await POST(makeRequest({ roomId: MOCK_ROOM_ID, sourceSlot: 0, variantSlot: 0 }));
+
+    expect(res.status).toBe(200);
+    // The cap is read from the counter row...
+    expect(getDailyUsage).toHaveBeenCalledWith("inpaint", MOCK_USER_ID);
+    // ...and a billed fal job writes a counter row, so deleting the room
+    // (which cascades its InpaintRequest rows away) cannot refund it.
+    expect(recordDailyUsage).toHaveBeenCalledWith("inpaint", MOCK_USER_ID);
+    // The old derivation: usage counted from rows that cascade-delete.
+    expect(prisma.inpaintRequest.count).not.toHaveBeenCalled();
+  });
+
+  it("does not charge the ledger when the quota gate blocks the request", async () => {
+    vi.mocked(getDailyUsage).mockResolvedValue(20);
+    vi.mocked(evaluateDailyQuota).mockReturnValue({
+      allowed: false,
+      used: 20,
+      limit: 20,
+      resetsAt: new Date(Date.now() + 86400000).toISOString(),
+    });
+
+    const res = await POST(makeRequest({ roomId: MOCK_ROOM_ID, sourceSlot: 0, variantSlot: 0 }));
+
+    expect(res.status).toBe(429);
+    expect(falQueueSubmitWithCircuitBreaker).not.toHaveBeenCalled();
+    expect(recordDailyUsage).not.toHaveBeenCalled();
   });
 });

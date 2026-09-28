@@ -116,6 +116,20 @@ export const E2E_ABSENT_PROJECT_ID = "cmissing00000000000000000";
  */
 export const E2E_DAILY_EXPORT_LIMIT = 20;
 
+/**
+ * The daily inpaint cap the harness expects `POST /api/inpaint` to apply.
+ *
+ * Mirrors `DEFAULT_DAILY_INPAINT_LIMIT` in `src/lib/api-quota.ts` for the
+ * same reason as {@link E2E_DAILY_EXPORT_LIMIT}: `nextEnv()` leaves
+ * `DAILY_INPAINT_LIMIT` unset so the app default applies, and a spec
+ * asserting the route's reported `limit` fails loudly if the two drift.
+ *
+ * Used by `withInpaintUsageAtLimit` (see `quota.ts`) to pin the ledger row
+ * at the cap and reach the 429 branch — which, for an inpaint submit,
+ * means the request is rejected before fal.ai is contacted (#1131).
+ */
+export const E2E_DAILY_INPAINT_LIMIT = 20;
+
 /** Port/host for the mock Supabase (GoTrue auth + Storage). */
 export const MOCK_SUPABASE_PORT = 39911;
 export const MOCK_SUPABASE_HOST = "127.0.0.1";

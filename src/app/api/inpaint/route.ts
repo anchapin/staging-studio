@@ -70,9 +70,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { qualityWarnings, requestId, recordDegraded } = await submitInpaintRequest(
-      roomValidation.room,
-      {
+    const { qualityWarnings, requestId, recordDegraded, quotaChargeDegraded } =
+      await submitInpaintRequest(roomValidation.room, {
+        userId: user.id,
         imageUrl: parsed.data.imageUrl,
         maskUrl: parsed.data.maskUrl,
         aesthetic: parsed.data.aesthetic,
@@ -85,13 +85,15 @@ export async function POST(request: NextRequest) {
         maskCoverageRatio: parsed.data.maskCoverageRatio,
         variantSlot: parsed.data.variantSlot,
         sourceSlot,
-      }
-    );
+      });
 
     return NextResponse.json({
       requestId,
       qualityWarnings,
       ...(recordDegraded ? { degraded: true } : {}),
+      // The fal job is already billed; tell the client the spend was not
+      // recorded rather than letting it retry into a second bill (#1131).
+      ...(quotaChargeDegraded ? { quotaChargeDegraded: true } : {}),
     });
   } catch (error) {
     const classified = classifyInpaintError(error);

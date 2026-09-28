@@ -19,7 +19,7 @@ import {
   DAILY_LIMIT_ENV_VAR,
   dailyQuotaExceededPayload,
   evaluateDailyQuota,
-  inpaintDailyUsageWhere,
+  getDailyUsage,
   resolveDailyLimit,
 } from "@/lib/api-quota";
 
@@ -43,14 +43,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Rate limit: count InpaintRequest rows via exact Postgres query (#985)
+  // Rate limit: today's charged inpaint units from the DailyApiUsage
+  // counter row (#985 counted InpaintRequest rows, which a room delete
+  // refunded — #1131).
   const inpaintLimit = resolveDailyLimit(
     process.env[DAILY_LIMIT_ENV_VAR.inpaint],
     DEFAULT_DAILY_INPAINT_LIMIT
   );
-  const inpaintCount = await prisma.inpaintRequest.count({
-    where: inpaintDailyUsageWhere(user.id),
-  });
+  const inpaintCount = await getDailyUsage("inpaint", user.id);
   const inpaintQuota = evaluateDailyQuota(inpaintCount, inpaintLimit);
   if (!inpaintQuota.allowed) {
     console.warn(

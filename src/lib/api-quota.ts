@@ -4,19 +4,25 @@
  * vision label instances (issue #263), Browserless PDF export, and
  * fal.ai SAM 3.1 segmentation (issue #226).
  *
- * Mechanism per surface:
- * - `inpaint` (fal.ai): every successful queue submit already persists an
- *   `InpaintRequest` row (`createdAt` is set by Prisma), so today's usage
- *   is derived by COUNTING those rows for the user — no schema change, and
- *   the count survives serverless cold starts because it lives in Postgres.
- *   Known small race: a request that is in flight concurrently (submitted
- *   but its row not yet written) is not counted, so the cap can be
- *   overshot by in-flight submissions. Acceptable for a guardrail, not an
- *   accounting ledger.
- * - `copy`, `export`, `segment`, `label` (OpenAI + Browserless + fal.ai
- *   SAM 3.1): tracked via the `DailyApiUsage` Postgres table using
- *   atomic upserts — survives serverless cold starts and multi-instance
- *   traffic splitting (issue #784).
+ * Mechanism: every surface is counted in the `DailyApiUsage` Postgres
+ * table, one row per `@@unique([userId, surface, dayKey])`, updated with
+ * atomic upserts — so usage survives serverless cold starts and
+ * multi-instance traffic splitting (issue #784).
+ *
+ * Why a counter table rather than deriving usage from the domain rows
+ * (issue #1131): the `inpaint` surface used to be metered by COUNTING
+ * today's `InpaintRequest` rows, but those rows CASCADE-delete with their
+ * room, so deleting the rooms staged today dropped the count back to zero
+ * and handed the user their whole cap back — repeatably, for free. A
+ * counter row is not a child of any user content, so no delete in the app
+ * can refund it. Nothing in `src/` may re-derive a daily cap from a
+ * deletable table; `tests/api-quota-ledger.test.ts` pins that.
+ *
+ * Known remaining race (tracked as #1111 and #1132): the `inpaint` charge
+ * is written AFTER the fal.ai submit, so a request that is in flight
+ * concurrently is not yet counted and the cap can be overshot by in-flight
+ * submissions; the same check-then-act window exists on every surface.
+ * Acceptable for a guardrail, not an accounting ledger.
  *
  * Window semantics: a "day" is the server-local calendar day (local
  * midnight → next local midnight, wall clock of the machine running the
@@ -35,7 +41,7 @@
 
 import { prisma } from "@/lib/prisma";
 
-export type QuotaSurface = "copy" | "export" | "label" | "segment";
+export type QuotaSurface = "copy" | "export" | "inpaint" | "label" | "segment";
 
 export const DEFAULT_DAILY_INPAINT_LIMIT = 20;
 export const DEFAULT_DAILY_COPY_LIMIT = 50;
@@ -190,29 +196,11 @@ export function dailyQuotaExceededPayload(
   };
 }
 
-/**
- * Prisma `where` fragment counting a user's inpaint requests in the
- * current daily window — the fal.ai usage signal (see module header).
- * Traverses `InpaintRequest → Room → Project.userId`, matching the
- * ownership filter used by the inpaint route, so a user's quota can only
- * ever reflect their own submissions.
- */
-export function inpaintDailyUsageWhere(
-  userId: string,
-  now: Date = new Date()
-): { room: { project: { userId: string } }; createdAt: { gte: Date } } {
-  return {
-    room: { project: { userId } },
-    createdAt: { gte: dailyWindow(now).startAt },
-  };
-}
-
 // ---------------------------------------------------------------------------
-// Postgres-backed daily usage counter (copy/export/segment/label surfaces).
-// Replaces the in-process Map which had a known multi-instance race condition
-// on serverless platforms (issue #784).  The `inpaint` surface still uses
-// InpaintRequest.count() via `inpaintDailyUsageWhere` — it has its own
-// persisted row and does not need this table.
+// Postgres-backed daily usage counters — ALL surfaces, `inpaint` included
+// (issue #1131).  Replaces the in-process Map, which had a known
+// multi-instance race condition on serverless platforms (issue #784), and
+// the `InpaintRequest.count()` derivation, which a room delete refunded.
 // ---------------------------------------------------------------------------
 
 /**
