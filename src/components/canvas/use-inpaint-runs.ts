@@ -418,7 +418,7 @@ export function useInpaintRuns({
   const submitInpaint = useCallback(
     async (maskDataUrl: string) => {
       if (!promptDirectives.trim()) {
-        showError("Please add staging directives first.");
+        showError("Add staging directives to brief the AI on your vision.");
         return;
       }
       if (!maskDataUrl) {

@@ -132,7 +132,18 @@ export class AutosaveController<T> {
         const payload = this.pending as T;
         this.pending = null;
         this.hasPending = false;
-        ok = await this.save(payload);
+        try {
+          ok = await this.save(payload);
+        } catch (err) {
+          // save() threw (e.g. a Next.js server action whose fetch was
+          // aborted during revalidation). Preserve the payload so the
+          // caller can retry — never silently drop user edits — and
+          // surface the failure so flush() resolves.
+          console.error("[autosave] save threw:", err);
+          ok = false;
+          failedPayload = payload;
+          break;
+        }
         if (!ok) {
           failedPayload = payload;
           break;
@@ -150,7 +161,18 @@ export class AutosaveController<T> {
       }
     };
 
-    this.inFlight = run();
+    // Guard run() so that any unexpected throw (defense-in-depth: the
+    // inner try/catch above should cover save() failures) still clears
+    // inFlight and resolves — otherwise flush()'s `await this.inFlight`
+    // would hang forever, leaving leaveEdit() stuck (issue #1083).
+    this.inFlight = (async () => {
+      try {
+        await run();
+      } catch (err) {
+        console.error("[autosave] run() threw:", err);
+        this.inFlight = null;
+      }
+    })();
     return this.inFlight;
   }
 }

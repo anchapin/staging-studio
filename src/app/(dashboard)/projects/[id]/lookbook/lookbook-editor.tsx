@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import {
@@ -188,7 +188,7 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
     if (switching) return;
     setSwitching(true);
     try {
-      const flushResults = [...controllersRef.current.values()].map((c) => c.flush());
+      const flushResults = Object.values(controllersRef.current).map((c) => c.flush());
       const procurementFlush = procurementControllerRef.current.flush();
       const allVoid = flushResults.every((r) => r === undefined) && procurementFlush === undefined;
       if (allVoid) {
@@ -210,7 +210,7 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
   }, [switching]);
 
   const retryFailedSaves = useCallback(() => {
-    for (const controller of controllersRef.current.values()) {
+    for (const controller of Object.values(controllersRef.current)) {
       if (controller.status === "error") controller.retry();
     }
     if (procurementControllerRef.current.status === "error") {
@@ -220,22 +220,12 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
 
   const flushBeforeExport = useCallback(async () => {
     const procurementResult = procurementControllerRef.current.flush();
-    const results = [...controllersRef.current.values()].map((c) => c.flush());
+    const results = Object.values(controllersRef.current).map((c) => c.flush());
     const allVoid = procurementResult === undefined && results.every((r) => r === undefined);
     if (allVoid) return true;
     const [pResult, ...rResults] = await Promise.all([procurementResult, ...results]);
     return Boolean(pResult) && rResults.every((ok) => ok !== false);
   }, []);
-
-  // Keep controllers alive in edit mode.
-  useEffect(() => {
-    if (mode !== "edit") return;
-    const id = setInterval(() => {
-      procurementControllerRef.current.tick();
-      for (const c of controllersRef.current.values()) c.tick();
-    }, 1000);
-    return () => clearInterval(id);
-  }, [mode]);
 
   // ─── Save indicator ───────────────────────────────────────────────
   const procurementStatus = statuses.__procurement__;
@@ -302,6 +292,17 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
     project: projectData,
     user: project.user,
   }));
+
+  const previewProject = useMemo<PreviewProject>(
+    () => ({
+      ...project,
+      rooms: project.rooms.map((room) => ({
+        ...room,
+        ...overrides[room.id],
+      })),
+    }),
+    [project, overrides],
+  );
 
   // ─── Render ───────────────────────────────────────────────────────
   return (
@@ -410,7 +411,7 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
             hasSwatches={project.materialSwatches.length > 0}
           />
           <div className="paper-preview">
-            <LookbookPreviewView project={project} />
+            <LookbookPreviewView project={previewProject} />
           </div>
         </div>
       ) : (

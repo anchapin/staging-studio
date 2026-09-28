@@ -398,7 +398,15 @@
     display: none;
   }
 
-  /* PDF page footer via @page rule (issue #643: Browserless/print capture). */
+  /* PDF page footer via @page rule (issue #643: Browserless/print capture).
+     Issue #1063: the original used @bottom-center:before with a display:
+     block pseudo-element to draw a hairline above the footer text. CSS
+     Paged Media Level 3 margin-box pseudo-elements are not parsed by
+     Tailwind v4 / lightningcss, which crashes the dev server's CSS
+     pipeline with "Unexpected token Colon". Folding the border + spacing
+     directly onto the @bottom-center box preserves the visual (thin
+     horizontal line with 2pt gap above the centered footer text) without
+     the unsupported pseudo-element. */
   @page {
     size: letter portrait;
     margin: 0mm;
@@ -407,12 +415,8 @@
       font-family: var(--font-jakarta), sans-serif;
       font-size: 6pt;
       color: #8C827A;
-    }
-    @bottom-center:before {
-      content: "";
-      display: block;
       border-top: 0.5pt solid #8C827A;
-      margin-bottom: 2pt;
+      padding-top: 2pt;
     }
   }
 }

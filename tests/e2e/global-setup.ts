@@ -17,6 +17,8 @@ import {
   E2E_UPLOAD_PROJECT_ID,
   E2E_UPLOAD_ROOM_ID,
   E2E_USER_ID,
+  MOCK_BROWSERLESS_HOST,
+  MOCK_BROWSERLESS_PORT,
   MOCK_SUPABASE_HOST,
   MOCK_SUPABASE_PORT,
   POSTGRES_CONTAINER_NAME,
@@ -25,6 +27,7 @@ import {
   roomPhotoPublicUrl,
 } from "./env";
 import { MockSupabase } from "./mock-supabase";
+import { MockBrowserless } from "./mock-browserless";
 import { roomPhotoFixture, stagedResultFixture } from "./fixtures";
 
 /**
@@ -38,6 +41,10 @@ import { roomPhotoFixture, stagedResultFixture } from "./fixtures";
  *      which is the prerequisite for the focused staging editor.
  *   3. The mock Supabase (GoTrue auth + Storage) HTTP server, kept alive
  *      for the whole test run (it lives in this process).
+ *   4. The mock Browserless PDF server (issue #1084), also kept alive for
+ *      the whole run. It backs the specs that drive the REAL export
+ *      route handler, whose server-side outbound fetch `page.route`
+ *      cannot intercept.
  *
  * The Next.js server itself is started later by playwright.config.ts's
  * `webServer`, pointed at the same mock + database via `nextEnv()`.
@@ -45,6 +52,7 @@ import { roomPhotoFixture, stagedResultFixture } from "./fixtures";
 
 declare global {
   var __e2eMockSupabase: MockSupabase | undefined;
+  var __e2eMockBrowserless: MockBrowserless | undefined;
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -283,6 +291,9 @@ async function seed(): Promise<void> {
 async function main(): Promise<void> {
   console.log("[e2e] app under test:", APP_URL);
   console.log(`[e2e] mock supabase:  http://${MOCK_SUPABASE_HOST}:${MOCK_SUPABASE_PORT}`);
+  console.log(
+    `[e2e] mock browserless: http://${MOCK_BROWSERLESS_HOST}:${MOCK_BROWSERLESS_PORT}/pdf`
+  );
 
   ensureDockerPostgres();
   await pushSchema();
@@ -326,6 +337,13 @@ async function main(): Promise<void> {
     `[e2e] seeded fixtures: room photo ${roomPhotoFixture().length}B, ` +
       `staged result ${stagedResultFixture().length}B — mock ready`
   );
+
+  // Started last: the Next.js server may hit the mock Browserless the
+  // moment a spec exercises the real export route, so it must be
+  // listening before the run begins.
+  const mockBrowserless = new MockBrowserless();
+  await mockBrowserless.start();
+  globalThis.__e2eMockBrowserless = mockBrowserless;
 }
 
 export default main;

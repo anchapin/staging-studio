@@ -4,6 +4,7 @@ import {
   BROWSERLESS_TIMEOUT_MS,
   buildBrowserlessPdfBody,
   buildBrowserlessPdfUrl,
+  resolveBrowserlessPdfUrl,
 } from "@/lib/browserless";
 
 describe("buildBrowserlessPdfUrl", () => {
@@ -18,6 +19,45 @@ describe("buildBrowserlessPdfUrl", () => {
     expect(url.protocol).toBe("https:");
     expect(url.hostname).toBe("chrome.browserless.io");
     expect(url.pathname).toBe("/pdf");
+  });
+});
+
+describe("resolveBrowserlessPdfUrl", () => {
+  const OVERRIDE = "http://127.0.0.1:39931/pdf";
+
+  it("returns the real endpoint when no env vars are set (production path)", () => {
+    expect(resolveBrowserlessPdfUrl(undefined, undefined)).toBe(
+      "https://chrome.browserless.io/pdf"
+    );
+  });
+
+  it("ignores the override unless the hermetic flag is exactly \"1\"", () => {
+    // Issue #1084: the override is a test-only seam. A stray
+    // E2E_BROWSERLESS_PDF_URL in a production .env.local must NOT be able
+    // to redirect outbound PDF bytes, so any flag value other than "1"
+    // keeps the real endpoint.
+    for (const flag of [undefined, "", "  ", "0", "true", "yes", "2"]) {
+      expect(resolveBrowserlessPdfUrl(flag, OVERRIDE)).toBe(
+        "https://chrome.browserless.io/pdf"
+      );
+    }
+  });
+
+  it("honors the override when the hermetic flag is \"1\"", () => {
+    expect(resolveBrowserlessPdfUrl("1", OVERRIDE)).toBe(OVERRIDE);
+    expect(resolveBrowserlessPdfUrl("  1  ", OVERRIDE)).toBe(OVERRIDE);
+  });
+
+  it("keeps the real endpoint when the flag is set but the override is blank", () => {
+    for (const blank of [undefined, "", "   "]) {
+      expect(resolveBrowserlessPdfUrl("1", blank)).toBe(
+        "https://chrome.browserless.io/pdf"
+      );
+    }
+  });
+
+  it("trims the override so a stray newline cannot corrupt the URL", () => {
+    expect(resolveBrowserlessPdfUrl("1", `  ${OVERRIDE}\n`)).toBe(OVERRIDE);
   });
 });
 
@@ -40,6 +80,7 @@ describe("buildBrowserlessPdfBody", () => {
           left: "0",
         },
       },
+      timeout: 55000,
     });
   });
 

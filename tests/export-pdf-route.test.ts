@@ -65,9 +65,13 @@ vi.mock("@/lib/preview-token", () => ({
 }));
 
 vi.mock("@/lib/browserless", () => ({
-  buildBrowserlessPdfUrl: vi.fn(() => "https://browserless.example.com/pdf"),
+  // Issue #1084: the route resolves the endpoint through the
+  // hermetic-gated resolver, not the raw constant builder.
+  resolveBrowserlessPdfUrl: vi.fn(() => "https://browserless.example.com/pdf"),
   buildBrowserlessPdfBody: vi.fn(() => ({ url: "https://example.com/preview" })),
   BROWSERLESS_TIMEOUT_MS: 60000,
+  E2E_HERMETIC_ENV_VAR: "E2E_HERMETIC",
+  E2E_BROWSERLESS_PDF_URL_ENV_VAR: "E2E_BROWSERLESS_PDF_URL",
   fetchBrowserlessPdfWithCircuitBreaker: mockFetchBrowserless,
 }));
 
