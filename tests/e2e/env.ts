@@ -15,15 +15,27 @@
  * never actually invoked.
  */
 
-/** Fixed seed identities so specs can address rows by URL deterministically. */
+/**
+ * Fixed seed identities so specs can address rows by URL deterministically.
+ *
+ * Project ids MUST be cuid-shaped (match /^c[a-z0-9]{24}$/) because
+ * /api/sign-project (issue #684), /api/export-pdf, and /api/v1/export-pdf
+ * all validate `projectId` against Prisma's cuid pattern before any
+ * business logic — the previous e2e…-prefixed nanoid-shaped ids would 400
+ * before the token/preview checks ran. The dedicated signoff id has been
+ * cuid-shaped since #695; #1079 extended the same convention to every
+ * other seeded project so export-pdf, rehearsal, and the cascades they
+ * unblock (#1084, parts of #1085) can mint a token for the seeded
+ * project and assert the 400 path on a separate seed row.
+ */
 export const E2E_USER_ID = "e2euser0000000000000000000user";
 export const E2E_EMAIL = "e2e@stagingstudio.test";
 export const E2E_PASSWORD = "e2e-password";
 
-export const E2E_UPLOAD_PROJECT_ID = "e2euploadproject0000000000proj";
+export const E2E_UPLOAD_PROJECT_ID = "cupload000000000000000000";
 export const E2E_UPLOAD_ROOM_ID = "e2euploadroom0000000000000room";
 
-export const E2E_EDITOR_PROJECT_ID = "e2eeditorproject000000000proj";
+export const E2E_EDITOR_PROJECT_ID = "ceditor000000000000000000";
 export const E2E_EDITOR_ROOM_ID = "e2eeditorroom00000000000000room";
 
 /**
@@ -32,10 +44,10 @@ export const E2E_EDITOR_ROOM_ID = "e2eeditorroom00000000000000room";
  * brush/preset specs assert against — specs run alphabetically and share
  * one seeded database per suite run.
  */
-export const E2E_CONCEPT_PROJECT_ID = "e2econceptproject00000000proj";
+export const E2E_CONCEPT_PROJECT_ID = "cconcept00000000000000000";
 export const E2E_CONCEPT_ROOM_ID = "e2econceptroom000000000000room";
 
-export const E2E_REHEARSAL_PROJECT_ID = "e2erehearsalproject0000000proj";
+export const E2E_REHEARSAL_PROJECT_ID = "crehearsal000000000000000";
 export const E2E_REHEARSAL_ROOM_ID = "e2erehearsalroom0000000000room";
 
 /**
@@ -48,10 +60,11 @@ export const E2E_LOOKBOOK_ROOM_ID = "e2elookbookroom00000000000room";
 
 /**
  * Dedicated unsigned project for the client signoff spec (issue #695).
- * The project id is deliberately cuid-shaped (matches the
- * /^c[a-z0-9]{24}$/ pattern signProjectRequestSchema enforces, issue
- * #684) — /api/sign-project would reject the e2e…-prefixed seed ids
- * with a 400 before the token check ever runs.
+ * The project id is cuid-shaped (matches /^c[a-z0-9]{24}$/, enforced by
+ * signProjectRequestSchema, issue #684) because /api/sign-project
+ * rejects non-cuid ids with a 400 before the token check ever runs.
+ * #1079 brought the other seeded project ids in line with this same
+ * convention.
  */
 export const E2E_SIGNOFF_PROJECT_ID = "ce2esignoff00000000000000";
 export const E2E_SIGNOFF_ROOM_ID = "e2esignoffroom00000000000000room";
