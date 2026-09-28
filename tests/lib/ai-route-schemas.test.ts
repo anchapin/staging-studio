@@ -4,7 +4,6 @@ import {
   aiImageUrlSchema,
   aiMaskUrlSchema,
   inpaintRequestSchema,
-  segmentPointSchema,
   segmentConceptSchema,
   visionLabelCropSchema,
   visionLabelOutputSchema,
@@ -15,13 +14,12 @@ import {
 
 /**
  * Issue #1061: ai-route-schemas — the schemas consumed by /api/inpaint,
- * /api/segment, /api/segment/furnishings, /api/label-instances, and the
+ * /api/segment/furnishings, /api/label-instances, and the
  * AI-quality-gate pre-flight checks.
  *
- * `generateCopyRequestSchema`, `segmentRequestSchema`,
- * `furnishingsSegmentRequestSchema`, `visionLabelRequestSchema`, and
- * `batchRoomTypesRequestSchema` are pinned in
- * tests/generate-copy-request-schema.test.ts and
+ * `generateCopyRequestSchema`, `furnishingsSegmentRequestSchema`,
+ * `visionLabelRequestSchema`, and `batchRoomTypesRequestSchema` are
+ * pinned in tests/generate-copy-request-schema.test.ts and
  * tests/segment-request-schema.test.ts (file names predate the
  * 1:1 convention). This file covers the schemas still missing
  * direct coverage, plus invariants shared across all of them
@@ -188,25 +186,6 @@ describe("inpaintRequestSchema (issue #1061)", () => {
         imageUrl: "https://example.com/x.png",
       }).success
     ).toBe(false);
-  });
-});
-
-describe("segmentPointSchema (issue #1061)", () => {
-  it("accepts a point with non-negative finite coordinates", () => {
-    expect(segmentPointSchema.safeParse({ x: 0, y: 0 }).success).toBe(true);
-    expect(segmentPointSchema.safeParse({ x: 1024, y: 768 }).success).toBe(true);
-  });
-
-  it("rejects negative coordinates", () => {
-    expect(segmentPointSchema.safeParse({ x: -1, y: 0 }).success).toBe(false);
-    expect(segmentPointSchema.safeParse({ x: 0, y: -1 }).success).toBe(false);
-  });
-
-  it("rejects non-finite coordinates (NaN, Infinity)", () => {
-    expect(segmentPointSchema.safeParse({ x: NaN, y: 0 }).success).toBe(false);
-    expect(segmentPointSchema.safeParse({ x: 0, y: Infinity }).success).toBe(
-      false
-    );
   });
 });
 

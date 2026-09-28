@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
   return NextResponse.json(
     {
       message: "v1 segment endpoint stub",
-      note: "Submit segmentation requests via the non-v1 /api/segment endpoint.",
+      note: "Submit segmentation requests via the non-v1 /api/segment/furnishings endpoint.",
       version: "v1",
     },
     { headers: buildVersionHeaders("v1") }
