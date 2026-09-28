@@ -13,6 +13,7 @@
     "e2e:headed": "playwright test --headed",
     "release:check": "bash scripts/check-develop-catchup.sh",
     "postinstall": "prisma generate",
+    "prepare": "bash scripts/enable-hooks.sh",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio"
