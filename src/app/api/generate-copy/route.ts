@@ -201,6 +201,27 @@ export async function POST(request: NextRequest) {
             room.project.buyerDemographics as unknown as import("@/lib/prompts").BuyerDemographicsInput | undefined
           ) ?? undefined,
         }),
+        repairText: async ({ text }) => {
+          const trimmed = text.trim();
+          const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
+          if (!jsonMatch) return null;
+          const extracted = jsonMatch[0];
+          try {
+            JSON.parse(extracted);
+            return extracted;
+          } catch {
+            const fixed = extracted
+              .replace(/,\s*([}\]])/g, "$1")
+              .replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":')
+              .replace(/:\s*'([^']*)'/g, ': "$1"');
+            try {
+              JSON.parse(fixed);
+              return fixed;
+            } catch {
+              return null;
+            }
+          }
+        },
       })
     );
 

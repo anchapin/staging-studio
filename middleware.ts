@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { buildDeprecationHeaders } from "@/lib/api-version";
 import { resolveAuthRedirect } from "@/lib/auth-redirect";
 import { logger } from "@/lib/logger";
 
@@ -66,6 +67,12 @@ export async function middleware(request: NextRequest) {
   const redirectTarget = resolveAuthRedirect(pathname, authenticated);
   if (redirectTarget) {
     return NextResponse.redirect(new URL(redirectTarget, request.url));
+  }
+
+  if (pathname.startsWith("/api/") && !pathname.startsWith("/api/v1/")) {
+    for (const [key, value] of Object.entries(buildDeprecationHeaders())) {
+      supabaseResponse.headers.set(key, value);
+    }
   }
 
   return supabaseResponse;

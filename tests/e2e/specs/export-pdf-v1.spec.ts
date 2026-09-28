@@ -19,7 +19,9 @@ const EXPORT_PDF_V1_URL = "/api/v1/export-pdf";
  * `GET` with a `?projectId=` query param, it adds a daily export quota
  * (429) and a project-ownership check (403/404) that the unversioned
  * route does not perform, and it answers every response — success and
- * error alike — with an `API-Version: v1` header. Its error mapping also
+ * error alike — with an `X-Supabase-API-Version: v1` header (renamed from
+ * `API-Version` by #1018, which lives on main and is already in Production).
+ * Its error mapping also
  * DIVERGES where it matters: an upstream provider failure is flattened to
  * a 500 `invalid-request`, whereas the unversioned route propagates the
  * provider's own status (a 503 stays a 503). Both are pinned below.
@@ -60,7 +62,7 @@ test.describe("export-pdf v1 API route", () => {
       `attachment; filename="staging-report-${E2E_UPLOAD_PROJECT_ID}.pdf"`
     );
     // The route stamps every branch with buildVersionHeaders("v1").
-    expect(response.headers()["api-version"]).toBe("v1");
+    expect(response.headers()["x-supabase-api-version"]).toBe("v1");
 
     const buffer = await response.body();
     expect(buffer.length).toBeGreaterThan(0);
@@ -87,7 +89,7 @@ test.describe("export-pdf v1 API route", () => {
     );
 
     expect(response.status()).toBe(401);
-    expect(response.headers()["api-version"]).toBe("v1");
+    expect(response.headers()["x-supabase-api-version"]).toBe("v1");
     const body = await response.json();
     expect(body.code).toBe("unauthorized");
   });
@@ -174,7 +176,7 @@ test.describe("export-pdf v1 API route", () => {
       );
       return {
         status: response.status(),
-        apiVersion: response.headers()["api-version"],
+        apiVersion: response.headers()["x-supabase-api-version"],
         body: (await response.json()) as {
           success: boolean;
           code: string;

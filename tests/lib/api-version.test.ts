@@ -106,9 +106,9 @@ describe("api-version", () => {
       expect(sunsetDate.toUTCString()).toBe(headers[SUNSET_HEADER]);
     });
 
-    it("sets Version header to unversioned", () => {
+    it("sets Version header to deprecated", () => {
       const headers = buildDeprecationHeaders();
-      expect(headers[VERSION_HEADER]).toBe("unversioned");
+      expect(headers[VERSION_HEADER]).toBe("deprecated");
     });
 
     it("sets Link header to v1 successor", () => {
@@ -139,8 +139,8 @@ describe("api-version", () => {
       expect(CURRENT_API_VERSION).toBe("v1");
     });
 
-    it("VERSION_HEADER is API-Version", () => {
-      expect(VERSION_HEADER).toBe("API-Version");
+    it("VERSION_HEADER is X-Supabase-API-Version", () => {
+      expect(VERSION_HEADER).toBe("X-Supabase-API-Version");
     });
 
     it("DEPRECATION_HEADER is Deprecation", () => {
