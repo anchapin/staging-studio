@@ -135,6 +135,8 @@ npm run e2e          # headless run (single worker — deterministic)
 npm run e2e:headed   # watch it drive the real UI
 ```
 
-Artifacts (traces/screenshots on failure, HTML report) land in `test-results/` and `playwright-report/`, both gitignored.
+Artifacts (traces/screenshots on failure, HTML report) land in `test-results/` and `playwright-report/`, both gitignored. On failure in CI they are uploaded as a workflow artifact instead, since the runner's copy is discarded at teardown.
+
+**In CI:** the same suite runs as the `e2e` job in `.github/workflows/ci.yml`, on **pushes** to `develop` and `main` only. Push is the only scope that would ever fire — `develop` is unprotected and ordinary work is pushed to it directly, so a PR-scoped job would run once per release and never for the work it covers. The trade is cost: hermetic but not cheap (a production build plus 62 specs on a single worker), so one run per merge beats one per PR push. The consequence: a red e2e run reports on the branch tip and does **not** block the merge that caused it, which is why `E2E (Playwright)` is deliberately not a required check. `main` gets its own run on release, which puts a release-merge regression in the same place as the Production deploy it affects.
 
 See [issues](../../issues) for the full development roadmap.

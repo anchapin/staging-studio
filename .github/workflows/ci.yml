@@ -50,6 +50,99 @@ jobs:
       - name: Unit tests (vitest)
         run: npm test
 
+  # Browser suite (Playwright). A sibling of fast-checks, not part of it.
+  #
+  # `fast-checks` covers lint + typecheck + vitest, which is what branch
+  # protection requires — but it cannot see anything that only exists in a
+  # real browser against a real server. That gap is not hypothetical: the
+  # `/api/v1/export-pdf` 429 branch was missing from this suite entirely,
+  # and a header rename that had already shipped to main
+  # (`API-Version` → `X-Supabase-API-Version`) was caught by this suite
+  # while `develop` was still stale — vitest was green throughout.
+  #
+  # Scoped to `push` on the long-lived branches ON PURPOSE. The suite is
+  # hermetic but not cheap: it builds the app, starts Postgres in Docker,
+  # and runs 62 specs on a single worker (workers: 1 is required — the mock
+  # Browserless's request log is process-wide).
+  #
+  # Push is not a compromise between "on PRs" and "on branches" here, it is
+  # the only scope that would ever fire: `develop` is UNPROTECTED and
+  # ordinary work is pushed to it directly. PRs exist only for the
+  # develop→main release. A `pull_request`-scoped e2e job would therefore
+  # run once per release and never for the work it is meant to cover.
+  # Charging that to every PR push buys little either way, because a PR's
+  # commits are what land on develop, and this job fires on that push.
+  # The regression is caught at the branch tip instead of before merge.
+  #
+  # Consequences of push-only, stated so nobody is surprised:
+  #   - A red e2e run does NOT block the merge that caused it. It reports
+  #     on the branch, and fixing it is a follow-up commit.
+  #   - It therefore cannot be a required check (a required check must
+  #     report on the PR). Do not add it to branch protection unless the
+  #     `if` is widened to cover pull_request.
+  #   - `main` gets its own run on release, so a release-merge regression
+  #     is visible in the same place a production deploy is.
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    timeout-minutes: 30
+    # Measured on a clean checkout with no env files (the closest thing to
+    # this runner available locally): `npm ci` ~20s, then ~4min for the
+    # production build inside the webServer plus all 62 specs. The 30min
+    # ceiling is deliberately slack rather than fitted — a cold runner with
+    # an empty browser cache is slower, and Playwright's own 90s per-test
+    # and 420s webServer timeouts already bound real hangs. This only stops
+    # a wedged job from holding a runner for hours.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # Docker is preinstalled on ubuntu-latest, which is all the harness
+      # needs: it runs a disposable postgres:16-alpine and serves a local
+      # mock Supabase (GoTrue + Storage) and mock Browserless. No secrets
+      # and no paid provider are involved, so this job needs no
+      # environment: block and cannot leak one.
+      - name: Install dependencies
+        run: npm ci
+
+      # Keyed on the lockfile rather than the @playwright/test version
+      # alone: a Playwright upgrade also moves the bundled browser build,
+      # and a stale cached browser fails at launch with a far less obvious
+      # error than "out of date".
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: E2E tests (Playwright)
+        run: npm run e2e
+
+      # The HTML report and traces are the only real diagnostic for a
+      # browser failure, and both paths are gitignored — they exist solely
+      # in the runner, so without this they are discarded on job teardown.
+      - name: Upload Playwright report and traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_id }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
   # Release guard: only fires on PRs that target main, i.e. release PRs.
   #
   # A commit that reaches main without reaching develop leaves develop
