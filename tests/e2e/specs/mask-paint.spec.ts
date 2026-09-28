@@ -81,21 +81,41 @@ test.describe("mask painting", () => {
     // Completion persists the staged image through the app's REAL room
     // PATCH route against the local database — the staged result section
     // (issue #168) renders once that write lands, and the variant strip
-    // marks Variant A as selected from the SAME persisted row. (The save
-    // toast is ephemeral: under full-suite load it can dismiss before any
-    // assertion poll sees it, so the durable rendered state is asserted
-    // instead.)
+    // marks the just-staged variant as selected from the SAME persisted
+    // row. (The save toast is ephemeral: under full-suite load it can
+    // dismiss before any assertion poll sees it, so the durable rendered
+    // state is asserted instead.)
     await expect(page.getByRole("heading", { name: "Staged result" })).toBeVisible({
       timeout: 20_000,
     });
-    await expect(page.getByText("Variant A (Selected)")).toBeVisible();
+    // Issue #1091: the strip never renders the literal text "Variant A
+    // (Selected)" — the selected caption is exposed via aria-pressed on the
+    // thumbnail button (src/components/canvas/variant-thumbnail-strip.tsx),
+    // with "(Selected)" in an sr-only span. Assert the accessibility
+    // contract instead. The shared Mask Room leaks variant-slot state across
+    // specs (inpaint-submit stages before this file runs), so scope the
+    // assertion to the slot THIS run staged — cf. version-history.spec.ts.
+    // The app always selects the slot it just staged
+    // (buildInpaintResultPatch in src/lib/inpaint-source.ts). The button is
+    // pinned via its thumbnail img alt ("…Variant A thumbnail") because the
+    // "Variant A" caption lives in a sibling ThumbLabel span, not inside
+    // the button, so a hasText filter on the button matches nothing.
+    const runSlot = inpaint.submitBody().variantSlot;
+    // The shared room may already hold staged variants from earlier specs,
+    // so this run targets whichever slot was free — assert a valid slot
+    // rather than assuming slot 0.
+    expect([0, 1]).toContain(runSlot);
+    const runLetter = runSlot === 0 ? "A" : "B";
+    const stagedButton = page.locator(
+      `button[aria-pressed]:has(img[alt*="Variant ${runLetter}"])`
+    );
+    await expect(stagedButton).toHaveAttribute("aria-pressed", "true");
 
     const body = inpaint.submitBody();
     expect(body.imageUrl).toContain(`/rooms/${E2E_EDITOR_ROOM_ID}/before-image.png`);
     expect(body.promptDirectives).toBe(
       "Add a neutral linen sofa and a warm wood coffee table."
     );
-    expect(body.variantSlot).toBe(0);
 
     const whiteShare = await whitePixelShare(page, inpaint.maskDataUrl());
     expect(
