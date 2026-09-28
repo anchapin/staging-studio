@@ -13,6 +13,15 @@
  * network layer with Playwright route handlers. The provider API keys in
  * `nextEnv()` are dummy strings — the routes that would use them are
  * never actually invoked.
+ *
+ * The one deliberate exception (issue #1084): `export-pdf.spec.ts` drives
+ * the REAL `/api/export-pdf` handler, because the browser-layer pattern
+ * cannot cover it — the handler's outbound Browserless fetch runs
+ * server-side, where `page.route` cannot reach. That fetch is redirected
+ * to a local mock (`mock-browserless.ts`) via the hermetic-gated
+ * `E2E_BROWSERLESS_PDF_URL` override, so real Browserless is still never
+ * contacted. Specs that only need client-side behavior keep using the
+ * browser-layer mock.
  */
 
 /**
@@ -86,6 +95,20 @@ export const POSTGRES_IMAGE = "postgres:16-alpine";
 export const DATABASE_URL = `postgresql://e2e:e2e@127.0.0.1:${POSTGRES_PORT}/staging_studio_e2e`;
 
 /**
+ * Mock Browserless PDF endpoint (issue #1084).
+ *
+ * `src/app/api/export-pdf` fetches Browserless from the Next.js SERVER
+ * process, which a Playwright `page.route` cannot intercept — only the
+ * browser's own requests pass through it. Specs that drive the real route
+ * handler point the handler's outbound fetch here instead (via the
+ * hermetic-gated `E2E_BROWSERLESS_PDF_URL` override), so the real
+ * Browserless API is never contacted.
+ */
+export const MOCK_BROWSERLESS_PORT = 39931;
+export const MOCK_BROWSERLESS_HOST = "127.0.0.1";
+export const MOCK_BROWSERLESS_URL = `http://${MOCK_BROWSERLESS_HOST}:${MOCK_BROWSERLESS_PORT}/pdf`;
+
+/**
  * Fake "fal.ai" staged-result URL persisted after a completed inpaint.
  *
  * Uses MOCK_SUPABASE_URL so the next/image optimizer can fetch it
@@ -121,6 +144,12 @@ export function nextEnv(): Record<string, string> {
     OPENAI_API_KEY: "e2e-dummy-openai-key",
     FAL_KEY: "e2e-dummy-fal-key",
     BROWSERLESS_API_KEY: "e2e-dummy-browserless-key",
+    // Issue #1084: with E2E_HERMETIC=1, the export route's outbound
+    // Browserless fetch resolves to the local mock instead of the real
+    // paid API. E2E_HERMETIC is the guard that keeps the override inert
+    // everywhere else — neither var is set outside this harness.
+    E2E_HERMETIC: "1",
+    E2E_BROWSERLESS_PDF_URL: MOCK_BROWSERLESS_URL,
     NEXT_PUBLIC_APP_URL: APP_URL,
     PREVIEW_TOKEN_SECRET: "e2e-preview-token-secret",
   };

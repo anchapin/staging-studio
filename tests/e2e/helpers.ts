@@ -6,10 +6,15 @@ import {
   E2E_EMAIL,
   E2E_PASSWORD,
   E2E_UPLOAD_PROJECT_ID,
+  MOCK_BROWSERLESS_URL,
   MOCK_SUPABASE_URL,
   STAGED_RESULT_HOST,
   STAGED_RESULT_PUBLIC_URL,
 } from "./env";
+import type {
+  BrowserlessOutcome,
+  CapturedBrowserlessRequest,
+} from "./mock-browserless";
 import { stagedResultFixture } from "./fixtures";
 
 /**
@@ -606,6 +611,35 @@ export async function mockStorageEntries(): Promise<MockStorageEntry[]> {
   const response = await fetch(`${MOCK_SUPABASE_URL}/__e2e/storage`);
   if (!response.ok) throw new Error(`mock storage inspection failed: HTTP ${response.status}`);
   return (await response.json()) as MockStorageEntry[];
+}
+
+/**
+ * Chooses the mock Browserless PDF endpoint's behavior (issue #1084):
+ * `"success"` serves a minimal valid PDF, `"outage"` serves a 503.
+ *
+ * Node side, no browser involved — the real export route handler's
+ * server-side fetch is what lands on the mock, so the control channel
+ * has to be the same one specs use to inspect captured requests.
+ */
+export async function setMockBrowserlessOutcome(outcome: BrowserlessOutcome): Promise<void> {
+  const response = await fetch(`${MOCK_BROWSERLESS_URL.replace(/\/pdf$/, "")}/__e2e/outcome`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ outcome }),
+  });
+  if (!response.ok) {
+    throw new Error(`mock browserless outcome control failed: HTTP ${response.status}`);
+  }
+}
+
+/** Every PDF request the mock Browserless has received, in arrival order. */
+export async function mockBrowserlessRequests(): Promise<CapturedBrowserlessRequest[]> {
+  const base = MOCK_BROWSERLESS_URL.replace(/\/pdf$/, "");
+  const response = await fetch(`${base}/__e2e/requests`);
+  if (!response.ok) {
+    throw new Error(`mock browserless inspection failed: HTTP ${response.status}`);
+  }
+  return (await response.json()) as CapturedBrowserlessRequest[];
 }
 
 /**

@@ -8,7 +8,7 @@ import { prisma } from "@/lib/prisma";
 // Use vi.hoisted so the mock is fresh for each test run and doesn't retain
 // state from the full suite run (avoids global.fetch pollution from sibling test files)
 const {
-  buildBrowserlessPdfUrl,
+  resolveBrowserlessPdfUrl,
   buildBrowserlessPdfBody,
   fetchBrowserlessPdfWithCircuitBreaker,
   requireProjectOwnershipOrThrow,
@@ -30,7 +30,10 @@ const {
   }
 
   return {
-    buildBrowserlessPdfUrl: vi.fn(() => "https://chrome.browserless.io/pdf"),
+    // Issue #1084: the route resolves the endpoint through the
+    // hermetic-gated resolver (real endpoint unless the e2e override is
+    // explicitly enabled), so that is what it must call.
+    resolveBrowserlessPdfUrl: vi.fn(() => "https://chrome.browserless.io/pdf"),
     buildBrowserlessPdfBody: vi.fn((url: string) => ({
       url,
       gotoOptions: { waitUntil: "networkidle0" as const },
@@ -62,9 +65,11 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 vi.mock("@/lib/browserless", () => ({
-  buildBrowserlessPdfUrl,
+  resolveBrowserlessPdfUrl,
   buildBrowserlessPdfBody,
   BROWSERLESS_TIMEOUT_MS: 60_000,
+  E2E_HERMETIC_ENV_VAR: "E2E_HERMETIC",
+  E2E_BROWSERLESS_PDF_URL_ENV_VAR: "E2E_BROWSERLESS_PDF_URL",
   fetchBrowserlessPdfWithCircuitBreaker,
 }));
 
