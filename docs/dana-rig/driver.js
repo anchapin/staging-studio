@@ -101,13 +101,17 @@ async function ensurePage() {
         // Fall back to the full Chromium build when the headless shell
         // is unavailable (e.g. flaky browser download). Override with
         // UX_PROTO_CHROME_PATH if your ms-playwright cache lives elsewhere.
+        // chromium-1187 is the build Playwright 1.55.0 ships (Chromium
+        // 140.0.7339.16) — pins to the version that pre-dates the Flight
+        // stream regression (#1073, Path A1). If your local ms-playwright
+        // cache is from a different Playwright version, set UX_PROTO_CHROME_PATH.
         const fullChrome =
           process.env.UX_PROTO_CHROME_PATH ||
           (process.platform === "darwin"
             ? require("os").homedir() +
-              "/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium"
+              "/Library/Caches/ms-playwright/chromium-1187/chrome-mac-arm64/chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium"
             : require("os").homedir() +
-              "/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome");
+              "/.cache/ms-playwright/chromium-1187/chrome-linux64/chrome");
         browser = await chromium.launch({ ...launchOpts, executablePath: fullChrome });
       }
     }
