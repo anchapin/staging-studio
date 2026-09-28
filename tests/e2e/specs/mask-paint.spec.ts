@@ -81,20 +81,45 @@ test.describe("mask painting", () => {
     // Completion persists the staged image through the app's REAL room
     // PATCH route against the local database — the staged result section
     // (issue #168) renders once that write lands, and the variant strip
-    // marks Variant A as selected from the SAME persisted row. (The save
-    // toast is ephemeral: under full-suite load it can dismiss before any
-    // assertion poll sees it, so the durable rendered state is asserted
-    // instead.)
+    // marks the newly-staged variant as selected from the SAME persisted
+    // row. (The save toast is ephemeral: under full-suite load it can
+    // dismiss before any assertion poll sees it, so the durable rendered
+    // state is asserted instead.)
     await expect(page.getByRole("heading", { name: "Staged result" })).toBeVisible({
       timeout: 20_000,
     });
-    await expect(page.getByText("Variant A (Selected)")).toBeVisible();
+    // Issue #1091, two defects at once:
+    //
+    // 1. The old assertion targeted "Variant A (Selected)" — text the
+    //    strip never renders. `(Selected)` lives in an sr-only span and
+    //    the visible badge is a Lucide check icon (variant-thumbnail-
+    //    strip.tsx:209-236), so `getByText` could never match it.
+    // 2. Pinning the letter "A" was wrong regardless: the Mask Room row
+    //    is shared by five specs and the server writes a fresh run to the
+    //    FIRST EMPTY variant slot (pickVariantSlot,
+    //    lib/inpaint-source.ts:49-53). Isolated, slot 0 is empty so this
+    //    run lands in A; after a sibling spec has staged a variant, it
+    //    lands in B instead. The stable contract is "the variant that
+    //    just received the result is the selected one" — exactly one
+    //    pressed thumbnail in the strip, and it is a staged one, not
+    //    "Not staged yet". Scope to the strip's role=group: aria-pressed
+    //    is also used by the brush tool and the concept chips.
+    const variantStrip = page.getByRole("group", { name: "Room variants" });
+    const pressedVariants = variantStrip.locator('button[aria-pressed="true"]');
+    await expect(pressedVariants).toHaveCount(1);
+    await expect(pressedVariants).toContainText("Staged");
 
     const body = inpaint.submitBody();
     expect(body.imageUrl).toContain(`/rooms/${E2E_EDITOR_ROOM_ID}/before-image.png`);
     expect(body.promptDirectives).toBe(
       "Add a neutral linen sofa and a warm wood coffee table."
     );
+    // STILL ORDER-DEPENDENT — tracked in #1091. The client picks the source
+    // slot by the same first-empty-slot rule, so on a virgin room this is 0
+    // but it becomes 1 once a sibling spec has staged a variant into the
+    // shared Mask Room row. The real fix is test isolation (a dedicated seed
+    // room, as E2E_CONCEPT_PROJECT_ID already does for concept-flow), not
+    // relaxing this to a range.
     expect(body.variantSlot).toBe(0);
 
     const whiteShare = await whitePixelShare(page, inpaint.maskDataUrl());
