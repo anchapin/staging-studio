@@ -4,6 +4,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     project: {
       update: vi.fn(),
+      updateMany: vi.fn(),
     },
   },
 }));
@@ -116,52 +117,41 @@ describe("saveProjectMetadata", () => {
 });
 
 describe("saveProjectSignature", () => {
+  const validSignature = "data:image/png;base64,abc123";
+
   it("returns error when not authenticated", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(null);
 
-    const result = await saveProjectSignature(validProjectId, "data:image/png;base64,abc123");
+    const result = await saveProjectSignature(validProjectId, validSignature);
 
     expect(result).toEqual({ success: false, error: "Not authenticated" });
   });
 
   it("returns error when project not found", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.update).mockRejectedValue(new Error("Project not found"));
+    vi.mocked(prisma.project.updateMany).mockRejectedValue(new Error("Project not found"));
 
-    const result = await saveProjectSignature(validProjectId, "data:image/png;base64,abc123");
+    const result = await saveProjectSignature(validProjectId, validSignature);
 
     expect(result).toEqual({ success: false, error: "Project not found" });
   });
 
   it("saves signature with Signed status and revalidates paths", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.update).mockResolvedValue({
-      id: validProjectId,
-      userId: mockUser.id,
-      propertyAddress: "123 Main St",
-      clientName: "John Doe",
-      targetBuyer: "Young professional",
-      stagingAesthetic: "modern",
-      stagingPackage: "full",
-      stagingDirectives: "Make it pop",
-      buyerDemographics: {},
-      roiSalesPricePremium: "0",
-      roiTransactionVelocity: "faster",
-      roiInvestmentTier: "mid",
-      clientSignature: "data:image/png;base64,abc123",
-      clientSignatureStatus: "Signed",
-      clientSignatureTimestamp: new Date(),
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    // updateMany returns count === 1 when the row was successfully updated
+    vi.mocked(prisma.project.updateMany).mockResolvedValue({ count: 1 });
 
-    const result = await saveProjectSignature(validProjectId, "data:image/png;base64,abc123");
+    const result = await saveProjectSignature(validProjectId, validSignature);
 
     expect(result).toEqual({ success: true });
-    expect(prisma.project.update).toHaveBeenCalledWith({
-      where: { id: validProjectId, userId: mockUser.id },
+    expect(prisma.project.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: validProjectId,
+        userId: mockUser.id,
+        clientSignatureStatus: { not: "Signed" },
+      },
       data: {
-        clientSignature: "data:image/png;base64,abc123",
+        clientSignature: validSignature,
         clientSignatureStatus: "Signed",
         clientSignatureTimestamp: expect.any(Date),
       },
@@ -170,11 +160,53 @@ describe("saveProjectSignature", () => {
     expect(revalidatePath).toHaveBeenCalledWith(`/projects/${validProjectId}/lookbook`);
   });
 
+  it("returns error when project is already signed (conditional update guards - issue #1146)", async () => {
+    vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
+    // updateMany returns count === 0 when no rows match the predicate
+    vi.mocked(prisma.project.updateMany).mockResolvedValue({ count: 0 });
+
+    const result = await saveProjectSignature(validProjectId, validSignature);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("already been signed");
+    // Verify updateMany was called with the conditional guard
+    expect(prisma.project.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: validProjectId,
+        userId: mockUser.id,
+        clientSignatureStatus: { not: "Signed" },
+      },
+      data: {
+        clientSignature: validSignature,
+        clientSignatureStatus: "Signed",
+        clientSignatureTimestamp: expect.any(Date),
+      },
+    });
+    // No revalidation should happen when already signed
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("captures timestamp once (issue #1146)", async () => {
+    vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
+
+    vi.mocked(prisma.project.updateMany).mockResolvedValue({ count: 1 });
+
+    const result = await saveProjectSignature(validProjectId, validSignature);
+
+    expect(result).toEqual({ success: true });
+    // Verify updateMany was called with the same timestamp instance
+    const calls = vi.mocked(prisma.project.updateMany).mock.calls;
+    expect(calls.length).toBe(1);
+    const callTimestamp = calls[0][0].data.clientSignatureTimestamp;
+    // The same timestamp should be passed (not a new Date() each call)
+    expect(callTimestamp).toBeInstanceOf(Date);
+  });
+
   it("propagates unexpected errors", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
-    vi.mocked(prisma.project.update).mockRejectedValue(new Error("DB failure"));
+    vi.mocked(prisma.project.updateMany).mockRejectedValue(new Error("DB failure"));
 
-    const result = await saveProjectSignature(validProjectId, "data:image/png;base64,abc");
+    const result = await saveProjectSignature(validProjectId, validSignature);
 
     expect(result).toEqual({ success: false, error: "DB failure" });
   });
@@ -182,7 +214,7 @@ describe("saveProjectSignature", () => {
   it("returns validation error for invalid project ID format", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
 
-    const result = await saveProjectSignature("invalid-id", "data:image/png;base64,abc");
+    const result = await saveProjectSignature("invalid-id", validSignature);
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("Invalid project id format");

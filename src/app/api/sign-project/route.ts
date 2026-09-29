@@ -132,28 +132,33 @@ export async function POST(req: NextRequest) {
         throw e;
       }
     }
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
-      select: { clientSignatureStatus: true },
-    });
-    if (project?.clientSignatureStatus === "Signed") {
-      return withCors(NextResponse.json(SIGN_ERROR_COPY.alreadySigned, { status: 409 }));
-    }
+    // Capture timestamp once before the retry loop so retries don't shift
+    // the recorded time (issue #1146).
+    const signatureTimestamp = new Date();
 
     try {
-      await withRetry(
+      const { count } = await withRetry(
         async () =>
-          prisma.project.update({
-            where: { id: projectId },
+          prisma.project.updateMany({
+            where: {
+              id: projectId,
+              clientSignatureStatus: { not: "Signed" },
+            },
             data: {
               clientSignature: signatureDataUrl,
               clientSignatureStatus: "Signed",
-              clientSignatureTimestamp: new Date(),
+              clientSignatureTimestamp: signatureTimestamp,
             },
           }),
         3,
         200
       );
+
+      // updateMany returns count === 0 when no rows matched the where clause,
+      // which means the project was already signed by another request.
+      if (count === 0) {
+        return withCors(NextResponse.json(SIGN_ERROR_COPY.alreadySigned, { status: 409 }));
+      }
     } catch (error) {
       console.error("sign_project_save_failed", {
         projectId,
