@@ -12,11 +12,12 @@ import { withExportUsageAtLimit } from "../quota";
 const EXPORT_PDF_V1_URL = "/api/v1/export-pdf";
 
 /**
- * Direct-API suite for `GET /api/v1/export-pdf` (the v1 sibling of the
+ * Direct-API suite for `POST /api/v1/export-pdf` (the v1 sibling of the
  * suite in `export-pdf.spec.ts`).
  *
- * The versioned route is NOT a superset of the unversioned one: it is a
- * `GET` with a `?projectId=` query param, it adds a daily export quota
+ * The versioned route is NOT a superset of the unversioned one: it was
+ * converted from GET (query param) to POST (JSON body) in #1158 to close
+ * the cross-site GET navigation attack vector. It adds a daily export quota
  * (429) and a project-ownership check (403/404) that the unversioned
  * route does not perform, and it answers every response — success and
  * error alike — with an `X-Supabase-API-Version: v1` header (renamed from
@@ -48,13 +49,14 @@ test.describe("export-pdf v1 API route", () => {
     await setMockBrowserlessOutcome("success");
   });
 
-  test("GET with valid projectId returns a PDF and version headers", async ({ page }) => {
+  test("POST with valid projectId returns a PDF and version headers", async ({ page }) => {
     await login(page);
     const before = await mockBrowserlessRequests();
 
-    const response = await page.request.get(
-      `${EXPORT_PDF_V1_URL}?projectId=${E2E_UPLOAD_PROJECT_ID}`
-    );
+    const response = await page.request.post(EXPORT_PDF_V1_URL, {
+      data: { projectId: E2E_UPLOAD_PROJECT_ID },
+      headers: { "Content-Type": "application/json" },
+    });
 
     expect(response.status()).toBe(200);
     expect(response.headers()["content-type"] ?? "").toContain("application/pdf");
@@ -83,10 +85,11 @@ test.describe("export-pdf v1 API route", () => {
     expect(body.url).toContain(`/preview/${E2E_UPLOAD_PROJECT_ID}?token=`);
   });
 
-  test("unauthenticated GET returns 401", async ({ page }) => {
-    const response = await page.request.get(
-      `${EXPORT_PDF_V1_URL}?projectId=${E2E_UPLOAD_PROJECT_ID}`
-    );
+  test("unauthenticated POST returns 401", async ({ page }) => {
+    const response = await page.request.post(EXPORT_PDF_V1_URL, {
+      data: { projectId: E2E_UPLOAD_PROJECT_ID },
+      headers: { "Content-Type": "application/json" },
+    });
 
     expect(response.status()).toBe(401);
     expect(response.headers()["x-supabase-api-version"]).toBe("v1");
@@ -94,10 +97,13 @@ test.describe("export-pdf v1 API route", () => {
     expect(body.code).toBe("unauthorized");
   });
 
-  test("GET with missing projectId returns 400", async ({ page }) => {
+  test("POST with missing projectId returns 400", async ({ page }) => {
     await login(page);
 
-    const response = await page.request.get(EXPORT_PDF_V1_URL);
+    const response = await page.request.post(EXPORT_PDF_V1_URL, {
+      data: {},
+      headers: { "Content-Type": "application/json" },
+    });
 
     expect(response.status()).toBe(400);
     const body = await response.json();
@@ -105,14 +111,15 @@ test.describe("export-pdf v1 API route", () => {
     expect(body.message).toContain("projectId must be a valid CUID");
   });
 
-  test("GET with malformed projectId returns 400 before the ownership lookup", async ({
+  test("POST with malformed projectId returns 400 before the ownership lookup", async ({
     page,
   }) => {
     await login(page);
 
-    const response = await page.request.get(
-      `${EXPORT_PDF_V1_URL}?projectId=not-a-cuid-format`
-    );
+    const response = await page.request.post(EXPORT_PDF_V1_URL, {
+      data: { projectId: "not-a-cuid-format" },
+      headers: { "Content-Type": "application/json" },
+    });
 
     expect(response.status()).toBe(400);
     const body = await response.json();
@@ -122,13 +129,14 @@ test.describe("export-pdf v1 API route", () => {
   // The cuid-shape guard is what keeps a malformed id out of the
   // ownership lookup, so this id is cuid-shaped too: it must fail as
   // "not found", not as a 400.
-  test("GET with a well-formed but unseeded projectId returns 404", async ({ page }) => {
+  test("POST with a well-formed but unseeded projectId returns 404", async ({ page }) => {
     await login(page);
     const before = await mockBrowserlessRequests();
 
-    const response = await page.request.get(
-      `${EXPORT_PDF_V1_URL}?projectId=${E2E_ABSENT_PROJECT_ID}`
-    );
+    const response = await page.request.post(EXPORT_PDF_V1_URL, {
+      data: { projectId: E2E_ABSENT_PROJECT_ID },
+      headers: { "Content-Type": "application/json" },
+    });
 
     expect(response.status()).toBe(404);
     const body = await response.json();
@@ -142,9 +150,10 @@ test.describe("export-pdf v1 API route", () => {
     await login(page);
     await setMockBrowserlessOutcome("outage");
 
-    const response = await page.request.get(
-      `${EXPORT_PDF_V1_URL}?projectId=${E2E_UPLOAD_PROJECT_ID}`
-    );
+    const response = await page.request.post(EXPORT_PDF_V1_URL, {
+      data: { projectId: E2E_UPLOAD_PROJECT_ID },
+      headers: { "Content-Type": "application/json" },
+    });
 
     // DIVERGENCE from the unversioned route, which propagates the
     // provider's status (its generic non-ok branch returns
@@ -171,9 +180,10 @@ test.describe("export-pdf v1 API route", () => {
     const before = await mockBrowserlessRequests();
 
     const { status, apiVersion, body } = await withExportUsageAtLimit(async () => {
-      const response = await page.request.get(
-        `${EXPORT_PDF_V1_URL}?projectId=${E2E_UPLOAD_PROJECT_ID}`
-      );
+      const response = await page.request.post(EXPORT_PDF_V1_URL, {
+        data: { projectId: E2E_UPLOAD_PROJECT_ID },
+        headers: { "Content-Type": "application/json" },
+      });
       return {
         status: response.status(),
         apiVersion: response.headers()["x-supabase-api-version"],

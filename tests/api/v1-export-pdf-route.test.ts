@@ -73,7 +73,7 @@ vi.mock("@/lib/browserless", () => ({
 }));
 
 // We need to import after mocking
-import { GET } from "@/app/api/v1/export-pdf/route";
+import { POST } from "@/app/api/v1/export-pdf/route";
 
 const USER_ID = "user-1";
 // Exactly 25 chars: c + 24 lowercase alphanumerics (matches PROJECT_ID_PATTERN /^c[a-z0-9]{24}$/)
@@ -116,16 +116,15 @@ const ORIGINAL_ENV = { ...process.env };
 });
 
 function callExportRoute(projectId?: string): Promise<Response> {
-  const url = projectId
-    ? `http://localhost/api/v1/export-pdf?projectId=${projectId}`
-    : "http://localhost/api/v1/export-pdf";
-  const request = new Request(url, {
-    method: "GET",
+  const request = new Request("http://localhost/api/v1/export-pdf", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: projectId ? JSON.stringify({ projectId }) : JSON.stringify({}),
   });
-  return GET(request as unknown as NextRequest);
+  return POST(request as unknown as NextRequest);
 }
 
-describe("GET /api/v1/export-pdf — projectId validation", () => {
+describe("POST /api/v1/export-pdf — projectId validation", () => {
   it("returns 400 when projectId is missing", async () => {
     const response = await callExportRoute();
     expect(response.status).toBe(400);
@@ -154,7 +153,7 @@ describe("GET /api/v1/export-pdf — projectId validation", () => {
   });
 });
 
-describe("GET /api/v1/export-pdf — auth", () => {
+describe("POST /api/v1/export-pdf — auth", () => {
   it("returns 401 when user is not authenticated", async () => {
     mockGetAuthedPrismaUser.mockResolvedValue(null);
 
@@ -165,7 +164,7 @@ describe("GET /api/v1/export-pdf — auth", () => {
   });
 });
 
-describe("GET /api/v1/export-pdf — ownership", () => {
+describe("POST /api/v1/export-pdf — ownership", () => {
   it("returns 404 when project does not exist", async () => {
     mockRequireProjectOwnershipOrThrow.mockRejectedValue(new MockProjectNotFoundError(PROJECT_ID));
 
@@ -185,7 +184,7 @@ describe("GET /api/v1/export-pdf — ownership", () => {
   });
 });
 
-describe("GET /api/v1/export-pdf — response headers", () => {
+describe("POST /api/v1/export-pdf — response headers", () => {
   it("includes X-Supabase-API-Version header in response", async () => {
     const response = await callExportRoute(PROJECT_ID);
     expect(response.status).toBe(200);
@@ -198,8 +197,12 @@ describe("GET /api/v1/export-pdf — response headers", () => {
  * directly, so it had no hermetic seam and no e2e spec could drive the real
  * handler. These pin that it now resolves through `resolveBrowserlessPdfUrl`
  * — the same gate the unversioned `/api/export-pdf` route uses.
+ *
+ * Issue #1158: the route was converted from GET (query param) to POST (JSON
+ * body) to close the cross-site GET navigation attack vector. These tests
+ * reflect the POST interface.
  */
-describe("GET /api/v1/export-pdf — hermetic Browserless endpoint seam", () => {
+describe("POST /api/v1/export-pdf — hermetic Browserless endpoint seam", () => {
   const MOCK_ENDPOINT = "http://127.0.0.1:8899/pdf";
 
   function mockPdfResponseForAnyUrl() {

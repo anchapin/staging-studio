@@ -3,7 +3,13 @@
  *
  * Rate-limited and ownership-checked PDF lookbook export endpoint.
  *
- * GET /api/v1/export-pdf?projectId=xxx
+ * POST /api/v1/export-pdf  { projectId: string }
+ *
+ * Mirrors the unversioned /api/export-pdf POST route.  Using POST with a
+ * JSON body closes the cross-site GET navigation attack vector (issue #1158):
+ * a SameSite=Lax auth cookie is NOT sent on cross-origin form POSTs, so a
+ * victim's browser cannot be walked to a crafted link that burns the export
+ * quota and real Browserless spend.
  */
 import { NextRequest, NextResponse } from "next/server";
 
@@ -44,7 +50,7 @@ const PREVIEW_TOKEN_QUERY_PARAM = "token";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: NextRequest) {
+export async function POST(req: NextRequest) {
   const versionInfo = buildVersionHeaders("v1");
 
   try {
@@ -61,8 +67,9 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const { searchParams } = new URL(request.url);
-    const projectId = searchParams.get("projectId");
+    // Shape-validate projectId from the JSON body BEFORE it is interpolated
+    // into the preview URL handed to an external service.
+    const { projectId } = await req.json();
 
     if (typeof projectId !== "string" || !PROJECT_ID_PATTERN.test(projectId)) {
       return NextResponse.json(
