@@ -82,8 +82,9 @@ export async function POST(request: NextRequest) {
 
     // Issue #201: daily per-user OpenAI cost guardrail, checked BEFORE any
     // validation or DB work — a user at their cap never reaches gpt-4o-mini.
-    // Usage lives in the in-process daily counter (lib/api-quota.ts), which
-    // resets on cold start; that under-count limitation is documented there.
+    // Usage lives in the `DailyApiUsage` Postgres table via atomic upserts,
+    // so it survives serverless cold starts and multi-instance traffic
+    // splitting (issues #784, #1131).
     const copyLimit = resolveDailyLimit(
       process.env[DAILY_LIMIT_ENV_VAR.copy],
       DEFAULT_DAILY_COPY_LIMIT
