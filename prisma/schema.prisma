@@ -89,7 +89,6 @@ model Room {
   inpaintRequests InpaintRequest[]
   inpaintVersions InpaintVersion[]
   selectionLogs  SelectionLog[]
-  visionLabels  VisionLabel[]
 
   @@index([projectId])
 }
@@ -136,16 +135,18 @@ model InpaintVersion {
 // so re-opening the editor does not re-bill (issue #266).
 // userId scopes cache entries per-user so one user's billed labels are not
 // served to another user at no cost (issue #774).
+// VisionLabel stands alone: no owner relation, so it survives room deletes.
+// The cache key is (userId, imageUrlHash, concept, instanceIndex); roomId is
+// a nullable denormalised filter column only (not a FK, not cascade-linked).
 model VisionLabel {
   id             String   @id @default(cuid())
   imageUrlHash   String   // hash of imageUrl (stable identifier)
   concept        String   // e.g. "furniture", "rug", etc.
   instanceIndex  Int
-  label          String   // GPT-4o-mini's label text
+  label          String   // GPT-4o-mini label text
   score          Float?
   userId         String  // scopes cache to the user who paid
-  roomId         String?  // optional: links to owning room for cascade delete (#775)
-  room           Room?    @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  roomId         String?  // nullable denormalised filter column only
   createdAt      DateTime @default(now())
 
   @@unique([userId, imageUrlHash, concept, instanceIndex])
