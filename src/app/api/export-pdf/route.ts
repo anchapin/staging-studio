@@ -86,9 +86,9 @@ export async function POST(req: NextRequest) {
     }
 
     // Issue #201: daily per-user Browserless cost guardrail, checked before
-    // any validation work. Usage lives in the in-process daily counter
-    // (lib/api-quota.ts), which resets on cold start; that under-count
-    // limitation is documented there.
+    // any validation work. Usage lives in the `DailyApiUsage` Postgres table
+    // via atomic upserts, so it survives serverless cold starts and multi-
+    // instance traffic splitting (issues #784, #1131).
     const exportLimit = resolveDailyLimit(
       process.env[DAILY_LIMIT_ENV_VAR.export],
       DEFAULT_DAILY_EXPORT_LIMIT

@@ -234,10 +234,11 @@ export async function detectBatchRoomTypes(
     };
   }
 
-  // Issue #681: daily label quota (in-process counter — see
-  // lib/api-quota.ts for the mechanism and its multi-instance
-  // limitation). Checked BEFORE any AI work so a user at their cap
-  // never reaches gpt-4o-mini; the whole batch must fit in headroom.
+  // Issue #681: daily label quota — tracked in the `DailyApiUsage`
+  // Postgres table via atomic upserts, so usage survives serverless
+  // cold starts and multi-instance traffic splitting (issue #784).
+  // Checked BEFORE any AI work so a user at their cap never reaches
+  // gpt-4o-mini; the whole batch must fit in headroom.
   const labelLimit = resolveDailyLimit(
     process.env[DAILY_LIMIT_ENV_VAR.label],
     DEFAULT_DAILY_LABEL_LIMIT

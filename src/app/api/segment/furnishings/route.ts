@@ -107,10 +107,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Issue #226: daily per-user segment guardrail (in-process counter —
-    // see lib/api-quota.ts for the mechanism and its multi-instance
-    // limitation). Checked BEFORE the body is parsed so a user at their
-    // cap never reaches the paid provider.
+    // Issue #226: daily per-user segment guardrail — tracked in the
+    // `DailyApiUsage` Postgres table via atomic upserts, so usage survives
+    // serverless cold starts and multi-instance traffic splitting (issue
+    // #784). Checked BEFORE the body is parsed so a user at their cap
+    // never reaches the paid provider.
     const segmentLimit = resolveDailyLimit(
       process.env[DAILY_LIMIT_ENV_VAR.segment],
       DEFAULT_DAILY_SEGMENT_LIMIT
