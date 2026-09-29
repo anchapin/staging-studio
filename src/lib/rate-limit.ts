@@ -89,3 +89,11 @@ export function cleanupExpiredEntries(): void {
     }
   }
 }
+
+/**
+ * Clear all entries from the rate limit store.
+ * Exported for test isolation; do not call in production.
+ */
+export function clearRateLimitStore(): void {
+  rateLimitStore.clear();
+}
