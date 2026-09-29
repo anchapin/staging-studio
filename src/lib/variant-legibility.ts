@@ -34,18 +34,21 @@ export type VariantStripSelection = "original" | VariantSlot;
 
 /**
  * Resolves the strip's highlighted item from the room's raw
- * `selectedVariantIndex` (null → slot 0, per the column's default
- * semantics) and its two variant pairs.
+ * `selectedVariantIndex` and its two variant pairs.
  *
  * A variant is highlighted only when it is the selection AND complete;
  * every other state (fresh room, selection pointing at an unstaged slot)
  * highlights "Original" so the strip never implies an empty variant is
- * chosen for the lookbook.
+ * chosen for the lookbook.  The strip reads "Original" whenever no staged
+ * variant is selected (`selectedIndexRaw === null`).
  */
 export function resolveStripSelection(
   selectedIndexRaw: number | null,
   pairs: readonly [StagedVariantPair, StagedVariantPair]
 ): VariantStripSelection {
+  if (selectedIndexRaw === null) {
+    return "original";
+  }
   const index: VariantSlot = selectedIndexRaw === 1 ? 1 : 0;
   return isCompleteVariantPair(pairs[index]) ? index : "original";
 }

@@ -13,7 +13,7 @@ const mockPrisma = vi.hoisted(() => ({
   },
 }));
 const mockGetAuthedPrismaUser = vi.hoisted(() => vi.fn());
-const mockResolveSelectionAfterDelete = vi.hoisted(() => vi.fn<() => number>().mockReturnValue(0));
+const mockResolveSelectionAfterDelete = vi.hoisted(() => vi.fn<() => number | null>().mockReturnValue(0));
 const mockTouchUpCountsBySlot = vi.hoisted(() =>
   vi
     .fn<(rows: { status: string; variantSlot: number }[]) => { 0: number; 1: number }>()
@@ -147,6 +147,61 @@ describe("room-variants actions", () => {
       expect(prisma.room.update).toHaveBeenCalledWith({
         where: { id: MOCK_ROOM_ID, project: { userId: MOCK_USER_ID } },
         data: { afterImageUrl2: null, selectedVariantIndex: 0 },
+      });
+    });
+
+    it("passes null through to resolveSelectionAfterDelete when selection is null (Original)", async () => {
+      // Issue #1150: when user picked "Original" (selectedVariantIndex: null),
+      // the server must NOT coerce to 0 before calling the resolver.
+      vi.mocked(prisma.room.findUnique).mockResolvedValue({
+        id: MOCK_ROOM_ID,
+        afterImageUrl: "https://example.com/after0.jpg",
+        afterImageUrl2: "https://example.com/after1.jpg",
+        beforeImageUrl: "https://example.com/before0.jpg",
+        beforeImageUrl2: "https://example.com/before1.jpg",
+        selectedVariantIndex: null, // "Original" was explicitly selected
+        project: { id: "pid", userId: MOCK_USER_ID },
+      } as never);
+      vi.mocked(prisma.room.update).mockResolvedValue({ id: MOCK_ROOM_ID } as never);
+      // Simulate resolver returning null (preserving Original) when deleting slot 1
+      mockResolveSelectionAfterDelete.mockReturnValue(null);
+
+      const result = await deleteVariantAfterImage(MOCK_ROOM_ID, 1);
+
+      expect(result.success).toBe(true);
+      // Verify null was passed to the resolver, not coerced to 0
+      expect(mockResolveSelectionAfterDelete).toHaveBeenCalledWith(
+        expect.anything(),
+        null, // NOT 0
+        1
+      );
+      // Verify null is written back to DB
+      expect(prisma.room.update).toHaveBeenCalledWith({
+        where: { id: MOCK_ROOM_ID, project: { userId: MOCK_USER_ID } },
+        data: { afterImageUrl2: null, selectedVariantIndex: null },
+      });
+    });
+
+    it("writes null to DB when resolver returns null after deletion with null selection", async () => {
+      // Verify the end-to-end flow: null selection + any slot deletion → null stays null
+      vi.mocked(prisma.room.findUnique).mockResolvedValue({
+        id: MOCK_ROOM_ID,
+        afterImageUrl: "https://example.com/after0.jpg",
+        afterImageUrl2: "https://example.com/after1.jpg",
+        beforeImageUrl: "https://example.com/before0.jpg",
+        beforeImageUrl2: "https://example.com/before1.jpg",
+        selectedVariantIndex: null,
+        project: { id: "pid", userId: MOCK_USER_ID },
+      } as never);
+      vi.mocked(prisma.room.update).mockResolvedValue({ id: MOCK_ROOM_ID } as never);
+      mockResolveSelectionAfterDelete.mockReturnValue(null);
+
+      const result = await deleteVariantAfterImage(MOCK_ROOM_ID, 0);
+
+      expect(result.success).toBe(true);
+      expect(prisma.room.update).toHaveBeenCalledWith({
+        where: { id: MOCK_ROOM_ID, project: { userId: MOCK_USER_ID } },
+        data: { afterImageUrl: null, selectedVariantIndex: null },
       });
     });
   });

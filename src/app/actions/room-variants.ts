@@ -112,7 +112,7 @@ export async function deleteVariantAfterImage(
 
     const nextSelection = resolveSelectionAfterDelete(
       pairs,
-      room.selectedVariantIndex ?? 0,
+      room.selectedVariantIndex,
       variantSlot
     );
 

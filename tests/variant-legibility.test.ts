@@ -26,6 +26,13 @@ describe("resolveStripSelection", () => {
     expect(resolveStripSelection(null, [EMPTY, EMPTY])).toBe("original");
   });
 
+  it("highlights Original when selectedVariantIndex is null even if slot 0 is complete", () => {
+    // Issue #1150: null means "Original" was explicitly chosen — never coerce to slot 0.
+    expect(resolveStripSelection(null, [COMPLETE_A, COMPLETE_B])).toBe("original");
+    expect(resolveStripSelection(null, [COMPLETE_A, EMPTY])).toBe("original");
+    expect(resolveStripSelection(null, [EMPTY, COMPLETE_B])).toBe("original");
+  });
+
   it("highlights Variant A when slot 0 is selected and complete", () => {
     expect(resolveStripSelection(0, [COMPLETE_A, EMPTY])).toBe(0);
   });
