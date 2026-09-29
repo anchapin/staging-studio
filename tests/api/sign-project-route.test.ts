@@ -144,10 +144,10 @@ describe("POST /api/sign-project", () => {
     vi.mocked(verifyPreviewToken).mockResolvedValue({ valid: true, projectId: MOCK_PROJECT_ID });
 
     const timestamps: Date[] = [];
-    vi.mocked(prisma.project.updateMany).mockImplementation(async () => {
+    vi.mocked(prisma.project.updateMany).mockImplementation((async () => {
       timestamps.push(new Date());
       return { count: 1 };
-    });
+    }) as unknown as typeof prisma.project.updateMany);
 
     const req = buildRequest({ projectId: MOCK_PROJECT_ID, signatureDataUrl: MOCK_SIGNATURE, token: MOCK_TOKEN });
     const res = await POST(req);
