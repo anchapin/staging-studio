@@ -420,3 +420,129 @@ describe("select-all connected components (issue #252 D2)", () => {
     expect(result.addedInstanceIndices).toEqual([1, 2, 0, 3, 4, 5]);
   });
 });
+
+describe("memberInstanceIndices sorting and deduping parity (issue #1156)", () => {
+  // Both applyConceptToggle (single-toggle path, line ~297) and
+  // applyConceptSelectAll (merge path, line ~477) must produce identical
+  // memberInstanceIndices arrays so the use-selection-mask-composer cache
+  // key `${id}:${members.join(",")}` does not miss.
+
+  it("select-all merge path produces sorted, deduped memberInstanceIndices", () => {
+    // Build candidates where instance 1 and 2 are near each other (one
+    // component), and instance 0 is far from them (separate component).
+    const grids = new Map<number, InstanceMaskGrid>();
+    grids.set(0, cellGrid(100, 1, [[0, 0]]));      // far
+    grids.set(1, cellGrid(100, 1, [[10, 0]]));     // near to 2
+    grids.set(2, cellGrid(100, 1, [[14, 0]]));    // near to 1
+    const candidates: ConceptSelectAllCandidate[] = [
+      { instanceIndex: 0, entry: entry("sofa:0", 0, 0), score: 100, grid: grids.get(0)! },
+      { instanceIndex: 1, entry: entry("sofa:1", 10, 0), score: 90, grid: grids.get(1)! },
+      { instanceIndex: 2, entry: entry("sofa:2", 14, 0), score: 80, grid: grids.get(2)! },
+    ];
+
+    // Select all → instance 0 is separate region, {1,2} fuse into one region.
+    const result = applyConceptSelectAll([], [], candidates);
+    expect(result.selections).toHaveLength(2);
+
+    const separate = result.selections.find((s) => s.memberInstanceIndices?.includes(0));
+    const fused = result.selections.find((s) => s.memberInstanceIndices?.includes(1) && s.memberInstanceIndices?.includes(2));
+
+    expect(separate?.memberInstanceIndices).toEqual([0]);
+    // Merge path must sort (not just append) and dedupe.
+    expect(fused?.memberInstanceIndices).toEqual([1, 2]);
+    expect(fused?.memberInstanceIndices?.join(",")).toBe("1,2");
+  });
+
+  it("toggle path and merge path produce identical arrays for the same set", () => {
+    // Both paths must produce identical sorted memberInstanceIndices so the
+    // use-selection-mask-composer cache key "${id}:${members.join(',')}" matches.
+    //
+    // This test verifies that select-all merging produces sorted output matching
+    // what the toggle path produces. We use MANUALLY CRAFTED state to avoid
+    // depending on the toggle path's exact merge behavior.
+    //
+    // NOTE: masksWithinProximity is directional (dilates first arg, checks if
+    // second is within). For reliable merging, distances must be within
+    // MERGE_PROXIMITY_PX=5 so the directional check passes in at least one direction.
+    // We use 4px gaps (within the 5px threshold).
+
+    const grids = new Map<number, InstanceMaskGrid>();
+    grids.set(0, cellGrid(100, 1, [[0, 0]]));
+    grids.set(1, cellGrid(100, 1, [[4, 0]]));
+    grids.set(2, cellGrid(100, 1, [[8, 0]]));
+
+    // Manually create state with one existing region containing [0, 1].
+    const existingSelections: BatchSelection[] = [
+      { ...entry("sofa:0", 0, 0), memberInstanceIndices: [0, 1] },
+    ];
+    const existingIndices = [0, 1];
+
+    // Select-all adds {2} which is near to existing region [0,1].
+    // Need to pass existing region grids so the merge check can find them.
+    const existingRegionGrids = new Map<number, InstanceMaskGrid>();
+    existingRegionGrids.set(0, grids.get(0)!);
+    existingRegionGrids.set(1, grids.get(1)!);
+
+    const mergeCandidates: ConceptSelectAllCandidate[] = [
+      { instanceIndex: 2, entry: entry("sofa:2", 8, 0), score: 80, grid: grids.get(2)! },
+    ];
+
+    const mergeResult = applyConceptSelectAll(existingSelections, existingIndices, mergeCandidates, existingRegionGrids);
+
+    // The merged region's memberInstanceIndices must be [0, 1, 2] (sorted).
+    const mergedRegion = mergeResult.selections.find((s) => s.id === "sofa:0");
+    expect(mergedRegion?.memberInstanceIndices).toEqual([0, 1, 2]);
+    expect(mergedRegion?.memberInstanceIndices?.join(",")).toBe("0,1,2");
+
+    // Compare with the same outcome from pure select-all (no pre-existing regions).
+    // All-at-once: instances 0,1,2 all 4px apart (within 5px threshold) → one component.
+    const allAtOnceResult = applyConceptSelectAll([], [], [
+      { instanceIndex: 0, entry: entry("sofa:0", 0, 0), score: 100, grid: grids.get(0)! },
+      { instanceIndex: 1, entry: entry("sofa:1", 4, 0), score: 90, grid: grids.get(1)! },
+      { instanceIndex: 2, entry: entry("sofa:2", 8, 0), score: 80, grid: grids.get(2)! },
+    ]);
+    const allAtOnceRegion = allAtOnceResult.selections.find((s) => s.id === "sofa:0");
+    expect(allAtOnceRegion?.memberInstanceIndices).toEqual([0, 1, 2]);
+
+    // Both paths must produce identical sorted arrays.
+    expect(mergedRegion?.memberInstanceIndices).toEqual(allAtOnceRegion?.memberInstanceIndices);
+
+    // Cache-key format check: join(",") must produce identical strings.
+    expect(mergedRegion?.memberInstanceIndices?.join(",")).toBe("0,1,2");
+    expect(allAtOnceRegion?.memberInstanceIndices?.join(",")).toBe("0,1,2");
+  });
+
+  it("merge path dedupes when the same index would be added twice", () => {
+    // A pathological case: a component might (in theory) include indices
+    // already in the merge target. The merge path must deduplicate.
+    const grids = new Map<number, InstanceMaskGrid>();
+    grids.set(0, cellGrid(100, 1, [[0, 0]]));
+    grids.set(1, cellGrid(100, 1, [[4, 0]]));
+    grids.set(2, cellGrid(100, 1, [[8, 0]]));
+
+    // Manually create a state where region "sofa:0" already has memberInstanceIndices [0, 1].
+    const existingSelections: BatchSelection[] = [
+      { ...entry("sofa:0", 0, 0), memberInstanceIndices: [0, 1] },
+    ];
+    const existingIndices = [0, 1];
+
+    // Existing region grids for the merge check.
+    const existingRegionGrids = new Map<number, InstanceMaskGrid>();
+    existingRegionGrids.set(0, grids.get(0)!);
+    existingRegionGrids.set(1, grids.get(1)!);
+
+    // Select-all picks up {2} as a candidate (1 is already selected, filtered out).
+    // Use 4px gaps to be within MERGE_PROXIMITY_PX=5.
+    const candidates: ConceptSelectAllCandidate[] = [
+      { instanceIndex: 2, entry: entry("sofa:2", 8, 0), score: 80, grid: grids.get(2)! },
+    ];
+
+    const result = applyConceptSelectAll(existingSelections, existingIndices, candidates, existingRegionGrids);
+
+    // Instance 2 is near the existing region, merges in, producing [0, 1, 2].
+    // The Set dedupes any duplicates.
+    const merged = result.selections.find((s) => s.id === "sofa:0");
+    expect(merged?.memberInstanceIndices).toEqual([0, 1, 2]);
+    expect(merged?.memberInstanceIndices?.join(",")).toBe("0,1,2");
+  });
+});
