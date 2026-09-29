@@ -14,6 +14,7 @@ import {
   signProjectRequestSchema,
   tokenMatchesProject,
 } from "@/lib/sign-project-schema";
+import { encryptSignature } from "@/lib/signature-encryption";
 import {
   API_ERROR_INVALID_TOKEN,
   API_ERROR_INVALID_PROJECT,
@@ -141,12 +142,13 @@ export async function POST(req: NextRequest) {
     }
 
     try {
+      const encryptedSignature = await encryptSignature(signatureDataUrl);
       await withRetry(
         async () =>
           prisma.project.update({
             where: { id: projectId },
             data: {
-              clientSignature: signatureDataUrl,
+              clientSignature: encryptedSignature,
               clientSignatureStatus: "Signed",
               clientSignatureTimestamp: new Date(),
             },

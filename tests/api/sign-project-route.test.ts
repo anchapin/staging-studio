@@ -9,6 +9,7 @@ const MOCK_USER_ID = "cuser12345678901234567890";
 const MOCK_PROJECT_ID = "cproj12345678901234567890";
 const MOCK_SIGNATURE = "data:image/png;base64,mock-signature-data";
 const MOCK_TOKEN = "valid-hmac-token";
+const MOCK_ENCRYPTED = "encrypted-signature-base64-value";
 
 const mockUser = { id: MOCK_USER_ID, email: "test@example.com", name: "Test User" };
 
@@ -38,6 +39,10 @@ vi.mock("@/lib/preview-token", () => ({
   verifyPreviewToken: vi.fn(),
   signPreviewToken: vi.fn(),
   PREVIEW_TOKEN_QUERY_PARAM: "token",
+}));
+
+vi.mock("@/lib/signature-encryption", () => ({
+  encryptSignature: vi.fn().mockResolvedValue(MOCK_ENCRYPTED),
 }));
 
 describe("POST /api/sign-project", () => {
@@ -123,10 +128,11 @@ describe("POST /api/sign-project", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json).toEqual({ success: true });
+    // Issue #1106: signature is encrypted before storage
     expect(prisma.project.update).toHaveBeenCalledWith({
       where: { id: MOCK_PROJECT_ID },
       data: {
-        clientSignature: MOCK_SIGNATURE,
+        clientSignature: MOCK_ENCRYPTED,
         clientSignatureStatus: "Signed",
         clientSignatureTimestamp: expect.any(Date),
       },

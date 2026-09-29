@@ -8,6 +8,7 @@ import {
 } from "@/lib/metadata-schemas";
 import { signProjectPayloadSchema } from "@/lib/sign-project-schema";
 import { revalidatePath } from "next/cache";
+import { encryptSignature } from "@/lib/signature-encryption";
 
 /**
  * Server action: updates editable project metadata fields.
@@ -110,10 +111,11 @@ export async function saveProjectSignature(
   }
 
   try {
+    const encryptedSignature = await encryptSignature(parsed.data.signatureDataUrl);
     await prisma.project.update({
       where: { id: parsed.data.projectId, userId: user.id },
       data: {
-        clientSignature: parsed.data.signatureDataUrl,
+        clientSignature: encryptedSignature,
         clientSignatureStatus: "Signed",
         clientSignatureTimestamp: new Date(),
       },

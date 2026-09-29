@@ -2,6 +2,7 @@ import Image from "next/image";
 import { LookbookRoomData } from "./types";
 import { ProposalFooter } from "./proposal-footer";
 import { formatLongDate } from "@/lib/relative-time";
+import { decryptSignature } from "@/lib/signature-encryption";
 
 interface SignoffPageProps {
   user: LookbookRoomData["user"];
@@ -17,9 +18,34 @@ interface SignoffPageProps {
  *
  * The interactive signing form (draw/type signature + approval checkbox) is
  * handled by `SignoffPageClient`, which wraps this component on the preview page.
+ *
+ * Signature decryption: `clientSignature` is stored encrypted (issue #1106).
+ * This component decrypts it before rendering so the Image src receives a
+ * valid PNG data URL. Backwards-compatible: if the stored value is a raw
+ * data URL (pre-#1106 migration), it is used as-is without attempting
+ * decryption, so existing signed projects render correctly.
  */
-export function SignoffPage({ user, project, rooms }: SignoffPageProps) {
-  const isSigned = project.clientSignatureStatus === "Signed" && project.clientSignature;
+export async function SignoffPage({ user, project, rooms }: SignoffPageProps) {
+  // Decrypt the stored signature if it's present and appears to be encrypted.
+  // Encrypted values are base64 with length > 20 (IV + ciphertext); a raw
+  // data URL starts with "data:" which is only 5 chars.
+  let signatureSrc: string | null = null;
+  if (project.clientSignature) {
+    if (project.clientSignature.startsWith("data:")) {
+      // Already a raw data URL (pre-#1106 or freshly signed via server action)
+      signatureSrc = project.clientSignature;
+    } else if (project.clientSignature.length > 20) {
+      // Likely encrypted — attempt decryption
+      try {
+        signatureSrc = await decryptSignature(project.clientSignature);
+      } catch (err) {
+        console.error("Failed to decrypt clientSignature, skipping render:", err);
+        signatureSrc = null;
+      }
+    }
+  }
+
+  const isSigned = project.clientSignatureStatus === "Signed" && !!signatureSrc;
   const content = user.signoffContent || getDefaultSignoff(user, project);
 
   return (
@@ -45,16 +71,16 @@ export function SignoffPage({ user, project, rooms }: SignoffPageProps) {
           </div>
 
           {/* Signed signature display */}
-          {isSigned && project.clientSignature && (
+          {isSigned && signatureSrc && (
             <div className="pt-4 border-t border-border space-y-3">
               <div className="flex justify-center">
                 <Image
-                  src={project.clientSignature}
+                  src={signatureSrc}
                   alt="Client signature"
                   width={200}
                   height={80}
                   className="object-contain max-h-20"
-                  unoptimized={project.clientSignature.startsWith("data:")}
+                  unoptimized={signatureSrc.startsWith("data:")}
                 />
               </div>
               <div className="space-y-1">

@@ -16,6 +16,10 @@ vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));
 
+vi.mock("@/lib/signature-encryption", () => ({
+  encryptSignature: vi.fn().mockResolvedValue("encrypted-signature-base64-value"),
+}));
+
 const mockUser = {
   id: "user-1",
   email: "test@example.com",
@@ -158,10 +162,11 @@ describe("saveProjectSignature", () => {
     const result = await saveProjectSignature(validProjectId, "data:image/png;base64,abc123");
 
     expect(result).toEqual({ success: true });
+    // Issue #1106: signature is encrypted before storage
     expect(prisma.project.update).toHaveBeenCalledWith({
       where: { id: validProjectId, userId: mockUser.id },
       data: {
-        clientSignature: "data:image/png;base64,abc123",
+        clientSignature: "encrypted-signature-base64-value",
         clientSignatureStatus: "Signed",
         clientSignatureTimestamp: expect.any(Date),
       },
