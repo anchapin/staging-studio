@@ -109,15 +109,33 @@ export async function saveProjectSignature(
     return { success: false, error: "Not authenticated" };
   }
 
+  // Capture timestamp once so retries don't shift the recorded time
+  // (same concern as issue #1146 for the route handler).
+  const signatureTimestamp = new Date();
+
   try {
-    await prisma.project.update({
-      where: { id: parsed.data.projectId, userId: user.id },
+    // Use updateMany with a conditional guard so a second signer cannot
+    // overwrite an existing signature (issue #1146).
+    const { count } = await prisma.project.updateMany({
+      where: {
+        id: parsed.data.projectId,
+        userId: user.id,
+        clientSignatureStatus: { not: "Signed" },
+      },
       data: {
         clientSignature: parsed.data.signatureDataUrl,
         clientSignatureStatus: "Signed",
-        clientSignatureTimestamp: new Date(),
+        clientSignatureTimestamp: signatureTimestamp,
       },
     });
+
+    if (count === 0) {
+      return {
+        success: false,
+        error: "This project has already been signed. The staging firm must reset the signature before it can be signed again.",
+      };
+    }
+
     revalidatePath(`/projects/${projectId}`);
     revalidatePath(`/projects/${projectId}/lookbook`);
     return { success: true };
