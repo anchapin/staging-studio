@@ -73,6 +73,7 @@ vi.mock("@/lib/prisma", () => ({
     project: {
       findUnique: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
     },
   },
 }));
@@ -103,9 +104,10 @@ describe("POST /api/sign-project — issue #1078 token-first gate order", () => 
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(null);
     // Default: ownership check passes if invoked.
     mockRequireProjectOwnershipOrThrow.mockResolvedValue(undefined);
-    // Default: project is unsigned, update succeeds.
+    // Default: project is unsigned, conditional write succeeds (count === 1).
     vi.mocked(prisma.project.findUnique).mockResolvedValue(buildProject("Pending") as never);
     vi.mocked(prisma.project.update).mockResolvedValue(buildProject("Signed") as never);
+    vi.mocked(prisma.project.updateMany).mockResolvedValue({ count: 1 } as never);
   });
 
   it("verifies the HMAC preview token BEFORE consulting the session (issue #1078)", async () => {
@@ -155,8 +157,19 @@ describe("POST /api/sign-project — issue #1078 token-first gate order", () => 
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.success).toBe(true);
-    // The Prisma write must have happened.
-    expect(prisma.project.update).toHaveBeenCalledTimes(1);
+    // The conditional Prisma write must have happened exactly once.
+    expect(prisma.project.updateMany).toHaveBeenCalledTimes(1);
+    expect(prisma.project.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: MOCK_PROJECT_ID,
+        clientSignatureStatus: { not: "Signed" },
+      },
+      data: {
+        clientSignature: TINY_PNG_DATA_URL,
+        clientSignatureStatus: "Signed",
+        clientSignatureTimestamp: expect.any(Date),
+      },
+    });
     // No session was needed, so no ownership check ran.
     expect(mockRequireProjectOwnershipOrThrow).not.toHaveBeenCalled();
   });
@@ -194,7 +207,7 @@ describe("POST /api/sign-project — issue #1078 token-first gate order", () => 
       MOCK_PROJECT_ID,
       MOCK_USER,
     );
-    expect(prisma.project.update).toHaveBeenCalledTimes(1);
+    expect(prisma.project.updateMany).toHaveBeenCalledTimes(1);
   });
 
   it("returns 403 when an authenticated firm user lacks project ownership", async () => {
@@ -226,9 +239,8 @@ describe("POST /api/sign-project — issue #1078 token-first gate order", () => 
   });
 
   it("returns 409 when the project is already Signed (immutability, issue #684)", async () => {
-    vi.mocked(prisma.project.findUnique).mockResolvedValue(
-      buildProject("Signed") as never,
-    );
+    // The conditional write matches zero rows when another request already signed.
+    vi.mocked(prisma.project.updateMany).mockResolvedValue({ count: 0 } as never);
 
     const req = buildRequest(validPayload());
     const res = await POST(req);
@@ -236,6 +248,7 @@ describe("POST /api/sign-project — issue #1078 token-first gate order", () => 
     expect(res.status).toBe(409);
     const json = await res.json();
     expect(json.message).toContain("already been signed");
+    expect(prisma.project.updateMany).toHaveBeenCalledTimes(1);
     expect(prisma.project.update).not.toHaveBeenCalled();
   });
 
@@ -268,7 +281,7 @@ describe("POST /api/sign-project — issue #1078 token-first gate order", () => 
 
   it("logs sign_project_save_failed and returns 500 when the Prisma update throws", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    vi.mocked(prisma.project.update).mockRejectedValue(
+    vi.mocked(prisma.project.updateMany).mockRejectedValue(
       new Error("simulated db outage"),
     );
 
