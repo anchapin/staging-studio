@@ -1,173 +1,163 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-// Import AFTER vi.mock so we get the mocked versions
-import { checkRateLimit, clearRateLimit } from "@/lib/sliding-window-ratelimit";
 
-// Mutable in-memory store keyed by `${identifier}:${dayKey}`.
-// Simulates the combined check+record behavior of checkAndRecordRateLimit
-// so that repeated checkRateLimit calls behave as the tests expect.
-const entryStore = vi.hoisted(() => {
-  type Entry = { identifier: string; dayKey: string; count: number; timestamps: number[] };
-  const store = new Map<string, Entry>();
-  return {
-    store,
-    reset: () => store.clear(),
-    /**
-     * Find an entry, evict old timestamps, record a new one if allowed.
-     * Returns { entry, allowed, remaining }.
-     */
-    findOrRecord(
-      identifier: string,
-      limit: number,
-      windowMs: number,
-    ): { allowed: boolean; remaining: number; resetAt: number } {
-      const dayKey = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-      const key = `${identifier}:${dayKey}`;
-      const now = Date.now();
-      const cutoff = now - windowMs;
+import {
+  checkRateLimit,
+  recordRateLimit,
+  checkAndRecordRateLimit,
+  clearRateLimit,
+  dayKey,
+} from "@/lib/sliding-window-ratelimit";
 
-      let entry = store.get(key);
+// ---------------------------------------------------------------------------
+// Mock Prisma
+// ---------------------------------------------------------------------------
 
-      if (!entry) {
-        // No record yet — create first entry
-        entry = { identifier, dayKey, count: 0, timestamps: [] };
-        store.set(key, entry);
-      }
+/** In-memory store keyed by `{userId}:{surface}:{dayKey}`. */
+interface UsageRecord {
+  userId: string;
+  surface: string;
+  dayKey: string;
+  count: number;
+  timestamps: Date[];
+}
 
-      // Evict timestamps outside the sliding window
-      entry.timestamps = entry.timestamps.filter((ts) => ts >= cutoff);
-      entry.count = entry.timestamps.length;
+const mockStore = new Map<string, UsageRecord>();
 
-      if (entry.count >= limit) {
-        return {
-          allowed: false,
-          remaining: 0,
-          resetAt: Math.min(...entry.timestamps) + windowMs,
-        };
-      }
+function storeKey(userId: string, surface: string, dayKey: string): string {
+  return `${userId}::${surface}::${dayKey}`;
+}
 
-      // Record this request
-      entry.timestamps.push(now);
-      entry.count = entry.timestamps.length;
+function cloneRecord(r: UsageRecord): UsageRecord {
+  return { ...r, timestamps: [...r.timestamps] };
+}
 
-      return {
-        allowed: true,
-        remaining: Math.max(0, limit - entry.count),
-        resetAt: Math.min(...entry.timestamps) + windowMs,
-      };
-    },
-    deleteEntry(identifier: string): void {
-      const dayKey = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-      store.delete(`${identifier}:${dayKey}`);
-    },
-  };
-});
-
-const mockPrisma = vi.hoisted(() => {
-  return {
-    resetMock: () => {}, // real reset happens via entryStore.reset()
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
     dailyApiUsage: {
-      findUnique: vi.fn().mockResolvedValue(null),
-      findMany: vi.fn().mockResolvedValue([]),
-      create: vi.fn().mockImplementation(({ data }) => Promise.resolve(data)),
-      update: vi.fn().mockImplementation(({ data }) => Promise.resolve(data)),
-      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
-    },
-  };
-});
+      findUnique: vi.fn(async ({ where }: { where: { userId_surface_dayKey: { userId: string; surface: string; dayKey: string } } }) => {
+        const k = storeKey(
+          where.userId_surface_dayKey.userId,
+          where.userId_surface_dayKey.surface,
+          where.userId_surface_dayKey.dayKey
+        );
+        const rec = mockStore.get(k);
+        return rec ? cloneRecord(rec) : null;
+      }),
 
-vi.mock("@/lib/prisma", () => ({ prisma: mockPrisma }));
+      create: vi.fn(async ({ data }: { data: { userId: string; surface: string; dayKey: string; count: number; timestamps: Date[] } }) => {
+        const k = storeKey(data.userId, data.surface, data.dayKey);
+        mockStore.set(k, cloneRecord(data as unknown as UsageRecord));
+        return cloneRecord(data as unknown as UsageRecord);
+      }),
 
-// Intercept checkRateLimit to record entries in our simulated store.
-// This lets the test exercise the real sliding-window algorithm logic.
-vi.mock("@/lib/sliding-window-ratelimit", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@/lib/sliding-window-ratelimit")>();
-  return {
-    ...original,
-    checkRateLimit: (
-      identifier: string,
-      limit: number,
-      windowMs: number,
-    ) => {
-      const result = entryStore.findOrRecord(identifier, limit, windowMs);
-      // Return in the same shape as the real checkRateLimit result
-      return Promise.resolve({
-        allowed: result.allowed,
-        remaining: result.remaining,
-        resetAt: result.resetAt,
-      });
+      update: vi.fn(async ({ where, data }: { where: { userId_surface_dayKey: { userId: string; surface: string; dayKey: string } }; data: { count?: number; timestamps?: Date[] } }) => {
+        const k = storeKey(
+          where.userId_surface_dayKey.userId,
+          where.userId_surface_dayKey.surface,
+          where.userId_surface_dayKey.dayKey
+        );
+        const existing = mockStore.get(k);
+        if (!existing) return null;
+        if (data.count !== undefined) existing.count = data.count;
+        if (data.timestamps !== undefined) existing.timestamps = [...data.timestamps];
+        return cloneRecord(existing);
+      }),
+
+      deleteMany: vi.fn(async ({ where }: { where: { userId: string; surface: string; dayKey: string } }) => {
+        const k = storeKey(where.userId, where.surface, where.dayKey);
+        const had = mockStore.has(k);
+        mockStore.delete(k);
+        return { count: had ? 1 : 0 };
+      }),
     },
-    clearRateLimit: (identifier: string) => {
-      entryStore.deleteEntry(identifier);
-      return Promise.resolve();
-    },
-  };
-});
+  },
+}));
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 describe("sliding-window-ratelimit", () => {
-  beforeEach(async () => {
-    entryStore.reset();
-    mockPrisma.resetMock();
+  // Use vitest fake timers so the window-reset test is deterministic
+  // and instant. The module reads Date.now() internally — vi.useFakeTimers
+  // stubs that globally for the test.
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-01-15T12:00:00Z"));
+    mockStore.clear();
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
-  it("1. allows first request with remaining = limit - 1", async () => {
+  // --- checkRateLimit --------------------------------------------------------
+
+  it("1. checkRateLimit allows first request with remaining = limit - 1", async () => {
     const result = await checkRateLimit("test", 5, 60_000);
     expect(result.allowed).toBe(true);
     expect(result.remaining).toBe(4);
   });
 
-  it("2. allows requests under the limit", async () => {
-    await checkRateLimit("test", 5, 60_000);
-    await checkRateLimit("test", 5, 60_000);
-    await checkRateLimit("test", 5, 60_000);
-    const result = await checkRateLimit("test", 5, 60_000);
-    expect(result.allowed).toBe(true);
-    expect(result.remaining).toBe(1);
+  it("2. checkRateLimit allows requests under the limit (limit > 1, check-only)", async () => {
+    // checkRateLimit does not record; use checkAndRecordRateLimit for that.
+    // These calls exercise the real DB reads without side-effects.
+    const r1 = await checkRateLimit("test", 5, 60_000);
+    expect(r1.allowed).toBe(true);
+    expect(r1.remaining).toBe(4);
+
+    const r2 = await checkRateLimit("test", 5, 60_000);
+    expect(r2.allowed).toBe(true);
+    expect(r2.remaining).toBe(4);
+
+    const r3 = await checkRateLimit("test", 5, 60_000);
+    expect(r3.allowed).toBe(true);
+    expect(r3.remaining).toBe(4);
   });
 
-  it("3. blocks requests at/over the limit", async () => {
+  it("3. checkAndRecordRateLimit blocks the 6th request when limit = 5", async () => {
     for (let i = 0; i < 5; i++) {
-      const r = await checkRateLimit("test", 5, 60_000);
+      const r = await checkAndRecordRateLimit("test", 5, 60_000);
       expect(r.allowed).toBe(true);
     }
-    const result = await checkRateLimit("test", 5, 60_000);
-    expect(result.allowed).toBe(false);
-    expect(result.remaining).toBe(0);
+    const blocked = await checkAndRecordRateLimit("test", 5, 60_000);
+    expect(blocked.allowed).toBe(false);
+    expect(blocked.remaining).toBe(0);
   });
 
-  it("4. remaining decrements correctly as requests are made", async () => {
-    const r1 = await checkRateLimit("test", 3, 60_000);
+  it("4. remaining decrements correctly with checkAndRecordRateLimit", async () => {
+    const r1 = await checkAndRecordRateLimit("test", 3, 60_000);
     expect(r1.allowed).toBe(true);
     expect(r1.remaining).toBe(2);
 
-    const r2 = await checkRateLimit("test", 3, 60_000);
+    const r2 = await checkAndRecordRateLimit("test", 3, 60_000);
     expect(r2.allowed).toBe(true);
     expect(r2.remaining).toBe(1);
 
-    const r3 = await checkRateLimit("test", 3, 60_000);
+    const r3 = await checkAndRecordRateLimit("test", 3, 60_000);
     expect(r3.allowed).toBe(true);
     expect(r3.remaining).toBe(0);
 
-    const r4 = await checkRateLimit("test", 3, 60_000);
+    const r4 = await checkAndRecordRateLimit("test", 3, 60_000);
     expect(r4.allowed).toBe(false);
     expect(r4.remaining).toBe(0);
   });
 
-  it("5. resetAt is correctly calculated when rate limited", async () => {
-    for (let i = 0; i < 3; i++) {
-      await checkRateLimit("test", 3, 60_000);
+  it("5. resetAt is set when rate limited", async () => {
+    for (let i = 0; i < 5; i++) {
+      await checkAndRecordRateLimit("test", 5, 60_000);
     }
-    const blocked = await checkRateLimit("test", 3, 60_000);
+    const blocked = await checkAndRecordRateLimit("test", 5, 60_000);
     expect(blocked.allowed).toBe(false);
+    expect(blocked.resetAt).toBeGreaterThan(Date.now());
   });
 
-  it("6. old entries outside the window are evicted on each call", async () => {
+  it("6. clearRateLimit removes the record and subsequent requests are allowed again", async () => {
     for (let i = 0; i < 3; i++) {
-      await checkRateLimit("test", 3, 60_000);
+      await checkAndRecordRateLimit("test", 3, 60_000);
     }
+    const blocked = await checkAndRecordRateLimit("test", 3, 60_000);
+    expect(blocked.allowed).toBe(false);
     await clearRateLimit("test");
     const result = await checkRateLimit("test", 3, 60_000);
     expect(result.allowed).toBe(true);
@@ -176,22 +166,89 @@ describe("sliding-window-ratelimit", () => {
 
   it("7. different identifiers have independent rate limits", async () => {
     for (let i = 0; i < 3; i++) {
-      await checkRateLimit("test", 3, 60_000);
+      await checkAndRecordRateLimit("test", 3, 60_000);
     }
-    const result = await checkRateLimit("other", 3, 60_000);
+    const result = await checkAndRecordRateLimit("other", 3, 60_000);
     expect(result.allowed).toBe(true);
     expect(result.remaining).toBe(2);
   });
 
-  it("8. clearRateLimit removes entries and subsequent requests are allowed again", async () => {
-    for (let i = 0; i < 3; i++) {
-      await checkRateLimit("test", 3, 60_000);
-    }
-    const blocked = await checkRateLimit("test", 3, 60_000);
-    expect(blocked.allowed).toBe(false);
-    await clearRateLimit("test");
-    const result = await checkRateLimit("test", 3, 60_000);
+  // --- recordRateLimit (standalone) ------------------------------------------
+
+  it("8. recordRateLimit records and returns correct remaining", async () => {
+    const r1 = await recordRateLimit("test", 4, 60_000);
+    expect(r1.allowed).toBe(true);
+    expect(r1.remaining).toBe(3);
+
+    const r2 = await recordRateLimit("test", 4, 60_000);
+    expect(r2.allowed).toBe(true);
+    expect(r2.remaining).toBe(2);
+
+    const r3 = await recordRateLimit("test", 4, 60_000);
+    expect(r3.allowed).toBe(true);
+    expect(r3.remaining).toBe(1);
+
+    const r4 = await recordRateLimit("test", 4, 60_000);
+    expect(r4.allowed).toBe(true);
+    expect(r4.remaining).toBe(0);
+
+    const r5 = await recordRateLimit("test", 4, 60_000);
+    expect(r5.allowed).toBe(false);
+    expect(r5.remaining).toBe(0);
+  });
+
+  // --- Limit > 1 regression cases -------------------------------------------
+
+  it("9. checkRateLimit honors limit > 1 (limit=5 with 2 prior requests is still allowed)", async () => {
+    // Manually seed the store with 2 prior records to simulate an existing usage entry.
+    // Use the same dayKey function as the source to ensure consistent key generation.
+    const fixedDate = new Date("2024-01-15T12:00:00Z");
+    const entry = {
+      userId: "test",
+      surface: "default",
+      dayKey: dayKey(fixedDate), // Use same dayKey function to ensure consistency
+      count: 2,
+      timestamps: [fixedDate, fixedDate],
+    };
+    const k = storeKey(entry.userId, entry.surface, entry.dayKey);
+    mockStore.set(k, entry);
+
+    // With limit=5 and 2 valid timestamps within window, remaining = 5 - 2 = 3
+    const result = await checkRateLimit("test", 5, 60_000, fixedDate);
     expect(result.allowed).toBe(true);
-    expect(result.remaining).toBe(2);
+    expect(result.remaining).toBe(3);
+  });
+
+  it("10. checkAndRecordRateLimit correctly uses limit > 1 (limit=5, 5th request is allowed, 6th is blocked)", async () => {
+    const results: boolean[] = [];
+    for (let i = 0; i < 6; i++) {
+      const r = await checkAndRecordRateLimit("user5", 5, 60_000);
+      results.push(r.allowed);
+    }
+    expect(results).toEqual([true, true, true, true, true, false]);
+    // If the old bug were present (limit treated as 1), results would be [true, false, false, false, false, false]
+  });
+
+  it("11. after all timestamps expire, remaining resets to limit (window is fresh)", async () => {
+    // Seed with 2 timestamps that will be outside the window
+    // 2 minutes ago is outside 60s window
+    const expiredDate = new Date("2024-01-15T11:58:00Z");
+    const entry = {
+      userId: "expire-test",
+      surface: "default",
+      dayKey: dayKey(expiredDate),
+      count: 2,
+      timestamps: [expiredDate, expiredDate],
+    };
+    const k = storeKey(entry.userId, entry.surface, entry.dayKey);
+    mockStore.set(k, entry);
+
+    // Current time is 12:00:00, timestamps are at 11:58:00 (2 minutes ago)
+    // windowMs = 60_000 (60 seconds), so timestamps are outside the window
+    // After cleanup, remaining should be limit (window is fresh)
+    const fixedDate = new Date("2024-01-15T12:00:00Z");
+    const result = await checkRateLimit("expire-test", 5, 60_000, fixedDate);
+    expect(result.allowed).toBe(true);
+    expect(result.remaining).toBe(5); // Window is fresh after cleanup
   });
 });

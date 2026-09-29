@@ -20,12 +20,12 @@ export interface RateLimitResult {
 function parseIdentifier(identifier: string): { surface: string; userId: string } {
   const parts = identifier.split(":");
   return {
-    surface: parts[0] || "default",
+    surface: parts.length > 1 ? parts[0] : "default",
     userId: parts.length > 1 ? parts[1] : identifier,
   };
 }
 
-function dayKey(now: Date = new Date()): string {
+export function dayKey(now: Date = new Date()): string {
   const year = now.getFullYear();
   const month = now.getMonth();
   const day = now.getDate();
@@ -45,6 +45,7 @@ function windowEnd(now: Date = new Date()): Date {
 
 async function fetchAndCleanTimestamps(
   record: DailyApiUsage,
+  limit: number,
   windowMs: number,
   now: Date = new Date()
 ): Promise<{ validTimestamps: Date[]; allowed: boolean; remaining: number }> {
@@ -54,8 +55,8 @@ async function fetchAndCleanTimestamps(
     .sort((a, b) => a.getTime() - b.getTime());
 
   const count = validTimestamps.length;
-  const allowed = count < 1;
-  const remaining = Math.max(0, 1 - count);
+  const allowed = count < limit;
+  const remaining = Math.max(0, limit - count);
 
   return { validTimestamps, allowed, remaining };
 }
@@ -80,6 +81,7 @@ export async function checkRateLimit(
 
   const { validTimestamps, allowed, remaining } = await fetchAndCleanTimestamps(
     record,
+    limit,
     windowMs,
     now
   );
@@ -89,7 +91,7 @@ export async function checkRateLimit(
       where: { userId_surface_dayKey: { userId, surface, dayKey: dk } },
       data: { timestamps: [], count: 0 },
     });
-    return { allowed: true, remaining: limit - 1, resetAt: we.getTime() };
+    return { allowed: true, remaining: limit, resetAt: we.getTime() };
   }
 
   return {
