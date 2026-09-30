@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import BufferedDirectivesTextarea from "@/components/canvas/buffered-directives-textarea";
 import { ArrowLeft, ChevronRight, GripVertical, PencilRuler, Check, X, Plus } from "lucide-react";
 import {
   DndContext,
@@ -1091,11 +1092,14 @@ export default function ProjectDetailView({
                             return null;
                           })()}
                         </div>
-                        <textarea
+                        {/* Issue #1159: buffered locally so a keystroke
+                            does not re-render the studio tree before the
+                            character lands. */}
+                        <BufferedDirectivesTextarea
                           id={`directives-${focusedRoom.id}`}
                           value={focusedInputs.roomDirectives}
-                          onChange={(e) =>
-                            editDirectives(focusedRoom.id, e.target.value)
+                          onCommit={(value) =>
+                            editDirectives(focusedRoom.id, value)
                           }
                           onBlur={() => blurDirectives(focusedRoom.id)}
                           maxLength={MAX_DIRECTIVE_LENGTH}
