@@ -46,7 +46,7 @@ describe("issue #1142 — a 429 is transient, never terminal", () => {
 
 describe("issue #1141 — the production poll honours its own bounds", () => {
   it("sleeps with growing backoff between transport failures instead of spinning", async () => {
-    const sleep = vi.fn(async () => {});
+    const sleep = vi.fn(async (_ms: number) => {});
     let calls = 0;
     const fetchStatus: FetchInpaintStatus = vi.fn(async () => {
       calls += 1;
