@@ -42,3 +42,22 @@ export function resolveInpaintRetry(
   }
   return { kind: "resubmit" };
 }
+
+/**
+ * Issue #1135: the submit path accepted a paid fal job but could not
+ * write its durable `InpaintRequest` row (`degraded: true`). The
+ * requestId cannot be polled — the status route 404s, which classifies
+ * terminal, which offers Retry, which submits a second billed job for a
+ * result that is already unrecoverable. This error stops that chain:
+ * the run fails once, non-retryably, and says so plainly.
+ */
+export class InpaintJobLostError extends Error {
+  readonly retryable = false;
+
+  constructor(
+    message = "This staging job was lost before it could be tracked, so its result can't be retrieved. You were charged once for it. Start a new run when you're ready."
+  ) {
+    super(message);
+    this.name = "InpaintJobLostError";
+  }
+}

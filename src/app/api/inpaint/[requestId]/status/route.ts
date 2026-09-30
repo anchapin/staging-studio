@@ -51,6 +51,12 @@ export async function GET(
         {
           error: "Too many requests",
           message: `Rate limit exceeded. Please wait ${rateLimit.retryAfterSeconds} seconds before trying again.`,
+          // Issue #1142: a rate limit is transient by definition — this
+          // response already carries Retry-After. Without the flag the
+          // poller classified it terminal, and the terminal path offers
+          // "Retry inpainting", which submits a second billed fal job
+          // for work still in flight.
+          retryable: true,
           code: API_ERROR_TOO_MANY_REQUESTS,
         },
         {
