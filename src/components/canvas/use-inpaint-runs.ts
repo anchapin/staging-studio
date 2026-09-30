@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useInpaintStatus } from "./use-inpaint-status";
+import { InpaintJobLostError } from "@/lib/inpaint-retry";
 import {
   shouldPersistResult,
   INPAINT_NOT_PERSISTED_WARNING,
@@ -267,6 +268,17 @@ export function useInpaintRuns({
 
         if (!startResponse.ok) {
           throw new Error(startData.message || startData.error || "Failed to start inpainting");
+        }
+
+        // Issue #1135: the submit path returns `degraded: true` when the
+        // fal job was accepted but its durable InpaintRequest row could
+        // not be written. Polling that requestId 404s, the poller reads
+        // 404 as terminal, and the terminal path offers "Retry
+        // inpainting" — billing a second fal job for a run whose result
+        // is already unrecoverable. Fail here instead, non-retryably, so
+        // the user is billed once and told plainly.
+        if (startData.degraded === true) {
+          throw new InpaintJobLostError();
         }
 
         return startData.requestId as string;

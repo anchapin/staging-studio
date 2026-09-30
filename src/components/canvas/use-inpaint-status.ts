@@ -2,79 +2,31 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  classifyStatusResponse,
   InpaintPollError,
+  pollInpaintStatus,
   type FetchInpaintStatus,
   type InpaintStatusResponse,
-  type StatusOutcome,
 } from "@/lib/inpaint-polling";
-import {
-  createBackoff,
-  nextDelay,
-  type BackoffOptions,
-  type BackoffState,
-} from "@/lib/inpaint-backoff";
-import { resolveInpaintRetry } from "@/lib/inpaint-retry";
+import { InpaintJobLostError, resolveInpaintRetry } from "@/lib/inpaint-retry";
 
+/**
+ * Issue #1141: a local backoff loop used to drive this poll. It
+ * declared `maxWaitMs` but never read it, and its transport-error
+ * branch did a bare `continue` with no sleep, so one DNS blip burned
+ * all 30 attempts in under a second and reported a misleading
+ * "Polling timed out." on a job the user is still paying for. Those
+ * rapid-fire attempts also tripped the 10/min status rate limit, which
+ * fed the 429 misclassification in #1142. `pollInpaintStatus` already
+ * enforces both bounds, backs off on transport errors and honours the
+ * abort contract, so it is now the production caller its own docstring
+ * always described.
+ */
 const POLL_OPTIONS = {
   intervalMs: 1000,
   maxIntervalMs: 30_000,
   maxAttempts: 30,
   maxWaitMs: 5 * 60_000,
 };
-
-const _backoffStates = new Map<string, BackoffState>();
-
-function _getBackoff(requestId: string): BackoffState {
-  if (!_backoffStates.has(requestId)) {
-    _backoffStates.set(requestId, createBackoff(POLL_OPTIONS));
-  }
-  return _backoffStates.get(requestId)!;
-}
-
-const _pollBackoffOptions: BackoffOptions = {
-  intervalMs: POLL_OPTIONS.intervalMs,
-  maxIntervalMs: POLL_OPTIONS.maxIntervalMs,
-};
-
-async function _pollWithBackoff(
-  fetchStatus: FetchInpaintStatus,
-  requestId: string,
-  signal?: AbortSignal,
-  onProgress?: (status: string) => void,
-): Promise<{ imageUrl: string; persisted: boolean }> {
-  for (let i = 0; i < POLL_OPTIONS.maxAttempts; i++) {
-    if (signal?.aborted) {
-      throw new InpaintPollError("aborted", "Polling was aborted.");
-    }
-
-    let outcome: StatusOutcome;
-    try {
-      const response = await fetchStatus(requestId, signal);
-      outcome = classifyStatusResponse(response.ok, response.httpStatus, response.body);
-    } catch (error) {
-      if (signal?.aborted) return { imageUrl: "", persisted: false };
-      if (error instanceof InpaintPollError) throw error;
-      const action = resolveInpaintRetry(error, requestId);
-      if (action.kind === "resubmit") throw error;
-      // "resume" — poll-phase error; re-poll the same requestId
-      continue;
-    }
-
-    if (outcome.kind === "completed") {
-      return { imageUrl: outcome.imageUrl, persisted: outcome.persisted };
-    }
-    if (outcome.kind === "terminal") {
-      throw new InpaintPollError("terminal", outcome.message);
-    }
-
-    onProgress?.(outcome.kind === "retryable" ? outcome.message : outcome.status);
-    const state = _getBackoff(requestId);
-    const delayMs = nextDelay(state, _pollBackoffOptions);
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-  }
-  throw new InpaintPollError("max-attempts", "Polling timed out.");
-}
 
 const MIN_PROCESSING_MS = 600;
 
@@ -156,12 +108,11 @@ export function useInpaintStatus(
       lastRequestIdRef.current = requestId;
       setStatusText("Processing image...");
 
-      const result = await _pollWithBackoff(
-        fetchInpaintStatus,
-        requestId,
+      const result = await pollInpaintStatus(fetchInpaintStatus, requestId, {
+        ...POLL_OPTIONS,
         signal,
-        (status) => setStatusText(`Processing: ${status}`),
-      );
+        onProgress: (status) => setStatusText(`Processing: ${status}`),
+      });
       if (signal.aborted) return;
 
       const elapsed = Date.now() - (processingStartRef.current ?? 0);
@@ -185,6 +136,13 @@ export function useInpaintStatus(
       setIsProcessing(false);
       setStatusText("");
       const message = error instanceof Error ? error.message : "Inpainting failed";
+      // Issue #1135: a lost job has no row to poll and no result to
+      // recover. Offering Retry here would bill a second fal job, so
+      // report it without one.
+      if (error instanceof InpaintJobLostError) {
+        callbacksRef.current.showError(message, false);
+        return;
+      }
       // Issue #698: classify the failure phase at capture time. A
       // poll-phase failure means the submit already produced a requestId
       // — a billed fal job exists and may still be running — so Retry
