@@ -170,19 +170,19 @@ export function useMaskOverlayLayer({ dims, instanceOverlays }: UseMaskOverlayLa
   // detected-only ones stay a faint wash plus an outline. This layer is
   // decorative only — it never touches the exported mask pixels.
   // ---------------------------------------------------------------------
-  useEffect(() => {
-    const overlayCanvas = overlayCanvasRef.current;
-    const ctx = overlayCanvas?.getContext("2d");
-    if (!overlayCanvas || !ctx) return;
-    ctx.clearRect(0, 0, dims.width, dims.height);
-    if (!instanceOverlays || instanceOverlays.length === 0) return;
-    const cache = instanceImageCacheRef.current;
-    drawInstanceOverlays(ctx, instanceOverlays, cache, { width: dims.width, height: dims.height });
-    ctx.globalAlpha = 1;
-  }, [instanceOverlays, overlayTick, dims.width, dims.height]);
-
-  // Issue #591: render the copy-paste selection rectangle and paste preview
-  // on the overlay canvas (above instance overlays, below the interactive canvas).
+  // Issue #1140: this layer is drawn by ONE effect. A second effect used
+  // to draw the instance overlays on a strict subset of these deps, and
+  // every trigger of it also triggered this one, which clears and
+  // redraws the same overlays — so half the work of every redraw was
+  // thrown away immediately. `drawInstanceOverlays` is full-canvas and
+  // per-instance (a canvas allocation, a full-size buffer and a
+  // per-pixel pass each, plus an outline pass for detected-only
+  // instances), and `selectionRect` changes on every pointermove, so the
+  // duplicate pass cost ~8 redundant recomposites and tens of MB of
+  // short-lived allocation per mouse move on a furnished room.
+  //
+  // Issue #591: the selection rectangle and paste preview sit above the
+  // instance overlays, below the interactive canvas.
   useEffect(() => {
     const overlayCanvas = overlayCanvasRef.current;
     const ctx = overlayCanvas?.getContext("2d");
