@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 
 import { prisma } from "@/lib/prisma";
 import { PREVIEW_TOKEN_QUERY_PARAM } from "@/lib/preview-token";
+import { parseBuyerDemographics } from "@/lib/project-create-schema";
 import {
   extractPreviewToken,
   getPreviewAccess as resolvePreviewAccessRequest,
@@ -192,7 +193,19 @@ export default async function LookbookPreviewPage({
     clientSignatureTimestamp: project.clientSignatureTimestamp
       ? project.clientSignatureTimestamp.toISOString()
       : null,
-    buyerDemographics: (project.buyerDemographics as PreviewProject["buyerDemographics"]) ?? null,
+    // Issue #1134: validated on read, not cast. A row whose
+    // `buyerDemographics` JSON does not match the shape
+    // `BuyerPersonaPage` destructures would otherwise throw inside this
+    // print render — the one Browserless fetches — and fail the export
+    // for the entire lookbook. Degrading to null drops one optional
+    // page instead.
+    // The enum members stay a cast: the persona page already falls back
+    // to the raw value for an unrecognised one
+    // (`BUYER_TYPE_LABELS[buyerType] ?? buyerType`). What the parse
+    // guarantees is the SHAPE, which is what the render depends on.
+    buyerDemographics: parseBuyerDemographics(
+      project.buyerDemographics
+    ) as PreviewProject["buyerDemographics"],
     user: {
       firmName: project.user.firmName,
       ownerName: project.user.ownerName,

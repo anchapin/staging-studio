@@ -8,6 +8,7 @@ import {
   API_ERROR_USER_NOT_FOUND,
 } from "@/lib/api-errors";
 import { withErrorHandler, ApiError } from "@/lib/api-error-handler";
+import { projectCreateRequestSchema } from "@/lib/project-create-schema";
 
 // GET: List the authed user's projects (scoped to caller)
 export const GET = withErrorHandler(async () => {
@@ -52,7 +53,38 @@ export const POST = withErrorHandler(async (request: Request) => {
     });
   }
 
-  const body = await request.json();
+  // Issue #1134: the body is validated BEFORE it reaches Prisma. The
+  // room list is capped, and `buyerDemographics` must match the shape
+  // the lookbook's buyer-persona page destructures — an unvalidated
+  // value here fails the PDF export for the whole lookbook, because
+  // that page renders inside the cookie-less print route Browserless
+  // fetches.
+  const rawBody: unknown = await request.json().catch(() => null);
+  const parsed = projectCreateRequestSchema.safeParse(rawBody);
+
+  if (!parsed.success) {
+    // A missing/empty required field keeps the original copy the client
+    // renders; everything else (room cap, bad demographics shape,
+    // unknown key) reports the specific issue.
+    const REQUIRED_FIELDS = new Set([
+      "propertyAddress",
+      "clientName",
+      "targetBuyer",
+      "stagingAesthetic",
+    ]);
+    const requiredFieldIssue = parsed.error.issues.some((issue) =>
+      REQUIRED_FIELDS.has(String(issue.path[0]))
+    );
+
+    throw new ApiError({
+      code: API_ERROR_MISSING_REQUIRED_FIELDS,
+      message: requiredFieldIssue
+        ? "propertyAddress, clientName, targetBuyer, and stagingAesthetic are required."
+        : (parsed.error.issues[0]?.message ?? "The project details could not be read."),
+      status: 400,
+    });
+  }
+
   const {
     propertyAddress,
     clientName,
@@ -61,15 +93,7 @@ export const POST = withErrorHandler(async (request: Request) => {
     buyerDemographics,
     stagingPackage,
     rooms,
-  } = body;
-
-  if (!propertyAddress || !clientName || !targetBuyer || !stagingAesthetic) {
-    throw new ApiError({
-      code: API_ERROR_MISSING_REQUIRED_FIELDS,
-      message: "propertyAddress, clientName, targetBuyer, and stagingAesthetic are required.",
-      status: 400,
-    });
-  }
+  } = parsed.data;
 
   const userRow = await prisma.user.findUnique({
     where: { email: user.email },
@@ -93,7 +117,7 @@ export const POST = withErrorHandler(async (request: Request) => {
       stagingPackage: stagingPackage ?? null,
       buyerDemographics: buyerDemographics ?? undefined,
       rooms: {
-        create: rooms.map((name: string) => ({ name })),
+        create: rooms.map((name) => ({ name })),
       },
     },
     include: { rooms: true },

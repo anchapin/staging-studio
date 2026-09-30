@@ -67,6 +67,17 @@ const INVALID_CONCEPT_COPY = {
 const DETECTION_TIMEOUT_MS = 90_000;
 
 /**
+ * Issue #1118: this route's worst case is the fal subscribe bounded by
+ * DETECTION_TIMEOUT_MS followed — sequentially — by the mask fetches,
+ * each armed with a fresh timeout of the same length. Without this
+ * declaration the platform default kills the function before either
+ * internal timeout fires, so the caller gets an opaque 504/500 instead
+ * of the classified "Request timeout" copy and `recordDailyUsage` never
+ * runs, leaving the paid SAM call unbilled.
+ */
+export const maxDuration = 300;
+
+/**
  * Fetches a fal-hosted mask image and re-encodes it as a data URL so the
  * browser can composite it without a cross-origin image load (which
  * would depend on remote CORS headers and could taint the canvas).
@@ -195,9 +206,48 @@ export async function POST(request: NextRequest) {
       throw new Error("Detection response did not include mask images");
     }
 
-    const maskDataUrls = await Promise.all(
+    // Issue #1119: settle per mask. `Promise.all` rejected the whole
+    // batch when a single mask URL was slow or 5xx, so the user got
+    // ZERO regions after an already-billed SAM call — auto-detect
+    // dead-ends on one bad URL. The classified error path is taken only
+    // when every mask fails, matching the failure tolerance the inpaint
+    // path already has (`persistFalImage` returns `{persisted:false}`
+    // and the status route retries).
+    const settled = await Promise.allSettled(
       detection.maskUrls.map((maskUrl) => fetchMaskAsDataUrl(maskUrl))
     );
+
+    const maskDataUrls: string[] = [];
+    const keptScores: number[] = [];
+    let failedMaskCount = 0;
+
+    settled.forEach((outcome, index) => {
+      if (outcome.status === "fulfilled") {
+        maskDataUrls.push(outcome.value);
+        const score = detection.scores?.[index];
+        if (score !== undefined) keptScores.push(score);
+        return;
+      }
+      failedMaskCount += 1;
+    });
+
+    if (failedMaskCount > 0) {
+      console.warn(
+        JSON.stringify({
+          event: "furnishings_mask_fetch_partial",
+          roomId: roomId ?? null,
+          requested: settled.length,
+          failed: failedMaskCount,
+        })
+      );
+    }
+
+    // Every mask failing is indistinguishable from a broken detection,
+    // so it takes the classified error path rather than presenting as
+    // "no furnishings found".
+    if (settled.length > 0 && maskDataUrls.length === 0) {
+      throw new Error("Every detected mask image failed to download");
+    }
 
     // An empty maskDataUrls list is a VALID result ("no {concept} found"
     // is presentable, not an error) — the response succeeds either way.
@@ -209,7 +259,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       concept: payload.prompt,
       maskDataUrls,
-      scores: detection.scores,
+      scores: detection.scores ? keptScores : detection.scores,
     });
   } catch (error) {
     console.error(
