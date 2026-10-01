@@ -1,4 +1,4 @@
-import * as fal from "@fal-ai/serverless-client";
+import { fal } from "@fal-ai/client";
 import { requireEnvVars } from "@/lib/env";
 import {
   getCircuitBreaker,
@@ -14,7 +14,7 @@ fal.config({
  *
  * Purpose: the single sanctioned fal.ai entry point. Import `fal` from
  * `@/lib/fal` (see `api/inpaint` for FLUX.1 Fill queue usage); never
- * import `@fal-ai/serverless-client` directly.
+ * import `@fal-ai/client` directly.
  *
  * Side effects at module load: calls `fal.config({ credentials:
  * process.env.FAL_KEY })` — importing this module therefore binds the
@@ -52,9 +52,13 @@ export async function falSubscribeWithCircuitBreaker<T = unknown>(
     cooldownMs: 30_000,
   });
   try {
-    return await cb.execute(() =>
+    // `@fal-ai/client@1.x`'s `subscribe()` resolves to `Result<T>` (data +
+    // requestId), not `T` directly. We widen through unknown before
+    // re-narrowing to the call-site `T` so callers continue to receive the
+    // payload as if it were the raw result.
+    return (await cb.execute(() =>
       fal.subscribe(modelId, { ...options })
-    ) as Promise<T>;
+    )) as unknown as Promise<T>;
   } catch (error) {
     logger.error(
       {
@@ -84,9 +88,15 @@ export async function falQueueSubmitWithCircuitBreaker(
     cooldownMs: 30_000,
   });
   try {
+    // `@fal-ai/client@1.x` returns a richer `InQueueQueueStatus`; we keep
+    // the narrow `{ request_id: string }` shape because every caller only
+    // reads `request_id`. The cast widens the typed result through unknown
+    // before re-narrowing to the call-site shape.
     return await cb.execute(() =>
-      fal.queue.submit(modelId, options)
-    ) as unknown as Promise<{ request_id: string }>;
+      fal.queue.submit(modelId, options) as unknown as Promise<{
+        request_id: string;
+      }>
+    );
   } catch (error) {
     logger.error(
       {

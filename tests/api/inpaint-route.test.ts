@@ -194,8 +194,12 @@ describe("POST /api/inpaint", () => {
     vi.mocked(prisma.dailyApiUsage.findFirst).mockResolvedValue(null);
     vi.mocked(prisma.dailyApiUsage.upsert).mockResolvedValue({} as never);
     vi.mocked(evaluateInpaintQualityGate).mockResolvedValue([]);
-    vi.mocked(fal.queue.submit).mockResolvedValue({ request_id: "fal-req-123" });
-    vi.mocked(falQueueSubmitWithCircuitBreaker).mockResolvedValue({ request_id: "fal-req-123" });
+    vi.mocked(fal.queue.submit).mockResolvedValue({
+      request_id: "fal-req-123",
+    } as never);
+    vi.mocked(falQueueSubmitWithCircuitBreaker).mockResolvedValue({
+      request_id: "fal-req-123",
+    });
     vi.mocked(buildInpaintPrompt).mockReturnValue("replace sofa with leather sofa");
     vi.mocked(resolveDailyLimit).mockReturnValue(20);
     vi.mocked(evaluateDailyQuota).mockReturnValue({ allowed: true, used: 0, limit: 20, remaining: 20 });
@@ -306,7 +310,9 @@ describe("POST /api/inpaint", () => {
   it("returns 200 and includes quality warnings when creativeMode=true", async () => {
     vi.mocked(getDailyUsage).mockResolvedValue(0);
     vi.mocked(evaluateInpaintQualityGate).mockResolvedValue([]);
-    vi.mocked(fal.queue.submit).mockResolvedValue({ request_id: "fal-req-123" });
+    vi.mocked(fal.queue.submit).mockResolvedValue({
+      request_id: "fal-req-123",
+    } as never);
 
     const res = await POST(
       makeRequest({
@@ -334,7 +340,9 @@ describe("POST /api/inpaint", () => {
   it("returns 200 when quality gate passes with no warnings", async () => {
     vi.mocked(getDailyUsage).mockResolvedValue(0);
     vi.mocked(evaluateInpaintQualityGate).mockResolvedValue([]);
-    vi.mocked(fal.queue.submit).mockResolvedValue({ request_id: "fal-req-123" });
+    vi.mocked(fal.queue.submit).mockResolvedValue({
+      request_id: "fal-req-123",
+    } as never);
 
     const res = await POST(
       makeRequest({
@@ -362,7 +370,9 @@ describe("POST /api/inpaint", () => {
     vi.mocked(evaluateInpaintQualityGate).mockResolvedValue([
       "prompt is vague — consider adding more specific style details",
     ]);
-    vi.mocked(fal.queue.submit).mockResolvedValue({ request_id: "fal-req-123" });
+    vi.mocked(fal.queue.submit).mockResolvedValue({
+      request_id: "fal-req-123",
+    } as never);
 
     const res = await POST(
       makeRequest({
