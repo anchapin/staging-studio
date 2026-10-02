@@ -37,7 +37,16 @@ const dashboardUserSelect = {
       createdAt: true,
       updatedAt: true,
       rooms: {
-        select: { id: true, name: true, afterImageUrl: true, afterImageUrl2: true },
+        select: {
+          id: true,
+          name: true,
+          afterImageUrl: true,
+          afterImageUrl2: true,
+          // Issue #1194: unstaged rooms fall back to their uploaded photo
+          // on the projects list (see roomCoverUrl).
+          beforeImageUrl: true,
+          beforeImageUrl2: true,
+        },
       },
     },
   },
