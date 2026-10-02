@@ -81,16 +81,47 @@ describe("falSubscribeWithCircuitBreaker", () => {
     expect(mockExecute).toHaveBeenCalledWith(expect.any(Function));
   });
 
-  it("passes through the result from the circuit breaker", async () => {
-    const expectedResult = { data: "image-url" };
-    mockExecute.mockResolvedValue(expectedResult);
+  it("unwraps the @fal-ai/client Result envelope to the raw model output (#1192)", async () => {
+    const output = {
+      masks: [{ url: "https://fal.media/mask-0.png" }, { url: "https://fal.media/mask-1.png" }],
+      scores: [0.94, 0.81],
+    };
+    mockExecute.mockResolvedValue({ data: output, requestId: "req-123" });
+
+    const { falSubscribeWithCircuitBreaker: subscribe } = await import("@/lib/fal");
+    const result = await subscribe("fal-ai/sam-3-1/image", {
+      input: { prompt: "furniture" },
+    });
+
+    expect(result).toEqual(output);
+  });
+
+  it("feeds furnishings detection a parseable payload end to end (#1192)", async () => {
+    mockExecute.mockResolvedValue({
+      data: { masks: [{ url: "https://fal.media/mask-0.png", score: 0.9 }] },
+      requestId: "req-456",
+    });
+
+    const { falSubscribeWithCircuitBreaker: subscribe } = await import("@/lib/fal");
+    const { parseFurnishingDetectionResponse } = await import("@/lib/furnishing-detection");
+    const result = await subscribe("fal-ai/sam-3-1/image", { input: { prompt: "furniture" } });
+
+    expect(parseFurnishingDetectionResponse(result)).toEqual({
+      maskUrls: ["https://fal.media/mask-0.png"],
+      scores: [0.9],
+    });
+  });
+
+  it("passes a value without the Result envelope through unchanged", async () => {
+    const raw = { data: "payload-field", other: 1 };
+    mockExecute.mockResolvedValue(raw);
 
     const { falSubscribeWithCircuitBreaker: subscribe } = await import("@/lib/fal");
     const result = await subscribe("fal-ai/flux-fill", {
       input: { prompt: "test" },
     });
 
-    expect(result).toEqual(expectedResult);
+    expect(result).toEqual(raw);
   });
 
   it("passes modelId and options to fal.subscribe", async () => {
