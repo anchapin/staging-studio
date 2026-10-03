@@ -7,6 +7,7 @@ import {
   InferenceRequestGoneError,
   LOGICAL_MODEL,
 } from "@/lib/inference";
+import { firstInpaintImageUrl, type RawInpaintOutput } from "@/lib/inpaint-output";
 import {
   API_ERROR_INPAINT_STATUS_FAILED,
   API_ERROR_INPAINT_TERMINAL,
@@ -134,7 +135,7 @@ interface PersistenceResult {
 }
 
 /**
- * Downloads the fal result image and uploads it to Supabase storage.
+ * Downloads the provider result image (fal or Replicate CDN URL) and uploads it to Supabase storage.
  * Returns { persisted: true, imageUrl } on success, { persisted: false, imageUrl: null } on failure.
  * Issue #717: download failures are logged and correlatable.
  */
@@ -291,7 +292,7 @@ function sleep(ms: number): Promise<void> {
 
 type GoneRecovery =
   | { kind: "status"; statusResponse: { status: string; raw?: unknown } }
-  | { kind: "result"; payload: { images?: Array<{ url: string }> } | null }
+  | { kind: "result"; payload: RawInpaintOutput }
   | { kind: "gone" };
 
 /**
@@ -326,10 +327,7 @@ async function recoverFromStatusGone(
   }
 
   try {
-    const { data } = await client.result<{ images?: Array<{ url: string }> }>(
-      inpaintModel,
-      requestId
-    );
+    const { data } = await client.result<RawInpaintOutput>(inpaintModel, requestId);
     console.warn(
       JSON.stringify({ event: "inpaint_status_404_recovered_via_result", requestId })
     );
@@ -390,11 +388,9 @@ export async function pollFalStatus(requestId: string): Promise<InpaintStatusRes
   // PERSISTENCE_FAILED: retry persistence, with a bounded give-up so
   // the poller cannot loop forever when Supabase is the failure mode.
   if (inpaintRequest.status === "PERSISTENCE_FAILED") {
-    let resultPayload: { images?: Array<{ url: string }> } | null = null;
+    let resultPayload: RawInpaintOutput = null;
     try {
-      const { data } = await client.result<{
-        images?: Array<{ url: string }>;
-      }>(inpaintModel, requestId);
+      const { data } = await client.result<RawInpaintOutput>(inpaintModel, requestId);
       resultPayload = data;
     } catch (resultError) {
       // The provider's queue prunes requestIds after their TTL. If
@@ -411,8 +407,7 @@ export async function pollFalStatus(requestId: string): Promise<InpaintStatusRes
         resultError
       );
     }
-    const falImageUrl: string | null =
-      resultPayload?.images?.[0]?.url ?? null;
+    const falImageUrl = firstInpaintImageUrl(resultPayload);
     if (!falImageUrl) {
       return { status: "retryable", imageUrl: null, persisted: false };
     }
@@ -494,11 +489,9 @@ export async function pollFalStatus(requestId: string): Promise<InpaintStatusRes
   }
 
   if (statusResponse.status === "COMPLETED") {
-    let resultPayload: { images?: Array<{ url: string }> } | null = null;
+    let resultPayload: RawInpaintOutput = null;
     try {
-      const { data } = await client.result<{
-        images?: Array<{ url: string }>;
-      }>(inpaintModel, requestId);
+      const { data } = await client.result<RawInpaintOutput>(inpaintModel, requestId);
       resultPayload = data;
     } catch (resultError) {
       console.error(
@@ -529,9 +522,11 @@ export async function pollFalStatus(requestId: string): Promise<InpaintStatusRes
  */
 async function finishCompletedJob(
   requestId: string,
-  resultPayload: { images?: Array<{ url: string }> } | null
+  resultPayload: RawInpaintOutput
 ): Promise<InpaintStatusResult> {
-  const falImageUrl = resultPayload?.images?.[0]?.url;
+  // Provider-neutral: fal's { images: [{ url }] } and Replicate's
+  // url / [url1, url2] both reduce to the first URL (#1199).
+  const falImageUrl = firstInpaintImageUrl(resultPayload);
 
   if (!falImageUrl) {
     return { status: "retryable", imageUrl: null, persisted: false };
