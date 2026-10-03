@@ -340,10 +340,14 @@ export type ReplicateFillPayload = {
   // Replicate uses a single `prompt_strength` parameter on this model.
   prompt_strength: number;
   num_inference_steps: number;
-  // Replicate's `output_format` and `output_quality` are post-process
-  // controls; we keep them pinned so the result is deterministic.
+  // Replicate's `output_format` is a post-process control; we keep
+  // it pinned so the result is deterministic.
   output_format: "png";
-  safety_tolerance: "2";
+  // Replicate's API requires `safety_tolerance` as an INTEGER (the
+  // #1200 probe caught a string-typed-as-string regression here:
+  // Replicate returned "Invalid type. Expected: integer, given: string").
+  // Range is 0..6 per the model card; 2 is the v1 default.
+  safety_tolerance: number;
 } & Record<string, unknown>;
 
 export function buildReplicateFillPayload(
@@ -366,7 +370,7 @@ export function buildReplicateFillPayload(
     prompt_strength: promptStrength,
     num_inference_steps: 28,
     output_format: "png",
-    safety_tolerance: "2",
+    safety_tolerance: 2,
   };
   return payload;
 }

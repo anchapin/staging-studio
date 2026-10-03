@@ -46,7 +46,7 @@ beforeEach(() => {
 });
 
 describe("submit", () => {
-  it("POSTs to /v1/predictions with the model id and input", async () => {
+  it("POSTs to /v1/predictions with the version hash and input", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       status: 201,
@@ -66,11 +66,55 @@ describe("submit", () => {
       "Content-Type": "application/json",
     });
     const body = JSON.parse(init.body);
-    expect(body.model).toBe("black-forest-labs/flux-fill-pro");
+    // Replicate's current /v1/predictions requires an explicit version
+    // hash and rejects `model` (#1200 probe). Pin both: the version
+    // must be present, and the legacy `model` key must not.
+    expect(body.version).toBe(
+      "41c767bcbfffe54ef8f05eb4d0100f9314790f7fc43a7b88d73ec06839deddb9"
+    );
+    expect(body.model).toBeUndefined();
     expect(body.input).toEqual({
       image: "https://x.test/i.png",
       prompt: "test",
     });
+  });
+
+  it("honors REPLICATE_FLUX_FILL_VERSION when set", async () => {
+    process.env.REPLICATE_FLUX_FILL_VERSION =
+      "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1";
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: "pred-abc-123", status: "starting" }),
+    });
+    const client = createReplicateClient();
+    await client.submit(LOGICAL_MODEL.FLUX_FILL, {
+      input: { prompt: "x" },
+    });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.version).toBe(
+      "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1"
+    );
+  });
+
+  it("does not put REPLICATE_FLUX_FILL_MODEL into the request body", async () => {
+    // REPLICATE_FLUX_FILL_MODEL is read by the adapter (so the
+    // deployment is logged correctly) but the wire body only carries
+    // `version` — Replicate's API rejects `model` (#1200 probe). If
+    // someone later adds `body.model = process.env.REPLICATE_FLUX_FILL_MODEL`
+    // this test will fail.
+    process.env.REPLICATE_FLUX_FILL_MODEL = "black-forest-labs/flux-fill-pro";
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: "pred-abc-123", status: "starting" }),
+    });
+    const client = createReplicateClient();
+    await client.submit(LOGICAL_MODEL.FLUX_FILL, {
+      input: { prompt: "x" },
+    });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.model).toBeUndefined();
   });
 
   it("translates a 404 to InferenceRequestGoneError", async () => {
@@ -203,5 +247,13 @@ describe("subscribe", () => {
     expect(result).toBe("ok");
     // One submit, one poll; no more.
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    // Pin subscribe's submit body the same way submit's body is
+    // pinned above — both call sites share the same wire format.
+    const submitCall = fetchMock.mock.calls[0];
+    const submitBody = JSON.parse(submitCall[1].body);
+    expect(submitBody.version).toBe(
+      "41c767bcbfffe54ef8f05eb4d0100f9314790f7fc43a7b88d73ec06839deddb9"
+    );
+    expect(submitBody.model).toBeUndefined();
   });
 });

@@ -1,0 +1,28 @@
+{
+  "probe": "replicate-integration",
+  "issue": 1200,
+  "startedAt": "2026-10-03T03:18:39.504Z",
+  "model": "black-forest-labs/flux-fill-pro",
+  "version": "41c767bcbfffe54ef8f05eb4d0100f9314790f7fc43a7b88d73ec06839deddb9",
+  "inputs": "generated data urls",
+  "requestId": "ptq252jx7srmr0d0zz2tj43t20",
+  "submitMs": 198,
+  "statusesSeen": [
+    "processing->IN_PROGRESS",
+    "succeeded->COMPLETED"
+  ],
+  "statusPolls": 4,
+  "completedMs": 5102,
+  "outputShape": "string",
+  "imageUrls": [
+    "https://replicate.delivery/xezq/0R19LcfwvIU9K6d60a7oOCMhhHxmPBKEkn6j4YCwp6mJMxpLA/tmppdd_c7j4.png"
+  ],
+  "download": {
+    "httpStatus": 200,
+    "contentType": "image/png",
+    "bytes": 48733
+  },
+  "totalMs": 5278,
+  "verdict": "PASS",
+  "finishedAt": "2026-10-03T03:18:44.782Z"
+}
