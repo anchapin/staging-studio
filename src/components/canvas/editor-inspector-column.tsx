@@ -7,6 +7,7 @@ import EntireTabPanel from "@/components/canvas/entire-tab-panel";
 import ManualTabPanel from "@/components/canvas/manual-tab-panel";
 import DetectTabPanel from "@/components/canvas/detect-tab-panel";
 import InspectorHeader from "@/components/canvas/inspector-header";
+import { inspectorHeading } from "@/lib/inspector-heading";
 import InspectorCollapsedRail from "@/components/canvas/inspector-collapsed-rail";
 import InspectorFooterPanels from "@/components/canvas/inspector-footer-panels";
 import SourceSelectorFieldset from "@/components/canvas/source-selector-fieldset";
@@ -110,7 +111,7 @@ export function EditorInspectorColumn({
         <InspectorCollapsedRail onExpand={handleInspectorRailExpand} />
       ) : (
         <>
-          {/* Issue #617: Active Inpaint Zone header with the collapse toggle.
+          {/* Issue #617/#1195: selection-aware header with the collapse toggle.
               The five inspector sections live below: operation mode tabs +
               targeted prompt editor + AI guidance sliders (Manual paint tab,
               via #629/#558) and the generated variation grid (#630). */}
@@ -122,6 +123,11 @@ export function EditorInspectorColumn({
               onToggleCollapse={inspectorPanel.toggle}
               isExpanded={inspectorView === "expanded"}
               activeBatch={activeBatch}
+              heading={inspectorHeading({
+                effectiveTab,
+                batchSelections,
+                hasPaintedMask: Boolean(maskDataUrl),
+              })}
             />
             <CollapsibleSection
               id="brushPanel"
