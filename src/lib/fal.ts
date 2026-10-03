@@ -1,4 +1,4 @@
-import { fal } from "@fal-ai/client";
+import { fal, ApiError } from "@fal-ai/client";
 import { requireEnvVars } from "@/lib/env";
 import {
   getCircuitBreaker,
@@ -24,7 +24,7 @@ fal.config({
  * clear message. fal.ai result URLs are served from `*.fal.ai`, which is
  * already allowlisted in `next.config.ts` `images.remotePatterns`.
  */
-export { fal };
+export { fal, ApiError as FalApiError };
 
 /**
  * Asserts that the fal.ai provider is usable before enqueueing work.

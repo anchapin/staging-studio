@@ -4,13 +4,29 @@ import type { NextRequest } from "next/server";
 import { POST } from "@/app/api/inpaint/route";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { evaluateInpaintQualityGate } from "@/lib/inpaint-quality-gate";
-import { falQueueSubmitWithCircuitBreaker } from "@/lib/fal";
 import { prisma } from "@/lib/prisma";
 
-vi.mock("@/lib/fal", () => ({
-  fal: { queue: { submit: vi.fn() } },
-  falQueueSubmitWithCircuitBreaker: vi.fn(),
-}));
+// The inpaint route goes through the inference abstraction. We mock
+// the abstraction's `getInferenceClient` so the test does not depend
+// on a real fal or Replicate token, and the mock returns a stub
+// client whose `submit` is a `vi.fn()` we can configure per-test.
+const mockInferenceSubmit = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/inference", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/inference")>();
+  return {
+    ...actual,
+    // `assertInferenceConfigured` is a no-op for tests; it would
+    // otherwise throw because the test env has no FAL_KEY.
+    assertInferenceConfigured: vi.fn(),
+    getInferenceClient: vi.fn(async () => ({
+      subscribe: vi.fn(),
+      submit: mockInferenceSubmit,
+      status: vi.fn(),
+      result: vi.fn(),
+    })),
+  };
+});
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -31,7 +47,7 @@ vi.mock("@/lib/inpaint-quality-gate", () => ({
   evaluateInpaintQualityGate: vi.fn(),
 }));
 
-const falQueueSubmit = falQueueSubmitWithCircuitBreaker as unknown as Mock;
+const inferenceSubmit = mockInferenceSubmit as unknown as Mock;
 const create = prisma.inpaintRequest.create as unknown as Mock;
 const findFirst = prisma.room.findFirst as unknown as Mock;
 const count = prisma.inpaintRequest.count as unknown as Mock;
@@ -82,7 +98,7 @@ beforeEach(() => {
     afterImageUrl2: null,
   });
   qualityGate.mockResolvedValue([]);
-  falQueueSubmit.mockResolvedValue({ request_id: REQUEST_ID });
+  inferenceSubmit.mockResolvedValue({ request_id: REQUEST_ID });
   create.mockResolvedValue({});
   findUsage.mockResolvedValue(null);
   upsertUsage.mockResolvedValue({ count: 1 });
@@ -106,7 +122,7 @@ describe("POST /api/inpaint — InpaintRequest create compensation (issue #688)"
     expect(body.requestId).toBe(REQUEST_ID);
     expect(body.degraded).toBeUndefined();
     // Exactly one billed fal run — the retry must never re-submit.
-    expect(falQueueSubmit).toHaveBeenCalledTimes(1);
+    expect(inferenceSubmit).toHaveBeenCalledTimes(1);
     expect(create).toHaveBeenCalledTimes(2);
     expect(create).toHaveBeenNthCalledWith(1, { data: EXPECTED_RECORD_DATA });
     expect(create).toHaveBeenNthCalledWith(2, { data: EXPECTED_RECORD_DATA });
@@ -130,7 +146,7 @@ describe("POST /api/inpaint — InpaintRequest create compensation (issue #688)"
     expect(body.qualityWarnings).toEqual([]);
     // Still exactly one billed fal run — a 500 here is what caused the
     // duplicate paid re-submit.
-    expect(falQueueSubmit).toHaveBeenCalledTimes(1);
+    expect(inferenceSubmit).toHaveBeenCalledTimes(1);
     expect(create).toHaveBeenCalledTimes(3);
     expect(
       errorSpy.mock.calls.some((call) =>
@@ -215,7 +231,7 @@ describe("POST /api/inpaint — inpaint quota ledger (issue #1131)", () => {
     expect(response.status).toBe(200);
     expect(body.requestId).toBe(REQUEST_ID);
     expect(body.quotaChargeDegraded).toBe(true);
-    expect(falQueueSubmit).toHaveBeenCalledTimes(1);
+    expect(inferenceSubmit).toHaveBeenCalledTimes(1);
     // Bounded retry, mirroring the record write.
     expect(upsertUsage).toHaveBeenCalledTimes(3);
     // The InpaintRequest row is still written — the two writes are

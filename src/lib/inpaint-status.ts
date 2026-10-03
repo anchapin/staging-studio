@@ -1,9 +1,12 @@
-import { fal } from "@/lib/fal";
 import { prisma } from "@/lib/prisma";
 import { createSupabaseRequestClient } from "@/lib/supabase";
 import { decideInpaintPersistence } from "@/lib/inpaint-persistence";
 import { classifyIntegrationError } from "@/lib/error-classify";
-import { FAL_FLUX_FILL_MODEL } from "@/lib/prompts";
+import {
+  getInferenceClient,
+  InferenceRequestGoneError,
+  LOGICAL_MODEL,
+} from "@/lib/inference";
 import {
   API_ERROR_INPAINT_STATUS_FAILED,
   API_ERROR_INPAINT_TERMINAL,
@@ -98,20 +101,27 @@ export function classifyStatusError(error: unknown): ClassifiedError {
   return classifyIntegrationError(error, INPAINT_STATUS_ERROR_COPY);
 }
 
-// ─── Fal Status Types ────────────────────────────────────────────────────────
-
-interface FalStatusResult {
-  status: string;
-  images?: Array<{ url: string }>;
-  error?: string;
-}
-
-type FalQueueStatusFunction = (id: string, options: { requestId: string }) => Promise<FalStatusResult>;
-type FalQueueResultFunction = (id: string, options: { requestId: string }) => Promise<{ images?: Array<{ url: string }> } | null>;
+// (Provider-specific status types were removed when this module was
+// refactored onto `@/lib/inference`. The abstraction returns the
+// normalized status directly, so no fal-only types live here anymore.)
 
 // ─── Image Persistence ────────────────────────────────────────────────────────
 
 const FETCH_TIMEOUT_MS = 30_000;
+
+/**
+ * Bound on retrying persistence after a row enters PERSISTENCE_FAILED.
+ * After this many milliseconds the route stops looping the client poller
+ * and returns the fal CDN URL with `persisted: false` (issue #687):
+ * the editor surfaces a "this URL will expire" warning and the user
+ * can move on instead of watching a spinner that never resolves. The
+ * row stays in PERSISTENCE_FAILED so a future upload retry (e.g. after
+ * Supabase is restored) can still complete it. Two minutes is well
+ * above the poller's natural cadence (1s → 2s → 4s …) so the user
+ * gets a real shot at a transient Supabase blip resolving, but short
+ * enough that the eventual stuck-state recovery is fast.
+ */
+const PERSISTENCE_GIVE_UP_MS = 2 * 60 * 1000;
 
 interface PersistenceResult {
   persisted: boolean;
@@ -187,9 +197,74 @@ export async function persistFalImage(
 // ─── Fal Status Polling ────────────────────────────────────────────────────────
 
 export interface InpaintStatusResult {
-  status: "completed" | "retryable" | "ERROR";
+  /**
+   * One of:
+   * - `"completed"`: the job finished and the result is durable storage
+   *   (or an expiring fal CDN URL with `persisted: false`, issue #687).
+   * - `"ERROR"`: terminal failure (row already marked ERROR, fal returned
+   *   ERROR, or the row is missing).
+   * - `"IN_QUEUE" | "IN_PROGRESS"`: passthrough from
+   *   `@fal-ai/client@1.x`'s `queue.status`. The client classifier maps
+   *   these to `pending` and keeps polling — collapsing them to
+   *   `"retryable"` made the editor render "Processing: retryable"
+   *   forever while burning the full maxAttempts budget on healthy jobs.
+   * - `"retryable"`: a non-fatal in-process failure (COMPLETED but the
+   *   result endpoint could not produce a URL, or a PERSISTENCE_FAILED
+   *   retry that still has no URL) — the poller retries briefly.
+   */
+  status: "completed" | "retryable" | "ERROR" | "IN_QUEUE" | "IN_PROGRESS";
   imageUrl?: string | null;
   persisted?: boolean;
+}
+
+/**
+ * Returns true when the thrown error indicates the queue no longer
+ * knows this requestId (HTTP 404 / "Not Found" from `queue.status` or
+ * `queue.result`). Each provider's queue prunes requestIds after its
+ * TTL, so an InpaintRequest row that outlives the queue entry is
+ * orphaned: the work was billed but its result is no longer
+ * retrievable. Detecting this shape lets the caller mark the row
+ * terminal instead of looping the poller forever (#1187 follow-up).
+ * The abstraction's adapters normalize provider-specific 404s into
+ * `InferenceRequestGoneError`; we also accept a few legacy shapes
+ * (plain `Error` with "Not Found" / "404" in the message) for the
+ * case where a network/transport wrapper ate the original typed
+ * error. Side effects: none (pure).
+ */
+function isInferenceRequestGone(error: unknown): boolean {
+  if (error instanceof InferenceRequestGoneError) {
+    return error.originalStatus === 404;
+  }
+  if (error instanceof Error) {
+    const message = error.message ?? "";
+    return message.includes("Not Found") || message.includes("404");
+  }
+  return false;
+}
+
+/**
+ * Best-effort marks the InpaintRequest row as ERROR in the database
+ * (so a subsequent page load does not auto-resume the orphaned job)
+ * and returns the terminal response body. A failed row update is
+ * logged but does not change the response — the user must see the
+ * terminal state either way. Side effects: one Prisma update (best
+ * effort) plus one `console.error` on failure.
+ */
+async function markRowTerminalAndReturnError(
+  requestId: string
+): Promise<InpaintStatusResult> {
+  try {
+    await prisma.inpaintRequest.update({
+      where: { id: requestId },
+      data: { status: "ERROR" },
+    });
+  } catch (recordError) {
+    console.error(
+      JSON.stringify({ event: "inpaint_lost_row_update_failed", requestId }),
+      recordError
+    );
+  }
+  return { status: "ERROR", imageUrl: null, persisted: false };
 }
 
 /**
@@ -205,6 +280,7 @@ export async function pollFalStatus(requestId: string): Promise<InpaintStatusRes
     select: {
       status: true,
       resultUrl: true,
+      updatedAt: true,
       room: { select: { project: { select: { userId: true } } } },
     },
   });
@@ -213,7 +289,7 @@ export async function pollFalStatus(requestId: string): Promise<InpaintStatusRes
     return { status: "ERROR", imageUrl: null, persisted: false };
   }
 
-  // Already-done: serve stored result without touching fal
+  // Already-done: serve stored result without touching the provider
   const persistenceDecision = decideInpaintPersistence({
     status: inpaintRequest.status,
     resultUrl: inpaintRequest.resultUrl,
@@ -228,15 +304,60 @@ export async function pollFalStatus(requestId: string): Promise<InpaintStatusRes
     return { status: "ERROR", imageUrl: null, persisted: false };
   }
 
-  const falQueueStatus = fal.queue.status as FalQueueStatusFunction;
-  const falQueueResult = fal.queue.result as FalQueueResultFunction;
+  // Resolve the active inference client (fal by default; Replicate when
+  // INFERENCE_PROVIDER=replicate). The client is cached at module
+  // level, so this is allocation-free after the first call. The model
+  // is the inpaint model — the only queue user today.
+  const client = await getInferenceClient();
+  const inpaintModel = LOGICAL_MODEL.FLUX_FILL;
 
-  // PERSISTENCE_FAILED: retry persistence
+  // PERSISTENCE_FAILED: retry persistence, with a bounded give-up so
+  // the poller cannot loop forever when Supabase is the failure mode.
   if (inpaintRequest.status === "PERSISTENCE_FAILED") {
-    const falResult = await falQueueResult(FAL_FLUX_FILL_MODEL, { requestId }).catch(() => null);
-    const falImageUrl: string | null = falResult?.images?.[0]?.url ?? null;
+    let resultPayload: { images?: Array<{ url: string }> } | null = null;
+    try {
+      const { data } = await client.result<{
+        images?: Array<{ url: string }>;
+      }>(inpaintModel, requestId);
+      resultPayload = data;
+    } catch (resultError) {
+      // The provider's queue prunes requestIds after their TTL. If
+      // the result endpoint 404s, the InpaintRequest row is
+      // orphaned: the work was billed but is unrecoverable. Mark the
+      // row ERROR and return terminal so the poller stops; otherwise
+      // the client polls a phantom job forever and the editor's
+      // button is permanently disabled (#1187 follow-up).
+      if (isInferenceRequestGone(resultError)) {
+        return await markRowTerminalAndReturnError(requestId);
+      }
+      console.error(
+        JSON.stringify({ event: "inpaint_result_fetch_failed", requestId }),
+        resultError
+      );
+    }
+    const falImageUrl: string | null =
+      resultPayload?.images?.[0]?.url ?? null;
     if (!falImageUrl) {
       return { status: "retryable", imageUrl: null, persisted: false };
+    }
+
+    // Bound the retry window: after PERSISTENCE_GIVE_UP_MS the row has
+    // been failing long enough that the fal CDN URL is at risk of
+    // expiring. Return `completed` with `persisted: false` so the
+    // poller terminates; the client (issue #687) surfaces a "this URL
+    // will expire" warning rather than letting the user wait on a
+    // never-resolving spinner. The row stays in PERSISTENCE_FAILED so
+    // a future upload retry (e.g. after Supabase is restored) can
+    // still complete it.
+    if (
+      Date.now() - inpaintRequest.updatedAt.getTime() >=
+      PERSISTENCE_GIVE_UP_MS
+    ) {
+      return {
+        status: "completed",
+        imageUrl: falImageUrl,
+        persisted: false,
+      };
     }
 
     const { persisted, imageUrl } = await persistFalImage(falImageUrl, requestId);
@@ -250,8 +371,20 @@ export async function pollFalStatus(requestId: string): Promise<InpaintStatusRes
     return { status: "retryable", imageUrl: falImageUrl, persisted: false };
   }
 
-  // Fetch fal status
-  const statusResponse = await falQueueStatus(FAL_FLUX_FILL_MODEL, { requestId });
+  // Fetch provider status. A 404 here means the queue has pruned
+  // the requestId — the work was billed but is unrecoverable. Mark
+  // the row ERROR and return terminal so the poller stops; otherwise
+  // the client polls a phantom job forever and the editor's button
+  // is permanently disabled (#1187 follow-up).
+  let statusResponse: { status: string; raw?: unknown };
+  try {
+    statusResponse = await client.status(inpaintModel, requestId);
+  } catch (statusError) {
+    if (isInferenceRequestGone(statusError)) {
+      return await markRowTerminalAndReturnError(requestId);
+    }
+    throw statusError;
+  }
 
   if (statusResponse.status === "ERROR") {
     // Best-effort: failed write must not flip terminal response back to retryable
@@ -263,12 +396,41 @@ export async function pollFalStatus(requestId: string): Promise<InpaintStatusRes
     return { status: "ERROR", imageUrl: null, persisted: false };
   }
 
+  // In-flight (IN_QUEUE / IN_PROGRESS) — pass the provider status
+  // through verbatim. The client's `classifyStatusResponse` already
+  // maps these to `pending` and keeps polling, so the editor shows
+  // "Processing: IN_PROGRESS" instead of "Processing: retryable" and
+  // the backoff loop is no longer wasted on a healthy job.
+  if (statusResponse.status === "IN_QUEUE" || statusResponse.status === "IN_PROGRESS") {
+    return {
+      status: statusResponse.status,
+      imageUrl: null,
+      persisted: false,
+    };
+  }
+
   if (statusResponse.status === "COMPLETED") {
-    const falResult = await falQueueResult(FAL_FLUX_FILL_MODEL, { requestId }).catch((resultError: unknown) => {
-      console.error(JSON.stringify({ event: "inpaint_result_fetch_failed", requestId }), resultError);
-      return null;
-    });
-    const falImageUrl = falResult?.images?.[0]?.url;
+    let resultPayload: { images?: Array<{ url: string }> } | null = null;
+    try {
+      const { data } = await client.result<{
+        images?: Array<{ url: string }>;
+      }>(inpaintModel, requestId);
+      resultPayload = data;
+    } catch (resultError) {
+      console.error(
+        JSON.stringify({ event: "inpaint_result_fetch_failed", requestId }),
+        resultError
+      );
+      // A 404 here also means the queue pruned the requestId after
+      // the COMPLETED status came back (rare race). Treat the same
+      // as a status-phase 404: mark the row ERROR and return
+      // terminal.
+      if (isInferenceRequestGone(resultError)) {
+        return await markRowTerminalAndReturnError(requestId);
+      }
+      return { status: "retryable", imageUrl: null, persisted: false };
+    }
+    const falImageUrl = resultPayload?.images?.[0]?.url;
 
     if (!falImageUrl) {
       return { status: "retryable", imageUrl: null, persisted: false };
@@ -288,12 +450,27 @@ export async function pollFalStatus(requestId: string): Promise<InpaintStatusRes
       return { status: "completed", imageUrl, persisted: true };
     }
 
-    // Persistence failed: mark PERSISTENCE_FAILED so subsequent polls retry
+    // Persistence failed but the provider's image URL is available.
+    // The user's job is done — hand it over with `persisted: false`
+    // so the client poller terminates and the editor surfaces the
+    // expiring-URL warning (issue #687). Returning `retryable` here
+    // strands the poller on a phantom retry: Supabase may be down
+    // (the most common cause), and looping on it produces
+    // "Processing: retryable" indefinitely.
     await prisma.inpaintRequest.update({
       where: { id: requestId },
       data: { status: "PERSISTENCE_FAILED", resultUrl: null },
+    }).catch((recordError) => {
+      console.error(
+        JSON.stringify({ event: "inpaint_persistence_failed_record_update_failed", requestId }),
+        recordError
+      );
     });
-    return { status: "retryable", imageUrl: falImageUrl, persisted: false };
+    return {
+      status: "completed",
+      imageUrl: falImageUrl,
+      persisted: false,
+    };
   }
 
   return { status: "retryable", imageUrl: null, persisted: false };

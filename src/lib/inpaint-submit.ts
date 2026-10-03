@@ -1,14 +1,18 @@
 import { z } from "zod";
-import { falQueueSubmitWithCircuitBreaker } from "@/lib/fal";
 import { prisma } from "@/lib/prisma";
 import { inpaintRequestSchema } from "@/lib/ai-route-schemas";
 import { evaluateInpaintQualityGate } from "@/lib/inpaint-quality-gate";
 import { classifyIntegrationError } from "@/lib/error-classify";
 import {
-  buildFalFillPayload,
+  buildInpaintPayloadForActiveProvider,
   buildInpaintPrompt,
-  FAL_FLUX_FILL_MODEL,
 } from "@/lib/prompts";
+import {
+  getInferenceClient,
+  LOGICAL_MODEL,
+  type LogicalInpaintInput,
+  type LogicalModel,
+} from "@/lib/inference";
 import {
   DEFAULT_DAILY_INPAINT_LIMIT,
   DAILY_LIMIT_ENV_VAR,
@@ -250,9 +254,9 @@ export interface FalSubmitOptions {
 /**
  * Fire-and-forget submit: returns as soon as the job is queued (~2s),
  * instead of holding the request open for the full generation.
- * submitWithRetry handles transient errors; the circuit breaker wrapper
- * (falQueueSubmitWithCircuitBreaker) prevents cascading failures when
- * the service is degraded.
+ * submitWithRetry handles transient errors; the abstraction's
+ * circuit breaker wrapper (per provider) prevents cascading failures
+ * when the service is degraded.
  */
 export async function submitInpaintToFal(
   options: FalSubmitOptions
@@ -260,18 +264,33 @@ export async function submitInpaintToFal(
   const { imageUrl, maskUrl, aesthetic, promptDirectives, negativePrompt, promptStrength, maskBlur, seed, creativeMode } = options;
   const prompt = buildInpaintPrompt(aesthetic, promptDirectives);
 
-  return submitWithRetry(falQueueSubmitWithCircuitBreaker, FAL_FLUX_FILL_MODEL, {
-    input: buildFalFillPayload({
-      imageUrl,
-      maskUrl,
-      prompt,
-      negativePrompt,
-      promptStrength,
-      maskBlur,
-      seed,
-      creativeMode,
-    }),
-  });
+  // Resolve the active provider once. The submit call goes through
+  // the abstraction's `submit` method, which routes to the right
+  // client. The payload schema differs per provider (fal expects
+  // snake_case `image_url`/`mask_url`; Replicate expects `image`/
+  // `mask`) so the payload builder is selected by the abstraction's
+  // provider name, not the call site.
+  const client = await getInferenceClient();
+  const logicalInput: LogicalInpaintInput = {
+    imageUrl,
+    maskUrl,
+    prompt,
+    negativePrompt,
+    promptStrength,
+    maskBlur,
+    seed,
+    creativeMode,
+  };
+  const input = buildInpaintPayloadForActiveProvider(logicalInput);
+
+  // Reuse the existing retry wrapper, but pass the abstraction's
+  // `submit` shape. The retry policy (transient 5xx retry, no
+  // retry on auth 401/403) is provider-agnostic and lives here.
+  // `submitWithRetry` types the first arg as `string`; the
+  // `LogicalModel` union is a string-literal, so the cast is safe.
+  const submit: (id: string, options: { input: Record<string, unknown> }) => Promise<{ request_id: string }> =
+    (id, options) => client.submit(id as LogicalModel, options);
+  return submitWithRetry(submit, LOGICAL_MODEL.FLUX_FILL, { input });
 }
 
 // ─── Error Classification ─────────────────────────────────────────────────────

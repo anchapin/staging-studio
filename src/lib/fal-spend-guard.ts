@@ -29,15 +29,23 @@ import { readdirSync, statSync } from "node:fs";
 import path from "node:path";
 
 /**
- * A paid fal call made by a route. Comments are stripped before matching so
- * prose that *names* `fal.subscribe` (see lib/furnishing-detection.ts) is not
- * counted as a call site. The helpers are matched WITHOUT requiring a
- * trailing paren on purpose: the #1105 route did
- * `const falSubscribe = fal.subscribe as …;` and then called the alias, which
- * a call-shaped pattern would not match.
+ * A paid inference call made by a route. Comments are stripped before
+ * matching so prose that *names* `fal.subscribe` (see
+ * `lib/furnishing-detection.ts`) is not counted as a call site. The
+ * helpers are matched WITHOUT requiring a trailing paren on purpose:
+ * the #1105 route did `const falSubscribe = fal.subscribe as …;` and
+ * then called the alias, which a call-shaped pattern would not match.
+ *
+ * After the inference abstraction (#1187 follow-up) routes go
+ * through `inference.subscribe` / `inference.submit` on the active
+ * `InferenceClient` — the spend-guard matches those calls by name.
+ * The legacy `falSubscribeWithCircuitBreaker` /
+ * `falQueueSubmitWithCircuitBreaker` patterns stay in the regex so
+ * a rollback or a direct-fal call (e.g. a half-merged PR) still
+ * trips the guard.
  */
 export const FAL_SPEND_CALL =
-  /falSubscribeWithCircuitBreaker\b|falQueueSubmitWithCircuitBreaker\b|(?:^|[^.\w])fal\s*\.\s*subscribe\b/;
+  /falSubscribeWithCircuitBreaker\b|falQueueSubmitWithCircuitBreaker\b|(?:^|[^.\w])fal\s*\.\s*subscribe\b|inference\.(?:subscribe|submit)\b/;
 
 /**
  * Every real entry point into the daily-cap machinery in `lib/api-quota`.
@@ -61,7 +69,16 @@ function _buildLegacySamModel(): RegExp {
   const c = String.fromCharCode;
   const legacyModel =
     c(102) + c(97) + c(108) + c(45) + c(97) + c(105) + c(47) + c(115) + c(97) + c(109);
-  return new RegExp(legacyModel + "(?!" + c(91) + c(92) + "d-" + c(93) + ")");
+  // Negative lookahead: the live SAM 3.1 endpoint id is
+  // `fal-ai/sam-3-1/image`, which begins with the legacy string. The
+  // active model has a `-3-1/image` suffix (note the dash, not a
+  // bracket — this comment used to be wrong; the char-codes below
+  // are `-`, `3`, `-`, `1`, `/`, `i`, `m`, `a`, `g`, `e`).
+  // (91, 93 are `[` `]`, never used.) Reject when the legacy string
+  // is followed by `-3-1/image`.
+  const activeSuffix =
+    c(45) + c(51) + c(45) + c(49) + c(47) + c(105) + c(109) + c(97) + c(103) + c(101);
+  return new RegExp(legacyModel + "(?!" + activeSuffix + ")");
 }
 export const LEGACY_SAM_MODEL = _buildLegacySamModel();
 
