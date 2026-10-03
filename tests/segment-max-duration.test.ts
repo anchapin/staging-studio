@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { DETECTION_TIMEOUT_MS, SEGMENT_WORST_CASE_MS } from "@/lib/segment-timeouts";
 
 /**
  * Issue #1118: the platform must not kill /api/segment/furnishings before
@@ -23,14 +24,19 @@ function readNumber(pattern: RegExp): number {
 
 describe("segment/furnishings maxDuration (#1118)", () => {
   const maxDurationSeconds = readNumber(/export const maxDuration = ([\d_]+);/);
-  const detectionTimeoutMs = readNumber(/const DETECTION_TIMEOUT_MS = ([\d_]+);/);
 
   it("declares maxDuration", () => {
     expect(maxDurationSeconds).toBeGreaterThan(0);
   });
 
   it("covers the subscribe plus the mask-fetch leg", () => {
-    expect(maxDurationSeconds * 1000).toBeGreaterThanOrEqual(2 * detectionTimeoutMs);
+    expect(SEGMENT_WORST_CASE_MS).toBe(2 * DETECTION_TIMEOUT_MS);
+    expect(maxDurationSeconds * 1000).toBeGreaterThanOrEqual(SEGMENT_WORST_CASE_MS);
+  });
+
+  it("the route uses the shared timeout, not a local copy", () => {
+    expect(source).toContain('from "@/lib/segment-timeouts"');
+    expect(source).not.toMatch(/const DETECTION_TIMEOUT_MS =/);
   });
 
   it("stays within the Vercel Pro ceiling", () => {
