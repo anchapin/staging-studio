@@ -75,7 +75,10 @@ describe("no uncapped fal.ai calls (#1105)", () => {
 
   it("the legacy fal-ai/sam model no longer appears in src/ (retirement, #236)", () => {
     // Every src file, so a re-introduced legacy model fails here even if it
-    // is reached through a different route or a lib helper.
+    // is reached through a different route or a lib helper. Comments are
+    // stripped so the inference-abstraction adapter (which mentions
+    // the legacy id in a docstring explaining the retirement) does not
+    // false-positive.
     const offenders: string[] = [];
     const walk = (dir: string) => {
       for (const entry of readdirSync(dir)) {
@@ -83,7 +86,7 @@ describe("no uncapped fal.ai calls (#1105)", () => {
         if (statSync(full).isDirectory()) {
           walk(full);
         } else if (/\.(ts|tsx)$/.test(entry)) {
-          if (LEGACY_SAM_MODEL.test(readFileSync(full, "utf8"))) {
+          if (LEGACY_SAM_MODEL.test(stripComments(readFileSync(full, "utf8")))) {
             offenders.push(repoRelative(full, REPO_ROOT));
           }
         }

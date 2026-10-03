@@ -23,10 +23,23 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 const mockFalSubscribe = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/fal", () => ({
-  assertFalConfigured: vi.fn(),
-  falSubscribeWithCircuitBreaker: mockFalSubscribe,
-}));
+// The furnishings route now goes through the inference abstraction.
+// We mock the abstraction so the test does not depend on a real
+// fal or Replicate token. The mock returns a stub client whose
+// `subscribe` is `mockFalSubscribe` (configured per-test below).
+vi.mock("@/lib/inference", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/inference")>();
+  return {
+    ...actual,
+    assertInferenceConfigured: vi.fn(),
+    getInferenceClient: vi.fn(async () => ({
+      subscribe: mockFalSubscribe,
+      submit: vi.fn(),
+      status: vi.fn(),
+      result: vi.fn(),
+    })),
+  };
+});
 
 const mockRecordDailyUsage = vi.hoisted(() => vi.fn(async () => 1));
 vi.mock("@/lib/api-quota", async (importOriginal) => {

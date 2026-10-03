@@ -1,4 +1,4 @@
-import { fal } from "@fal-ai/client";
+import { fal, ApiError } from "@fal-ai/client";
 import { requireEnvVars } from "@/lib/env";
 import {
   getCircuitBreaker,
@@ -24,7 +24,7 @@ fal.config({
  * clear message. fal.ai result URLs are served from `*.fal.ai`, which is
  * already allowlisted in `next.config.ts` `images.remotePatterns`.
  */
-export { fal };
+export { fal, ApiError as FalApiError };
 
 /**
  * Asserts that the fal.ai provider is usable before enqueueing work.
@@ -36,6 +36,25 @@ export { fal };
  */
 export function assertFalConfigured(): void {
   requireEnvVars("FAL_KEY");
+}
+
+/**
+ * Issue #1192: unwraps an `@fal-ai/client@1.x` `Result<T>` envelope
+ * (`{ data, requestId }`) to the raw model output `T`. A value without
+ * that envelope shape passes through unchanged, so a raw payload that
+ * happens to carry its own `data` field (but no `requestId`) is never
+ * mis-unwrapped. Side effects: none (pure).
+ */
+export function unwrapFalResult<T>(result: unknown): T {
+  if (
+    typeof result === "object" &&
+    result !== null &&
+    "data" in result &&
+    "requestId" in result
+  ) {
+    return (result as { data: T }).data;
+  }
+  return result as T;
 }
 
 interface FalSubscribeOptions {
@@ -52,13 +71,15 @@ export async function falSubscribeWithCircuitBreaker<T = unknown>(
     cooldownMs: 30_000,
   });
   try {
-    // `@fal-ai/client@1.x`'s `subscribe()` resolves to `Result<T>` (data +
-    // requestId), not `T` directly. We widen through unknown before
-    // re-narrowing to the call-site `T` so callers continue to receive the
-    // payload as if it were the raw result.
-    return (await cb.execute(() =>
-      fal.subscribe(modelId, { ...options })
-    )) as unknown as Promise<T>;
+    // Issue #1192: `@fal-ai/client@1.x`'s `subscribe()` resolves to
+    // `Result<T>` = `{ data: T, requestId }`, not `T` directly (the
+    // deprecated `@fal-ai/serverless-client` returned `T`). The #1183
+    // migration only re-cast the type, so callers received the envelope
+    // and `parseFurnishingDetectionResponse` found no top-level `masks`,
+    // failing every furniture detection. Unwrap here so every caller keeps
+    // receiving the raw model output.
+    const result = await cb.execute(() => fal.subscribe(modelId, { ...options }));
+    return unwrapFalResult<T>(result);
   } catch (error) {
     logger.error(
       {

@@ -14,15 +14,42 @@
  * - 500 on fal submission failure
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type { NextRequest } from "next/server";
 import { POST } from "@/app/api/inpaint/route";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
-import { fal, falQueueSubmitWithCircuitBreaker } from "@/lib/fal";
+
+// The inpaint route now goes through the inference abstraction. We
+// mock the abstraction so the test does not depend on a real fal or
+// Replicate token. The mock returns a stub client whose `submit` is
+// a `vi.fn()` we configure per-test below.
+const fakeSubmit = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/inference", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/inference")>();
+  return {
+    ...actual,
+    getInferenceClient: vi.fn(async () => ({
+      subscribe: vi.fn(),
+      submit: fakeSubmit,
+      status: vi.fn(),
+      result: vi.fn(),
+    })),
+  };
+});
+
 import { evaluateInpaintQualityGate } from "@/lib/inpaint-quality-gate";
 import { resolveDailyLimit, evaluateDailyQuota, getDailyUsage, recordDailyUsage } from "@/lib/api-quota";
 import { buildInpaintPrompt } from "@/lib/prompts";
+
+// The legacy `falQueueSubmitWithCircuitBreaker` import from
+// `@/lib/fal` is no longer the call site — the route uses the
+// abstraction. Existing test bodies read as "the fal submit was
+// called", and they poke `falQueueSubmitWithCircuitBreaker` for
+// assertion; aliasing to `fakeSubmit` keeps those lines reading the
+// same without churn.
+const falQueueSubmitWithCircuitBreaker = fakeSubmit as unknown as Mock;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -122,16 +149,6 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-vi.mock("@/lib/fal", () => ({
-  fal: {
-    queue: {
-      submit: vi.fn(),
-    },
-  },
-  falQueueSubmitWithCircuitBreaker: vi.fn(),
-  assertFalConfigured: vi.fn(),
-}));
-
 vi.mock("@/lib/inpaint-quality-gate", () => ({
   evaluateInpaintQualityGate: vi.fn(),
 }));
@@ -140,6 +157,14 @@ vi.mock("@/lib/prompts", () => ({
   FAL_FLUX_FILL_MODEL: "fal-ai/flux-lora-fill",
   buildInpaintPrompt: vi.fn(() => "replace sofa with leather sofa"),
   buildFalFillPayload: vi.fn(() => ({
+    image_url: "https://xxxx.supabase.co/storage/slot0.png",
+    mask_url: "https://xxxx.supabase.co/storage/mask.png",
+    prompt: "replace sofa",
+    negative_prompt: "",
+    guidance: 7.5,
+    num_inference_steps: 28,
+  })),
+  buildInpaintPayloadForActiveProvider: vi.fn(() => ({
     image_url: "https://xxxx.supabase.co/storage/slot0.png",
     mask_url: "https://xxxx.supabase.co/storage/mask.png",
     prompt: "replace sofa",
@@ -194,7 +219,7 @@ describe("POST /api/inpaint", () => {
     vi.mocked(prisma.dailyApiUsage.findFirst).mockResolvedValue(null);
     vi.mocked(prisma.dailyApiUsage.upsert).mockResolvedValue({} as never);
     vi.mocked(evaluateInpaintQualityGate).mockResolvedValue([]);
-    vi.mocked(fal.queue.submit).mockResolvedValue({
+    vi.mocked(falQueueSubmitWithCircuitBreaker).mockResolvedValue({
       request_id: "fal-req-123",
     } as never);
     vi.mocked(falQueueSubmitWithCircuitBreaker).mockResolvedValue({
@@ -310,7 +335,7 @@ describe("POST /api/inpaint", () => {
   it("returns 200 and includes quality warnings when creativeMode=true", async () => {
     vi.mocked(getDailyUsage).mockResolvedValue(0);
     vi.mocked(evaluateInpaintQualityGate).mockResolvedValue([]);
-    vi.mocked(fal.queue.submit).mockResolvedValue({
+    vi.mocked(falQueueSubmitWithCircuitBreaker).mockResolvedValue({
       request_id: "fal-req-123",
     } as never);
 
@@ -340,7 +365,7 @@ describe("POST /api/inpaint", () => {
   it("returns 200 when quality gate passes with no warnings", async () => {
     vi.mocked(getDailyUsage).mockResolvedValue(0);
     vi.mocked(evaluateInpaintQualityGate).mockResolvedValue([]);
-    vi.mocked(fal.queue.submit).mockResolvedValue({
+    vi.mocked(falQueueSubmitWithCircuitBreaker).mockResolvedValue({
       request_id: "fal-req-123",
     } as never);
 
@@ -370,7 +395,7 @@ describe("POST /api/inpaint", () => {
     vi.mocked(evaluateInpaintQualityGate).mockResolvedValue([
       "prompt is vague — consider adding more specific style details",
     ]);
-    vi.mocked(fal.queue.submit).mockResolvedValue({
+    vi.mocked(falQueueSubmitWithCircuitBreaker).mockResolvedValue({
       request_id: "fal-req-123",
     } as never);
 

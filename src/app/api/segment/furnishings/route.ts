@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { assertFalConfigured, falSubscribeWithCircuitBreaker } from "@/lib/fal";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { buildDeprecationHeaders } from "@/lib/api-version";
 import { furnishingsSegmentRequestSchema } from "@/lib/ai-route-schemas";
 import { classifyIntegrationError } from "@/lib/error-classify";
+import { getInferenceClient, LOGICAL_MODEL, assertInferenceConfigured } from "@/lib/inference";
 import {
   DEFAULT_DAILY_SEGMENT_LIMIT,
   DAILY_LIMIT_ENV_VAR,
@@ -15,7 +15,6 @@ import {
   resolveDailyLimit,
 } from "@/lib/api-quota";
 import {
-  FAL_FURNISHING_DETECTION_MODEL,
   buildFurnishingDetectionPayload,
   parseFurnishingDetectionResponse,
 } from "@/lib/furnishing-detection";
@@ -188,15 +187,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    assertFalConfigured();
+    assertInferenceConfigured();
 
     // Synchronous detection call: SAM 3.1 completes in seconds, so a
-    // direct queue-aware subscribe keeps the preset flow single-round-trip
-    // (the same pattern as /api/segment). Omitted concept ⇒ the payload
-    // builder applies the verified "furniture" default, so the preset
-    // path stays byte-equivalent.
+    // direct queue-aware subscribe keeps the preset flow
+    // single-round-trip (the same pattern as /api/segment). Omitted
+    // concept ⇒ the payload builder applies the verified "furniture"
+    // default, so the preset path stays byte-equivalent. The active
+    // provider (fal by default; Replicate when
+    // INFERENCE_PROVIDER=replicate) is resolved here once per
+    // request and the subscribe goes through the abstraction.
     const payload = buildFurnishingDetectionPayload({ imageUrl, concept });
-    const result = await falSubscribeWithCircuitBreaker(FAL_FURNISHING_DETECTION_MODEL, {
+    const inference = await getInferenceClient();
+    const result = await inference.subscribe(LOGICAL_MODEL.SAM_3_1_IMAGE, {
       input: payload,
       abortSignal: AbortSignal.timeout(DETECTION_TIMEOUT_MS),
     });

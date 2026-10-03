@@ -311,3 +311,86 @@ export function buildFalFillPayload(
 
   return payload;
 }
+
+// ─── Replicate payload ─────────────────────────────────────────────────────
+
+/**
+ * `black-forest-labs/flux-fill-pro` (Replicate) expects snake_case
+ * keys too but a different schema than fal. `prompt_strength` and
+ * `num_inference_steps` are the closest analogs. We map the same
+ * UI inputs to the Replicate field names; the negative prompt uses
+ * the same default since the architecture-no-touch invariant is
+ * provider-agnostic.
+ */
+export interface ReplicateFillPayloadInput {
+  imageUrl: string;
+  maskUrl: string;
+  prompt: string;
+  negativePrompt?: string;
+  promptStrength?: number;
+  maskBlur?: number;
+  seed?: number;
+  creativeMode?: boolean;
+}
+
+export type ReplicateFillPayload = {
+  image: string;
+  mask: string;
+  prompt: string;
+  // Replicate uses a single `prompt_strength` parameter on this model.
+  prompt_strength: number;
+  num_inference_steps: number;
+  // Replicate's `output_format` and `output_quality` are post-process
+  // controls; we keep them pinned so the result is deterministic.
+  output_format: "png";
+  safety_tolerance: "2";
+} & Record<string, unknown>;
+
+export function buildReplicateFillPayload(
+  input: ReplicateFillPayloadInput
+): ReplicateFillPayload {
+  // Issue #558: same guidance logic as the fal payload — creative
+  // mode is a lower prompt_strength, otherwise scale from 0.1–1.0
+  // to Replicate's 1–10 range.
+  let promptStrength = 1.0;
+  if (input.creativeMode) {
+    promptStrength = 0.5;
+  } else if (input.promptStrength !== undefined) {
+    promptStrength = input.promptStrength * 10;
+  }
+
+  const payload: ReplicateFillPayload = {
+    image: input.imageUrl,
+    mask: input.maskUrl,
+    prompt: input.prompt,
+    prompt_strength: promptStrength,
+    num_inference_steps: 28,
+    output_format: "png",
+    safety_tolerance: "2",
+  };
+  return payload;
+}
+
+/**
+ * Picks the right provider-specific payload builder based on the
+ * active provider. Call sites that have already translated their
+ * UI input into the logical shape can hand it to this and get the
+ * correct wire format back, without importing provider-specific
+ * modules. Side effects: reads `process.env.INFERENCE_PROVIDER`.
+ *
+ * Provider dispatch is done by reading `INFERENCE_PROVIDER`
+ * directly (rather than calling `resolveProvider()` from
+ * `@/lib/inference`) to keep `prompts.ts` independent of the
+ * abstraction module — that avoids a circular import (the
+ * abstraction's clients may import the payload builders for their
+ * submit shapes, and prompts is the natural home for those).
+ */
+export function buildInpaintPayloadForActiveProvider(
+  input: FalFillPayloadInput | ReplicateFillPayloadInput
+): Record<string, unknown> {
+  const provider = process.env.INFERENCE_PROVIDER?.trim().toLowerCase();
+  if (provider === "replicate") {
+    return buildReplicateFillPayload(input) as unknown as Record<string, unknown>;
+  }
+  return buildFalFillPayload(input) as unknown as Record<string, unknown>;
+}
