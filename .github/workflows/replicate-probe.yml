@@ -1,0 +1,51 @@
+name: Replicate integration probe
+
+# #1200: one real FLUX.1 Fill call against Replicate through the app's
+# adapter, nightly and on demand, so the INFERENCE_PROVIDER=replicate
+# path has a live signal before anyone flips it in production.
+# Each run is one billed prediction (~$0.05 on flux-fill-pro).
+# Without the REPLICATE_API_TOKEN repo secret the job skips cleanly.
+
+on:
+  schedule:
+    - cron: "17 8 * * *" # 08:17 UTC nightly
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: replicate-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
+    steps:
+      - name: Skip when no token is configured
+        if: env.REPLICATE_API_TOKEN == ''
+        run: echo "::notice::REPLICATE_API_TOKEN secret not set; skipping the live Replicate probe."
+      - uses: actions/checkout@v4
+        if: env.REPLICATE_API_TOKEN != ''
+      - uses: actions/setup-node@v4
+        if: env.REPLICATE_API_TOKEN != ''
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install
+        if: env.REPLICATE_API_TOKEN != ''
+        run: npm ci --ignore-scripts
+      - name: Run probe
+        if: env.REPLICATE_API_TOKEN != ''
+        run: npx tsx scripts/replicate-integration-probe.mts --save
+      - name: Keep the verdict for trend analysis
+        if: always() && env.REPLICATE_API_TOKEN != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: replicate-probe-${{ github.run_id }}
+          path: .agents/results/replicate-probe-*.json
+          if-no-files-found: warn
+          retention-days: 90
