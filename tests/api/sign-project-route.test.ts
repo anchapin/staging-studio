@@ -102,7 +102,10 @@ describe("POST /api/sign-project", () => {
     expect(prisma.project.updateMany).toHaveBeenCalledWith({
       where: {
         id: MOCK_PROJECT_ID,
-        clientSignatureStatus: { not: "Signed" },
+        OR: [
+          { clientSignatureStatus: null },
+          { clientSignatureStatus: { not: "Signed" } },
+        ],
       },
       data: {
         clientSignature: MOCK_SIGNATURE,
@@ -129,7 +132,10 @@ describe("POST /api/sign-project", () => {
     expect(prisma.project.updateMany).toHaveBeenCalledWith({
       where: {
         id: MOCK_PROJECT_ID,
-        clientSignatureStatus: { not: "Signed" },
+        OR: [
+          { clientSignatureStatus: null },
+          { clientSignatureStatus: { not: "Signed" } },
+        ],
       },
       data: {
         clientSignature: MOCK_SIGNATURE,

@@ -162,7 +162,10 @@ describe("POST /api/sign-project — issue #1078 token-first gate order", () => 
     expect(prisma.project.updateMany).toHaveBeenCalledWith({
       where: {
         id: MOCK_PROJECT_ID,
-        clientSignatureStatus: { not: "Signed" },
+        OR: [
+          { clientSignatureStatus: null },
+          { clientSignatureStatus: { not: "Signed" } },
+        ],
       },
       data: {
         clientSignature: TINY_PNG_DATA_URL,
