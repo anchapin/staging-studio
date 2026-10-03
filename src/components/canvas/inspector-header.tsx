@@ -3,6 +3,7 @@
 import { Loader2, PanelRightClose } from "lucide-react";
 import { batchProgressText, hasFailedStep } from "@/lib/multi-select-batch";
 import type { ActiveBatch } from "./batch-staging-panel";
+import type { InspectorHeading } from "@/lib/inspector-heading";
 
 export interface InspectorHeaderProps {
   /** Issue #617: the collapse toggle (Cmd+B). */
@@ -10,24 +11,41 @@ export interface InspectorHeaderProps {
   isExpanded: boolean;
   /** AC-L2: batch progress pins to the panel top during a run. */
   activeBatch: ActiveBatch | null;
+  /** Issue #1195: what the panel is editing right now. */
+  heading: InspectorHeading;
 }
 
 /**
  * The inspector column's fixed header (issue #691 extraction from
- * inpaint-editor.tsx): the "Active Inpaint Zone" title with the #617
+ * inpaint-editor.tsx): the selection-aware title (#1195) with the #617
  * collapse toggle, plus the AC-L2 batch-progress banner.
  */
 export default function InspectorHeader({
   onToggleCollapse,
   isExpanded,
   activeBatch,
+  heading,
 }: InspectorHeaderProps) {
   return (
     <>
       <div className="flex shrink-0 items-center justify-between rounded-md border border-atelier-taupe/30 bg-white px-3 py-2">
-        <h3 className="font-jakarta text-sm font-semibold text-atelier-primary">
-          Active Inpaint Zone
-        </h3>
+        <div className="min-w-0 flex-1 pr-2">
+          <h3
+            data-testid="inspector-heading"
+            title={heading.title}
+            aria-live="polite"
+            className={`truncate font-jakarta text-sm font-semibold ${
+              heading.hasSelection ? "text-atelier-primary" : "text-atelier-taupe"
+            }`}
+          >
+            {heading.title}
+          </h3>
+          {heading.hint && (
+            <p className="truncate text-xs text-atelier-taupe" title={heading.hint}>
+              {heading.hint}
+            </p>
+          )}
+        </div>
         <button
           type="button"
           onClick={onToggleCollapse}
