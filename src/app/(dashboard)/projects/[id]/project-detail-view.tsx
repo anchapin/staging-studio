@@ -23,6 +23,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { createClient } from "@/lib/supabase";
 import { resolveFocusedRoom, resolveRoomLayoutMode } from "@/lib/focus-mode";
+import { confirmLeaveEditorInBrowser } from "@/lib/editor-leave";
 import {
   isCompleteVariantPair,
   resolveStagedResultDisplay,
@@ -338,6 +339,15 @@ export default function ProjectDetailView({
     null
   );
   const [editorRoomId, setEditorRoomId] = useState<string | null>(null);
+  // Issue #1188: run state reported by the editor, so every exit back to
+  // the project overview can flush pending edits and confirm before
+  // dropping an in-flight run.
+  const [editorBusy, setEditorBusy] = useState(false);
+  const leaveEditor = useCallback(() => {
+    if (!confirmLeaveEditorInBrowser(editorBusy)) return;
+    setEditorBusy(false);
+    setEditorRoomId(null);
+  }, [editorBusy]);
   const [directives, setDirectives] = useState<Record<string, string>>({});
   // Per-room inpaint source choice (issue #170): original photo by default,
   // or a completed staged variant for progressive editing.
@@ -884,11 +894,31 @@ export default function ProjectDetailView({
                 Projects
               </Link>
               <ChevronRight className="w-4 h-4" aria-hidden="true" />
-              <span className="text-foreground">{project.propertyAddress}</span>
+              {/* Issue #1188: while a room is open, the project segment is
+                  the one-click way back to the overview. */}
+              {focusedRoom && layoutMode === "focused" ? (
+                <button
+                  type="button"
+                  onClick={leaveEditor}
+                  title={project.propertyAddress}
+                  className="max-w-[16rem] truncate hover:text-foreground hover:underline"
+                >
+                  {project.propertyAddress}
+                </button>
+              ) : (
+                <span
+                  className="max-w-[16rem] truncate text-foreground"
+                  title={project.propertyAddress}
+                >
+                  {project.propertyAddress}
+                </span>
+              )}
               {focusedRoom && (
                 <>
-                  <ChevronRight className="w-4 h-4" aria-hidden="true" />
-                  <span className="text-foreground">{focusedRoom.name}</span>
+                  <ChevronRight className="w-4 h-4 shrink-0" aria-hidden="true" />
+                  <span className="max-w-[12rem] truncate text-foreground" title={focusedRoom.name}>
+                    {focusedRoom.name}
+                  </span>
                 </>
               )}
             </nav>
@@ -941,7 +971,8 @@ export default function ProjectDetailView({
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
               <button
                 type="button"
-                onClick={() => setEditorRoomId(null)}
+                onClick={leaveEditor}
+                title="Back to the project overview"
                 className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
               >
                 <ArrowLeft className="w-4 h-4" aria-hidden="true" />
@@ -1008,6 +1039,8 @@ export default function ProjectDetailView({
                 <InpaintEditor
                   roomId={focusedRoom.id}
                   roomName={focusedRoom.name}
+                  onExitToProject={leaveEditor}
+                  onProcessingChange={setEditorBusy}
                   imageUrl={focusedInputs.inpaintImageUrl ?? ""}
                   aesthetic={project.stagingAesthetic}
                   promptDirectives={focusedInputs.roomDirectives.trim()}
