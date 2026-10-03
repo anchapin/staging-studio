@@ -9,6 +9,7 @@ import {
 } from "@/lib/prompts";
 import {
   getInferenceClient,
+  InferenceRequestGoneError,
   LOGICAL_MODEL,
   type LogicalInpaintInput,
   type LogicalModel,
@@ -81,16 +82,39 @@ type FalQueueSubmitFunction = (
  * transient errors (network failures, timeouts, 5xx HTTP responses).
  * Auth errors (401/403) are not retried — they indicate a config problem
  * that subsequent attempts will not resolve.
+ *
+ * Issue #1201: an `InferenceRequestGoneError` (a 404 from the provider's
+ * submit endpoint) is retried exactly once, immediately, with the same
+ * payload. The 404 reflects transient queue/routing state, not the
+ * input, and no InpaintRequest row exists yet, so a resend cannot
+ * double-bill. A second 404 propagates as-is. This one-shot retry is
+ * separate from the 5xx backoff budget.
  */
 export async function submitWithRetry(
   falQueueSubmit: FalQueueSubmitFunction,
   model: string,
   payload: { input: Record<string, unknown> }
 ): Promise<{ request_id: string }> {
+  let goneRetried = false;
   for (let attempt = 1; attempt <= FAL_SUBMIT_ATTEMPTS; attempt += 1) {
     try {
       return await falQueueSubmit(model, payload);
     } catch (error) {
+      if (error instanceof InferenceRequestGoneError) {
+        if (goneRetried) throw error;
+        goneRetried = true;
+        console.warn(
+          JSON.stringify({ event: "inference_submit_gone_retry", provider: error.provider }),
+          error
+        );
+        try {
+          return await falQueueSubmit(model, payload);
+        } catch (retryError) {
+          if (retryError instanceof InferenceRequestGoneError) throw retryError;
+          error = retryError;
+        }
+      }
+
       const isLastAttempt = attempt === FAL_SUBMIT_ATTEMPTS;
       const isAuthError =
         error != null &&
