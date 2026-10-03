@@ -142,7 +142,13 @@ export async function POST(req: NextRequest) {
           prisma.project.updateMany({
             where: {
               id: projectId,
-              clientSignatureStatus: { not: "Signed" },
+              // Prisma's `not` filter compiles to SQL `<>`, which never matches NULL,
+              // and freshly created projects have a NULL status. Match NULL
+              // explicitly or an unsigned project can never be signed.
+              OR: [
+                { clientSignatureStatus: null },
+                { clientSignatureStatus: { not: "Signed" } },
+              ],
             },
             data: {
               clientSignature: signatureDataUrl,

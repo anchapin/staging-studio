@@ -120,7 +120,13 @@ export async function saveProjectSignature(
       where: {
         id: parsed.data.projectId,
         userId: user.id,
-        clientSignatureStatus: { not: "Signed" },
+        // Prisma's `not` filter compiles to SQL `<>`, which never matches NULL,
+        // and freshly created projects have a NULL status. Match NULL
+        // explicitly or an unsigned project can never be signed.
+        OR: [
+          { clientSignatureStatus: null },
+          { clientSignatureStatus: { not: "Signed" } },
+        ],
       },
       data: {
         clientSignature: parsed.data.signatureDataUrl,

@@ -148,7 +148,10 @@ describe("saveProjectSignature", () => {
       where: {
         id: validProjectId,
         userId: mockUser.id,
-        clientSignatureStatus: { not: "Signed" },
+        OR: [
+          { clientSignatureStatus: null },
+          { clientSignatureStatus: { not: "Signed" } },
+        ],
       },
       data: {
         clientSignature: validSignature,
@@ -174,7 +177,10 @@ describe("saveProjectSignature", () => {
       where: {
         id: validProjectId,
         userId: mockUser.id,
-        clientSignatureStatus: { not: "Signed" },
+        OR: [
+          { clientSignatureStatus: null },
+          { clientSignatureStatus: { not: "Signed" } },
+        ],
       },
       data: {
         clientSignature: validSignature,
