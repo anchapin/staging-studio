@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useAutoSaveStatus } from "@/lib/autosave-controller";
 import { DEFAULT_MASK_EXPANSION_RADIUS } from "@/lib/mask-dilation";
 import {
@@ -31,6 +31,8 @@ import { useInpaintRuns } from "./use-inpaint-runs";
 import { type GeneratedVariation } from "./generated-variation-grid";
 import type { InpaintEditorProps } from "./inpaint-editor-props";
 import VersionHistoryPills from "./version-history-pills";
+import ExitToProjectButton from "./exit-to-project-button";
+import { confirmLeaveEditorInBrowser } from "@/lib/editor-leave";
 
 export default function InpaintEditor({
   roomId,
@@ -53,6 +55,8 @@ export default function InpaintEditor({
   directivesValue,
   currentResultUrl,
   projectName,
+  onExitToProject,
+  onProcessingChange,
 }: InpaintEditorProps) {
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
   // Natural-dimension tracking for the base photo (issue #691 hook).
@@ -245,6 +249,22 @@ export default function InpaintEditor({
     setSelectedInstanceIndices,
   });
 
+  // Issue #1188: let the page guard its own exits (header breadcrumb,
+  // "All rooms") while a run is in flight.
+  useEffect(() => {
+    onProcessingChange?.(isProcessing);
+  }, [isProcessing, onProcessingChange]);
+
+  // Issue #1188: Zen/Focus exit to the project overview. Flushes pending
+  // directive edits and confirms before dropping an in-flight run.
+  const handleExitToProject = useCallback(() => {
+    if (!onExitToProject) return;
+    if (!confirmLeaveEditorInBrowser(isProcessing)) return;
+    setZenMode(false);
+    setFocusMode(false);
+    onExitToProject();
+  }, [onExitToProject, isProcessing, setZenMode, setFocusMode]);
+
   // Issue #560/#588/#617/#638 workspace keyboard shortcuts (Z / Escape /
   // backtick / Cmd+B / F) — the listener lives in use-workspace-shortcuts.
   useWorkspaceShortcuts({
@@ -345,6 +365,7 @@ export default function InpaintEditor({
           projectName={projectName}
           roomName={roomName}
           onRestore={() => setFocusMode(false)}
+          onExitToProject={onExitToProject ? handleExitToProject : undefined}
         />
       )}
       {/* ---- LEFT PANE: room imagery (optional slot) + mask canvas ------ */}
@@ -474,6 +495,14 @@ export default function InpaintEditor({
       {/* Issue #616: Floating glassmorphic canvas tool rail — left-anchored
           stack (1.5rem from viewport edges) with the tool strip, brush
           parameter flyout, and zoom HUD. Shown when Zen Mode is active. */}
+      {/* Issue #1188: Zen Mode hides the page header, so keep a way back to
+          the project overview at the top-right (the tool rail owns the
+          top-left corner). */}
+      {zenMode && onExitToProject && (
+        <div className="fixed right-6 top-6 z-50">
+          <ExitToProjectButton onClick={handleExitToProject} />
+        </div>
+      )}
       {zenMode && (
         <ZenToolRail
           studioActiveTool={studioActiveTool}

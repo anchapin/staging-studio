@@ -57,5 +57,14 @@ export interface InpaintEditorProps {
   projectName?: string;
   /** Issue #638: Room name for Focus Canvas Mode breadcrumb. */
   roomName?: string;
+  /**
+   * Issue #1188: return to the project overview. When set, Zen Mode and
+   * Focus Canvas show a "Back to project" control (their chrome hides the
+   * page header). The editor flushes pending edits and confirms first if
+   * a run is in flight.
+   */
+  onExitToProject?: () => void;
+  /** Issue #1188: reports run state so the page can guard its own exits. */
+  onProcessingChange?: (isProcessing: boolean) => void;
 }
 
