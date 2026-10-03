@@ -3,7 +3,11 @@
 import { useState } from "react";
 import { Download, Loader2, RotateCw, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { STAGING_AESTHETICS } from "@/lib/staging-aesthetics";
+import {
+  PROJECT_AESTHETIC_LABEL,
+  PROJECT_AESTHETIC_HELPER,
+  aestheticOptions,
+} from "@/lib/project-aesthetic";
 import {
   WORKBENCH_DIRECTIVE_GRID_CLASSES,
   WORKBENCH_TOPBAR_SURFACE_CLASSES,
@@ -83,20 +87,25 @@ export default function GlobalStagingDirectivesBar({
       <div className={WORKBENCH_DIRECTIVE_GRID_CLASSES}>
         {/* Card 1: Design Aesthetic Preset */}
         <div className={DIRECTIVE_CARD_CLASSES}>
-          <span className="text-sm text-muted-foreground">Design Aesthetic</span>
+          <span className="text-sm text-muted-foreground">{PROJECT_AESTHETIC_LABEL}</span>
           <select
             value={aesthetic}
             onChange={(e) => onAestheticChange(e.target.value)}
             className="rounded-lg border border-border/40 bg-muted px-3 py-2 text-sm text-foreground"
             aria-label="Design aesthetic preset"
+            aria-describedby="project-aesthetic-helper"
           >
             <option value="">Select aesthetic...</option>
-            {STAGING_AESTHETICS.map((a) => (
+            {aestheticOptions(aesthetic).map((a) => (
               <option key={a} value={a}>
                 {a}
               </option>
             ))}
           </select>
+          {/* Issue #1189: rooms have no aesthetic of their own. */}
+          <span id="project-aesthetic-helper" className="text-xs text-muted-foreground">
+            {PROJECT_AESTHETIC_HELPER}
+          </span>
         </div>
 
         {/* Card 2: Architectural Preservation Lock */}

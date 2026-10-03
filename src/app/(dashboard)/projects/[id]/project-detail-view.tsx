@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import BufferedDirectivesTextarea from "@/components/canvas/buffered-directives-textarea";
-import { ArrowLeft, ChevronRight, GripVertical, PencilRuler, Check, X, Plus } from "lucide-react";
+import { ArrowLeft, ChevronRight, GripVertical, PencilRuler, X, Plus } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -70,9 +70,14 @@ import {
 import { buildPrefill } from "@/lib/prompt-prefill";
 import { StagingPackageCard } from "@/components/packages";
 import { STAGING_PACKAGES } from "@/lib/staging-packages-schema";
-import { STAGING_AESTHETICS } from "@/lib/staging-aesthetics";
 import BatchRoomUpload from "@/components/canvas/batch-room-upload";
 import GlobalStagingDirectivesBar from "@/components/canvas/global-staging-directives-bar";
+import {
+  BULK_AESTHETIC_NOTE,
+  PROJECT_AESTHETIC_HELPER,
+  projectAestheticBadge,
+  resolveRoomAesthetic,
+} from "@/lib/project-aesthetic";
 
 const MAX_DIRECTIVE_LENGTH = 2000;
 
@@ -370,10 +375,8 @@ export default function ProjectDetailView({
   const { toasts, showError, showSuccess, showInfo, dismissToast } = useToast();
   const [selectedRoomIds, setSelectedRoomIds] = useState<Set<string>>(new Set());
   const [showBatchUpload, setShowBatchUpload] = useState(false);
-  const [bulkAesthetic, setBulkAesthetic] = useState<string>("");
 
   // Issue #636: Global Staging Directives Bar state
-  const [globalAesthetic, setGlobalAesthetic] = useState<string>("");
   const [lockedElements, setLockedElements] = useState<string[]>([
     "Archival Molding",
     "Hardwood Floors",
@@ -927,8 +930,11 @@ export default function ProjectDetailView({
             </h1>
             <div className="mt-1 flex items-center gap-4">
               <p className="text-sm text-muted-foreground">{project.clientName}</p>
-              <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-foreground">
-                {project.stagingAesthetic}
+              <span
+                className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-foreground"
+                title={PROJECT_AESTHETIC_HELPER}
+              >
+                {projectAestheticBadge(project.stagingAesthetic)}
               </span>
             </div>
           </div>
@@ -1264,47 +1270,17 @@ export default function ProjectDetailView({
               </div>
             )}
 
-            {/* Bulk aesthetic toolbar */}
+            {/* Bulk selection toolbar */}
             {selectedRoomIds.size > 0 && (
               <div className="mb-4 flex items-center gap-3 rounded-lg border border-primary bg-primary/5 p-3">
                 <span className="text-sm font-medium text-foreground">
                   {selectedRoomIds.size} room{selectedRoomIds.size !== 1 ? "s" : ""} selected
                 </span>
-                <select
-                  className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground"
-                  value={bulkAesthetic}
-                  onChange={(e) => setBulkAesthetic(e.target.value)}
-                  aria-label="Select aesthetic to apply"
-                >
-                  <option value="">Set aesthetic...</option>
-                  {STAGING_AESTHETICS.map((a) => (
-                    <option key={a} value={a}>{a}</option>
-                  ))}
-                </select>
-                {bulkAesthetic && (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const result = await saveProjectMetadata(project.id, {
-                        stagingAesthetic: bulkAesthetic,
-                      });
-                      if (result.success) {
-                        setProject((prev) =>
-                          prev ? { ...prev, stagingAesthetic: bulkAesthetic } : prev
-                        );
-                        showSuccess(`Aesthetic set to "${bulkAesthetic}"`);
-                        setBulkAesthetic("");
-                        setSelectedRoomIds(new Set());
-                      } else {
-                        showError(result.error ?? "Failed to update aesthetic");
-                      }
-                    }}
-                    className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1 text-sm font-medium text-primary-foreground hover:bg-primary/80"
-                  >
-                    <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                    Apply to {selectedRoomIds.size} room{selectedRoomIds.size !== 1 ? "s" : ""}
-                  </button>
-                )}
+                {/* Issue #1189: aesthetic is project-wide, so the bulk toolbar no
+                    longer offers a per-selection aesthetic it can't honour. */}
+                <span className="text-sm text-muted-foreground" data-testid="bulk-aesthetic-note">
+                  {BULK_AESTHETIC_NOTE}
+                </span>
                 <button
                   type="button"
                   onClick={() => setSelectedRoomIds(new Set())}
@@ -1345,9 +1321,10 @@ export default function ProjectDetailView({
                     the handlers renders them disabled with visible "Coming soon" copy
                     instead of firing placeholder toasts. */}
                 <GlobalStagingDirectivesBar
-                  aesthetic={globalAesthetic}
+                  aesthetic={resolveRoomAesthetic(project)}
                   onAestheticChange={(aesthetic) => {
-                    setGlobalAesthetic(aesthetic);
+                    // Issue #1189: the bar reads and writes the project value
+                    // directly, so it never shows blank for a saved aesthetic.
                     // Issue #636: propagate aesthetic to project-level stagingAesthetic
                     if (project && aesthetic) {
                       void saveProjectMetadata(project.id, { stagingAesthetic: aesthetic }).then((result) => {
