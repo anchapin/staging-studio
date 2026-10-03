@@ -25,6 +25,7 @@ import {
   API_ERROR_INVALID_CONCEPT,
   API_ERROR_ROOM_NOT_FOUND,
 } from "@/lib/api-errors";
+import { DETECTION_TIMEOUT_MS } from "@/lib/segment-timeouts";
 
 export const INVALID_FURNISHINGS_REQUEST_MESSAGE =
   "We couldn't read the room details — try reloading the room.";
@@ -63,7 +64,6 @@ const INVALID_CONCEPT_COPY = {
 // SAM 3.1 detection completes in seconds; bound the wait so a hung
 // provider degrades to the retryable timeout copy instead of hanging
 // the detection request.
-const DETECTION_TIMEOUT_MS = 90_000;
 
 /**
  * Issue #1118: this route's worst case is the fal subscribe bounded by
