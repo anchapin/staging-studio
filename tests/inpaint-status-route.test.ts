@@ -4,6 +4,10 @@ import type { NextRequest } from "next/server";
 import { GET } from "@/app/api/inpaint/[requestId]/status/route";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
+import {
+  _resetInpaintStatusRateLimitForTests,
+  _setStatusGoneRetryDelaysForTests,
+} from "@/lib/inpaint-status";
 
 // The inpaint status route goes through the inference abstraction.
 // We mock the abstraction so the test does not depend on a real
@@ -95,6 +99,11 @@ async function callStatusRoute(): Promise<Response> {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  // #1202: the 404-recovery retries sleep between attempts; keep tests instant.
+  _setStatusGoneRetryDelaysForTests([0, 0]);
+  // The status route rate-limits per (user, request); 10 calls/min would
+  // otherwise start returning 429 partway through this file.
+  _resetInpaintStatusRateLimitForTests();
   authedUser.mockResolvedValue({ id: USER_ID });
   findUnique.mockResolvedValue(ownedRow());
   update.mockResolvedValue({});
@@ -269,9 +278,10 @@ describe("GET /api/inpaint/[requestId]/status — fal reports the job is gone", 
   // job forever, isProcessing stays true, and the editor's "Restage
   // furnishings" button is permanently disabled.
 
-  it("marks the row ERROR and returns the terminal body when fal.queue.status throws 404", async () => {
+  it("marks the row ERROR only after status retries AND result all 404", async () => {
     const falError = new FakeFalApiError(404, "Not Found");
     falQueueStatus.mockRejectedValue(falError);
+    falQueueResult.mockRejectedValue(new FakeFalApiError(404, "Not Found"));
 
     const response = await callStatusRoute();
     const body = await response.json();
@@ -294,6 +304,7 @@ describe("GET /api/inpaint/[requestId]/status — fal reports the job is gone", 
   it("still responds terminal when the row update fails (best-effort persist)", async () => {
     const falError = new FakeFalApiError(404, "Not Found");
     falQueueStatus.mockRejectedValue(falError);
+    falQueueResult.mockRejectedValue(new FakeFalApiError(404, "Not Found"));
     update.mockRejectedValue(new Error("db down"));
 
     const response = await callStatusRoute();
@@ -367,5 +378,82 @@ describe("GET /api/inpaint/[requestId]/status — PERSISTENCE_FAILED give-up bou
     // The row stays in PERSISTENCE_FAILED so a future upload retry
     // (e.g. after Supabase is restored) can still complete it.
     expect(update).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/inpaint/[requestId]/status — recovering from a transient status 404 (#1202)", () => {
+  // A 404 from `status` is not a 404 from `result`. The poller must
+  // retry status, then ask result, before declaring the work lost.
+
+  function mockPersistenceSucceeds() {
+    // persistFalImage downloads the provider URL, then uploads to Supabase.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), {
+        status: 200,
+        headers: { "content-type": "image/png" },
+      }))
+    );
+  }
+
+  it("recovers via result when status 404s on every try but result still has the image", async () => {
+    falQueueStatus.mockRejectedValue(new FakeFalApiError(404, "Not Found"));
+    falQueueResult.mockResolvedValue({
+      data: { images: [{ url: "https://fal.media/files/recovered.png" }] },
+    });
+
+    const response = await callStatusRoute();
+    const body = await response.json();
+
+    expect(body.status).not.toBe("ERROR");
+    expect(body.status).toBe("completed");
+    // 1 initial status call + 2 retries, then exactly one result call.
+    expect(falQueueStatus).toHaveBeenCalledTimes(3);
+    expect(falQueueResult).toHaveBeenCalledTimes(1);
+    expect(update).not.toHaveBeenCalledWith({
+      where: { id: REQUEST_ID },
+      data: { status: "ERROR" },
+    });
+  });
+
+  it("carries on normally when a status retry succeeds after one 404", async () => {
+    falQueueStatus
+      .mockRejectedValueOnce(new FakeFalApiError(404, "Not Found"))
+      .mockResolvedValueOnce({ status: "IN_PROGRESS" });
+
+    const response = await callStatusRoute();
+    const body = await response.json();
+
+    expect(body.status).toBe("IN_PROGRESS");
+    expect(falQueueStatus).toHaveBeenCalledTimes(2);
+    expect(falQueueResult).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("persists the recovered image on the existing row with status COMPLETED", async () => {
+    mockPersistenceSucceeds();
+    falQueueStatus.mockRejectedValue(new FakeFalApiError(404, "Not Found"));
+    falQueueResult.mockResolvedValue({
+      data: { images: [{ url: "https://fal.media/files/recovered.png" }] },
+    });
+
+    const response = await callStatusRoute();
+    const body = await response.json();
+    vi.unstubAllGlobals();
+
+    expect(body.status).toBe("completed");
+    const statuses = update.mock.calls.map((c) => c[0]?.data?.status);
+    expect(statuses).not.toContain("ERROR");
+    expect(statuses.some((st) => st === "COMPLETED" || st === "PERSISTENCE_FAILED")).toBe(true);
+  });
+
+  it("bounds the recovery cost: at most 3 status calls and 1 result call", async () => {
+    falQueueStatus.mockRejectedValue(new FakeFalApiError(404, "Not Found"));
+    falQueueResult.mockRejectedValue(new FakeFalApiError(404, "Not Found"));
+
+    await callStatusRoute();
+
+    expect(falQueueStatus).toHaveBeenCalledTimes(3);
+    expect(falQueueResult).toHaveBeenCalledTimes(1);
   });
 });
