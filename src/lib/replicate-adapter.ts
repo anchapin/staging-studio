@@ -34,34 +34,52 @@ import {
 const REPLICATE_API_BASE = "https://api.replicate.com/v1";
 
 /**
- * Maps logical model names to Replicate's `{ owner/name }` model id
- * strings. The values chosen here are FLUX.1 Fill Pro
- * (`black-forest-labs/flux-fill-pro`) and a text-prompted SAM
- * (`lucataco/sam-2-text`). Override per-deploy via env
- * (`REPLICATE_FLUX_FILL_MODEL`, `REPLICATE_SAM_MODEL`) without code
- * changes — same model identity, different host.
+ * Resolves a Replicate deployment for a logical model. Replicate's
+ * current `/v1/predictions` API requires an explicit version hash and
+ * rejects `model` in the request body, so each deployment is the pair
+ * (model, version). Both are env-overridable
+ * (`REPLICATE_FLUX_FILL_MODEL` / `REPLICATE_FLUX_FILL_VERSION` and the
+ * matching SAM pair) so a model bump is an env change rather than a
+ * code change. Defaults pinned here are the v1 recommendation from
+ * the fal-swap plan: `black-forest-labs/flux-fill-pro` (FLUX.1 Fill
+ * Pro) and `lucataco/sam-2-text` (text-prompted SAM). The FLUX version
+ * hash below was verified against Replicate on 2026-10-03 by the
+ * #1200 integration probe; a model bump must update both the default
+ * and the env-override docs together.
  */
-function resolveReplicateModel(logical: LogicalModel): string {
+function resolveReplicateDeployment(
+  logical: LogicalModel
+): { model: string; version: string } {
   switch (logical) {
     case LOGICAL_MODEL.FLUX_FILL: {
-      return (
-        process.env.REPLICATE_FLUX_FILL_MODEL?.trim() ||
-        "black-forest-labs/flux-fill-pro"
-      );
+      return {
+        model:
+          process.env.REPLICATE_FLUX_FILL_MODEL?.trim() ||
+          "black-forest-labs/flux-fill-pro",
+        version:
+          process.env.REPLICATE_FLUX_FILL_VERSION?.trim() ||
+          "41c767bcbfffe54ef8f05eb4d0100f9314790f7fc43a7b88d73ec06839deddb9",
+      };
     }
     case LOGICAL_MODEL.SAM_3_1_IMAGE: {
-      return (
-        process.env.REPLICATE_SAM_MODEL?.trim() ||
-        "lucataco/sam-2-text"
-      );
+      return {
+        model:
+          process.env.REPLICATE_SAM_MODEL?.trim() || "lucataco/sam-2-text",
+        // SAM has no verified version hash yet — the probe only
+        // exercises FLUX.1 Fill. Operators wiring SAM through
+        // Replicate must set REPLICATE_SAM_VERSION to a real hash
+        // (curl /v1/models/lucataco/sam-2-text) before flipping
+        // INFERENCE_PROVIDER=replicate in production.
+        version: process.env.REPLICATE_SAM_VERSION?.trim() || "",
+      };
     }
     default: {
       // exhaustiveness guard — adding a logical model without a
-      // Replicate model id is a programming error.
+      // Replicate deployment is a programming error.
       const _exhaustive: never = logical;
       throw new Error(
         `Replicate adapter: unknown logical model "${String(logical)}". ` +
-          `Add a case to resolveReplicateModel.`
+          `Add a case to resolveReplicateDeployment.`
       );
     }
   }
@@ -171,7 +189,7 @@ export function createReplicateClient(): InferenceClient {
       abortSignal?: AbortSignal;
     }): Promise<T> {
       const token = getReplicateToken();
-      const modelId = resolveReplicateModel(logicalModel);
+      const { model, version } = resolveReplicateDeployment(logicalModel);
       try {
         // Replicate has no streaming subscribe equivalent on the REST
         // API; we submit and poll until terminal. This matches fal's
@@ -181,7 +199,7 @@ export function createReplicateClient(): InferenceClient {
         const submitResult = await replicateFetch("/predictions", {
           method: "POST",
           token,
-          body: { model: modelId, input: options.input },
+          body: { version, input: options.input },
         });
         if (options.abortSignal?.aborted) {
           throw new Error("replicate subscribe aborted before completion");
@@ -208,7 +226,8 @@ export function createReplicateClient(): InferenceClient {
             event: "inference_error",
             provider: "replicate",
             logicalModel,
-            modelId,
+            model,
+            version,
             error: error instanceof Error ? error.message : String(error),
           },
           `[inference] replicate subscribe error: ${error instanceof Error ? error.message : String(error)}`
@@ -222,11 +241,11 @@ export function createReplicateClient(): InferenceClient {
       options: { input: Record<string, unknown>; abortSignal?: AbortSignal }
     ): Promise<{ request_id: string }> {
       const token = getReplicateToken();
-      const modelId = resolveReplicateModel(logicalModel);
+      const { version } = resolveReplicateDeployment(logicalModel);
       const result = await replicateFetch("/predictions", {
         method: "POST",
         token,
-        body: { model: modelId, input: options.input },
+        body: { version, input: options.input },
       });
       return { request_id: result.id };
     },

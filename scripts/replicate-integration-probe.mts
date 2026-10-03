@@ -24,6 +24,7 @@
  *     a generated 256x256 gray image and a white center-square mask, sent
  *     as PNG data URLs, so the probe has no external dependency.
  *   REPLICATE_FLUX_FILL_MODEL         same override the adapter honors.
+ *   REPLICATE_FLUX_FILL_VERSION       same override the adapter honors.
  *   PROBE_TIMEOUT_MS                  overall poll cap (default 180000).
  *
  * Idempotent: writes nothing to the app database or storage. Re-running
@@ -110,6 +111,8 @@ async function main(): Promise<number> {
     issue: 1200,
     startedAt: new Date().toISOString(),
     model: process.env.REPLICATE_FLUX_FILL_MODEL?.trim() || "black-forest-labs/flux-fill-pro",
+    version: process.env.REPLICATE_FLUX_FILL_VERSION?.trim() ||
+      "41c767bcbfffe54ef8f05eb4d0100f9314790f7fc43a7b88d73ec06839deddb9",
     inputs: process.env.PROBE_IMAGE_URL ? "env urls" : "generated data urls",
   };
   const fail = (stage: string, error: unknown): number => {
