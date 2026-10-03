@@ -457,3 +457,70 @@ describe("GET /api/inpaint/[requestId]/status — recovering from a transient st
     expect(falQueueResult).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("GET /api/inpaint/[requestId]/status — Replicate output shape (#1199)", () => {
+  // Replicate's flux-fill-pro returns the image(s) as a bare URL or a
+  // top-level [url1, url2] array, not fal's { images: [{ url }] }.
+  // The poller used to read result.images?.[0]?.url, got undefined,
+  // and returned "retryable" forever.
+
+  it("completes and persists from Replicate's [url1, url2] output", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), {
+        status: 200,
+        headers: { "content-type": "image/webp" },
+      }))
+    );
+    falQueueStatus.mockResolvedValue({ status: "COMPLETED" });
+    falQueueResult.mockResolvedValue({
+      data: [
+        "https://replicate.delivery/pbxt/out-0.webp",
+        "https://replicate.delivery/pbxt/out-1.webp",
+      ],
+    });
+
+    const response = await callStatusRoute();
+    const body = await response.json();
+    const fetchMock = globalThis.fetch as unknown as Mock;
+    const fetchedUrls = fetchMock.mock.calls.map((c) => String(c[0]));
+    vi.unstubAllGlobals();
+
+    expect(response.status).toBe(200);
+    expect(body.status).toBe("completed");
+    expect(body.status).not.toBe("retryable");
+    // The first Replicate URL is the one downloaded for persistence.
+    expect(fetchedUrls).toContain("https://replicate.delivery/pbxt/out-0.webp");
+  });
+
+  it("hands back the Replicate URL with persisted:false when persistence fails", async () => {
+    falQueueStatus.mockResolvedValue({ status: "COMPLETED" });
+    falQueueResult.mockResolvedValue({
+      data: "https://replicate.delivery/pbxt/single.webp",
+    });
+
+    const response = await callStatusRoute();
+    const body = await response.json();
+
+    expect(body).toEqual({
+      status: "completed",
+      imageUrl: "https://replicate.delivery/pbxt/single.webp",
+      persisted: false,
+    });
+  });
+
+  it("retries persistence for a PERSISTENCE_FAILED row using Replicate's array output", async () => {
+    findUnique.mockResolvedValue(ownedRow({ status: "PERSISTENCE_FAILED" }));
+    falQueueResult.mockResolvedValue({
+      data: ["https://replicate.delivery/pbxt/retry.webp"],
+    });
+
+    const response = await callStatusRoute();
+    const body = await response.json();
+
+    // Supabase is unmocked here, so persistence fails again and the
+    // poller keeps the job alive with the URL, rather than "no image".
+    expect(body.status).toBe("retryable");
+    expect(body.imageUrl).toBe("https://replicate.delivery/pbxt/retry.webp");
+  });
+});
