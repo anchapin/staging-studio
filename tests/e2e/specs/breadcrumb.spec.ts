@@ -39,13 +39,18 @@ test.describe("breadcrumb navigation", () => {
     const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" });
     await expect(breadcrumb).toBeVisible();
 
-    // Three segments: Projects link, PropertyAddress span, RoomName span
+    // Three segments: Projects link, PropertyAddress button, RoomName span.
+    // Issue #1188: while a room is open the property address is a button
+    // that leaves the editor and returns to the project overview.
     await expect(breadcrumb.getByRole("link", { name: "Projects" })).toBeVisible();
-    await expect(breadcrumb.locator("span.text-foreground")).toHaveCount(2);
+    const addressButton = breadcrumb.getByRole("button");
+    await expect(addressButton).toHaveCount(1);
+    await expect(addressButton).not.toBeEmpty();
 
-    // Room name is the last span
-    const roomNameSpan = breadcrumb.locator("span.text-foreground").last();
-    await expect(roomNameSpan).toContainText("Mask Room");
+    // Room name is the only current-page span
+    const currentSpans = breadcrumb.locator("span.text-foreground");
+    await expect(currentSpans).toHaveCount(1);
+    await expect(currentSpans).toContainText("Mask Room");
   });
 
   test("Projects link navigates to /projects", async ({ page }) => {
