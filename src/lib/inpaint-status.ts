@@ -10,6 +10,10 @@ import {
 } from "@/lib/inference";
 import { firstInpaintImageUrl, type RawInpaintOutput } from "@/lib/inpaint-output";
 import {
+  logInpaintEvent,
+  type InpaintEventStatus,
+} from "@/lib/logInpaintEvent";
+import {
   API_ERROR_INPAINT_STATUS_FAILED,
   API_ERROR_INPAINT_TERMINAL,
   API_ERROR_REQUEST_NOT_FOUND,
@@ -282,7 +286,41 @@ async function markRowTerminalAndReturnError(
       recordError
     );
   }
+  // Issue #1116: the ERROR flip is a pipeline state transition; log it.
+  await logInpaintTransition(requestId, "failed");
   return { status: "ERROR", imageUrl: null, persisted: false };
+}
+
+/**
+ * Issue #1116: logs one pipeline state-transition event with the row's
+ * identity (userId via room.project, roomId, variantSlot). Best-effort:
+ * the identity read never throws into the pipeline path, and a row
+ * deleted mid-flight logs nothing.
+ */
+export async function logInpaintTransition(
+  requestId: string,
+  status: InpaintEventStatus
+): Promise<void> {
+  try {
+    const row = await prisma.inpaintRequest.findUnique({
+      where: { id: requestId },
+      select: {
+        roomId: true,
+        variantSlot: true,
+        room: { select: { project: { select: { userId: true } } } },
+      },
+    });
+    if (!row) return;
+    logInpaintEvent({
+      userId: row.room.project.userId,
+      requestId,
+      roomId: row.roomId,
+      variantSlot: row.variantSlot,
+      status,
+    });
+  } catch {
+    // Observability never derails the pipeline.
+  }
 }
 
 /**
@@ -522,6 +560,8 @@ export async function pollFalStatus(requestId: string): Promise<InpaintStatusRes
           where: { id: requestId },
           data: { status: "COMPLETED", resultUrl: imageUrl },
         });
+        // Issue #1116: the COMPLETED flip is a pipeline state transition.
+        await logInpaintTransition(requestId, "completed");
         return { status: "completed", imageUrl, persisted: true };
       } catch (recordError) {
         console.error(JSON.stringify({ event: "inpaint_record_failed", requestId }), recordError);
@@ -630,6 +670,8 @@ async function finishCompletedJob(
         where: { id: requestId },
         data: { status: "COMPLETED", resultUrl: imageUrl },
       });
+      // Issue #1116: the COMPLETED flip is a pipeline state transition.
+      await logInpaintTransition(requestId, "completed");
       return { status: "completed", imageUrl, persisted: true };
     } catch (recordError) {
       // Issue #1136: the durable upload succeeded but the record write

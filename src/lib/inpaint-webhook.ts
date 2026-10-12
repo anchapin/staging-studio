@@ -23,7 +23,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { firstInpaintImageUrl } from "@/lib/inpaint-output";
-import { persistFalImage } from "@/lib/inpaint-status";
+import { logInpaintTransition, persistFalImage } from "@/lib/inpaint-status";
 
 export type InpaintWebhookOutcome =
   | { kind: "completed"; imageUrl: string }
@@ -141,6 +141,8 @@ export async function applyInpaintWebhookEvent(params: {
           recordError
         );
       });
+    // Issue #1116: the ERROR flip is a pipeline state transition.
+    await logInpaintTransition(row.id, "failed");
     return { kind: "provider_error" };
   }
 
@@ -178,6 +180,8 @@ async function persistCompletion(
         where: { id: requestId },
         data: { status: "COMPLETED", resultUrl: imageUrl },
       });
+      // Issue #1116: the COMPLETED flip is a pipeline state transition.
+      await logInpaintTransition(requestId, "completed");
       return { kind: "completed", imageUrl };
     } catch (recordError) {
       // Same contract as finishCompletedJob (issue #1136): a failed

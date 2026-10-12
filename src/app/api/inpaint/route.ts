@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { buildDeprecationHeaders } from "@/lib/api-version";
+import { withRequestLogging } from "@/lib/api-logging";
+import { logInpaintEvent } from "@/lib/logInpaintEvent";
 import {
   inpaintSubmitSchema,
   checkDailyQuota,
@@ -9,7 +11,7 @@ import {
   submitInpaintRequest,
 } from "@/lib/inpaint-submit";
 
-export async function POST(request: NextRequest) {
+async function postInpaint(request: NextRequest) {
   try {
     const user = await getAuthedPrismaUser();
     if (!user) {
@@ -87,7 +89,7 @@ export async function POST(request: NextRequest) {
         sourceSlot,
       });
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       requestId,
       qualityWarnings,
       ...(recordDegraded ? { degraded: true } : {}),
@@ -95,6 +97,18 @@ export async function POST(request: NextRequest) {
       // recorded rather than letting it retry into a second bill (#1131).
       ...(quotaChargeDegraded ? { quotaChargeDegraded: true } : {}),
     });
+    // Issue #1116: the pipeline requestId supersedes the wrapper's minted
+    // HTTP id. The client echoes it on status polls, so submit -> fal
+    // queue -> status poll -> upload join on one id.
+    response.headers.set("x-request-id", requestId);
+    logInpaintEvent({
+      userId: user.id,
+      requestId,
+      roomId,
+      variantSlot: parsed.data.variantSlot,
+      status: "submitted",
+    });
+    return response;
   } catch (error) {
     const classified = classifyInpaintError(error);
     return NextResponse.json(
@@ -103,3 +117,6 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+// Issue #1116: wire the request logger so this route actually logs.
+export const POST = withRequestLogging(postInpaint);

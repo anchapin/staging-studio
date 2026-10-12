@@ -5,6 +5,7 @@ import { POST } from "@/app/api/inpaint/route";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { evaluateInpaintQualityGate } from "@/lib/inpaint-quality-gate";
 import { prisma } from "@/lib/prisma";
+import { logger } from "@/lib/logger";
 
 // The inpaint route goes through the inference abstraction. We mock
 // the abstraction's `getInferenceClient` so the test does not depend
@@ -267,5 +268,23 @@ describe("POST /api/inpaint — inpaint quota ledger (issue #1131)", () => {
         String(call[0]).includes("inpaint_quota_charge_retry")
       )
     ).toBe(true);
+  });
+});
+
+describe("POST /api/inpaint — pipeline event wiring (issue #1116)", () => {
+  it("logs the submitted inpaint event and echoes the pipeline requestId", async () => {
+    const infoSpy = vi.spyOn(logger, "info").mockImplementation(() => logger);
+    const response = await callSubmitRoute();
+    expect(response.headers.get("x-request-id")).toBe(REQUEST_ID);
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "inpaint",
+        userId: USER_ID,
+        requestId: REQUEST_ID,
+        roomId: ROOM_ID,
+        variantSlot: 0,
+        status: "submitted",
+      })
+    );
   });
 });
