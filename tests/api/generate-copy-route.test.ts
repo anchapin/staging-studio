@@ -4,7 +4,7 @@ import { POST } from "@/app/api/generate-copy/route";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { saveRoomCopy } from "@/app/actions/room";
-import { generateWithCircuitBreaker } from "@/lib/ai";
+import { generateWithCircuitBreaker, generateWithFailover } from "@/lib/ai";
 
 const MOCK_USER_ID = "cuser12345678901234567890";
 const MOCK_ROOM_ID = "croom12345678901234567890";
@@ -48,9 +48,12 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 vi.mock("@/lib/ai", () => ({
+  FALLBACK_MODEL_ID: "gpt-4o",
+  FALLBACK_PRIMARY_ID: "gpt-4o-mini",
   aiModel: "gpt-4o-mini",
   assertOpenAIConfigured: vi.fn(),
   generateWithCircuitBreaker: vi.fn(),
+  generateWithFailover: vi.fn(),
 }));
 
 vi.mock("@/lib/api-quota", () => ({
@@ -241,13 +244,19 @@ describe("POST /api/generate-copy", () => {
       ],
     };
 
-    vi.mocked(generateWithCircuitBreaker).mockResolvedValue({
-      object: mockCopy,
-      finishReason: "stop",
-      usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
+    vi.mocked(generateWithFailover).mockResolvedValue({
+      result: {
+        object: mockCopy,
+        finishReason: "stop",
+        usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
+      },
+      modelId: "gpt-4o-mini",
+      failedOver: false,
     });
     vi.mocked(saveRoomCopy).mockResolvedValue({ success: true });
-
+    vi.mocked(generateWithCircuitBreaker).mockResolvedValue({
+      object: { buyer_aligned: null, checklist_actionable: null, aesthetic_consistent: null, qualityWarnings: [] },
+    });
     const response = await POST(buildRequest({ roomId: MOCK_ROOM_ID }));
     const json = await response.json();
 
@@ -257,6 +266,10 @@ describe("POST /api/generate-copy", () => {
       data: mockCopy,
     });
     expect(json.data.observedChallenge).toBe("Limited natural light");
+    // Issue #1224: exactly one billed usage record per successful
+    // generation, whatever model produced it.
+    const { recordDailyUsage } = await import("@/lib/api-quota");
+    expect(recordDailyUsage).toHaveBeenCalledTimes(1);
   });
 
   it("returns 502 when copy is generated but save fails", async () => {
@@ -269,13 +282,19 @@ describe("POST /api/generate-copy", () => {
       ],
     };
 
-    vi.mocked(generateWithCircuitBreaker).mockResolvedValue({
-      object: mockCopy,
-      finishReason: "stop",
-      usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
+    vi.mocked(generateWithFailover).mockResolvedValue({
+      result: {
+        object: mockCopy,
+        finishReason: "stop",
+        usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
+      },
+      modelId: "gpt-4o",
+      failedOver: true,
     });
     vi.mocked(saveRoomCopy).mockResolvedValue({ success: false, error: "DB error" });
-
+    vi.mocked(generateWithCircuitBreaker).mockResolvedValue({
+      object: { buyer_aligned: null, checklist_actionable: null, aesthetic_consistent: null, qualityWarnings: [] },
+    });
     const response = await POST(buildRequest({ roomId: MOCK_ROOM_ID }));
     const json = await response.json();
 
