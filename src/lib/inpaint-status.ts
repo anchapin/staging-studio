@@ -518,7 +518,8 @@ export async function pollFalStatus(requestId: string): Promise<InpaintStatusRes
  * Shared by the normal COMPLETED path and the #1202 404-recovery path,
  * so a recovered job reuses the existing row's lifecycle (no second
  * billed InpaintRequest). Side effects: one image download + Supabase
- * upload (via `persistFalImage`) and one best-effort Prisma update.
+ * upload (via `persistFalImage`) and one Prisma update whose failure
+ * surfaces as `retryable` (issue #1136), never as a completed result.
  */
 async function finishCompletedJob(
   requestId: string,
@@ -540,10 +541,18 @@ async function finishCompletedJob(
         where: { id: requestId },
         data: { status: "COMPLETED", resultUrl: imageUrl },
       });
+      return { status: "completed", imageUrl, persisted: true };
     } catch (recordError) {
+      // Issue #1136: the durable upload succeeded but the record write
+      // did not land. Reporting `completed` here desyncs the client
+      // (it writes the result into the room and saves an InpaintVersion
+      // for a row the DB does not show as COMPLETED). Return
+      // `retryable` so the client keeps polling; the next poll re-runs
+      // the fal fetch + upsert re-upload and retries the write, and
+      // once it lands the row flips to COMPLETED.
       console.error(JSON.stringify({ event: "inpaint_record_failed", requestId }), recordError);
+      return { status: "retryable", imageUrl: null, persisted: false };
     }
-    return { status: "completed", imageUrl, persisted: true };
   }
 
   // Persistence failed but the provider's image URL is available.
