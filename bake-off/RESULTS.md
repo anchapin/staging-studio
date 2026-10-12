@@ -16,7 +16,7 @@ Total cells: 27 (9 slots x 3 cases)
 | flux-pro-kontext | fal | instruction | 10.4s (1248x832) | 8.4s (1248x832) | 6.3s (1248x832) | $0.04 | images |
 | z-image-turbo-inpaint | fal | mask-fill | 10.4s (2000x1328) | 10.4s (2000x1328) | 8.4s (2000x1328) | $0.01 | megapixels |
 | flux-kontext-lora-inpaint | fal | mask-fill | 16.5s (1248x832) | 10.4s (1248x832) | 12.4s (1248x832) | $0.035 | megapixels |
-| gpt-image-2-5 | openai | mask-fill | FAIL: Incorrect API key provided: sk | FAIL: Incorrect API key provided: sk | FAIL: Incorrect API key provided: sk | - | - |
+| gpt-image-2-5 | openai | mask-fill | 31.4s | 31.4s | 29.0s | 2887 tok | - |
 
 ## Per-slot notes
 
@@ -53,19 +53,20 @@ Total cells: 27 (9 slots x 3 cases)
   - occupied-replace: [output](https://v3b.fal.media/files/b/0aae1f2c/sPjK96YoqGI9q50pggXMY.png)
   - repeat-stability: [output](https://v3b.fal.media/files/b/0aae1f2d/vlZz5LJtIylEWNVO_Kq8I.png)
 - **gpt-image-2-5** (openai, mask-fill) -- OpenAI GPT-Image-2.5 Sunburst class. Multipart edits endpoint with mask. New OpenAI vendor (uses OPENAI_API_KEY, not FAL_KEY). The model issue #1240 specifically called out as 'leads LM Arena'.
-  - vacant-insert: FAILED -- OpenAI returned error: {"message":"Incorrect API key provided: sk-proj-*****************************************************************dvNC. You can find your API key at https://platform.openai.com/account/api-keys.","type":"invalid_request_error","code":"invalid_api_key","param":null}
-  - occupied-replace: FAILED -- OpenAI returned error: {"message":"Incorrect API key provided: sk-proj-*****************************************************************dvNC. You can find your API key at https://platform.openai.com/account/api-keys.","type":"invalid_request_error","code":"invalid_api_key","param":null}
-  - repeat-stability: FAILED -- OpenAI returned error: {"message":"Incorrect API key provided: sk-proj-*****************************************************************dvNC. You can find your API key at https://platform.openai.com/account/api-keys.","type":"invalid_request_error","code":"invalid_api_key","param":null}
+  - vacant-insert: [output](bake-off/outputs/gpt-image-2-5__vacant-insert__31421ms.png)
+  - occupied-replace: [output](bake-off/outputs/gpt-image-2-5__occupied-replace__31444ms.png)
+  - repeat-stability: [output](bake-off/outputs/gpt-image-2-5__repeat-stability__29004ms.png)
 
 ## Gaps from issue #1240 and current run
 
-- **gpt-image-2.5** is auth-failing in this env (OPENAI_API_KEY in .env.local rejected as invalid by api.openai.com). The schema, dispatch, and mask-invert code paths all work; only the API key is in the way. Re-run with a valid key when available.
 - **flux-3-image** is text-to-image only on fal; not edit-comparable.
-- **qwen-image-2.1** marked Private on fal; issue #1240 already flags research-only license.
+- **qwen-image-2-1** marked Private on fal; issue #1240 already flags research-only license.
 - **nano-banana-2-1 / repeat-stability** rejected by content checker (legit policy violation).
-- **nano-banana-2.1 pricing** came back as a sentinel row from /v1/models/pricing.
-- **Mask parity**: only flux-pro-fill, z-image-turbo-inpaint, flux-kontext-lora-inpaint, and gpt-image-2.5 (would-be) actually consume the mask. The instruction-only slots (flux-pro-kontext, seedream-5-flash, nano-banana-2-1, qwen-image-2.1) ignore the mask entirely, so mask-vs-mask comparison is only valid across the four mask-capable slots.
+- **nano-banana-2-1 pricing** came back as a sentinel row from /v1/models/pricing.
+- **Mask parity**: only flux-pro-fill, z-image-turbo-inpaint, flux-kontext-lora-inpaint, and gpt-image-2-5 actually consume the mask. The instruction-only slots ignore the mask entirely, so mask-vs-mask comparison is only valid across the four mask-capable slots.
+- **gpt-image-2-5 dimensions** not in response body (OpenAI returns only b64_json for GPT image models); saved locally at bake-off/outputs/gpt-image-2-5__*.png as 1536x1024.
+- **gpt-image-2-5 initially auth-failed** (stale OPENAI_API_KEY in .env.local); succeeded on retry after key rotation. Schema/dispatch/mask-invert code paths were correct.
 
 ## Verdict
 
-All four new fal slots (flux-pro-kontext, z-image-turbo-inpaint, flux-kontext-lora-inpaint, plus the existing 5) returned real billed outputs. GPT-Image-2.5 failed on auth -- runner + mask-invert logic is sound, key issue is on the user side. 26 of 27 cells ok; 1 cell is a legitimate content-policy rejection. Manual scoring still owed on the output URLs; no provider flip recommended until Alex reviews.
+All 9 slots produced real billed outputs (1 cell is a legitimate content-policy rejection on nano-banana-2-1). Manual scoring still owed on the output files; no provider flip recommended until Alex reviews.

@@ -291,24 +291,39 @@
     "slot": "gpt-image-2-5",
     "vendor": "openai",
     "case": "vacant-insert",
-    "ok": false,
-    "latency_ms": 1023,
-    "error": "OpenAI returned error: {\"message\":\"Incorrect API key provided: sk-proj-*****************************************************************dvNC. You can find your API key at https://platform.openai.com/account/api-keys.\",\"type\":\"invalid_request_error\",\"code\":\"invalid_api_key\",\"param\":null}"
+    "ok": true,
+    "latency_ms": 31428,
+    "input_tokens": 1515,
+    "output_tokens": 1372,
+    "total_tokens": 2887,
+    "output": "bake-off/outputs/gpt-image-2-5__vacant-insert__31421ms.png",
+    "output_dimensions": null,
+    "http_status": "200"
   },
   {
     "slot": "gpt-image-2-5",
     "vendor": "openai",
     "case": "occupied-replace",
-    "ok": false,
-    "latency_ms": 572,
-    "error": "OpenAI returned error: {\"message\":\"Incorrect API key provided: sk-proj-*****************************************************************dvNC. You can find your API key at https://platform.openai.com/account/api-keys.\",\"type\":\"invalid_request_error\",\"code\":\"invalid_api_key\",\"param\":null}"
+    "ok": true,
+    "latency_ms": 31448,
+    "input_tokens": 1514,
+    "output_tokens": 1372,
+    "total_tokens": 2886,
+    "output": "bake-off/outputs/gpt-image-2-5__occupied-replace__31444ms.png",
+    "output_dimensions": null,
+    "http_status": "200"
   },
   {
     "slot": "gpt-image-2-5",
     "vendor": "openai",
     "case": "repeat-stability",
-    "ok": false,
-    "latency_ms": 795,
-    "error": "OpenAI returned error: {\"message\":\"Incorrect API key provided: sk-proj-*****************************************************************dvNC. You can find your API key at https://platform.openai.com/account/api-keys.\",\"type\":\"invalid_request_error\",\"code\":\"invalid_api_key\",\"param\":null}"
+    "ok": true,
+    "latency_ms": 29008,
+    "input_tokens": 1498,
+    "output_tokens": 1372,
+    "total_tokens": 2870,
+    "output": "bake-off/outputs/gpt-image-2-5__repeat-stability__29004ms.png",
+    "output_dimensions": null,
+    "http_status": "200"
   }
 ]

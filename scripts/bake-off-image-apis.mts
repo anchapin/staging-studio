@@ -199,10 +199,12 @@ async function buildOpenAiInput(
   slot: Slot,
   caseInput: { prompt?: string; imageUrl?: string; maskUrl?: string | null },
 ): Promise<Record<string, unknown>> {
+  // input_fidelity is supported by gpt-image-1 / 1.5 only; gpt-image-2.5 rejects
+  // it explicitly. See scripts/bake-off-results.json entry from the first
+  // attempt ("invalid_input_fidelity_model").
   const input: Record<string, unknown> = {
     model: "gpt-image-2.5-sunburst",
     prompt: caseInput.prompt ?? "",
-    input_fidelity: "high",
     quality: "high",
   };
   if (caseInput.imageUrl) {
