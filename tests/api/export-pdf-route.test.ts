@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 
 import { POST } from "@/app/api/export-pdf/route";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
 // Use vi.hoisted so the mock is fresh for each test run and doesn't retain
@@ -60,7 +61,7 @@ vi.mock("@/lib/api-auth", () => ({
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     project: { findUnique: vi.fn() },
-    dailyApiUsage: { upsert: vi.fn(), findUnique: vi.fn() },
+    dailyApiUsage: { upsert: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn(), create: vi.fn() },
   },
 }));
 
@@ -77,6 +78,8 @@ const authedUser = getAuthedPrismaUser as unknown as Mock;
 const projectFindUnique = prisma.project.findUnique as unknown as Mock;
 const dailyApiUsageUpsert = prisma.dailyApiUsage.upsert as unknown as Mock;
 const dailyApiUsageFindUnique = prisma.dailyApiUsage.findUnique as unknown as Mock;
+const dailyApiUsageUpdateMany = prisma.dailyApiUsage.updateMany as unknown as Mock;
+const dailyApiUsageCreate = prisma.dailyApiUsage.create as unknown as Mock;
 
 const USER_ID = "user-1";
 // Exactly 25 chars: c + 24 lowercase alphanumerics (matches PROJECT_ID_PATTERN /^c[a-z0-9]{24}$/)
@@ -96,6 +99,8 @@ beforeEach(() => {
     requireProjectOwnershipOrThrow.mockResolvedValue({ ok: true, projectId: PROJECT_ID });
     dailyApiUsageFindUnique.mockResolvedValue({ count: 0 });
   dailyApiUsageUpsert.mockResolvedValue({ count: 1 });
+  dailyApiUsageUpdateMany.mockResolvedValue({ count: 1 });
+  dailyApiUsageCreate.mockResolvedValue({ count: 1 });
   // Reset hoisted mock and delegate to global.fetch so per-test overrides work
   vi.mocked(fetchBrowserlessPdfWithCircuitBreaker).mockReset().mockImplementation(
     (url: string, opts?: RequestInit) => global.fetch(url, opts) as Promise<Response>,
@@ -121,6 +126,8 @@ beforeEach(() => {
   projectFindUnique.mockResolvedValue({ id: PROJECT_ID, userId: USER_ID });
   dailyApiUsageFindUnique.mockResolvedValue({ count: 0 });
   dailyApiUsageUpsert.mockResolvedValue({ count: 1 });
+  dailyApiUsageUpdateMany.mockResolvedValue({ count: 1 });
+  dailyApiUsageCreate.mockResolvedValue({ count: 1 });
   vi.mocked(fetchBrowserlessPdfWithCircuitBreaker).mockReset().mockImplementation(
     (url: string, opts?: RequestInit) => global.fetch(url, opts) as Promise<Response>,
   );
@@ -193,6 +200,17 @@ describe("POST /api/export-pdf — auth", () => {
 
 describe("POST /api/export-pdf — quota", () => {
   it("returns 429 when daily export limit is exceeded", async () => {
+    // Issue #1132: the claim is a conditional increment. A full counter
+    // loses it (0 rows updated), the first-of-day create hits the unique
+    // key (P2002), the retry increment loses again, and the route reads
+    // today's count and denies — no charge, no provider call.
+    dailyApiUsageUpdateMany.mockResolvedValue({ count: 0 });
+    dailyApiUsageCreate.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+        code: "P2002",
+        clientVersion: "5.22.0",
+      })
+    );
     dailyApiUsageFindUnique.mockResolvedValue({ count: 20 });
 
     const response = await callExportRoute(validBody());

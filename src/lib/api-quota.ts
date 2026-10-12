@@ -39,6 +39,7 @@
  * day) — compare against the providers' dashboard spend alerts.
  */
 
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
 export type QuotaSurface = "copy" | "export" | "inpaint" | "label" | "segment";
@@ -240,4 +241,141 @@ export async function recordDailyUsage(
     update: { count: { increment: count } },
   });
   return record.count;
+}
+
+/**
+ * A daily-quota decision whose units have been atomically claimed
+ * (issue #1132). `claimed: true` means the units are ALREADY counted in
+ * `DailyApiUsage` — the caller may spend them on the provider call and
+ * should `refundDailyQuota` when that call fails. `claimed: false` means
+ * the request was denied and nothing was written. All other fields mirror
+ * `QuotaDecision`, so `dailyQuotaExceededPayload` and every 429 response
+ * body keep their exact shape.
+ */
+export type QuotaClaim =
+  | { claimed: true; allowed: true; used: number; limit: number; remaining: number }
+  | { claimed: false; allowed: false; used: number; limit: number; resetsAt: string };
+
+/**
+ * Atomically claims `count` units for a user on a Postgres-counted
+ * surface BEFORE spending them on a provider call (issue #1132).
+ *
+ * The check-then-charge pattern this replaces (`getDailyUsage` +
+ * `evaluateDailyQuota` deciding up front, `recordDailyUsage` charging
+ * after the provider call) had a burst hole: N concurrent requests all
+ * read the same pre-spend count, all pass the gate, and all spend —
+ * e.g. 500 concurrent segment requests against a cap of 100 all see
+ * used=0 and all reach SAM 3.1. The claim is instead a single
+ * conditional increment (`UPDATE ... WHERE count <= limit - N`); Postgres
+ * serializes the row update, so only headroom-sized claims land and the
+ * losers see zero rows updated and get denied. Unlike the old gate, the
+ * claim runs just before the provider call, so the units are HELD while
+ * the call is in flight; `refundDailyQuota` on failure keeps the net
+ * accounting identical (a failed attempt costs nothing, as before).
+ */
+export async function claimDailyQuota(
+  surface: QuotaSurface,
+  userId: string,
+  limit: number,
+  count: number = 1,
+  now: Date = new Date()
+): Promise<QuotaClaim> {
+  const { dayKey, endAt } = dailyWindow(now);
+  const resetsAt = endAt.toISOString();
+  const unitWhere = { userId, surface, dayKey, count: { lte: limit - count } };
+
+  // A single request asking for more units than the entire daily cap can
+  // never be served, even on an untouched row; deny it without a write.
+  if (count > limit) {
+    const used = await getDailyUsage(surface, userId, now);
+    return { claimed: false, allowed: false, used, limit, resetsAt };
+  }
+
+  const claimOnce = async (): Promise<boolean> => {
+    const updated = await prisma.dailyApiUsage.updateMany({
+      where: unitWhere,
+      data: { count: { increment: count } },
+    });
+    return updated.count === 1;
+  };
+
+  const allowedClaim = async (used: number): Promise<QuotaClaim> => ({
+    claimed: true,
+    allowed: true,
+    used,
+    limit,
+    remaining: Math.max(0, limit - used),
+  });
+
+  if (await claimOnce()) {
+    const fresh = await prisma.dailyApiUsage.findUnique({
+      where: { userId_surface_dayKey: { userId, surface, dayKey } },
+    });
+    return allowedClaim(fresh?.count ?? count);
+  }
+
+  // Zero rows updated: either today's row does not exist yet (first claim
+  // of the day) or the cap is exhausted. Create the row; if another
+  // request wins the first-of-day race (P2002), retry the conditional
+  // increment once, which then arbitrates against the winner's count.
+  try {
+    const created = await prisma.dailyApiUsage.create({
+      data: { userId, surface, dayKey, count },
+    });
+    return allowedClaim(created.count);
+  } catch (err) {
+    if (
+      !(err instanceof Prisma.PrismaClientKnownRequestError) ||
+      err.code !== "P2002"
+    ) {
+      throw err;
+    }
+  }
+
+  if (await claimOnce()) {
+    const fresh = await prisma.dailyApiUsage.findUnique({
+      where: { userId_surface_dayKey: { userId, surface, dayKey } },
+    });
+    return allowedClaim(fresh?.count ?? count);
+  }
+
+  const record = await prisma.dailyApiUsage.findUnique({
+    where: { userId_surface_dayKey: { userId, surface, dayKey } },
+  });
+  const used = record?.count ?? 0;
+  return { claimed: false, allowed: false, used, limit, resetsAt };
+}
+
+/**
+ * Best-effort refund of `count` previously claimed units (issue #1132).
+ * Called when the provider call a claim was held for fails, so the user's
+ * net daily usage is unchanged. Guarded with `count >= N` so it can never
+ * drive a row negative, and never throws: a failed refund leaves usage
+ * slightly over-counted (the conservative direction), and the failure is
+ * logged for inspection.
+ */
+export async function refundDailyQuota(
+  surface: QuotaSurface,
+  userId: string,
+  count: number = 1,
+  now: Date = new Date()
+): Promise<void> {
+  const { dayKey } = dailyWindow(now);
+  try {
+    await prisma.dailyApiUsage.updateMany({
+      where: { userId, surface, dayKey, count: { gte: count } },
+      data: { count: { decrement: count } },
+    });
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        event: "daily_quota_refund_failed",
+        surface,
+        userId,
+        count,
+        dayKey,
+      }),
+      err
+    );
+  }
 }

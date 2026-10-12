@@ -65,15 +65,17 @@ vi.mock("@/lib/api-quota", () => ({
     export: "DAILY_EXPORT_LIMIT",
     segment: "DAILY_SEGMENT_LIMIT",
   },
-  getDailyUsage: vi.fn(() => Promise.resolve(0)),
-  evaluateDailyQuota: vi.fn(() => ({
-    allowed: true,
-    used: 0,
-    limit: 50,
-    remaining: 50,
-  })),
+  claimDailyQuota: vi.fn(() =>
+    Promise.resolve({
+      claimed: true,
+      allowed: true,
+      used: 1,
+      limit: 50,
+      remaining: 49,
+    })
+  ),
+  refundDailyQuota: vi.fn(() => Promise.resolve(undefined)),
   resolveDailyLimit: vi.fn((_raw: string | undefined, fallback: number) => fallback),
-  recordDailyUsage: vi.fn(() => Promise.resolve(1)),
   dailyQuotaExceededPayload: vi.fn(() => ({
     error: "Daily limit reached",
     message: "Please try again tomorrow.",
@@ -150,8 +152,9 @@ describe("POST /api/generate-copy", () => {
   });
 
   it("returns 429 when daily quota exceeded", async () => {
-    const { evaluateDailyQuota } = vi.mocked(await import("@/lib/api-quota"));
-    evaluateDailyQuota.mockReturnValueOnce({
+    const { claimDailyQuota } = vi.mocked(await import("@/lib/api-quota"));
+    claimDailyQuota.mockResolvedValueOnce({
+      claimed: false,
       allowed: false,
       used: 50,
       limit: 50,
@@ -266,10 +269,11 @@ describe("POST /api/generate-copy", () => {
       data: mockCopy,
     });
     expect(json.data.observedChallenge).toBe("Limited natural light");
-    // Issue #1224: exactly one billed usage record per successful
-    // generation, whatever model produced it.
-    const { recordDailyUsage } = await import("@/lib/api-quota");
-    expect(recordDailyUsage).toHaveBeenCalledTimes(1);
+    // Issue #1224/#1132: exactly one quota claim per generation,
+    // whatever model produced it (the claim is atomic and pre-call; the
+    // charge lands only via the claim itself).
+    const { claimDailyQuota } = await import("@/lib/api-quota");
+    expect(claimDailyQuota).toHaveBeenCalledTimes(1);
   });
 
   it("returns 502 when copy is generated but save fails", async () => {

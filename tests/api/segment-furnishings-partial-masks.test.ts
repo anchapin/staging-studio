@@ -41,13 +41,16 @@ vi.mock("@/lib/inference", async (importOriginal) => {
   };
 });
 
-const mockRecordDailyUsage = vi.hoisted(() => vi.fn(async () => 1));
+const mockClaimDailyQuota = vi.hoisted(() =>
+  vi.fn(async () => ({ claimed: true, allowed: true, used: 1, limit: 100, remaining: 99 }))
+);
+const mockRefundDailyQuota = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock("@/lib/api-quota", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api-quota")>();
   return {
     ...actual,
-    getDailyUsage: vi.fn(async () => 0),
-    recordDailyUsage: mockRecordDailyUsage,
+    claimDailyQuota: mockClaimDailyQuota,
+    refundDailyQuota: mockRefundDailyQuota,
     resolveDailyLimit: vi.fn(() => 100),
   };
 });
@@ -107,7 +110,7 @@ describe("POST /api/segment/furnishings mask settling", () => {
     );
     // Scores stay aligned with the masks that survived.
     expect(body.scores).toEqual([0.9, 0.7]);
-    expect(mockRecordDailyUsage).toHaveBeenCalledTimes(1);
+    expect(mockClaimDailyQuota).toHaveBeenCalledTimes(1);
   });
 
   it("still succeeds when a mask fetch rejects outright", async () => {
@@ -145,6 +148,6 @@ describe("POST /api/segment/furnishings mask settling", () => {
 
     expect(response.status).toBe(200);
     expect(body.maskDataUrls).toEqual([]);
-    expect(mockRecordDailyUsage).toHaveBeenCalledTimes(1);
+    expect(mockClaimDailyQuota).toHaveBeenCalledTimes(1);
   });
 });

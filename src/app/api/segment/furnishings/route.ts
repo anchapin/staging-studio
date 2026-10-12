@@ -9,11 +9,11 @@ import {
   DEFAULT_DAILY_SEGMENT_LIMIT,
   DAILY_LIMIT_ENV_VAR,
   dailyQuotaExceededPayload,
-  evaluateDailyQuota,
-  getDailyUsage,
-  recordDailyUsage,
+  claimDailyQuota,
+  refundDailyQuota,
   resolveDailyLimit,
 } from "@/lib/api-quota";
+import type { QuotaClaim } from "@/lib/api-quota";
 import {
   buildFurnishingDetectionPayload,
   parseFurnishingDetectionResponse,
@@ -104,6 +104,10 @@ async function fetchMaskAsDataUrl(url: string): Promise<string> {
 
 export async function POST(request: NextRequest) {
   let roomId: string | undefined;
+  // Issue #1132: per-request record of an atomic quota claim so the catch
+  // below can refund it when detection fails.
+  let segmentUserId: string | undefined;
+  let segmentClaim: QuotaClaim | null = null;
   try {
     const user = await getAuthedPrismaUser();
     if (!user) {
@@ -117,40 +121,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Issue #226: daily per-user segment guardrail — tracked in the
-    // `DailyApiUsage` Postgres table via atomic upserts, so usage survives
-    // serverless cold starts and multi-instance traffic splitting (issue
-    // #784). Checked BEFORE the body is parsed so a user at their cap
-    // never reaches the paid provider.
-    const segmentLimit = resolveDailyLimit(
-      process.env[DAILY_LIMIT_ENV_VAR.segment],
-      DEFAULT_DAILY_SEGMENT_LIMIT
-    );
-    const segmentQuota = evaluateDailyQuota(
-      await getDailyUsage("segment", user.id),
-      segmentLimit
-    );
-    if (!segmentQuota.allowed) {
-      console.warn(
-        JSON.stringify({
-          event: "segment_daily_quota_exceeded",
-          userId: user.id,
-          used: segmentQuota.used,
-          limit: segmentQuota.limit,
-        })
-      );
-      return NextResponse.json(
-        {
-          ...dailyQuotaExceededPayload(segmentQuota, "Please try again tomorrow."),
-          code: API_ERROR_RATE_LIMIT_EXCEEDED,
-        },
-        { status: 429 }
-      );
-    }
-
     const parsed = furnishingsSegmentRequestSchema.safeParse(await request.json());
     if (!parsed.success) {
-      // Issue #227: concept-shaped failures get actionable, non-retryable
+      segmentUserId = user.id;
+
+    // Issue #227: concept-shaped failures get actionable, non-retryable
       // copy — the fix is editing the input, not resending it.
       const conceptInvalid = parsed.error.issues.some((issue) =>
         issue.path.includes("concept")
@@ -188,6 +163,39 @@ export async function POST(request: NextRequest) {
     }
 
     assertInferenceConfigured();
+
+    // Issue #226/#1132: claim one segment unit ATOMICALLY here, on the
+    // eve of the paid call, instead of gate-reading the counter up front.
+    // The conditional increment (UPDATE ... WHERE count <= limit - N) is
+    // serialized by Postgres, so a concurrent burst can no longer all
+    // read the same pre-spend count and all reach SAM 3.1; losers get 429
+    // with the same payload shape as before. A failed detection refunds
+    // the claim in the catch below, so net accounting is unchanged.
+    segmentClaim = await claimDailyQuota(
+      "segment",
+      user.id,
+      resolveDailyLimit(
+        process.env[DAILY_LIMIT_ENV_VAR.segment],
+        DEFAULT_DAILY_SEGMENT_LIMIT
+      )
+    );
+    if (!segmentClaim.claimed) {
+      console.warn(
+        JSON.stringify({
+          event: "segment_daily_quota_exceeded",
+          userId: user.id,
+          used: segmentClaim.used,
+          limit: segmentClaim.limit,
+        })
+      );
+      return NextResponse.json(
+        {
+          ...dailyQuotaExceededPayload(segmentClaim, "Please try again tomorrow."),
+          code: API_ERROR_RATE_LIMIT_EXCEEDED,
+        },
+        { status: 429 }
+      );
+    }
 
     // Synchronous detection call: SAM 3.1 completes in seconds, so a
     // direct queue-aware subscribe keeps the preset flow
@@ -254,10 +262,10 @@ export async function POST(request: NextRequest) {
 
     // An empty maskDataUrls list is a VALID result ("no {concept} found"
     // is presentable, not an error) — the response succeeds either way.
-    // Billing is recorded only for completed detections (the
-    // segment_concept_timing console.log was removed as debug debris,
-    // #720).
-    await recordDailyUsage("segment", user.id);
+    // No charge is written here: the unit was claimed atomically before
+    // the SAM call (issue #1132), and a failed detection is refunded in
+    // the catch below, so only completed detections net-count, as before
+    // (#720).
 
     return NextResponse.json({
       concept: payload.prompt,
@@ -265,6 +273,11 @@ export async function POST(request: NextRequest) {
       scores: detection.scores ? keptScores : detection.scores,
     });
   } catch (error) {
+    // Issue #1132: give the claimed unit back when detection fails, so a
+    // failed attempt costs the user nothing (the pre-#1132 behavior).
+    if (segmentUserId && segmentClaim?.claimed) {
+      await refundDailyQuota("segment", segmentUserId);
+    }
     console.error(
       JSON.stringify({ event: "furnishings_detection_failed", roomId: roomId ?? null }),
       error

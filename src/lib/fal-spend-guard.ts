@@ -54,7 +54,7 @@ export const FAL_SPEND_CALL =
  * guard.
  */
 export const QUOTA_ENFORCEMENT =
-  /checkDailyQuota\s*\(|evaluateDailyQuota\s*\(|evaluateDailyBatchQuota\s*\(/;
+  /checkDailyQuota\s*\(|evaluateDailyQuota\s*\(|evaluateDailyBatchQuota\s*\(|claimDailyQuota\s*\(/;
 
 /**
  * The legacy model id, matched exactly. The current SAM 3.1 endpoint

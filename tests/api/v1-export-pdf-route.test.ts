@@ -42,6 +42,8 @@ const { MockProjectNotFoundError, MockProjectForbiddenError } = vi.hoisted(() =>
 const mockProjectFindUnique = vi.hoisted(() => vi.fn());
 const mockDailyApiUsageUpsert = vi.hoisted(() => vi.fn());
 const mockDailyApiUsageFindUnique = vi.hoisted(() => vi.fn());
+const mockDailyApiUsageUpdateMany = vi.hoisted(() => vi.fn());
+const mockDailyApiUsageCreate = vi.hoisted(() => vi.fn());
 const mockSignPreviewToken = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/api-auth", () => ({
@@ -54,7 +56,7 @@ vi.mock("@/lib/api-auth", () => ({
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     project: { findUnique: mockProjectFindUnique },
-    dailyApiUsage: { upsert: mockDailyApiUsageUpsert, findUnique: mockDailyApiUsageFindUnique },
+    dailyApiUsage: { upsert: mockDailyApiUsageUpsert, findUnique: mockDailyApiUsageFindUnique, updateMany: mockDailyApiUsageUpdateMany, create: mockDailyApiUsageCreate },
   },
 }));
 
@@ -94,6 +96,8 @@ const ORIGINAL_ENV = { ...process.env };
     mockProjectFindUnique.mockResolvedValue({ id: PROJECT_ID, userId: USER_ID });
     mockDailyApiUsageUpsert.mockResolvedValue({});
     mockDailyApiUsageFindUnique.mockResolvedValue({ count: 0 });
+    mockDailyApiUsageUpdateMany.mockResolvedValue({ count: 1 });
+    mockDailyApiUsageCreate.mockResolvedValue({ count: 1 });
     mockSignPreviewToken.mockResolvedValue("test-preview-token");
 
     // Default: the resolver hands back the real endpoint. The hermetic-seam

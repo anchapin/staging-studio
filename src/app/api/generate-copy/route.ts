@@ -30,11 +30,11 @@ import {
   DEFAULT_DAILY_COPY_LIMIT,
   DAILY_LIMIT_ENV_VAR,
   dailyQuotaExceededPayload,
-  evaluateDailyQuota,
-  getDailyUsage,
-  recordDailyUsage,
+  claimDailyQuota,
+  refundDailyQuota,
   resolveDailyLimit,
 } from "@/lib/api-quota";
+import type { QuotaClaim } from "@/lib/api-quota";
 import { saveRoomCopy, type GeneratedCopy } from "@/app/actions/room";
 import {
   API_ERROR_UNAUTHORIZED,
@@ -74,6 +74,14 @@ export async function POST(request: NextRequest) {
   // Hoisted so the catch block can correlate failures with the room even
   // when the error fires before/after the request body is parsed.
   let roomId: string | undefined;
+  // Issue #1132: per-request record of the atomic quota claim and whether
+  // the provider call resolved, so the catch below refunds the claim only
+  // when the paid call itself failed (a failure after it resolved, e.g.
+  // persisting the copy, keeps the count — the same accounting as the old
+  // charge-after-resolve).
+  let copyUserId: string | undefined;
+  let copyClaim: QuotaClaim | null = null;
+  let copyGenerationResolved = false;
   try {
     const user = await getAuthedPrismaUser();
     if (!user) {
@@ -88,37 +96,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Issue #201: daily per-user OpenAI cost guardrail, checked BEFORE any
-    // validation or DB work — a user at their cap never reaches gpt-4o-mini.
-    // Usage lives in the `DailyApiUsage` Postgres table via atomic upserts,
-    // so it survives serverless cold starts and multi-instance traffic
-    // splitting (issues #784, #1131).
+    copyUserId = user.id;
+
+    // Issue #201: daily per-user OpenAI cost guardrail. Usage lives in the
+    // `DailyApiUsage` Postgres table, so it survives serverless cold starts
+    // and multi-instance traffic splitting (issues #784, #1131). #1132: the
+    // unit is claimed ATOMICALLY just before the paid call (below), not
+    // gate-read up front — the old check-then-charge let a concurrent burst
+    // all read the same pre-spend count and overshoot the cap. A user at
+    // their cap still never reaches gpt-4o-mini.
     const copyLimit = resolveDailyLimit(
       process.env[DAILY_LIMIT_ENV_VAR.copy],
       DEFAULT_DAILY_COPY_LIMIT
     );
-    const copyQuota = evaluateDailyQuota(
-      await getDailyUsage("copy", user.id),
-      copyLimit
-    );
-    if (!copyQuota.allowed) {
-      console.warn(
-        JSON.stringify({
-          event: "generate_copy_daily_quota_exceeded",
-          userId: user.id,
-          used: copyQuota.used,
-          limit: copyQuota.limit,
-        })
-      );
-      return NextResponse.json(
-        {
-          success: false,
-          ...dailyQuotaExceededPayload(copyQuota, "Please try again tomorrow."),
-          code: API_ERROR_RATE_LIMIT_EXCEEDED,
-        },
-        { status: 429 }
-      );
-    }
 
     const { roomId: parsedRoomId } = generateCopyRequestSchema.parse(
       await request.json()
@@ -196,6 +186,31 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Issue #201/#1132: claim one copy unit ATOMICALLY here, on the eve of
+    // the paid call. The conditional increment (UPDATE ... WHERE count <=
+    // limit - N) is serialized by Postgres, so a concurrent burst can no
+    // longer all read the same pre-spend count and all reach gpt-4o-mini;
+    // losers get 429 with the same payload shape as before.
+    copyClaim = await claimDailyQuota("copy", user.id, copyLimit);
+    if (!copyClaim.claimed) {
+      console.warn(
+        JSON.stringify({
+          event: "generate_copy_daily_quota_exceeded",
+          userId: user.id,
+          used: copyClaim.used,
+          limit: copyClaim.limit,
+        })
+      );
+      return NextResponse.json(
+        {
+          success: false,
+          ...dailyQuotaExceededPayload(copyClaim, "Please try again tomorrow."),
+          code: API_ERROR_RATE_LIMIT_EXCEEDED,
+        },
+        { status: 429 }
+      );
+    }
+
     // Issue #1224: the generation call runs through the failover wrapper —
     // a vendor-availability failure on the primary (rate limit, timeout,
     // network) gets exactly one attempt on the fallback model. The quality
@@ -239,11 +254,11 @@ export async function POST(request: NextRequest) {
       })
     );
     const { object: copy, finishReason, usage } = generation;
+    copyGenerationResolved = true;
 
-    // Count the billable generation only after the provider call resolves:
-    // a failed/timeout attempt costs at most a few rejected tokens and does
-    // not count against the user's daily cap.
-    await recordDailyUsage("copy", user.id);
+    // No charge is written here: the unit was claimed atomically before
+    // the call (issue #1132), and a failed/timeout attempt is refunded in
+    // the catch below, so it still costs nothing against the daily cap.
 
     // Issue #600: copy quality gate — evaluate generated copy quality before
     // persisting. Advisory only; warnings ride along with the saved copy.
@@ -369,6 +384,13 @@ export async function POST(request: NextRequest) {
       { status: 200 }
     );
   } catch (error) {
+    // Issue #1132: give the claimed unit back when the paid call itself
+    // failed. Once it resolved, the count stands even if a later step
+    // (persisting the copy) throws — the vision/generation work was
+    // consumed.
+    if (!copyGenerationResolved && copyUserId && copyClaim?.claimed) {
+      await refundDailyQuota("copy", copyUserId);
+    }
     console.error(
       JSON.stringify({ event: "generate_copy_failed", roomId: roomId ?? null }),
       error

@@ -5,9 +5,8 @@ import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { signPreviewToken } from "@/lib/preview-token";
 import {
-  getDailyUsage,
-  recordDailyUsage,
-  evaluateDailyQuota,
+  claimDailyQuota,
+  refundDailyQuota,
 } from "@/lib/api-quota";
 
 
@@ -78,9 +77,8 @@ vi.mock("@/lib/browserless", () => ({
 }));
 
 vi.mock("@/lib/api-quota", () => ({
-  getDailyUsage: vi.fn(),
-  recordDailyUsage: vi.fn(),
-  evaluateDailyQuota: vi.fn(),
+  claimDailyQuota: vi.fn(),
+  refundDailyQuota: vi.fn(),
   DEFAULT_DAILY_EXPORT_LIMIT: 20,
   resolveDailyLimit: vi.fn(() => 20),
   dailyQuotaExceededPayload: vi.fn(() => ({
@@ -104,13 +102,14 @@ describe("POST /api/export-pdf", () => {
       (url: string, opts?: RequestInit) => global.fetch(url, opts) as Promise<Response>,
     );
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser as never);
-    vi.mocked(getDailyUsage).mockResolvedValue(0);
-    vi.mocked(evaluateDailyQuota).mockReturnValue({
+    vi.mocked(claimDailyQuota).mockResolvedValue({
+      claimed: true,
       allowed: true,
-      used: 0,
+      used: 1,
       limit: 20,
-      remaining: 20,
+      remaining: 19,
     });
+    vi.mocked(refundDailyQuota).mockResolvedValue(undefined);
     vi.mocked(signPreviewToken).mockResolvedValue("mock-signed-token");
     vi.mocked(prisma.project.findUnique).mockResolvedValue({
       id: MOCK_PROJECT_ID,
@@ -147,7 +146,8 @@ describe("POST /api/export-pdf", () => {
   });
 
   it("returns 429 when daily export quota exceeded", async () => {
-    vi.mocked(evaluateDailyQuota).mockReturnValue({
+    vi.mocked(claimDailyQuota).mockResolvedValue({
+      claimed: false,
       allowed: false,
       used: 20,
       limit: 20,
@@ -326,7 +326,7 @@ describe("POST /api/export-pdf", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toBe("application/pdf");
     expect(res.headers.get("Content-Disposition")).toContain("attachment");
-    expect(recordDailyUsage).toHaveBeenCalledWith("export", MOCK_USER_ID);
+    expect(claimDailyQuota).toHaveBeenCalledWith("export", MOCK_USER_ID, 20);
   });
 
   it("does not count Browserless errors against daily quota", async () => {
@@ -341,6 +341,6 @@ describe("POST /api/export-pdf", () => {
     const req = buildRequest({ projectId: MOCK_PROJECT_ID });
     await POST(req);
 
-    expect(recordDailyUsage).not.toHaveBeenCalled();
+    expect(refundDailyQuota).toHaveBeenCalledWith("export", MOCK_USER_ID);
   });
 });
