@@ -49,8 +49,18 @@ function parseArgs(): UsageOptions {
     switch (args[i]) {
       case "--date": {
         const value = args[++i];
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-          console.error("--date expects YYYY-MM-DD");
+        const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+        // Reject impossible dates up front: JS Date silently rolls 2026-13-99
+        // over into 2027, and the report would then claim a dayKey the app
+        // can never have written.
+        if (
+          !match ||
+          Number(match[2]) < 1 ||
+          Number(match[2]) > 12 ||
+          Number(match[3]) < 1 ||
+          Number(match[3]) > 31
+        ) {
+          console.error("--date expects a real date as YYYY-MM-DD");
           process.exit(1);
         }
         options.date = value;
