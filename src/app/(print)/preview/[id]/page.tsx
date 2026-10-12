@@ -11,7 +11,11 @@ import type { Metadata } from "next";
 export const dynamic = "force-dynamic";
 
 import { prisma } from "@/lib/prisma";
-import { PREVIEW_TOKEN_QUERY_PARAM } from "@/lib/preview-token";
+import {
+  PREVIEW_CAPTURE_QUERY_PARAM,
+  PREVIEW_CAPTURE_QUERY_VALUE,
+  PREVIEW_TOKEN_QUERY_PARAM,
+} from "@/lib/preview-token";
 import { parseBuyerDemographics } from "@/lib/project-create-schema";
 import {
   extractPreviewToken,
@@ -261,6 +265,18 @@ export default async function LookbookPreviewPage({
           />
         </div>
       )}
+      {/* Issue #1222: the Browserless capture path marks itself
+          (?capture=pdf, appended by src/app/api/export-pdf) so the print
+          CSS can keep that render full-bleed (--print-margin: 0mm) while
+          a human printing from a browser gets the safe-area margin. The
+          class must land on <html> because @page resolves var() against
+          the root element, and an inline script is the only way to get
+          there from a server component. */}
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `if (new URLSearchParams(location.search).get("${PREVIEW_CAPTURE_QUERY_PARAM}") === "${PREVIEW_CAPTURE_QUERY_VALUE}") document.documentElement.classList.add("pdf-capture");`,
+        }}
+      />
       <LookbookPreviewView project={previewProject} previewToken={token ?? undefined} />
     </div>
   );

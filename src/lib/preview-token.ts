@@ -40,6 +40,18 @@
 /** Query param the signed token travels in on the preview URL. */
 export const PREVIEW_TOKEN_QUERY_PARAM = "token";
 
+/**
+ * Marks a preview load as the Browserless PDF capture path (issue #1222).
+ * The export route appends `capture=pdf` to the signed preview URL it
+ * hands the cloud browser; the preview page turns that into a
+ * `pdf-capture` class on `<html>`, which the print CSS uses to keep the
+ * capture full-bleed (`--print-margin: 0mm`) while a human printing from
+ * a browser gets the safe-area margin. Exported so the route, the page,
+ * and the tests pin the same literal.
+ */
+export const PREVIEW_CAPTURE_QUERY_PARAM = "capture";
+export const PREVIEW_CAPTURE_QUERY_VALUE = "pdf";
+
 /** Default token lifetime: 5 minutes, in seconds. */
 export const PREVIEW_TOKEN_TTL_SECONDS = 5 * 60;
 
