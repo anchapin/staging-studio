@@ -329,7 +329,7 @@ describe("POST /api/export-pdf", () => {
     expect(claimDailyQuota).toHaveBeenCalledWith("export", MOCK_USER_ID, 20);
   });
 
-  it("does not count Browserless errors against daily quota", async () => {
+  it("counts Browserless errors against daily quota (issue #1124)", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 500,
@@ -341,6 +341,11 @@ describe("POST /api/export-pdf", () => {
     const req = buildRequest({ projectId: MOCK_PROJECT_ID });
     await POST(req);
 
-    expect(refundDailyQuota).toHaveBeenCalledWith("export", MOCK_USER_ID);
+    // Issue #1124 reverses the issue #1132 refund policy for exports: a
+    // failed render still consumed Browserless compute, so the unit claimed
+    // before the dispatch stays claimed. A refund here would reopen the
+    // unbounded-retry window the daily cap exists to close.
+    expect(refundDailyQuota).not.toHaveBeenCalled();
+    expect(claimDailyQuota).toHaveBeenCalledWith("export", MOCK_USER_ID, 20);
   });
 });

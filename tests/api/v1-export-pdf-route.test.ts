@@ -268,3 +268,44 @@ describe("POST /api/v1/export-pdf — hermetic Browserless endpoint seam", () =>
     });
   });
 });
+
+/**
+ * Issue #1124: the unit claimed before the dispatch (issue #1132) stays
+ * claimed when the render fails — Browserless compute was consumed and the
+ * failure response is retryable, so the daily cap bounds failing dispatches.
+ */
+describe("POST /api/v1/export-pdf — failed exports consume quota (issue #1124)", () => {
+  it("keeps the claim when the render fails (no refund after dispatch)", async () => {
+    let counter = 0;
+    const increments: number[] = [];
+    const decrements: number[] = [];
+    mockDailyApiUsageUpdateMany.mockImplementation(
+      async (
+        args: {
+          where?: { count?: { lte?: number } };
+          data?: { count?: { increment?: number; decrement?: number } };
+        }
+      ) => {
+        if (args?.data?.count?.increment !== undefined) {
+          increments.push(args.data.count.increment);
+          counter += args.data.count.increment;
+          return { count: 1 };
+        }
+        if (args?.data?.count?.decrement !== undefined) {
+          // A decrement here means a refund call site sneaked back in.
+          decrements.push(args.data.count.decrement);
+          return { count: 1 };
+        }
+        return { count: 0 };
+      }
+    );
+    mockDailyApiUsageFindUnique.mockImplementation(async () => ({ count: counter }));
+    fetchBrowserlessPdfWithCircuitBreaker.mockRejectedValue(new Error("network down"));
+
+    const response = await callExportRoute(PROJECT_ID);
+
+    expect(response.status).toBeGreaterThanOrEqual(500);
+    expect(increments).toEqual([1]);
+    expect(decrements).toEqual([]);
+  });
+});
