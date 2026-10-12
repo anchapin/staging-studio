@@ -58,6 +58,16 @@ export function maskUndoCount(history: MaskUndoHistory): number {
   return history.undo.length;
 }
 
+/** Whether any redo target exists (drives the Redo button, issue #1223). */
+export function canRedoMask(history: MaskUndoHistory): boolean {
+  return history.redo.length > 0;
+}
+
+/** Number of redo steps currently available (drives the Redo button count). */
+export function maskRedoCount(history: MaskUndoHistory): number {
+  return history.redo.length;
+}
+
 function capUndo(undo: readonly string[]): readonly string[] {
   if (undo.length <= MAX_MASK_UNDO_DEPTH) return undo;
   return undo.slice(undo.length - MAX_MASK_UNDO_DEPTH);
