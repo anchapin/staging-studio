@@ -5,6 +5,13 @@ import { getAuthedPrismaUser, requireProjectOwnershipSafe } from "@/lib/api-auth
 import { revalidatePath } from "next/cache";
 import { createSupabaseRequestClient } from "@/lib/supabase";
 import { withRetry } from "@/lib/retry";
+import {
+  MAX_ROOM_PHOTO_BYTES,
+  ROOM_PHOTOS_BUCKET,
+  extractStoragePathFromUrl,
+  readUploadedObjectSize,
+  removeStorageObjects,
+} from "@/lib/storage-cleanup";
 import { batchRoomTypesRequestSchema } from "@/lib/ai-route-schemas";
 import {
   batchRoomUploadUrlsRequestSchema,
@@ -96,6 +103,39 @@ export async function createRoomsBatch(
   }
 
   const maxSortOrder = project.rooms[0]?.sortOrder ?? -1;
+
+  // #1145: confirm-time size gate — each entry's uploaded object must
+  // fit MAX_ROOM_PHOTO_BYTES before it is linked into a Room row.
+  // Oversized objects are deleted; the whole batch is rejected (the
+  // client's own compression already targets the same ceiling, so this
+  // only fires on raw oversized PUTs). Unreadable sizes pass.
+  const supabase = await createSupabaseRequestClient();
+  for (const entry of parsed.data.entries) {
+    const storagePath = extractStoragePathFromUrl(entry.beforeImageUrl);
+    if (!storagePath) continue;
+    const uploadedSize = await readUploadedObjectSize(
+      supabase as never,
+      ROOM_PHOTOS_BUCKET,
+      storagePath
+    );
+    if (uploadedSize !== null && uploadedSize > MAX_ROOM_PHOTO_BYTES) {
+      console.warn(
+        JSON.stringify({
+          event: "batch_room_upload_oversized",
+          projectId: parsed.data.projectId,
+          storagePath,
+          size: uploadedSize,
+          max: MAX_ROOM_PHOTO_BYTES,
+        })
+      );
+      await removeStorageObjects([storagePath]);
+      return {
+        success: false,
+        error:
+          "One or more uploaded images are too large. Please use images under 10 MB.",
+      };
+    }
+  }
 
   try {
     const rooms = await prisma.$transaction(
