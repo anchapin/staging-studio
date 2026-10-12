@@ -27,12 +27,21 @@ export async function reorderRooms(
   }
 
   try {
-    await Promise.all(
-      roomIds.map((roomId, index) =>
-        prisma.room.updateMany({
-          where: { id: roomId, projectId },
-          data: { sortOrder: index },
-        })
+    // Issue #1147: the old fan-out committed N independent updates, so one
+    // failure left a mix of old and new indexes and duplicate sortOrder
+    // values. Commit all-or-nothing instead, and drop duplicate ids (a
+    // duplicate would otherwise receive two conflicting indexes). update()
+    // rather than updateMany() so a room deleted mid-reorder throws and
+    // rolls the whole transaction back instead of matching zero rows.
+    const uniqueRoomIds = Array.from(new Set(roomIds));
+    await prisma.$transaction(async (tx) =>
+      Promise.all(
+        uniqueRoomIds.map((roomId, index) =>
+          tx.room.update({
+            where: { id: roomId, projectId },
+            data: { sortOrder: index },
+          })
+        )
       )
     );
     return { success: true };

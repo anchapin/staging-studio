@@ -7,7 +7,9 @@ vi.mock("@/lib/prisma", () => ({
     },
     room: {
       updateMany: vi.fn(),
+      update: vi.fn(),
     },
+    $transaction: vi.fn(),
   },
 }));
 
@@ -28,6 +30,12 @@ describe("room-delete actions", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser as never);
+    // Issue #1147: $transaction runs its callback against a tx client whose
+    // room.update is the same mock prisma.room.update.
+    vi.mocked(prisma.$transaction).mockImplementation(async (fn) => {
+      const tx = { room: { update: prisma.room.update } } as never;
+      return (fn as (t: never) => Promise<unknown>)(tx);
+    });
   });
 
   describe("reorderRooms", () => {
@@ -56,22 +64,53 @@ describe("room-delete actions", () => {
       expect(result.error).toBe("Project not found");
     });
 
-    it("updates sortOrder and returns success for valid input", async () => {
+    it("updates sortOrder inside a transaction and returns success (issue #1147)", async () => {
       vi.mocked(requireProjectOwnershipSafe).mockResolvedValue({ project: { id: MOCK_PROJECT_ID } as never });
-      vi.mocked(prisma.room.updateMany).mockResolvedValue({ count: 1 } as never);
+      vi.mocked(prisma.room.update).mockResolvedValue({ id: "room1" } as never);
 
       const result = await reorderRooms(MOCK_PROJECT_ID, ["room1", "room2"]);
 
       expect(result.success).toBe(true);
-      expect(prisma.room.updateMany).toHaveBeenCalledTimes(2);
-      expect(prisma.room.updateMany).toHaveBeenCalledWith({
+      // The writes run against the transaction client, not the root prisma.
+      expect(prisma.room.update).toHaveBeenCalledTimes(2);
+      expect(prisma.room.update).toHaveBeenCalledWith({
         where: { id: "room1", projectId: MOCK_PROJECT_ID },
         data: { sortOrder: 0 },
       });
-      expect(prisma.room.updateMany).toHaveBeenCalledWith({
+      expect(prisma.room.update).toHaveBeenCalledWith({
         where: { id: "room2", projectId: MOCK_PROJECT_ID },
         data: { sortOrder: 1 },
       });
+    });
+
+    it("dedupes roomIds so a duplicate id gets one index (issue #1147)", async () => {
+      vi.mocked(requireProjectOwnershipSafe).mockResolvedValue({ project: { id: MOCK_PROJECT_ID } as never });
+      vi.mocked(prisma.room.update).mockResolvedValue({ id: "room1" } as never);
+
+      const result = await reorderRooms(MOCK_PROJECT_ID, ["room1", "room2", "room1"]);
+
+      expect(result.success).toBe(true);
+      expect(prisma.room.update).toHaveBeenCalledTimes(2);
+      expect(prisma.room.update).toHaveBeenCalledWith({
+        where: { id: "room1", projectId: MOCK_PROJECT_ID },
+        data: { sortOrder: 0 },
+      });
+      expect(prisma.room.update).toHaveBeenCalledWith({
+        where: { id: "room2", projectId: MOCK_PROJECT_ID },
+        data: { sortOrder: 1 },
+      });
+    });
+
+    it("returns failure and aborts when the transaction rejects (issue #1147)", async () => {
+      vi.mocked(requireProjectOwnershipSafe).mockResolvedValue({ project: { id: MOCK_PROJECT_ID } as never });
+      // P2025-style: a room deleted mid-reorder makes update() throw, which
+      // aborts the transaction so no index change lands.
+      vi.mocked(prisma.room.update).mockRejectedValue(new Error("Record to update not found."));
+
+      const result = await reorderRooms(MOCK_PROJECT_ID, ["room1", "room2"]);
+
+      expect(result.success).toBe(false);
+      expect((result as { success: false; error: string }).error).toBe("Record to update not found.");
     });
   });
 });
