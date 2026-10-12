@@ -329,12 +329,23 @@ export function createAlibabaClient(): InferenceClient {
         abortSignal?: AbortSignal;
         webhookUrl?: string;
       },
-    ): Promise<{ request_id: string }> {
+    ): Promise<{
+      request_id: string;
+      result?: { imageUrl: string; width: number | null; height: number | null };
+    }> {
       // The DashScope API is synchronous: do the POST now, cache the
       // result, return a local requestId so the route's normal
       // status/result polling flow continues to work. `webhookUrl` is
       // accepted for interface compatibility but unused (DashScope has
       // no callback surface).
+      //
+      // We also return the synchronous result inline (#1240 multi-
+      // instance fix): the route handler writes the row with
+      // status="COMPLETED" + resultUrl=<dashscope-url> in the same
+      // request as the submit. Otherwise a Vercel multi-instance
+      // deploy would let instance A handle the POST (caching the URL
+      // in its module-local Map) and instance B handle the first poll
+      // (404 because B's cache is empty).
       const { apiKey, workspaceId } = requireAlibabaEnv();
       const model = resolveAlibabaModel(_logicalModel);
       const imageUrl = String(options.input.imageUrl ?? "");
@@ -342,7 +353,7 @@ export function createAlibabaClient(): InferenceClient {
       const requestId = newRequestId();
       const picked = await runInpaintSync(imageUrl, prompt, workspaceId, apiKey, model);
       alibabaResultCache.set(requestId, picked);
-      return { request_id: requestId };
+      return { request_id: requestId, result: picked };
     },
 
     async status(

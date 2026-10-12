@@ -165,11 +165,22 @@ export interface InferenceClient {
    * try to normalize them. Returns a provider-agnostic
    * `request_id` string the caller passes back to `status` /
    * `result`.
+   *
+   * For **synchronous** providers (e.g. Alibaba DashScope, where one
+   * round-trip returns the final image URL), the returned object also
+   * carries a populated `result` so the route handler can persist the
+   * durable result URL alongside the row write in the same request
+   * (#1240 multi-instance fix). Async providers (fal queue, Replicate
+   * prediction) leave `result` undefined and the poller fills the
+   * durable URL on a later poll.
    */
   submit(
     logicalModel: LogicalModel,
     options: SubscribeOptions
-  ): Promise<{ request_id: string }>;
+  ): Promise<{
+    request_id: string;
+    result?: { imageUrl: string; width: number | null; height: number | null };
+  }>;
 
   /**
    * Poll the queue for a non-terminal job. The provider-specific

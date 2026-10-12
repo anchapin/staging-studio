@@ -485,4 +485,61 @@ describe("POST /api/inpaint", () => {
     expect(falQueueSubmitWithCircuitBreaker).not.toHaveBeenCalled();
     expect(recordDailyUsage).not.toHaveBeenCalled();
   });
+
+  // -------------------------------------------------------------------------
+  // Synchronous provider (#1240 multi-instance fix)
+  // -------------------------------------------------------------------------
+
+  it("writes the row with status=COMPLETED + resultUrl when submit returns a synchronous result", async () => {
+    // Synchronous providers (Alibaba DashScope today) return the
+    // durable result URL inline so a Vercel multi-instance deploy
+    // doesn't lose the result when POST and first poll land on
+    // different instances. The row must persist status + resultUrl
+    // alongside the row write so decideInpaintPersistence() in the
+    // poller short-circuits to return-stored on any instance.
+    const dashScopeUrl =
+      "https://dashscope-result-sz.oss-accelerate.aliyuncs.com/abc.png";
+    vi.mocked(falQueueSubmitWithCircuitBreaker).mockResolvedValue({
+      request_id: "dashscope-req-123",
+      result: {
+        imageUrl: dashScopeUrl,
+        width: 2048,
+        height: 1536,
+      },
+    } as never);
+
+    const res = await POST(makeRequest({ roomId: MOCK_ROOM_ID, sourceSlot: 0, variantSlot: 0 }));
+
+    expect(res.status).toBe(200);
+    expect(prisma.inpaintRequest.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          id: "dashscope-req-123",
+          status: "COMPLETED",
+          resultUrl: dashScopeUrl,
+        }),
+      }),
+    );
+  });
+
+  it("writes the row with status=IN_QUEUE and no resultUrl when submit returns no synchronous result", async () => {
+    // Async providers (fal queue, Replicate) leave `result`
+    // undefined. The row is written with status=IN_QUEUE and the
+    // poller fills resultUrl on a later poll. `resultUrl` is omitted
+    // from the data payload (no-op spread), so we just assert it's
+    // not present in the create call.
+    vi.mocked(falQueueSubmitWithCircuitBreaker).mockResolvedValue({
+      request_id: "fal-req-123",
+    } as never);
+
+    const res = await POST(makeRequest({ roomId: MOCK_ROOM_ID, sourceSlot: 0, variantSlot: 0 }));
+
+    expect(res.status).toBe(200);
+    const createCall = vi.mocked(prisma.inpaintRequest.create).mock.calls[0]?.[0];
+    expect(createCall).toBeDefined();
+    const data = (createCall as { data: Record<string, unknown> }).data;
+    expect(data.id).toBe("fal-req-123");
+    expect(data.status).toBe("IN_QUEUE");
+    expect(data).not.toHaveProperty("resultUrl");
+  });
 });
