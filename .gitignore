@@ -77,3 +77,6 @@ tsconfig.tsbuildinfo
 
 # vitest JSON reporter output (rtk/vitest artifact)
 .vitest/
+
+# Pre-push pg_dump backups (see docs/DEPLOYMENT.md, Database safety)
+backups/
