@@ -23,6 +23,7 @@ import {
 import { buildCopyPrompt } from "@/lib/prompts";
 import { checklistItemSchema } from "@/lib/checklist-schema";
 import { classifyIntegrationError, classifyIntegrationErrorClass } from "@/lib/error-classify";
+import { withRequestLogging } from "@/lib/api-logging";
 import { logger } from "@/lib/logger";
 import { describeNoObjectGeneratedError } from "@/lib/no-object-error";
 import { sanitizePromptValue } from "@/lib/sanitize-prompt";
@@ -70,7 +71,7 @@ const CopyOutputSchema = z.object({
   checklist: z.array(checklistItemSchema),
 });
 
-export async function POST(request: NextRequest) {
+async function postGenerateCopy(request: NextRequest) {
   // Hoisted so the catch block can correlate failures with the room even
   // when the error fires before/after the request body is parsed.
   let roomId: string | undefined;
@@ -438,3 +439,6 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+// Issue #1116: wire the request logger so this route actually logs.
+export const POST = withRequestLogging(postGenerateCopy);

@@ -23,7 +23,12 @@ const mockUser = {
 };
 
 function buildRequest(body: unknown): NextRequest {
+  // Issue #1116: POST is wrapped in withRequestLogging, so the double
+  // must carry the header/url surface the wrapper reads.
   return {
+    method: "POST",
+    url: "http://localhost/api/generate-copy",
+    headers: new Headers({ "content-type": "application/json" }),
     json: () => Promise.resolve(body),
   } as unknown as NextRequest;
 }

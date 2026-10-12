@@ -12,12 +12,32 @@ export function withRequestLogging(
   return async (request: NextRequest): Promise<Response> => {
     const start = Date.now();
     const method = request.method;
-    const path = new URL(request.url).pathname;
-    const requestId = request.headers.get("x-request-id") ?? undefined;
+    // Defensive parse: a request double with a non-absolute URL (some test
+    // harnesses build one) must not derail the route it wraps; the log
+    // entry just loses its path.
+    let path: string;
+    try {
+      path = new URL(request.url).pathname;
+    } catch {
+      path = "(unparsed)";
+    }
+    // Issue #1116: read OR GENERATE the request id. A caller-supplied
+    // x-request-id joins the serverless hops that echo it; with none, this
+    // mints one so every invocation is still correlatable.
+    const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
 
     try {
       const response = await handler(request);
       const duration = Date.now() - start;
+
+      // A route may override the id on its response (the inpaint submit
+      // echoes the pipeline requestId, which supersedes the minted one).
+      // Echo and log whichever id the response carries so the http_request
+      // entry joins the same hop chain the client sees.
+      const echoedId = response.headers.get("x-request-id") ?? requestId;
+      if (!response.headers.has("x-request-id")) {
+        response.headers.set("x-request-id", echoedId);
+      }
 
       logger.info({
         event: "http_request",
@@ -25,7 +45,7 @@ export function withRequestLogging(
         path,
         status: response.status,
         duration_ms: duration,
-        requestId,
+        requestId: echoedId,
       });
 
       return response;

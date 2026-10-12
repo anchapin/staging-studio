@@ -20,6 +20,9 @@ import type { NextRequest } from "next/server";
 import { webcrypto } from "node:crypto";
 
 const mockPersistFalImage = vi.hoisted(() => vi.fn());
+// Issue #1116: the completion/error transitions log a pipeline event
+// via the shared inpaint-status helper; stubbed here, pinned below.
+const mockLogInpaintTransition = vi.hoisted(() => vi.fn(async () => {}));
 const mockPrisma = vi.hoisted(() => ({
   inpaintRequest: {
     findUnique: vi.fn(),
@@ -29,6 +32,7 @@ const mockPrisma = vi.hoisted(() => ({
 
 vi.mock("@/lib/inpaint-status", () => ({
   persistFalImage: mockPersistFalImage,
+  logInpaintTransition: mockLogInpaintTransition,
 }));
 
 vi.mock("@/lib/prisma", () => ({ prisma: mockPrisma }));
@@ -171,6 +175,12 @@ describe("POST /api/inpaint/webhook", () => {
       where: { id: ROW_ID },
       data: { status: "COMPLETED", resultUrl: PERSISTED_URL },
     });
+  });
+
+  it("logs the completed pipeline event on a completed delivery (issue #1116)", async () => {
+    const response = await POST(await await signedRequest(falDelivery({ image: { url: CDN_URL } })));
+    expect(response.status).toBe(200);
+    expect(mockLogInpaintTransition).toHaveBeenCalledWith(ROW_ID, "completed");
   });
 
   it("is idempotent: an already-COMPLETED row is a 200 noop with no re-upload", async () => {

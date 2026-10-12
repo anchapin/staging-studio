@@ -130,7 +130,14 @@ const BASE_BODY = {
 };
 
 function makeRequest(overrides: Record<string, unknown> = {}): NextRequest {
-  return { json: () => Promise.resolve({ ...BASE_BODY, ...overrides }) } as unknown as NextRequest;
+  // Issue #1116: POST is wrapped in withRequestLogging, so the double
+  // must carry the header/url surface the wrapper reads.
+  return {
+    method: "POST",
+    url: "http://localhost/api/inpaint",
+    headers: new Headers({ "content-type": "application/json" }),
+    json: () => Promise.resolve({ ...BASE_BODY, ...overrides }),
+  } as unknown as NextRequest;
 }
 
 // ---------------------------------------------------------------------------
