@@ -39,21 +39,16 @@ function maskPng(width: number, height: number): Buffer {
 }
 
 class PngBuilder {
-  private pixels: Uint8Array;
+  private pixels: Buffer;
   constructor(
     private width: number,
     private height: number,
   ) {
-    // RGBA pixel buffer.
-    this.pixels = new Uint8Array(width * height * 4);
+    // RGBA pixel buffer (Buffer so we can use .copy in the PNG encoder).
+    this.pixels = Buffer.alloc(width * height * 4);
   }
   fillWhite() {
-    for (let i = 0; i < this.pixels.length; i += 4) {
-      this.pixels[i] = 255;
-      this.pixels[i + 1] = 255;
-      this.pixels[i + 2] = 255;
-      this.pixels[i + 3] = 255;
-    }
+    this.pixels.fill(0xff);
   }
   fillBlackRect(x: number, y: number, w: number, h: number) {
     for (let row = y; row < y + h; row++) {
@@ -62,7 +57,7 @@ class PngBuilder {
         this.pixels[i] = 0;
         this.pixels[i + 1] = 0;
         this.pixels[i + 2] = 0;
-        this.pixels[i + 3] = 255;
+        this.pixels[i + 3] = 0xff;
       }
     }
   }
@@ -75,7 +70,7 @@ class PngBuilder {
 function encodePng(
   width: number,
   height: number,
-  rgba: Uint8Array,
+  rgba: Buffer,
 ): Buffer {
   const crc32 = crc32Table();
 
@@ -104,10 +99,7 @@ function encodePng(
   const raw = Buffer.alloc((stride + 1) * height);
   for (let row = 0; row < height; row++) {
     raw[row * (stride + 1)] = 0;
-    rgba.subarray(row * stride, (row + 1) * stride).copy(
-      raw,
-      row * (stride + 1) + 1,
-    );
+    rgba.copy(raw, row * (stride + 1) + 1, row * stride, (row + 1) * stride);
   }
   const idat = zlib.deflateSync(raw);
 
