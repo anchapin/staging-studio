@@ -17,32 +17,39 @@ import {
   resolveDailyLimit,
 } from "@/lib/api-quota";
 
-// Shared in-memory store for mock api-quota functions (reset between tests)
+// Issue #1138: the money counters run for real here. Only @/lib/prisma is
+// mocked, with a faithful in-memory upsert/findUnique, so the actual
+// recordDailyUsage / getDailyUsage implementations (composite unique key,
+// create count:1, update increment:1) are what the tests exercise.
 const mockUsageStore: Record<string, number> = {};
+const mockUpsertCalls: Array<{
+  where: { userId_surface_dayKey: { userId: string; surface: string; dayKey: string } };
+  create?: { userId: string; surface: string; dayKey: string; count: number };
+  update?: { count: { increment: number } };
+}> = [];
 
-vi.mock("@/lib/api-quota", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/api-quota")>();
-  return {
-    ...actual,
-    recordDailyUsage: vi.fn(async (surface: string, userId: string, now: Date) => {
-      const dayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-      const key = `${userId}:${surface}:${dayKey}`;
-      // Prune previous day's entries for this user+surface (simulates old in-process Map behavior)
-      for (const k of Object.keys(mockUsageStore)) {
-        if (k.startsWith(`${userId}:${surface}:`) && !k.endsWith(`:${dayKey}`)) {
-          delete mockUsageStore[k];
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
+    dailyApiUsage: {
+      upsert: vi.fn(async ({ where, create, update }: (typeof mockUpsertCalls)[number]) => {
+        mockUpsertCalls.push({ where, create, update });
+        const { userId, surface, dayKey } = where.userId_surface_dayKey;
+        const key = `${userId}|${surface}|${dayKey}`;
+        if (key in mockUsageStore) {
+          mockUsageStore[key] += update?.count?.increment ?? 0;
+        } else {
+          mockUsageStore[key] = create?.count ?? 0;
         }
-      }
-      mockUsageStore[key] = (mockUsageStore[key] ?? 0) + 1;
-      return mockUsageStore[key];
-    }),
-    getDailyUsage: vi.fn(async (surface: string, userId: string, now: Date) => {
-      const dayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-      const key = `${userId}:${surface}:${dayKey}`;
-      return mockUsageStore[key] ?? 0;
-    }),
-  };
-});
+        return { count: mockUsageStore[key] };
+      }),
+      findUnique: vi.fn(async ({ where }: (typeof mockUpsertCalls)[number]) => {
+        const { userId, surface, dayKey } = where.userId_surface_dayKey;
+        const key = `${userId}|${surface}|${dayKey}`;
+        return key in mockUsageStore ? { count: mockUsageStore[key] } : null;
+      }),
+    },
+  },
+}));
 
 // Constructed via the local-time Date constructor so expectations hold in
 // every TZ: the quota window is defined in server-local time.
@@ -168,15 +175,29 @@ describe("inpaint surface (FLUX.1 Fill runs, issue #1131)", () => {
 });
 
 beforeEach(() => {
-  // Clear the shared in-memory store between tests
+  // Clear the shared in-memory store and the recorded upsert calls between tests
   for (const key in mockUsageStore) delete mockUsageStore[key];
+  mockUpsertCalls.length = 0;
 });
 
-describe("in-process daily usage counter", () => {
-  it("records billable units cumulatively and returns the new count", async () => {
+describe("Postgres-backed daily usage counter (issue #784)", () => {
+  it("records billable units cumulatively on the composite key and returns the new count", async () => {
     await expect(recordDailyUsage("copy", "counter-user-a", midDay)).resolves.toBe(1);
     await expect(recordDailyUsage("copy", "counter-user-a", midDay)).resolves.toBe(2);
     await expect(getDailyUsage("copy", "counter-user-a", midDay)).resolves.toBe(2);
+
+    // Both writes carry the (userId, surface, dayKey) composite from
+    // dailyWindow and the create:1 / update:increment:1 branches...
+    const expectedCall = {
+      where: { userId_surface_dayKey: { userId: "counter-user-a", surface: "copy", dayKey: "2026-09-17" } },
+      create: { userId: "counter-user-a", surface: "copy", dayKey: "2026-09-17", count: 1 },
+      update: { count: { increment: 1 } },
+    };
+    expect(mockUpsertCalls[0]).toEqual(expectedCall);
+    expect(mockUpsertCalls[1]).toEqual(expectedCall);
+    // ...and the in-memory upsert executed create on the first write and
+    // the increment on the second (counts 1 then 2 above), matching what
+    // Postgres does with the same arguments.
   });
 
   it("isolates usage per user", async () => {
@@ -191,7 +212,7 @@ describe("in-process daily usage counter", () => {
     await expect(getDailyUsage("export", "counter-user-d", midDay)).resolves.toBe(0);
   });
 
-  it("resets at the daily rollover and prunes previous-day keys", async () => {
+  it("starts a new row at the daily rollover; the previous day row persists but stops counting", async () => {
     const before = new Date(DAY.y, DAY.m, DAY.d, 23, 59, 59, 999);
     const after = new Date(DAY.y, DAY.m, DAY.d + 1, 0, 0, 0, 0);
 
@@ -204,8 +225,12 @@ describe("in-process daily usage counter", () => {
     await recordDailyUsage("copy", "counter-user-e", after);
     await expect(getDailyUsage("copy", "counter-user-e", after)).resolves.toBe(1);
 
-    // ...and the previous day's key was pruned by the day-2 write.
-    await expect(getDailyUsage("copy", "counter-user-e", before)).resolves.toBe(0);
+    // ...via a row with the new dayKey, not an increment of the old one.
+    const dayKeys = mockUpsertCalls.map((c) => c.where.userId_surface_dayKey.dayKey);
+    expect(dayKeys).toEqual(["2026-09-17", "2026-09-17", "2026-09-18"]);
+
+    // Postgres rows persist; the old row simply never matches the new window.
+    await expect(getDailyUsage("copy", "counter-user-e", before)).resolves.toBe(2);
   });
 
   it("treats an unknown user as zero usage", async () => {
@@ -214,7 +239,7 @@ describe("in-process daily usage counter", () => {
 });
 
 describe("segment surface (SAM 3.1 concept calls, issue #226)", () => {
-  it("records usage on its own in-process counter", async () => {
+  it("records usage on its own Postgres counter", async () => {
     await expect(recordDailyUsage("segment", "segment-user-a", midDay)).resolves.toBe(1);
     await expect(getDailyUsage("segment", "segment-user-a", midDay)).resolves.toBe(1);
     await expect(getDailyUsage("copy", "segment-user-a", midDay)).resolves.toBe(0);
@@ -259,7 +284,7 @@ describe("segment surface (SAM 3.1 concept calls, issue #226)", () => {
 });
 
 describe("label surface (OpenAI gpt-4o-mini vision, issue #263)", () => {
-  it("records usage on its own in-process counter", async () => {
+  it("records usage on its own Postgres counter", async () => {
     await expect(recordDailyUsage("label", "label-user-a", midDay)).resolves.toBe(1);
     await expect(getDailyUsage("label", "label-user-a", midDay)).resolves.toBe(1);
     await expect(getDailyUsage("copy", "label-user-a", midDay)).resolves.toBe(0);
