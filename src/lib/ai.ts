@@ -16,7 +16,9 @@ import { logger } from "@/lib/logger";
  * actual request requires `OPENAI_API_KEY` — call `assertOpenAIConfigured()`
  * first (or let `requireEnvVars` throw) in server-only code paths.
  */
-export const aiModel = openai("gpt-4o-mini");
+/** Wire-facing id of the primary model; keep in step with `aiModel`. */
+const PRIMARY_MODEL_ID = "gpt-4o-mini";
+export const aiModel = openai(PRIMARY_MODEL_ID);
 
 /**
  * Fallback chat model for LLM failover (issue #1224).
@@ -28,7 +30,7 @@ export const aiModel = openai("gpt-4o-mini");
  * any model id the Vercel AI SDK supports.
  */
 /** Wire-facing ids for the failover log and the route's `model` field. */
-export const FALLBACK_PRIMARY_ID = "gpt-4o-mini";
+export const FALLBACK_PRIMARY_ID = PRIMARY_MODEL_ID;
 export const FALLBACK_MODEL_ID = process.env.FALLBACK_MODEL?.trim() || "gpt-4o";
 
 export const aiModelFallback = openai(FALLBACK_MODEL_ID);

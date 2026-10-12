@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import {
   FALLBACK_MODEL_ID,
+  FALLBACK_PRIMARY_ID,
   aiModel,
   assertOpenAIConfigured,
   generateWithCircuitBreaker,
@@ -21,7 +22,8 @@ import {
 } from "@/lib/ai-route-schemas";
 import { buildCopyPrompt } from "@/lib/prompts";
 import { checklistItemSchema } from "@/lib/checklist-schema";
-import { classifyIntegrationError } from "@/lib/error-classify";
+import { classifyIntegrationError, classifyIntegrationErrorClass } from "@/lib/error-classify";
+import { logger } from "@/lib/logger";
 import { describeNoObjectGeneratedError } from "@/lib/no-object-error";
 import { sanitizePromptValue } from "@/lib/sanitize-prompt";
 import {
@@ -247,48 +249,65 @@ export async function POST(request: NextRequest) {
     // persisting. Advisory only; warnings ride along with the saved copy.
     const qualityWarnings: string[] = [];
     assertOpenAIConfigured();
-    const { object: qg } = await generateWithCircuitBreaker(async () =>
-      generateObject({
-        model: aiModel,
-        schema: copyQualityGateSchema,
-        messages: [
-          {
-            role: "user",
-            content: [
-              `You are a staging copy quality auditor. Evaluate the generated copy for room "${sanitizePromptValue(room.name)}".`,
-              "",
-              `Staging aesthetic: "${sanitizePromptValue(room.project.stagingAesthetic)}"`,
-              `Target buyer: "${sanitizePromptValue(room.project.targetBuyer)}"`,
-              `Raw directives: "${sanitizePromptValue(room.rawDirectives ?? "")}"`,
-              "",
-              `Generated copy:`,
-              `  Observed challenge: "${copy.observedChallenge}"`,
-              `  Recommendation: "${copy.recommendation}"`,
-              `  Buyer psychology: "${copy.buyerPsychology}"`,
-              `  Checklist: ${copy.checklist.map((c) => `"${c.item}"`).join(", ")}`,
-              "",
-              "Evaluate:",
-              "1. specificity (0–3): 0=generic/filler like 'Attention to detail ensures lasting impressions', 3=highly specific and concrete",
-              "2. buyer_aligned: if the copy doesn't speak to the target buyer persona, explain how",
-              "3. checklist_actionable: if any checklist item is vague, non-actionable, or generic",
-              "4. aesthetic_consistent: if copy contradicts or misaligns with the staging aesthetic",
-              "",
-              "Return JSON with: specificity (0-3), buyer_aligned (string only if misaligned), checklist_actionable (string only if vague items), aesthetic_consistent (string only if inconsistent), qualityWarnings (array of distinct warning strings).",
-            ].join("\n"),
-          },
-        ],
-      })
-    );
-    if (qg.buyer_aligned) {
+    // Issue #1224: the gate is advisory, so a gate failure must never turn
+    // an already-generated copy (including one the fallback just produced
+    // during an availability incident) into a failed request.
+    let qg: z.infer<typeof copyQualityGateSchema> | null = null;
+    try {
+      qg = (
+        await generateWithCircuitBreaker(async () =>
+        generateObject({
+          model: aiModel,
+          schema: copyQualityGateSchema,
+          messages: [
+            {
+              role: "user",
+              content: [
+                `You are a staging copy quality auditor. Evaluate the generated copy for room "${sanitizePromptValue(room.name)}".`,
+                "",
+                `Staging aesthetic: "${sanitizePromptValue(room.project.stagingAesthetic)}"`,
+                `Target buyer: "${sanitizePromptValue(room.project.targetBuyer)}"`,
+                `Raw directives: "${sanitizePromptValue(room.rawDirectives ?? "")}"`,
+                "",
+                `Generated copy:`,
+                `  Observed challenge: "${copy.observedChallenge}"`,
+                `  Recommendation: "${copy.recommendation}"`,
+                `  Buyer psychology: "${copy.buyerPsychology}"`,
+                `  Checklist: ${copy.checklist.map((c) => `"${c.item}"`).join(", ")}`,
+                "",
+                "Evaluate:",
+                "1. specificity (0–3): 0=generic/filler like 'Attention to detail ensures lasting impressions', 3=highly specific and concrete",
+                "2. buyer_aligned: if the copy doesn't speak to the target buyer persona, explain how",
+                "3. checklist_actionable: if any checklist item is vague, non-actionable, or generic",
+                "4. aesthetic_consistent: if copy contradicts or misaligns with the staging aesthetic",
+                "",
+                "Return JSON with: specificity (0-3), buyer_aligned (string only if misaligned), checklist_actionable (string only if vague items), aesthetic_consistent (string only if inconsistent), qualityWarnings (array of distinct warning strings).",
+              ].join("\n"),
+            },
+          ],
+        })
+        )
+      ).object;
+    } catch (gateError) {
+      logger.warn(
+        {
+          event: "generate_copy_quality_gate_failed",
+          roomId,
+          errorClass: classifyIntegrationErrorClass(gateError),
+        },
+        `[generate-copy] quality gate skipped: ${gateError instanceof Error ? gateError.message : String(gateError)}`
+      );
+    }
+    if (qg?.buyer_aligned) {
       qualityWarnings.push(qg.buyer_aligned);
     }
-    if (qg.checklist_actionable) {
+    if (qg?.checklist_actionable) {
       qualityWarnings.push(qg.checklist_actionable);
     }
-    if (qg.aesthetic_consistent) {
+    if (qg?.aesthetic_consistent) {
       qualityWarnings.push(qg.aesthetic_consistent);
     }
-    if (qg.qualityWarnings) {
+    if (qg?.qualityWarnings) {
       qualityWarnings.push(...qg.qualityWarnings);
     }
 
@@ -333,7 +352,7 @@ export async function POST(request: NextRequest) {
         JSON.stringify({
           event: "generate_copy_failover",
           roomId,
-          primaryModel: "gpt-4o-mini",
+          primaryModel: FALLBACK_PRIMARY_ID,
           fallbackModel: FALLBACK_MODEL_ID,
         })
       );
