@@ -76,6 +76,7 @@ const EXPECTED_RECORD_DATA = {
   variantSlot: 0,
   sourceSlot: null,
   status: "IN_QUEUE",
+  providerJobId: REQUEST_ID, // issue #1221: the row's webhook lookup key
 };
 
 async function callSubmitRoute(): Promise<Response> {

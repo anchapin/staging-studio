@@ -19,6 +19,21 @@
  *   # also write the verdict JSON to .agents/results/
  *   REPLICATE_API_TOKEN=r8_... npx tsx scripts/replicate-integration-probe.mts --save
  *
+ * Webhook mode (issue #1221): add --webhook to exercise the opt-in
+ * callback delivery path instead of client-driven polling:
+ *
+ *   REPLICATE_API_TOKEN=r8_... INPAINT_WEBHOOK_SECRET=whsec_probe \
+ *     PROBE_WEBHOOK_URL=https://<tunnel>/api/inpaint/webhook \
+ *     npx tsx scripts/replicate-integration-probe.mts --webhook
+ *
+ * The probe submits with the webhook attached, runs a local listener
+ * that verifies the `webhook-signature` header with the same lib the
+ * route uses, and PASSes when a valid signed delivery carries an image
+ * URL. The provider must be able to REACH the callback URL: point
+ * PROBE_WEBHOOK_URL at a tunnel (ngrok/cloudflared) targeting
+ * PROBE_WEBHOOK_PORT (default 8942); a bare localhost URL cannot
+ * receive callbacks and the delivery stage will time out.
+ *
  * Optional env:
  *   PROBE_IMAGE_URL / PROBE_MASK_URL  a real photo + mask (https). Default is
  *     a generated 256x256 gray image and a white center-square mask, sent
@@ -37,6 +52,11 @@ import { createReplicateClient } from "../src/lib/replicate-adapter";
 import { buildReplicateFillPayload } from "../src/lib/prompts";
 import { LOGICAL_MODEL } from "../src/lib/inference";
 import { extractInpaintImageUrls } from "../src/lib/inpaint-output";
+import {
+  verifyWebhookSignature,
+} from "../src/lib/webhook-signature";
+import type { IncomingMessage } from "node:http";
+import { createServer } from "node:http";
 
 // ─── tiny PNG encoder (8-bit grayscale) ────────────────────────────────────
 const CRC_TABLE = (() => {
@@ -106,9 +126,11 @@ async function main(): Promise<number> {
     process.env.PROBE_MASK_URL?.trim() ||
     grayPngDataUrl(SIZE, (x, y) => (x > 64 && x < 192 && y > 64 && y < 192 ? 255 : 0));
 
+  const webhookMode = process.argv.includes("--webhook");
   const report: Record<string, unknown> = {
     probe: "replicate-integration",
     issue: 1200,
+    webhookMode,
     startedAt: new Date().toISOString(),
     model: process.env.REPLICATE_FLUX_FILL_MODEL?.trim() || "black-forest-labs/flux-fill-pro",
     version: process.env.REPLICATE_FLUX_FILL_VERSION?.trim() ||
@@ -131,16 +153,102 @@ async function main(): Promise<number> {
   }) as unknown as Record<string, unknown>;
 
   const t0 = Date.now();
-  try {
-    let requestId: string;
-    try {
-      ({ request_id: requestId } = await client.submit(LOGICAL_MODEL.FLUX_FILL, { input: payload }));
-      report.requestId = requestId;
-      report.submitMs = Date.now() - t0;
-    } catch (e) {
-      return fail("submit", e);
+
+  // ── webhook mode: local listener + signed delivery ──
+  if (webhookMode) {
+    const secret = process.env.INPAINT_WEBHOOK_SECRET?.trim();
+    if (!secret) {
+      return fail("setup", new Error("INPAINT_WEBHOOK_SECRET is not set; the route rejects unsigned deliveries"));
+    }
+    const port = Number(process.env.PROBE_WEBHOOK_PORT ?? 8942);
+    const publicUrl = process.env.PROBE_WEBHOOK_URL?.trim() ||
+      `http://127.0.0.1:${port}/api/inpaint/webhook`;
+    if (publicUrl.includes("127.0.0.1") || publicUrl.includes("localhost")) {
+      console.warn(
+        "[probe] PROBE_WEBHOOK_URL is a loopback address; Replicate cannot reach it " +
+        "without a tunnel, so the delivery stage will likely time out."
+      );
     }
 
+    const deliveries: { ok: boolean; reason: string; hasImage: boolean }[] = [];
+    const server = createServer((req: IncomingMessage, res) => {
+      let raw = "";
+      req.on("data", (chunk) => (raw += chunk));
+      req.on("end", async () => {
+        const verification = await verifyWebhookSignature(
+          req.headers["webhook-signature"] as string | undefined,
+          raw,
+          secret
+        );
+        let hasImage = false;
+        if (verification.ok) {
+          try {
+            const parsed = JSON.parse(raw) as { output?: unknown };
+            hasImage = extractInpaintImageUrls(parsed.output).length > 0;
+          } catch {
+            hasImage = false;
+          }
+        }
+        deliveries.push({
+          ok: verification.ok,
+          reason: verification.ok ? "verified" : verification.reason,
+          hasImage,
+        });
+        res.statusCode = verification.ok ? 200 : 401;
+        res.end(JSON.stringify({ ok: verification.ok }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", resolve));
+    console.log(`[probe] webhook listener on 127.0.0.1:${port} (public: ${publicUrl})`);
+
+    try {
+      let requestId: string;
+      try {
+        ({ request_id: requestId } = await client.submit(LOGICAL_MODEL.FLUX_FILL, {
+          input: payload,
+          webhookUrl: publicUrl,
+        }));
+        report.requestId = requestId;
+        report.submitMs = Date.now() - t0;
+      } catch (e) {
+        return fail("submit", e);
+      }
+
+      const deliveryDeadline = t0 + timeoutMs;
+      while (deliveries.length === 0 && Date.now() < deliveryDeadline) {
+        await new Promise((r) => setTimeout(r, 1_000));
+      }
+      report.deliveries = deliveries;
+      if (deliveries.length === 0) {
+        return fail("webhook", new Error(`no delivery within ${timeoutMs}ms`));
+      }
+      const first = deliveries[0];
+      if (!first.ok) {
+        return fail("webhook", new Error(`delivery rejected: ${first.reason}`));
+      }
+      if (!first.hasImage) {
+        return fail("webhook", new Error("delivery verified but carried no image URL"));
+      }
+      report.verifiedDelivery = true;
+      report.completedMs = Date.now() - t0;
+
+      // Corroborate through the status API: the job should be terminal.
+      try {
+        const st = await client.status(LOGICAL_MODEL.FLUX_FILL, requestId);
+        report.corroboratingStatus = st.status;
+      } catch {
+        report.corroboratingStatus = "unavailable (non-fatal)";
+      }
+
+      report.verdict = "PASS";
+      return 0;
+    } finally {
+      server.close();
+    }
+  }
+
+  // ── polling path (unchanged default) ──
+  try {
     const seen: string[] = [];
     let polls = 0;
     let delay = 1_000;

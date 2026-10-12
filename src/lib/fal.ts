@@ -98,6 +98,8 @@ export async function falSubscribeWithCircuitBreaker<T = unknown>(
 interface FalQueueSubmitOptions {
   input: Record<string, unknown>;
   abortSignal?: AbortSignal;
+  /** Optional completion webhook URL (issue #1221); fal's queue.submit accepts `webhook`. */
+  webhookUrl?: string;
 }
 
 export async function falQueueSubmitWithCircuitBreaker(

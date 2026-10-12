@@ -238,14 +238,25 @@ export function createReplicateClient(): InferenceClient {
 
     async submit(
       logicalModel: LogicalModel,
-      options: { input: Record<string, unknown>; abortSignal?: AbortSignal }
+      options: {
+        input: Record<string, unknown>;
+        abortSignal?: AbortSignal;
+        webhookUrl?: string;
+      }
     ): Promise<{ request_id: string }> {
       const token = getReplicateToken();
       const { version } = resolveReplicateDeployment(logicalModel);
+      const body: Record<string, unknown> = { version, input: options.input };
+      if (options.webhookUrl) {
+        // Issue #1221: completion callback. Replicate re-fires on
+        // non-2xx, which the route's idempotency contract expects.
+        body.webhook = options.webhookUrl;
+        body.events_filter = ["completed"];
+      }
       const result = await replicateFetch("/predictions", {
         method: "POST",
         token,
-        body: { version, input: options.input },
+        body,
       });
       return { request_id: result.id };
     },

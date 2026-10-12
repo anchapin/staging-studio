@@ -114,7 +114,11 @@ export function createFalClient(): InferenceClient {
 
     async submit(
       logicalModel: LogicalModel,
-      options: { input: Record<string, unknown>; abortSignal?: AbortSignal }
+      options: {
+        input: Record<string, unknown>;
+        abortSignal?: AbortSignal;
+        webhookUrl?: string;
+      }
     ): Promise<{ request_id: string }> {
       const modelId = LOGICAL_MODEL_TO_FAL[logicalModel];
       if (!modelId) {

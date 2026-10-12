@@ -107,6 +107,11 @@ model InpaintRequest {
                        // result-persistence semantics as the original submit.
   status      String   // mirrors fal queue status: IN_QUEUE | IN_PROGRESS | COMPLETED | ERROR | PERSISTENCE_FAILED
   resultUrl   String?  // filled when status is COMPLETED
+  providerJobId String? @unique // issue #1221: the provider's own job id (fal request_id /
+                       // Replicate prediction id). Lets the webhook delivery path
+                       // match a callback to this row even when the URL path was
+                       // tampered with. Backfilled on submit; legacy polling rows
+                       // keep null (their id IS the fal request_id).
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

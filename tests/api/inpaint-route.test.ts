@@ -91,6 +91,7 @@ function mockInpaintRequest(overrides = {}) {
     imageUrl: "https://xxxx.supabase.co/storage/out.png",
     resultUrl: null,
     maskImageUrl: null,
+    providerJobId: null,
     prompt: "replace sofa with leather sofa",
     createdAt: new Date(),
     updatedAt: new Date(),
