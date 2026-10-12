@@ -12,17 +12,11 @@ Total cells: 27 (9 slots x 3 cases)
 | flux-3-image | fal | text-to-image | 30.9s (880x1184) | 24.7s (880x1184) | 24.7s (880x1184) | $0.024 | megapixels |
 | seedream-5-flash | fal | instruction | 145.1s | 22.6s | 20.6s | $0.027 | images |
 | nano-banana-2-1 | fal | instruction | 18.6s | 18.5s | 14.6s | $1 | units |
-| qwen-image-2-1 | fal | instruction | 20.6s (1024x1024) | 12.4s (1024x1024) | 12.4s (1024x1024) | $0.03666667 | megapixels |
+| qwen-image-2-1 | alibaba | instruction | 38.0s (2048x1536) | 32.1s (2048x1536) | 33.7s (2048x1536) | $0.04 | images |
 | flux-pro-kontext | fal | instruction | 6.3s (1248x832) | 12.4s (1248x832) | 6.3s (1248x832) | $0.04 | images |
 | z-image-turbo-inpaint | fal | mask-fill | 8.4s (2000x1328) | 8.4s (2000x1328) | 8.4s (2000x1328) | $0.01 | megapixels |
 | flux-kontext-lora-inpaint | fal | mask-fill | 18.6s (1248x832) | 16.5s (1248x832) | 16.5s (1248x832) | $0.035 | megapixels |
 | gpt-image-2-5 | openai | mask-fill | 31.3s | 29.2s | 30.0s | 2887 tok | - |
-
-## Case prompts
-
-- **vacant-insert**: Stage this empty living room with a mid-century walnut sofa, a cream linen armchair, a round walnut coffee table, a woven jute rug, and warm brass floor lamp. Keep walls and flooring unchanged.
-- **occupied-replace**: Replace the existing sofa and coffee table with a smaller white linen loveseat and a light oak round coffee table. Keep all other furniture and the rug unchanged.
-- **repeat-stability**: Add a brass floor lamp and a small walnut side table in the center of the room. Do not change anything else.
 
 ## Per-slot notes
 
@@ -42,10 +36,10 @@ Total cells: 27 (9 slots x 3 cases)
   - vacant-insert: [output](https://v3b.fal.media/files/b/0aae2146/kNTmBC1EvD-A1ECQCzqMC_lBsTPZ1J.png)
   - occupied-replace: [output](https://v3b.fal.media/files/b/0aae2148/Stm5wWuNo-MXVRABDXL1T_Q0bBg1b8.png)
   - repeat-stability: [output](https://v3b.fal.media/files/b/0aae2149/1778INeaF4n_0f9D9RJC8_AieXeulp.png)
-- **qwen-image-2-1** (fal, instruction) -- Qwen-Image-2.1; flagged Private on fal. Issue #1240 notes research-only license; commercial grant from Alibaba required before any production use.
-  - vacant-insert: [output](https://v3b.fal.media/files/b/0aae214d/RntHIjhXiSabcHRMMD2pX.png)
-  - occupied-replace: [output](https://v3b.fal.media/files/b/0aae214e/acLyWlgPZLrkDC1Ml55uX.png)
-  - repeat-stability: [output](https://v3b.fal.media/files/b/0aae214f/hX0lWh7fM1lpuPWR00dm5.png)
+- **qwen-image-2-1** (alibaba, instruction) -- Qwen-Image-2.1 Pro routed via Alibaba Cloud Model Studio Singapore endpoint. Commercial terms bundled with Alibaba Cloud account ($0.04/image per Alibaba pricing). Replaces the fal-hosted slot which was flagged Private/research-only. Uses DashScope multimodal-conversation endpoint with image+text content; instruction-mode only (no mask on the wire).
+  - vacant-insert: [output](bake-off/outputs/qwen-image-2-1__vacant-insert__37931ms.png)
+  - occupied-replace: [output](bake-off/outputs/qwen-image-2-1__occupied-replace__32096ms.png)
+  - repeat-stability: [output](bake-off/outputs/qwen-image-2-1__repeat-stability__33718ms.png)
 - **flux-pro-kontext** (fal, instruction) -- FLUX.1 Kontext [pro]. Same vendor as incumbent. Instruction editing with no mask support (image_url only). $0.04/image flat. Strongest same-vendor incumbent-replacement candidate.
   - vacant-insert: [output](https://v3b.fal.media/files/b/0aae2150/guKluiSuIRNeDQ0GpTSKy_841ee0eae773470f8734bad9dfaa9de1.jpg)
   - occupied-replace: [output](https://v3b.fal.media/files/b/0aae2151/1egZXZKy3e8WUHb-sU-rR_a76552c76fa14e638b18398004dd42e8.jpg)
@@ -67,5 +61,5 @@ Total cells: 27 (9 slots x 3 cases)
 
 - **Mask convention**: fal = white = edit, black = preserve. OpenAI = alpha=0 transparent = edit. Corrected in scripts/bake-off-prep-masks.mts and scripts/bake-off-mask-invert.mts.
 - **Prompt alignment**: prompts target the center rectangle (which is the mask edit region). Earlier occupied-replace and repeat-stability prompts mentioned "add to corner" -- corrected to stay inside the mask.
+- **Qwen-Image-2.1 routing**: routed through Alibaba Cloud Model Studio (Singapore endpoint, workspace llm-x83c15vnd001kxij, model qwen-image-2.1-pro, $0.04/image). The fal-hosted slot was flagged Private; commercial terms are bundled with the Alibaba Cloud account.
 - **nano-banana-2-1** ran cleanly across all 3 cases after prompt fix (no more content-policy rejection).
-- **Mask-fill candidates are now correctly configured**: FLUX Pro Fill (incumbent), Z-Image Turbo Inpaint, FLUX Kontext LoRA Inpaint all use the corrected mask. See bake-off/drift-results.md for the drift numbers.

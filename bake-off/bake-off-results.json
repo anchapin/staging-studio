@@ -144,42 +144,6 @@
     "queue_status": "COMPLETED"
   },
   {
-    "slot": "qwen-image-2-1",
-    "vendor": "fal",
-    "case": "vacant-insert",
-    "ok": true,
-    "latency_ms": 20629,
-    "unit_price_usd": 0.03666667,
-    "billing_unit": "megapixels",
-    "output": "https://v3b.fal.media/files/b/0aae214d/RntHIjhXiSabcHRMMD2pX.png",
-    "output_dimensions": "1024x1024",
-    "queue_status": "COMPLETED"
-  },
-  {
-    "slot": "qwen-image-2-1",
-    "vendor": "fal",
-    "case": "occupied-replace",
-    "ok": true,
-    "latency_ms": 12450,
-    "unit_price_usd": 0.03666667,
-    "billing_unit": "megapixels",
-    "output": "https://v3b.fal.media/files/b/0aae214e/acLyWlgPZLrkDC1Ml55uX.png",
-    "output_dimensions": "1024x1024",
-    "queue_status": "COMPLETED"
-  },
-  {
-    "slot": "qwen-image-2-1",
-    "vendor": "fal",
-    "case": "repeat-stability",
-    "ok": true,
-    "latency_ms": 12429,
-    "unit_price_usd": 0.03666667,
-    "billing_unit": "megapixels",
-    "output": "https://v3b.fal.media/files/b/0aae214f/hX0lWh7fM1lpuPWR00dm5.png",
-    "output_dimensions": "1024x1024",
-    "queue_status": "COMPLETED"
-  },
-  {
     "slot": "flux-pro-kontext",
     "vendor": "fal",
     "case": "vacant-insert",
@@ -324,6 +288,42 @@
     "total_tokens": 2869,
     "output": "bake-off/outputs/gpt-image-2-5__repeat-stability__29972ms.png",
     "output_dimensions": null,
+    "http_status": "200"
+  },
+  {
+    "slot": "qwen-image-2-1",
+    "vendor": "alibaba",
+    "case": "vacant-insert",
+    "ok": true,
+    "latency_ms": 37971,
+    "unit_price_usd": 0.04,
+    "billing_unit": "images",
+    "output": "bake-off/outputs/qwen-image-2-1__vacant-insert__37931ms.png",
+    "output_dimensions": "2048x1536",
+    "http_status": "200"
+  },
+  {
+    "slot": "qwen-image-2-1",
+    "vendor": "alibaba",
+    "case": "occupied-replace",
+    "ok": true,
+    "latency_ms": 32118,
+    "unit_price_usd": 0.04,
+    "billing_unit": "images",
+    "output": "bake-off/outputs/qwen-image-2-1__occupied-replace__32096ms.png",
+    "output_dimensions": "2048x1536",
+    "http_status": "200"
+  },
+  {
+    "slot": "qwen-image-2-1",
+    "vendor": "alibaba",
+    "case": "repeat-stability",
+    "ok": true,
+    "latency_ms": 33745,
+    "unit_price_usd": 0.04,
+    "billing_unit": "images",
+    "output": "bake-off/outputs/qwen-image-2-1__repeat-stability__33718ms.png",
+    "output_dimensions": "2048x1536",
     "http_status": "200"
   }
 ]

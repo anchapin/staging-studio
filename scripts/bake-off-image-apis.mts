@@ -33,10 +33,14 @@ interface SlotInputShape {
 
 interface Slot {
   id: string;
-  vendor: "fal" | "openai";
+  vendor: "fal" | "openai" | "alibaba";
   falModelId: string | null;
   mode: "mask-fill" | "instruction" | "text-to-image";
   expectedEndpoint: string;
+  // Alibaba (DashScope multimodal-conversation): workspace id is required
+  // for the URL, model name is the DashScope model id.
+  alibabaWorkspaceId?: string | null;
+  alibabaModel?: string | null;
   inputShape?: SlotInputShape;
   notes?: string;
 }
@@ -140,6 +144,63 @@ async function openAiEdit(
     };
   }
   return { status: r.status.toString(), body };
+}
+
+interface AlibabaRunResult {
+  status: string;
+  body: Record<string, unknown> | null;
+  errorDetail?: string;
+}
+
+/**
+ * DashScope multimodal-conversation call for Qwen-Image-2.1.
+ *
+ * Endpoint shape (Singapore):
+ *   POST https://{workspaceId}.ap-southeast-1.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
+ *   Authorization: Bearer $DASHSCOPE_API_KEY
+ *   { "model": "qwen-image-2.1-pro", "input": { "messages": [{"role":"user","content":[{"image":"..."},{"text":"..."}]}] }, "parameters": {...} }
+ *
+ * Note: this endpoint is instruction-mode only. It accepts image + text
+ * content in the user message; no mask is exposed on the wire.
+ */
+async function alibabaEdit(
+  workspaceId: string,
+  model: string,
+  caseInput: { prompt?: string; imageUrl?: string },
+  apiKey: string,
+): Promise<AlibabaRunResult> {
+  const url = `https://${workspaceId}.ap-southeast-1.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`;
+  const content: Array<Record<string, string>> = [];
+  if (caseInput.imageUrl) content.push({ image: caseInput.imageUrl });
+  content.push({ text: caseInput.prompt ?? "" });
+  const body = {
+    model,
+    input: { messages: [{ role: "user", content }] },
+    parameters: {
+      n: 1,
+      watermark: false,
+      prompt_extend: true,
+      seed: 42,
+      size: "2048*1536",
+    },
+  };
+  const r = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  const respBody = (await r.json()) as Record<string, unknown>;
+  if (!r.ok) {
+    return {
+      status: r.status.toString(),
+      body: null,
+      errorDetail: JSON.stringify((respBody as { error?: unknown }).error ?? respBody),
+    };
+  }
+  return { status: r.status.toString(), body: respBody };
 }
 
 async function fetchFalPricing(
@@ -275,8 +336,12 @@ async function main() {
   // Only require keys we actually need.
   const falSlots = newSlots.filter((s) => s.vendor === "fal");
   const openAiSlots = newSlots.filter((s) => s.vendor === "openai");
+  const alibabaSlots = newSlots.filter((s) => s.vendor === "alibaba");
   const falKey = falSlots.length ? requireKey("FAL_KEY") : "";
+  // openAiKey variable is reused for either OpenAI or Alibaba (their request
+  // shapes differ but the same .env-source mechanism applies).
   const openAiKey = openAiSlots.length ? requireKey("OPENAI_API_KEY") : "";
+  const alibabaKey = alibabaSlots.length ? requireKey("ALIBABA_DASHSCOPE_API_KEY") : "";
 
   // Pre-cache pricing for fal endpoints only.
   const pricing = await fetchFalPricing(
@@ -373,6 +438,77 @@ async function main() {
             total_tokens: usage?.total_tokens ?? null,
             output: `bake-off/outputs/${filename}`,
             output_dimensions: null, // OpenAI doesn't return dimensions in the response
+            http_status: status,
+          });
+        } else if (slot.vendor === "alibaba") {
+          const { status, body, errorDetail } = await alibabaEdit(
+            slot.alibabaWorkspaceId ?? "",
+            slot.alibabaModel ?? "",
+            caseInput,
+            alibabaKey,
+          );
+          if (!body) {
+            results.push({
+              slot: slot.id,
+              vendor: slot.vendor,
+              case: cs,
+              ok: false,
+              latency_ms: Date.now() - started,
+              error: `Alibaba returned error: ${errorDetail ?? "(no detail)"}`,
+            });
+            continue;
+          }
+          // DashScope returns content as [{ "image": "<url>" }] under
+          // choices[0].message.content. We pull the URL and download.
+          const choices = (body as {
+            output?: { choices?: Array<{ message?: { content?: Array<{ image?: string }> } }> };
+          }).output?.choices;
+          const firstImage = choices?.[0]?.message?.content?.[0]?.image;
+          if (!firstImage) {
+            results.push({
+              slot: slot.id,
+              vendor: slot.vendor,
+              case: cs,
+              ok: false,
+              latency_ms: Date.now() - started,
+              error: "Alibaba returned no image URL in choices[0].message.content[0]",
+            });
+            continue;
+          }
+          // Download the hosted image so reviewers don't deal with 24h expiring URLs.
+          const imgRes = await fetch(firstImage);
+          if (!imgRes.ok) {
+            results.push({
+              slot: slot.id,
+              vendor: slot.vendor,
+              case: cs,
+              ok: false,
+              latency_ms: Date.now() - started,
+              error: `Alibaba image download failed: ${imgRes.status}`,
+            });
+            continue;
+          }
+          const buf = Buffer.from(await imgRes.arrayBuffer());
+          const ext = "png";
+          const filename = `${slot.id}__${cs}__${Date.now() - started}ms.${ext}`;
+          const dest = path.join(BAKE_OFF_DIR, "outputs", filename);
+          fs.writeFileSync(dest, buf);
+          const usage = body.usage as
+            | { image_count?: number; width?: number; height?: number }
+            | undefined;
+          results.push({
+            slot: slot.id,
+            vendor: slot.vendor,
+            case: cs,
+            ok: true,
+            latency_ms: Date.now() - started,
+            unit_price_usd: 0.04, // Singapore qwen-image-2.1-pro per-image (alibabacloud.com pricing)
+            billing_unit: "images",
+            output: `bake-off/outputs/${filename}`,
+            output_dimensions:
+              usage?.width && usage?.height
+                ? `${usage.width}x${usage.height}`
+                : null,
             http_status: status,
           });
         } else {

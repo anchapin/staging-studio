@@ -33,11 +33,13 @@
   },
   {
     "id": "qwen-image-2-1",
-    "vendor": "fal",
-    "falModelId": "fal-ai/qwen-image-2.1/edit",
+    "vendor": "alibaba",
+    "falModelId": null,
     "mode": "instruction",
-    "expectedEndpoint": "fal-ai/qwen-image-2.1/edit",
-    "notes": "Qwen-Image-2.1; flagged Private on fal. Issue #1240 notes research-only license; commercial grant from Alibaba required before any production use."
+    "expectedEndpoint": "https://{workspaceId}.ap-southeast-1.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+    "alibabaWorkspaceId": "llm-x83c15vnd001kxij",
+    "alibabaModel": "qwen-image-2.1-pro",
+    "notes": "Qwen-Image-2.1 Pro routed via Alibaba Cloud Model Studio Singapore endpoint. Commercial terms bundled with Alibaba Cloud account ($0.04/image per Alibaba pricing). Replaces the fal-hosted slot which was flagged Private/research-only. Uses DashScope multimodal-conversation endpoint with image+text content; instruction-mode only (no mask on the wire)."
   },
   {
     "id": "flux-pro-kontext",
