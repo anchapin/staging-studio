@@ -5,9 +5,14 @@
  * fal.ai SAM 3.1 segmentation (issue #226).
  *
  * Mechanism: every surface is counted in the `DailyApiUsage` Postgres
- * table, one row per `@@unique([userId, surface, dayKey])`, updated with
- * atomic upserts — so usage survives serverless cold starts and
- * multi-instance traffic splitting (issue #784).
+ * table, one row per `@@unique([userId, surface, dayKey])` — so usage
+ * survives serverless cold starts and multi-instance traffic splitting
+ * (issue #784). `inpaint` charges via atomic upserts when a run
+ * completes; the other four surfaces (copy, label, segment, export)
+ * claim their units ATOMICALLY before the paid call (issue #1132, see
+ * `claimDailyQuota`) and refund on provider failure
+ * (`refundDailyQuota`), so a concurrent burst can no longer all read
+ * the same pre-spend count and overshoot the cap.
  *
  * Why a counter table rather than deriving usage from the domain rows
  * (issue #1131): the `inpaint` surface used to be metered by COUNTING
