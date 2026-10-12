@@ -2,28 +2,42 @@
  * Ranked bake-off of latest image-editing APIs vs the incumbent FLUX.1 Fill pipeline.
  * Issue #1240. Read-only for app code: writes nothing outside ./bake-off/.
  *
- * Usage:  FAL_KEY=... npm run bake-off   (fails fast when FAL_KEY is missing)
+ * Usage:
+ *   FAL_KEY=... OPENAI_API_KEY=... npm run bake-off
+ *   (OPENAI_API_KEY only required if a slot has vendor=openai)
  *
  * Design:
  *  - Slots are DATA in scripts/bake-off-slots.json, not code: each slot names its
- *    fal model id, input mode (mask+fill vs instruction) and expected endpoint.
- *    Verify each slot against fal's model page (catalog + price) before the paid
- *    run; endpoints are merchant copy, not verified API surface.
+ *    vendor, model id, input mode (mask+fill vs instruction), and endpoint.
+ *  - Two vendor dispatchers: fal (queue.fal.run + /v1/models/pricing) and
+ *    openai (api.openai.com/v1/images/edits, JSON body with URL inputs).
+ *  - For OpenAI, our black-rect-on-white masks are inverted to alpha-based
+ *    (transparent = edit) via scripts/bake-off-mask-invert.mts.
  *  - Incumbent slot (flux-pro-fill) always runs so every other result is scored
  *    against the same case set on the same day.
  *  - Results go to bake-off/bake-off-results.json for the table Alex signs off on.
  */
 import fs from "node:fs";
 import path from "node:path";
+import { invertFalMaskToOpenAIDataUrl } from "./bake-off-mask-invert.mts";
 
 const BAKE_OFF_DIR = path.resolve(process.cwd(), "bake-off");
 const CASES = ["vacant-insert", "occupied-replace", "repeat-stability"];
 
+interface SlotInputShape {
+  imageField?: string;
+  imageIsArray?: boolean;
+  maskField?: string;
+  extraFields?: Record<string, string>;
+}
+
 interface Slot {
   id: string;
-  falModelId: string;
+  vendor: "fal" | "openai";
+  falModelId: string | null;
   mode: "mask-fill" | "instruction" | "text-to-image";
   expectedEndpoint: string;
+  inputShape?: SlotInputShape;
   notes?: string;
 }
 
@@ -34,11 +48,17 @@ interface PricingRow {
   currency: string;
 }
 
-function requireFalKey(): string {
-  const key = process.env.FAL_KEY;
+interface FalRunResult {
+  status: string;
+  body: Record<string, unknown> | null;
+  errorDetail?: string;
+}
+
+function requireKey(name: string): string {
+  const key = process.env[name];
   if (!key) {
     console.error(
-      "FAL_KEY is missing. Set it in your shell (deployment env) or .env.local; never paste it in chat.",
+      `${name} is missing. Set it in your shell or .env.local; never paste it in chat.`,
     );
     process.exit(1);
   }
@@ -49,7 +69,7 @@ async function falQueueRun(
   model: string,
   input: Record<string, unknown>,
   key: string,
-): Promise<{ status: string; body: Record<string, unknown> | null; errorDetail?: string }> {
+): Promise<FalRunResult> {
   const submit = await fetch(`https://queue.fal.run/${model}`, {
     method: "POST",
     headers: { Authorization: `Key ${key}`, "Content-Type": "application/json" },
@@ -83,8 +103,6 @@ async function falQueueRun(
     headers: { Authorization: `Key ${key}` },
   });
   const body = (await res.json()) as Record<string, unknown>;
-  // fal's queue returns a FastAPI validation error as JSON with a "detail"
-  // field. Surface it so the row is marked failed instead of silently ok=true.
   if (Array.isArray((body as { detail?: unknown }).detail)) {
     return {
       status: finalStatus,
@@ -95,11 +113,39 @@ async function falQueueRun(
   return { status: finalStatus, body };
 }
 
-async function fetchPricing(
+interface OpenAiRunResult {
+  status: string;
+  body: Record<string, unknown> | null;
+  errorDetail?: string;
+}
+
+async function openAiEdit(
+  payload: Record<string, unknown>,
+  key: string,
+): Promise<OpenAiRunResult> {
+  const r = await fetch("https://api.openai.com/v1/images/edits", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  const body = (await r.json()) as Record<string, unknown>;
+  if (!r.ok) {
+    return {
+      status: r.status.toString(),
+      body: null,
+      errorDetail: JSON.stringify((body as { error?: unknown }).error ?? body),
+    };
+  }
+  return { status: r.status.toString(), body };
+}
+
+async function fetchFalPricing(
   endpointIds: string[],
   key: string,
 ): Promise<Map<string, PricingRow>> {
-  // fal pricing API is not key-gated but we pass FAL_KEY for parity with queue calls.
   const map = new Map<string, PricingRow>();
   for (const id of endpointIds) {
     try {
@@ -121,67 +167,208 @@ async function fetchPricing(
   return map;
 }
 
+function buildFalInput(
+  slot: Slot,
+  caseInput: { prompt?: string; imageUrl?: string; maskUrl?: string | null },
+): Record<string, unknown> {
+  const input: Record<string, unknown> = { prompt: caseInput.prompt ?? "" };
+  const shape = slot.inputShape ?? {};
+  const imageField = shape.imageField ?? (slot.mode === "instruction" ? "image_urls" : "image_url");
+  const imageIsArray = shape.imageIsArray ?? (imageField === "image_urls");
+  const maskField = shape.maskField ?? "mask_url";
+
+  if (caseInput.imageUrl) {
+    if (imageIsArray) {
+      input[imageField] = [caseInput.imageUrl];
+    } else {
+      input[imageField] = caseInput.imageUrl;
+    }
+  }
+  if (slot.mode === "mask-fill" && caseInput.maskUrl) {
+    input[maskField] = caseInput.maskUrl;
+  }
+  if (shape.extraFields) {
+    for (const [k, v] of Object.entries(shape.extraFields)) {
+      input[k] = v;
+    }
+  }
+  return input;
+}
+
+async function buildOpenAiInput(
+  slot: Slot,
+  caseInput: { prompt?: string; imageUrl?: string; maskUrl?: string | null },
+): Promise<Record<string, unknown>> {
+  const input: Record<string, unknown> = {
+    model: "gpt-image-2.5-sunburst",
+    prompt: caseInput.prompt ?? "",
+    input_fidelity: "high",
+    quality: "high",
+  };
+  if (caseInput.imageUrl) {
+    input.images = [{ image_url: caseInput.imageUrl }];
+  }
+  if (slot.mode === "mask-fill" && caseInput.maskUrl) {
+    input.mask = { image_url: await invertFalMaskToOpenAIDataUrl(caseInput.maskUrl) };
+  }
+  return input;
+}
+
+function readCase(cs: string): { prompt?: string; imageUrl?: string; maskUrl?: string | null } {
+  return JSON.parse(fs.readFileSync(path.join(BAKE_OFF_DIR, `${cs}.json`), "utf8"));
+}
+
 async function main() {
-  const key = requireFalKey();
   const slots: Slot[] = JSON.parse(
     fs.readFileSync("scripts/bake-off-slots.json", "utf8"),
   );
   fs.mkdirSync(BAKE_OFF_DIR, { recursive: true });
+  fs.mkdirSync(path.join(BAKE_OFF_DIR, "outputs"), { recursive: true });
 
-  // Pre-cache pricing per endpoint so the table Alex signs off on has real USD figures.
-  const pricing = await fetchPricing(slots.map((s) => s.expectedEndpoint), key);
+  // Idempotent re-run: load prior results, drop failed rows whose slot is in
+  // the current slots list (so failures get overwritten on retry), and skip
+  // slots that already have successful results so we don't bill twice.
+  const resultsPath = path.join(BAKE_OFF_DIR, "bake-off-results.json");
+  let existingResults: Array<Record<string, unknown>> = [];
+  if (fs.existsSync(resultsPath)) {
+    try {
+      existingResults = JSON.parse(fs.readFileSync(resultsPath, "utf8"));
+    } catch {
+      // Treat a corrupt prior file as empty rather than failing the run.
+    }
+  }
+  const activeSlotIds = new Set(slots.map((s) => s.id));
+  const slotHasSuccess = new Set<string>();
+  for (const r of existingResults) {
+    if (r.ok && activeSlotIds.has(String(r.slot))) {
+      slotHasSuccess.add(String(r.slot));
+    }
+  }
+  // Keep rows that are either (a) successful OR (b) for a slot not in the
+  // current list (e.g. a slot that was removed from slots.json). Drop rows
+  // that are failed AND for a slot that's still in the list — those get
+  // overwritten by the new run.
+  const survivingResults = existingResults.filter((r) => {
+    const id = String(r.slot);
+    if (!activeSlotIds.has(id)) return true; // legacy, keep
+    if (r.ok) return true; // success, keep
+    return false; // failed and being retried, drop
+  });
+  const newSlots = slots.filter((s) => !slotHasSuccess.has(s.id));
+  if (newSlots.length === 0) {
+    console.log("all slots already have successful results; nothing to do");
+    return;
+  }
+
+  // Only require keys we actually need.
+  const falSlots = newSlots.filter((s) => s.vendor === "fal");
+  const openAiSlots = newSlots.filter((s) => s.vendor === "openai");
+  const falKey = falSlots.length ? requireKey("FAL_KEY") : "";
+  const openAiKey = openAiSlots.length ? requireKey("OPENAI_API_KEY") : "";
+
+  // Pre-cache pricing for fal endpoints only.
+  const pricing = await fetchFalPricing(
+    falSlots.map((s) => s.expectedEndpoint),
+    falKey,
+  );
 
   const results: Array<Record<string, unknown>> = [];
-  for (const slot of slots) {
+  for (const slot of newSlots) {
     for (const cs of CASES) {
-      const caseInput = JSON.parse(
-        fs.readFileSync(path.join(BAKE_OFF_DIR, `${cs}.json`), "utf8"),
-      );
-      const input: Record<string, unknown> = { prompt: casePrompt(caseInput) };
-      if (slot.mode === "instruction" && caseInput.imageUrl) {
-        // instruction-mode slots on fal take an array of reference images.
-        input.image_urls = [caseInput.imageUrl];
-      } else if (slot.mode === "mask-fill") {
-        if (caseInput.imageUrl) input.image_url = caseInput.imageUrl;
-        if (caseInput.maskUrl) input.mask_url = caseInput.maskUrl;
-      }
-      // text-to-image mode: no image inputs.
+      const caseInput = readCase(cs);
       const started = Date.now();
       try {
-        const { status, body, errorDetail } = await falQueueRun(
-          slot.expectedEndpoint,
-          input,
-          key,
-        );
-        if (!body) {
+        if (slot.vendor === "fal") {
+          const input = buildFalInput(slot, caseInput);
+          const { status, body, errorDetail } = await falQueueRun(
+            slot.expectedEndpoint,
+            input,
+            falKey,
+          );
+          if (!body) {
+            results.push({
+              slot: slot.id,
+              vendor: slot.vendor,
+              case: cs,
+              ok: false,
+              latency_ms: Date.now() - started,
+              error: `provider returned validation error: ${errorDetail ?? "(no detail)"}`,
+            });
+            continue;
+          }
+          const images = (body as { images?: Array<{ url: string; width?: number; height?: number }> }).images;
+          const firstImage = images?.[0];
           results.push({
             slot: slot.id,
+            vendor: slot.vendor,
             case: cs,
-            ok: false,
+            ok: true,
             latency_ms: Date.now() - started,
-            error: `provider returned validation error: ${errorDetail ?? "(no detail)"}`,
+            unit_price_usd: pricing.get(slot.expectedEndpoint)?.unit_price ?? null,
+            billing_unit: pricing.get(slot.expectedEndpoint)?.unit ?? null,
+            output: firstImage?.url ?? null,
+            output_dimensions:
+              firstImage?.width && firstImage?.height
+                ? `${firstImage.width}x${firstImage.height}`
+                : null,
+            queue_status: status,
           });
-          continue;
+        } else if (slot.vendor === "openai") {
+          const input = await buildOpenAiInput(slot, caseInput);
+          const { status, body, errorDetail } = await openAiEdit(input, openAiKey);
+          if (!body) {
+            results.push({
+              slot: slot.id,
+              vendor: slot.vendor,
+              case: cs,
+              ok: false,
+              latency_ms: Date.now() - started,
+              error: `OpenAI returned error: ${errorDetail ?? "(no detail)"}`,
+            });
+            continue;
+          }
+          const data = (body as { data?: Array<{ b64_json?: string }> }).data ?? [];
+          const firstImage = data[0];
+          if (!firstImage?.b64_json) {
+            results.push({
+              slot: slot.id,
+              vendor: slot.vendor,
+              case: cs,
+              ok: false,
+              latency_ms: Date.now() - started,
+              error: "OpenAI returned no b64_json in data[0]",
+            });
+            continue;
+          }
+          // Save locally so reviewers can open it without a hosted URL expiring.
+          const buf = Buffer.from(firstImage.b64_json, "base64");
+          const ext = "png";
+          const filename = `${slot.id}__${cs}__${Date.now() - started}ms.${ext}`;
+          const dest = path.join(BAKE_OFF_DIR, "outputs", filename);
+          fs.writeFileSync(dest, buf);
+          const usage = body.usage as
+            | { input_tokens?: number; output_tokens?: number; total_tokens?: number }
+            | undefined;
+          results.push({
+            slot: slot.id,
+            vendor: slot.vendor,
+            case: cs,
+            ok: true,
+            latency_ms: Date.now() - started,
+            input_tokens: usage?.input_tokens ?? null,
+            output_tokens: usage?.output_tokens ?? null,
+            total_tokens: usage?.total_tokens ?? null,
+            output: `bake-off/outputs/${filename}`,
+            output_dimensions: null, // OpenAI doesn't return dimensions in the response
+            http_status: status,
+          });
+        } else {
+          throw new Error(`unknown vendor: ${(slot as { vendor: string }).vendor}`);
         }
-        const images = (body as { images?: Array<{ url: string; width?: number; height?: number }> }).images;
-        const firstImage = images?.[0];
-        results.push({
-          slot: slot.id,
-          case: cs,
-          ok: true,
-          latency_ms: Date.now() - started,
-          unit_price_usd: pricing.get(slot.expectedEndpoint)?.unit_price ?? null,
-          billing_unit: pricing.get(slot.expectedEndpoint)?.unit ?? null,
-          output: firstImage?.url ?? null,
-          output_dimensions:
-            firstImage?.width && firstImage?.height
-              ? `${firstImage.width}x${firstImage.height}`
-              : null,
-          queue_status: status,
-        });
       } catch (err) {
         results.push({
           slot: slot.id,
+          vendor: slot.vendor,
           case: cs,
           ok: false,
           latency_ms: Date.now() - started,
@@ -190,15 +377,17 @@ async function main() {
       }
     }
   }
+  const merged = [...survivingResults, ...results];
   fs.writeFileSync(
-    path.join(BAKE_OFF_DIR, "bake-off-results.json"),
-    JSON.stringify(results, null, 2),
+    resultsPath,
+    JSON.stringify(merged, null, 2),
   );
-  console.log(`wrote ${results.length} rows to bake-off/bake-off-results.json`);
+  console.log(
+    `wrote ${results.length} new rows (${merged.length} total) to bake-off/bake-off-results.json`,
+  );
 }
 
-function casePrompt(c: Record<string, unknown>): string {
-  return (c as { prompt?: string }).prompt ?? "";
-}
-
-main();
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
