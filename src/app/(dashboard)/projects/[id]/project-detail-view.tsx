@@ -1047,6 +1047,7 @@ export default function ProjectDetailView({
                   roomName={focusedRoom.name}
                   onExitToProject={leaveEditor}
                   onProcessingChange={setEditorBusy}
+                  saveStatus={directiveStatuses[focusedRoom.id] ?? "idle"}
                   imageUrl={focusedInputs.inpaintImageUrl ?? ""}
                   aesthetic={project.stagingAesthetic}
                   promptDirectives={focusedInputs.roomDirectives.trim()}

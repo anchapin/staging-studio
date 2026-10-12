@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { InpaintSource } from "@/lib/inpaint-source";
+import type { AutosaveStatus } from "@/lib/autosave-controller";
 
 export interface InpaintEditorProps {
   roomId: string;
@@ -66,5 +67,12 @@ export interface InpaintEditorProps {
   onExitToProject?: () => void;
   /** Issue #1188: reports run state so the page can guard its own exits. */
   onProcessingChange?: (isProcessing: boolean) => void;
+  /**
+   * Issue #1155: the directive autosave status from the controller instance
+   * that actually performs the save, owned by the parent (project-detail-view
+   * keeps one controller per room). Replaces the orphan module-level registry
+   * that no save ever drove.
+   */
+  saveStatus?: AutosaveStatus;
 }
 
