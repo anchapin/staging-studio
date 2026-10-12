@@ -172,9 +172,12 @@ describe("room-variants actions", () => {
       const result = await deleteVariantAfterImage(MOCK_ROOM_ID, 0);
 
       expect(result.success).toBe(true);
-      expect(mockRevalidatePath).toHaveBeenCalledTimes(3);
+      expect(mockRevalidatePath).toHaveBeenCalledTimes(6);
       expect(mockRevalidatePath).toHaveBeenCalledWith("/projects/cproj12345678901234567890");
+      expect(mockRevalidatePath).toHaveBeenCalledWith("/projects/cproj12345678901234567890/rooms");
       expect(mockRevalidatePath).toHaveBeenCalledWith("/projects/cproj12345678901234567890/lookbook");
+      expect(mockRevalidatePath).toHaveBeenCalledWith("/projects/cproj12345678901234567890/refine");
+      expect(mockRevalidatePath).toHaveBeenCalledWith("/projects/cproj12345678901234567890/report");
       expect(mockRevalidatePath).toHaveBeenCalledWith("/preview/cproj12345678901234567890");
     });
 
