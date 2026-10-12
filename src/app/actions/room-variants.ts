@@ -51,14 +51,24 @@ export async function saveVariantSelection(
 export async function getVariantTouchUpCounts(
   roomId: string
 ): Promise<{ success: boolean; counts?: { 0: number; 1: number }; error?: string }> {
-  const ownershipWhere = await getOwnedRoomWhere(roomId);
-  if (!ownershipWhere) {
+  const user = await getAuthedPrismaUser();
+  if (!user) {
     return failure("Not authenticated");
   }
 
   try {
+    // Issue #1133: filter on statuses that are actually written
+    // (IN_QUEUE | IN_PROGRESS | COMPLETED). "succeeded" never appears in
+    // the data, so the old filter matched nothing. ERROR rows changed
+    // nothing and are excluded by countVariantTouchUps itself;
+    // PERSISTENCE_FAILED rows never landed durably (issue #1136), so
+    // they do not count as a landed touch-up either.
     const rows = await prisma.inpaintRequest.findMany({
-      where: { roomId, status: "succeeded" },
+      where: {
+        roomId,
+        status: { in: ["IN_QUEUE", "IN_PROGRESS", "COMPLETED"] },
+        room: { project: { userId: user.id } },
+      },
       select: { id: true, status: true, variantSlot: true, sourceSlot: true },
       orderBy: { createdAt: "asc" },
     });
