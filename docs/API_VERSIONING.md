@@ -111,6 +111,36 @@ Link: </api/v1>; rel="successor-version"
 }
 ```
 
+## Request/Response Parity (issue #1125)
+
+A v1 route must be a faithful copy of the route it versions. Concretely:
+
+### Shared request schemas
+
+Each v1 stub imports the exact Zod schema its unversioned twin enforces instead of declaring a local one, so a client written against the v1 contract works against the twin and vice versa:
+
+| v1 route | Twin | Shared schema |
+|----------|------|---------------|
+| `/api/v1/inpaint` (POST) | `/api/inpaint` | `inpaintSubmitSchema` (`imageUrl`, `maskUrl`, `promptDirectives`, `aesthetic`, `roomId`, `variantSlot`, ...) |
+| `/api/v1/inpaint/[requestId]` (GET) | `/api/inpaint/[requestId]` | no request body; same path params |
+| `/api/v1/generate-copy` (POST) | `/api/generate-copy` | `generateCopyRequestSchema` (`roomId`) |
+| `/api/v1/segment` (POST) | `/api/segment/furnishings` | `furnishingsSegmentRequestSchema` (`roomId`, `imageUrl`, `concept`) |
+| `/api/v1/segment/furnishings` (POST) | `/api/segment/furnishings` | `furnishingsSegmentRequestSchema` |
+
+The stubs stay stubs (they return 200 note bodies without doing work), but their validation is already the real contract. A client that migrated to v1 based on this document cannot be broken by the day a stub becomes an implementation.
+
+### Error codes
+
+Every v1 error response carries a machine-readable `code` from `src/lib/api-errors.ts`: 401 -> `unauthorized`, 400 -> `invalid-request`, 403 -> `room-not-found` (or `request-not-found` on the status GET), 429 -> `rate-limit-exceeded`. The v1 429 body wraps the shared `dailyQuotaExceededPayload` with this code; unversioned 429 bodies are intentionally left untouched.
+
+### Deliberate divergences (pinned, not bugs)
+
+`/api/v1/export-pdf` flattens a 503 from the PDF provider to 500, while the unversioned `/api/export-pdf` propagates the provider status. This is intentional and covered by route tests. Any *other* v1-vs-twin divergence is a bug (file it against parity).
+
+### Quota recording
+
+No v1 route does real work today, so nothing charges. A v1 stub that becomes an implementation MUST claim quota through `claimDailyQuota(...)` (issue #1132) immediately before the provider call; the read-only daily-limit check that stubs perform does NOT record usage, and relying on it alone makes the route a silent cap bypass. Each stub's success note carries an implementation note saying the same.
+
 ## Version Detection Utility
 
 The `src/lib/api-version.ts` module provides utilities for working with API versions:
