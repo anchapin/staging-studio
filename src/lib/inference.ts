@@ -102,6 +102,13 @@ export interface InferenceResultResult<T = unknown> {
 export interface SubscribeOptions {
   input: Record<string, unknown>;
   abortSignal?: AbortSignal;
+  /**
+   * Optional completion webhook URL (issue #1221). Set only when
+   * `INFERENCE_DELIVERY=webhook`: fal receives `webhook`, Replicate
+   * `webhook` + `events_filter`. Unset keeps the polling path
+   * byte-identical.
+   */
+  webhookUrl?: string;
 }
 
 // ─── Logical inpaint input ──────────────────────────────────────────────────

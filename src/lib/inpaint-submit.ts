@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { inpaintRequestSchema } from "@/lib/ai-route-schemas";
 import { evaluateInpaintQualityGate } from "@/lib/inpaint-quality-gate";
 import { classifyIntegrationError } from "@/lib/error-classify";
+import { resolveInpaintDelivery } from "@/lib/inpaint-webhook";
 import {
   buildInpaintPayloadForActiveProvider,
   buildInpaintPrompt,
@@ -93,7 +94,7 @@ type FalQueueSubmitFunction = (
 export async function submitWithRetry(
   falQueueSubmit: FalQueueSubmitFunction,
   model: string,
-  payload: { input: Record<string, unknown> }
+  payload: { input: Record<string, unknown>; webhookUrl?: string }
 ): Promise<{ request_id: string }> {
   let goneRetried = false;
   for (let attempt = 1; attempt <= FAL_SUBMIT_ATTEMPTS; attempt += 1) {
@@ -153,6 +154,8 @@ export interface InpaintRecordCreateData {
   variantSlot: number;
   sourceSlot: number | null;
   status: "IN_QUEUE";
+  /** Provider job id for webhook matching (issue #1221); equals `id`. */
+  providerJobId?: string;
 }
 
 /**
@@ -314,7 +317,24 @@ export async function submitInpaintToFal(
   // `LogicalModel` union is a string-literal, so the cast is safe.
   const submit: (id: string, options: { input: Record<string, unknown> }) => Promise<{ request_id: string }> =
     (id, options) => client.submit(id as LogicalModel, options);
-  return submitWithRetry(submit, LOGICAL_MODEL.FLUX_FILL, { input });
+  // Issue #1221: only opt-in deployments hand the provider a callback
+  // URL. Unset `INFERENCE_DELIVERY` keeps the payload (and the wire
+  // request) byte-identical to the polling path.
+  const webhookUrl = resolveInpaintDelivery() === "webhook"
+    ? `${getAppBaseUrl()}/api/inpaint/webhook`
+    : undefined;
+  return submitWithRetry(submit, LOGICAL_MODEL.FLUX_FILL, { input, webhookUrl });
+}
+
+
+/**
+ * Public base URL for provider callbacks (issue #1221). Mirrors
+ * cors.ts's resolution so a deploy with no NEXT_PUBLIC_APP_URL falls
+ * back to localhost:3000 rather than minting a malformed URL.
+ */
+function getAppBaseUrl(): string {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+  return appUrl && appUrl.length > 0 ? appUrl : "http://localhost:3000";
 }
 
 // ─── Error Classification ─────────────────────────────────────────────────────
@@ -503,6 +523,7 @@ export async function submitInpaintRequest(
       variantSlot: params.variantSlot,
       sourceSlot: params.sourceSlot,
       status: "IN_QUEUE",
+      providerJobId: submission.request_id,
     });
   } catch (recordError) {
     recordDegraded = true;
