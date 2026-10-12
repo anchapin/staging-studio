@@ -320,24 +320,22 @@ async function main() {
 
   const slots: SlotConfig[] = [
     {
-      id: "flux-pro-fill",
+      id: "seedream-5-flash",
       vendor: "fal",
-      mode: "mask-fill",
-      expectedEndpoint: "fal-ai/flux-pro/v1/fill",
+      mode: "instruction",
+      expectedEndpoint: "bytedance/seedream/v5/flash/edit",
     },
     {
-      id: "z-image-turbo-inpaint",
+      id: "qwen-image-2-1",
       vendor: "fal",
-      mode: "mask-fill",
-      expectedEndpoint: "fal-ai/z-image/turbo/inpaint",
-      maskField: "mask_image_url",
+      mode: "instruction",
+      expectedEndpoint: "fal-ai/qwen-image-2.1/edit",
     },
     {
-      id: "flux-kontext-lora-inpaint",
+      id: "nano-banana-2-1",
       vendor: "fal",
-      mode: "mask-fill",
-      expectedEndpoint: "fal-ai/flux-kontext-lora/inpaint",
-      referenceImageUrl: "$imageUrl",
+      mode: "instruction",
+      expectedEndpoint: "fal-ai/nano-banana-2.1/edit",
     },
   ];
 
