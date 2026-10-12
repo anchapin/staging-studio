@@ -346,6 +346,108 @@ test.describe("mask painting on high-DPI displays", () => {
  * the wall-band strategy's architecture drift. These specs prove it
  * through the actual POST /api/inpaint body the browser puts on the wire.
  */
+/**
+ * Redo + zoom/pan (issue #1223).
+ *
+ * The undo stack already covered restore-on-undo; #1223 wires the mirror
+ * half: a Redo button plus Cmd/Ctrl+Shift+Z / Ctrl+Y that restores the last
+ * undone snapshot, and a wheel/pinch zoom with middle-drag pan. These cases
+ * pin the pixel-level redo round trip and the zoom transform's scale
+ * factor, both against the real canvas.
+ */
+test.describe("mask canvas redo and zoom", () => {
+  test.use({ viewport: { width: 1280, height: 720 } });
+
+  function brushCanvas(page: import("@playwright/test").Page) {
+    return page
+      .getByRole("application")
+      .locator('canvas[aria-label^="Room mask painting canvas"]');
+  }
+
+  /** Share of the mask canvas backing store that is non-black. */
+  async function nonBlackShare(page: import("@playwright/test").Page): Promise<number> {
+    return brushCanvas(page).evaluate((el) => {
+      const canvas = el as HTMLCanvasElement;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("no 2d context");
+      const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      let lit = 0;
+      const total = canvas.width * canvas.height;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] > 60 || data[i + 1] > 60 || data[i + 2] > 60) lit++;
+      }
+      return lit / total;
+    });
+  }
+
+  async function openEditor(page: import("@playwright/test").Page): Promise<void> {
+    interceptFurnishingsDetection(page); // editor-open auto-fire stays hermetic
+    await login(page);
+    await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
+    await openEditorTab(page, "Manual paint");
+  }
+
+  test("Redo restores the last undone stroke (button and Ctrl+Y)", async ({ page }) => {
+    await openEditor(page);
+
+    await paintMaskZigzag(page);
+    const painted = await nonBlackShare(page);
+    expect(painted).toBeGreaterThan(MIN_WHITE_SHARE);
+
+    // Undo drains the mask back to empty.
+    const undo = page.getByRole("button", { name: /^Undo/ });
+    await undo.click();
+    expect(await nonBlackShare(page)).toBeLessThan(0.0005);
+
+    // Redo (button) brings the exact snapshot back.
+    const redo = page.getByRole("button", { name: /^Redo/ });
+    await expect(redo).toBeEnabled();
+    await redo.click();
+    const restored = await nonBlackShare(page);
+    expect(restored).toBeGreaterThan(MIN_WHITE_SHARE);
+    expect(Math.abs(restored - painted)).toBeLessThan(0.001);
+
+    // Ctrl+Y redoes again when a second snapshot exists: paint, undo, redo.
+    await paintMaskZigzag(page);
+    await undo.click();
+    await expect(redo).toBeEnabled();
+    await page.keyboard.press("Control+y");
+    expect(await nonBlackShare(page)).toBeGreaterThan(MIN_WHITE_SHARE);
+  });
+
+  test("wheel zoom scales the canvas toward the cursor and the indicator resets it", async ({
+    page,
+  }) => {
+    await openEditor(page);
+
+    const canvas = brushCanvas(page);
+    await expect(canvas).toBeVisible();
+    await canvas.scrollIntoViewIfNeeded();
+    const before = (await canvas.boundingBox())!;
+    const cx = before.x + before.width / 2;
+    const cy = before.y + before.height / 2;
+
+    // deltaY = -300 zooms in by exp(300 * 0.0015) ≈ 1.568x.
+    await page.mouse.move(cx, cy);
+    await page.mouse.wheel(0, -300);
+    await page.waitForTimeout(150);
+
+    const after = (await canvas.boundingBox())!;
+    const factor = after.width / before.width;
+    expect(factor).toBeGreaterThan(1.5);
+    expect(factor).toBeLessThan(1.65);
+
+    // The indicator appears at non-1x zoom and clicking it returns to 1:1.
+    const indicator = page.getByRole("button", { name: /^Zoom 1\.6x/ });
+    await expect(indicator).toBeVisible();
+    await indicator.click();
+    await page.waitForTimeout(100);
+    const reset = (await canvas.boundingBox())!;
+    expect(reset.width).toBeCloseTo(before.width, 0);
+    await expect(page.getByRole("button", { name: /^Zoom \d/ })).toHaveCount(0);
+  });
+});
+
 test.describe("restage furnishings preset", () => {
   test("regenerates only detected furnishings — ceiling and floor strips stay black", async ({
     page,

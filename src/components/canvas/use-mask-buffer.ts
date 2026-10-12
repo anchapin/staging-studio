@@ -9,6 +9,9 @@ import {
   maskUndoCount,
   pushMaskSnapshot,
   undoMaskSnapshot,
+  redoMaskSnapshot,
+  canRedoMask,
+  maskRedoCount,
   type MaskUndoHistory,
 } from "@/lib/mask-undo-stack";
 import {
@@ -317,13 +320,27 @@ export function useMaskBuffer({
   // from the explicit Undo button and from the Cmd/Ctrl+Z keyboard shortcut.
   // Issue #1033: await restoreUndoState so the canvas is painted before export,
   // and call exportMask() instead of raw toDataURL to preserve dilation/hole-fill/rescale.
+  // Issue #1223: undo is now redo-aware — the CURRENT canvas state is passed
+  // as the redo target, so a following handleRedo can restore it. The pure
+  // module keeps the discard-and-clear behavior for callers that omit it.
   const handleUndo = useCallback(async () => {
-    const { history, snapshot: previousState } = undoMaskSnapshot(undoHistory);
+    const current = captureUndoState();
+    const { history, snapshot: previousState } = undoMaskSnapshot(undoHistory, current);
     if (previousState === null) return;
     await restoreUndoState(previousState);
     setUndoHistory(history);
     exportMask();
-  }, [undoHistory, restoreUndoState, exportMask]);
+  }, [undoHistory, captureUndoState, restoreUndoState, exportMask]);
+
+  // Issue #1223: restore the most recent redo target. Symmetric with the
+  // redo-aware undo: the current canvas state becomes the next undo target.
+  const handleRedo = useCallback(async () => {
+    const { history, snapshot: nextState } = redoMaskSnapshot(undoHistory, captureUndoState());
+    if (nextState === null) return;
+    await restoreUndoState(nextState);
+    setUndoHistory(history);
+    exportMask();
+  }, [undoHistory, captureUndoState, restoreUndoState, exportMask]);
 
 
   // Keep a ref to the latest exportMask so copy/paste callbacks don't go stale
@@ -433,5 +450,9 @@ export function useMaskBuffer({
     clearMask,
     canUndo: canUndoMask(undoHistory),
     undoCount: maskUndoCount(undoHistory),
+    // Issue #1223: redo affordance state.
+    canRedo: canRedoMask(undoHistory),
+    redoCount: maskRedoCount(undoHistory),
+    handleRedo,
   };
 }
