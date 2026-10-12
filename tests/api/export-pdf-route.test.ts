@@ -305,3 +305,109 @@ describe("POST /api/export-pdf — PDF generation", () => {
     expect(url).toBe("https://chrome.browserless.io/pdf");
   });
 });
+
+/**
+ * Issue #1124: a failed Browserless render still consumed Browserless
+ * compute, and its retryable response invites retries. The unit claimed
+ * atomically before the dispatch (issue #1132) therefore STAYS claimed on
+ * every post-dispatch outcome, so the daily cap bounds failing dispatches
+ * too, not just successes. No refund call site may exist after dispatch.
+ */
+describe("POST /api/export-pdf — failed exports consume quota (issue #1124)", () => {
+  interface CounterArgs {
+    where?: { count?: { lte?: number } };
+    data?: { count?: { increment?: number; decrement?: number } };
+  }
+
+  /** Stateful fake of the atomic conditional increment / refund writes. */
+  function wireUsageCounter() {
+    let counter = 0;
+    const increments: number[] = [];
+    const decrements: number[] = [];
+    dailyApiUsageUpdateMany.mockImplementation(async (args: CounterArgs) => {
+      if (args?.data?.count?.increment !== undefined) {
+        // Mirrors claimDailyQuota's UPDATE ... WHERE count <= limit - N guard.
+        const lte = args?.where?.count?.lte;
+        if (typeof lte === "number" && counter > lte) return { count: 0 };
+        increments.push(args.data.count.increment);
+        counter += args.data.count.increment;
+        return { count: 1 };
+      }
+      if (args?.data?.count?.decrement !== undefined) {
+        // Mirrors refundDailyQuota's decrement. A decrement here means a
+        // refund call site sneaked back into the route after dispatch.
+        decrements.push(args.data.count.decrement);
+        return { count: 1 };
+      }
+      return { count: 0 };
+    });
+    dailyApiUsageFindUnique.mockImplementation(async () => ({ count: counter }));
+    return { increments, decrements };
+  }
+
+  function p2002Rejection() {
+    return new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+      code: "P2002",
+      clientVersion: "5.22.0",
+    });
+  }
+
+  it("counts N failing exports against the daily cap: 3 failures consume 3 units, the 4th is denied", async () => {
+    process.env.DAILY_EXPORT_LIMIT = "3";
+    const { increments, decrements } = wireUsageCounter();
+    // First-of-day create loses the unique key, so the cap-exhausted path
+    // re-reads today's count and denies (same flow the existing 429 test pins).
+    dailyApiUsageCreate.mockRejectedValue(p2002Rejection());
+    vi.mocked(fetchBrowserlessPdfWithCircuitBreaker).mockRejectedValue(
+      new Error("network down")
+    );
+
+    for (let i = 0; i < 3; i++) {
+      const response = await callExportRoute(validBody());
+      expect(response.status).toBeGreaterThanOrEqual(500);
+    }
+
+    expect(increments).toEqual([1, 1, 1]);
+    expect(decrements).toEqual([]);
+
+    const denied = await callExportRoute(validBody());
+    expect(denied.status).toBe(429);
+    const body = await denied.json();
+    expect(body.error).toBe("Daily limit reached");
+    expect(body.retryable).toBe(true);
+    expect(increments).toEqual([1, 1, 1]);
+    expect(decrements).toEqual([]);
+  });
+
+  it("keeps the claim when Browserless returns non-PDF content", async () => {
+    const { increments, decrements } = wireUsageCounter();
+    vi.mocked(fetchBrowserlessPdfWithCircuitBreaker).mockResolvedValue(
+      new Response("not a pdf", {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+      })
+    );
+
+    const response = await callExportRoute(validBody());
+
+    expect(response.status).toBe(502);
+    expect(increments).toEqual([1]);
+    expect(decrements).toEqual([]);
+  });
+
+  it("keeps the claim when Browserless returns an error status", async () => {
+    const { increments, decrements } = wireUsageCounter();
+    vi.mocked(fetchBrowserlessPdfWithCircuitBreaker).mockResolvedValue(
+      new Response("Browserless error", {
+        status: 500,
+        headers: { "Content-Type": "text/plain" },
+      })
+    );
+
+    const response = await callExportRoute(validBody());
+
+    expect(response.status).toBe(500);
+    expect(increments).toEqual([1]);
+    expect(decrements).toEqual([]);
+  });
+});

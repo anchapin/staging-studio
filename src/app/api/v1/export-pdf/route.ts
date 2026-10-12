@@ -25,10 +25,8 @@ import {
   DAILY_LIMIT_ENV_VAR,
   dailyQuotaExceededPayload,
   claimDailyQuota,
-  refundDailyQuota,
   resolveDailyLimit,
 } from "@/lib/api-quota";
-import type { QuotaClaim } from "@/lib/api-quota";
 import {
   BROWSERLESS_TIMEOUT_MS,
   E2E_BROWSERLESS_PDF_URL_ENV_VAR,
@@ -52,11 +50,6 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   const versionInfo = buildVersionHeaders("v1");
-
-  // Issue #1132: per-request record of the atomic quota claim so failures
-  // after it can refund the unit.
-  let exportUserId: string | undefined;
-  let exportClaim: QuotaClaim | null = null;
 
   try {
     const user = await getAuthedPrismaUser();
@@ -97,7 +90,6 @@ export async function POST(req: NextRequest) {
       process.env[DAILY_LIMIT_ENV_VAR.export],
       DEFAULT_DAILY_EXPORT_LIMIT
     );
-    exportUserId = user.id;
 
     // Fetch project and verify ownership
     try {
@@ -173,7 +165,7 @@ export async function POST(req: NextRequest) {
     // concurrent burst can no longer all read the same pre-spend count
     // and all reach the paid renderer; losers get 429 with the same
     // payload shape as before.
-    exportClaim = await claimDailyQuota("export", user.id, exportLimit);
+    const exportClaim = await claimDailyQuota("export", user.id, exportLimit);
     if (!exportClaim.claimed) {
       console.warn(
         JSON.stringify({
@@ -228,11 +220,10 @@ export async function POST(req: NextRequest) {
     }
 
     if (!chromeResponse.ok) {
-    // Issue #1132: the render failed, so the claimed unit is refunded
-    // (Browserless errors do not count against the user's daily cap).
-      if (exportUserId) {
-        await refundDailyQuota("export", exportUserId);
-      }
+    // Issue #1124: the unit stays claimed. This failed render still
+    // consumed Browserless compute, and the failure response invites
+    // retries, so the daily cap must bound dispatches, not just
+    // successes.
       const errorText = await chromeResponse.text();
       console.error(
         JSON.stringify({
@@ -267,8 +258,9 @@ export async function POST(req: NextRequest) {
     }
 
     // No charge is written here: the unit was claimed atomically before
-    // the render (issue #1132). Browserless failures and non-PDF payloads
-    // refund the claim, so they do not count against the user's daily cap.
+    // the render (issue #1132) and stays claimed on every post-dispatch
+    // outcome (issue #1124): failed renders consumed Browserless compute
+    // and count toward the user's daily cap.
 
     return new NextResponse(await chromeResponse.arrayBuffer(), {
       status: 200,
@@ -279,10 +271,9 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error) {
-    // Issue #1132: give the claimed unit back when the render fails.
-    if (exportUserId && exportClaim?.claimed) {
-      await refundDailyQuota("export", exportUserId);
-    }
+    // Issue #1124: a dispatch that dies here (timeout abort, network
+    // error) keeps its claim; it consumed or attempted Browserless
+    // compute and counts toward the user's daily cap.
     console.error("Export PDF error:", error);
     return NextResponse.json(
       {
