@@ -201,7 +201,13 @@ async function persistCompletion(
   await prisma.inpaintRequest
     .update({
       where: { id: requestId },
-      data: { status: "PERSISTENCE_FAILED", resultUrl: null },
+      data: {
+        status: "PERSISTENCE_FAILED",
+        resultUrl: null,
+        falResultUrl: imageUrl,
+        persistenceAttempts: { increment: 1 },
+        lastPersistenceAttemptAt: new Date(),
+      },
     })
     .catch((recordError) => {
       console.error(

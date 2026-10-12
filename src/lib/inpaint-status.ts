@@ -129,6 +129,27 @@ const FETCH_TIMEOUT_MS = 30_000;
  */
 const PERSISTENCE_GIVE_UP_MS = 2 * 60 * 1000;
 
+/**
+ * Issue #1143: hard cap on provider-touching persistence attempts (the
+ * initial try plus retries) for a PERSISTENCE_FAILED row. Before the cap,
+ * every poll inside the give-up window re-downloaded the result and
+ * re-uploaded it byte-identical, uncapped. After the cap the branch
+ * returns the #687 terminal handover (`completed` / `persisted: false`)
+ * without touching the provider; the row STAYS PERSISTENCE_FAILED so a
+ * later Supabase recovery can still complete it.
+ */
+export const MAX_PERSISTENCE_ATTEMPTS = 5;
+
+/**
+ * Issue #1143: exponential backoff before the next persistence attempt,
+ * in ms, keyed on the attempts already made. Pure so tests can pin it;
+ * the cap at 30s keeps a resumed row responsive while still collapsing
+ * a 60-poll burst into 5 tries (1s, 2s, 4s, 8s, then the cap).
+ */
+export function persistenceBackoffMs(attempts: number): number {
+  return Math.min(1000 * 2 ** Math.max(attempts - 1, 0), 30_000);
+}
+
 interface PersistenceResult {
   persisted: boolean;
   imageUrl: string | null;
@@ -354,6 +375,9 @@ export async function pollFalStatus(requestId: string): Promise<InpaintStatusRes
     select: {
       status: true,
       resultUrl: true,
+      falResultUrl: true,
+      persistenceAttempts: true,
+      lastPersistenceAttemptAt: true,
       updatedAt: true,
       room: { select: { project: { select: { userId: true } } } },
     },
@@ -386,30 +410,74 @@ export async function pollFalStatus(requestId: string): Promise<InpaintStatusRes
   const inpaintModel = LOGICAL_MODEL.FLUX_FILL;
 
   // PERSISTENCE_FAILED: retry persistence, with a bounded give-up so
-  // the poller cannot loop forever when Supabase is the failure mode.
+  // the poller cannot loop forever when Supabase is the failure mode,
+  // and (issue #1143) with memoized economics so each retry does not
+  // re-download and re-upload the byte-identical result.
   if (inpaintRequest.status === "PERSISTENCE_FAILED") {
-    let resultPayload: RawInpaintOutput = null;
-    try {
-      const { data } = await client.result<RawInpaintOutput>(inpaintModel, requestId);
-      resultPayload = data;
-    } catch (resultError) {
-      // The provider's queue prunes requestIds after their TTL. If
-      // the result endpoint 404s, the InpaintRequest row is
-      // orphaned: the work was billed but is unrecoverable. Mark the
-      // row ERROR and return terminal so the poller stops; otherwise
-      // the client polls a phantom job forever and the editor's
-      // button is permanently disabled (#1187 follow-up).
-      if (isInferenceRequestGone(resultError)) {
-        return await markRowTerminalAndReturnError(requestId);
-      }
-      console.error(
-        JSON.stringify({ event: "inpaint_result_fetch_failed", requestId }),
-        resultError
-      );
-    }
-    const falImageUrl = firstInpaintImageUrl(resultPayload);
-    if (!falImageUrl) {
+    // Issue #1143: backoff gate. A row that just attempted persistence
+    // waits before the provider is touched again; the gate reads only
+    // row fields, so a poll inside the window costs no provider calls.
+    const attempts = inpaintRequest.persistenceAttempts;
+    const lastAttemptAt = inpaintRequest.lastPersistenceAttemptAt?.getTime() ?? null;
+    if (lastAttemptAt !== null && Date.now() - lastAttemptAt < persistenceBackoffMs(attempts)) {
       return { status: "retryable", imageUrl: null, persisted: false };
+    }
+
+    // Issue #1143: attempt cap. Once MAX_PERSISTENCE_ATTEMPTS tries
+    // have failed, stop touching the provider entirely and hand over
+    // via the #687 terminal shape (`completed` / `persisted: false`).
+    // The row STAYS PERSISTENCE_FAILED: #687's manual-recovery intent
+    // (Supabase restored -> the job can still complete) is preserved;
+    // terminal here means "no more provider traffic", not ERROR.
+    if (attempts >= MAX_PERSISTENCE_ATTEMPTS && inpaintRequest.falResultUrl) {
+      return {
+        status: "completed",
+        imageUrl: inpaintRequest.falResultUrl,
+        persisted: false,
+      };
+    }
+    // A capped row with no memoized URL (memo writes also failing) falls
+    // through: it memoizes once below and the #687 give-up window stays
+    // the final bound, so no path loops unbounded.
+
+    // Issue #1143: memoized result URL. Use the stored provider URL
+    // when present; only a legacy row (written before this column)
+    // pays the `client.result` fetch. A freshly fetched URL is written
+    // back best-effort before persisting so later polls skip the
+    // fetch entirely.
+    let falImageUrl = inpaintRequest.falResultUrl;
+    if (!falImageUrl) {
+      let resultPayload: RawInpaintOutput = null;
+      try {
+        const { data } = await client.result<RawInpaintOutput>(inpaintModel, requestId);
+        resultPayload = data;
+      } catch (resultError) {
+        // The provider's queue prunes requestIds after their TTL. If
+        // the result endpoint 404s, the InpaintRequest row is
+        // orphaned: the work was billed but is unrecoverable. Mark the
+        // row ERROR and return terminal so the poller stops; otherwise
+        // the client polls a phantom job forever and the editor's
+        // button is permanently disabled (#1187 follow-up).
+        if (isInferenceRequestGone(resultError)) {
+          return await markRowTerminalAndReturnError(requestId);
+        }
+        console.error(
+          JSON.stringify({ event: "inpaint_result_fetch_failed", requestId }),
+          resultError
+        );
+      }
+      falImageUrl = firstInpaintImageUrl(resultPayload);
+      if (!falImageUrl) {
+        return { status: "retryable", imageUrl: null, persisted: false };
+      }
+      await prisma.inpaintRequest
+        .update({ where: { id: requestId }, data: { falResultUrl: falImageUrl } })
+        .catch((memoError) => {
+          console.error(
+            JSON.stringify({ event: "inpaint_fal_result_memo_failed", requestId }),
+            memoError
+          );
+        });
     }
 
     // Bound the retry window: after PERSISTENCE_GIVE_UP_MS the row has
@@ -430,6 +498,24 @@ export async function pollFalStatus(requestId: string): Promise<InpaintStatusRes
         persisted: false,
       };
     }
+
+    // Issue #1143: record the attempt (best-effort) BEFORE the upload
+    // try, so a crash mid-upload still counts and the cap eventually
+    // bites.
+    await prisma.inpaintRequest
+      .update({
+        where: { id: requestId },
+        data: {
+          persistenceAttempts: { increment: 1 },
+          lastPersistenceAttemptAt: new Date(),
+        },
+      })
+      .catch((attemptError) => {
+        console.error(
+          JSON.stringify({ event: "inpaint_persistence_attempt_record_failed", requestId }),
+          attemptError
+        );
+      });
 
     const { persisted, imageUrl } = await persistFalImage(falImageUrl, requestId);
     if (persisted && imageUrl) {
@@ -571,9 +657,18 @@ async function finishCompletedJob(
   // strands the poller on a phantom retry: Supabase may be down
   // (the most common cause), and looping on it produces
   // "Processing: retryable" indefinitely.
+  // Issue #1143: memoize the provider URL on the way down so the
+  // PERSISTENCE_FAILED retry path never re-fetches `client.result`,
+  // and seed the attempt bookkeeping (attempt 1 is this upload).
   await prisma.inpaintRequest.update({
     where: { id: requestId },
-    data: { status: "PERSISTENCE_FAILED", resultUrl: null },
+    data: {
+      status: "PERSISTENCE_FAILED",
+      resultUrl: null,
+      falResultUrl: falImageUrl,
+      persistenceAttempts: { increment: 1 },
+      lastPersistenceAttemptAt: new Date(),
+    },
   }).catch((recordError) => {
     console.error(
       JSON.stringify({ event: "inpaint_persistence_failed_record_update_failed", requestId }),

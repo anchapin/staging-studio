@@ -107,6 +107,9 @@ function mockInpaintRequest(overrides = {}) {
     maskBlur: 0,
     lockSeed: false,
     falRequestId: null,
+    falResultUrl: null,
+    persistenceAttempts: 0,
+    lastPersistenceAttemptAt: null,
     ...overrides,
   };
 }
