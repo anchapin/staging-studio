@@ -5,6 +5,11 @@ import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { revalidatePath } from "next/cache";
 import { withRetry } from "@/lib/retry";
+import {
+  MAX_ROOM_PHOTO_BYTES,
+  ROOM_PHOTOS_BUCKET,
+  readUploadedObjectSize,
+} from "@/lib/storage-cleanup";
 
 const ALLOWED_IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp"];
 
@@ -203,6 +208,31 @@ export async function confirmRoomPhotoUpload(
   }
 
   const supabase = await createSupabaseRequestClient();
+
+  // #1145: the signed upload URL carries no size limit, so the cap is
+  // enforced here at confirm, where the object exists and its stored
+  // size is readable. An unreadable size (missing object) passes — it
+  // fails downstream anyway when the stored URL 404s.
+  const uploadedSize = await readUploadedObjectSize(
+    supabase as never,
+    ROOM_PHOTOS_BUCKET,
+    storagePath
+  );
+  if (uploadedSize !== null && uploadedSize > MAX_ROOM_PHOTO_BYTES) {
+    console.warn(
+      JSON.stringify({
+        event: "room_photo_upload_oversized",
+        roomId,
+        storagePath,
+        size: uploadedSize,
+        max: MAX_ROOM_PHOTO_BYTES,
+      })
+    );
+    await supabase.storage.from(ROOM_PHOTOS_BUCKET).remove([storagePath]);
+    return failure(
+      "Uploaded image is too large. Please use an image under 10 MB."
+    );
+  }
 
   const {
     data: { publicUrl },
