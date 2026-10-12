@@ -32,6 +32,8 @@ export type InpaintWebhookOutcome =
   | { kind: "provider_error" } // delivery reported job failure
   | { kind: "persistence_failed"; providerImageUrl: string }
   | { kind: "write_failed"; imageUrl: string }
+  | { kind: "result_fetch_failed" } // response_url unfetchable: 503, provider retries
+  | { kind: "in_progress" } // mid-flight fal status: accepted no-op
   | { kind: "unrecognized" };
 
 /**
@@ -45,8 +47,10 @@ export async function applyInpaintWebhookEvent(params: {
   providerJobId: string;
   status: string;
   output: unknown;
+  /** fal's queue.status.updated carries the result here, not inline. */
+  responseUrl?: string | null;
 }): Promise<InpaintWebhookOutcome> {
-  const { providerJobId, status, output } = params;
+  const { providerJobId, status, output, responseUrl } = params;
 
   const row = await prisma.inpaintRequest.findUnique({
     where: { providerJobId },
@@ -66,53 +70,50 @@ export async function applyInpaintWebhookEvent(params: {
 
   const providerImageUrl = firstInpaintImageUrl(output);
   if (providerImageUrl) {
-    const { persisted, imageUrl } = await persistFalImage(
-      providerImageUrl,
-      row.id
-    );
+    return persistCompletion(row.id, providerJobId, providerImageUrl);
+  }
 
-    if (persisted && imageUrl) {
-      try {
-        await prisma.inpaintRequest.update({
-          where: { id: row.id },
-          data: { status: "COMPLETED", resultUrl: imageUrl },
-        });
-        return { kind: "completed", imageUrl };
-      } catch (recordError) {
-        // Same contract as finishCompletedJob (issue #1136): a failed
-        // durable write is reported, never papered over as completed.
-        // 503 makes the provider retry; the retry re-runs this path.
-        console.error(
-          JSON.stringify({
-            event: "inpaint_webhook_record_failed",
-            requestId: row.id,
-            providerJobId,
-          }),
-          recordError
-        );
-        return { kind: "write_failed", imageUrl };
+  // No image inline. fal's queue.status.updated never carries the
+  // result; a completed fal delivery points at `response_url`, so
+  // fetch it (a completed status with neither is what fal's "OK"
+  // looks like). Mid-flight statuses are an accepted no-op: the
+  // poller still governs progress, and a 4xx here would only teach
+  // the provider to stop updating us.
+  const completionStatuses = new Set(["OK", "COMPLETED", "SUCCESS"]);
+  const inFlightStatuses = new Set(["IN_QUEUE", "IN_PROGRESS", "PROCESSING", "STARTING"]);
+  if (completionStatuses.has(status) && responseUrl) {
+    try {
+      const res = await fetch(responseUrl);
+      if (res.ok) {
+        const fetched = (await res.json()) as unknown;
+        const fetchedUrl = firstInpaintImageUrl(fetched);
+        if (fetchedUrl) {
+          const persisted = await persistCompletion(row.id, providerJobId, fetchedUrl);
+          return persisted;
+        }
+        return { kind: "unrecognized" };
       }
+      console.error(
+        JSON.stringify({
+          event: "inpaint_webhook_result_fetch_failed",
+          requestId: row.id,
+          responseStatus: res.status,
+        })
+      );
+      return { kind: "result_fetch_failed" };
+    } catch (fetchError) {
+      console.error(
+        JSON.stringify({
+          event: "inpaint_webhook_result_fetch_failed",
+          requestId: row.id,
+        }),
+        fetchError
+      );
+      return { kind: "result_fetch_failed" };
     }
-
-    // Upload failed (most commonly Supabase down). Mark the row so
-    // the polling path's PERSISTENCE_FAILED retry/give-up logic still
-    // governs it, and 503 so the provider retries the delivery.
-    await prisma.inpaintRequest
-      .update({
-        where: { id: row.id },
-        data: { status: "PERSISTENCE_FAILED", resultUrl: null },
-      })
-      .catch((recordError) => {
-        console.error(
-          JSON.stringify({
-            event: "inpaint_webhook_persist_status_failed",
-            requestId: row.id,
-            providerJobId,
-          }),
-          recordError
-        );
-      });
-    return { kind: "persistence_failed", providerImageUrl };
+  }
+  if (inFlightStatuses.has(status)) {
+    return { kind: "in_progress" };
   }
 
   // No image in the payload: the only other meaningful delivery is a
@@ -154,4 +155,63 @@ export async function applyInpaintWebhookEvent(params: {
 export function resolveInpaintDelivery(): "polling" | "webhook" {
   const raw = process.env.INFERENCE_DELIVERY?.trim().toLowerCase();
   return raw === "webhook" ? "webhook" : "polling";
+}
+
+/**
+ * Shared completion tail for inline and response_url-fetched results:
+ * persist the image, then the durable COMPLETED write, with the same
+ * failure contract in both paths.
+ */
+async function persistCompletion(
+  requestId: string,
+  providerJobId: string,
+  providerImageUrl: string
+): Promise<InpaintWebhookOutcome> {
+  const { persisted, imageUrl } = await persistFalImage(
+    providerImageUrl,
+    requestId
+  );
+
+  if (persisted && imageUrl) {
+    try {
+      await prisma.inpaintRequest.update({
+        where: { id: requestId },
+        data: { status: "COMPLETED", resultUrl: imageUrl },
+      });
+      return { kind: "completed", imageUrl };
+    } catch (recordError) {
+      // Same contract as finishCompletedJob (issue #1136): a failed
+      // durable write is reported, never papered over as completed.
+      // 503 makes the provider retry; the retry re-runs this path.
+      console.error(
+        JSON.stringify({
+          event: "inpaint_webhook_record_failed",
+          requestId,
+          providerJobId,
+        }),
+        recordError
+      );
+      return { kind: "write_failed", imageUrl };
+    }
+  }
+
+  // Upload failed (most commonly Supabase down). Mark the row so
+  // the polling path's PERSISTENCE_FAILED retry/give-up logic still
+  // governs it, and 503 so the provider retries the delivery.
+  await prisma.inpaintRequest
+    .update({
+      where: { id: requestId },
+      data: { status: "PERSISTENCE_FAILED", resultUrl: null },
+    })
+    .catch((recordError) => {
+      console.error(
+        JSON.stringify({
+          event: "inpaint_webhook_persist_status_failed",
+          requestId,
+          providerJobId,
+        }),
+        recordError
+      );
+    });
+  return { kind: "persistence_failed", providerImageUrl };
 }

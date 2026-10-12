@@ -54,12 +54,17 @@ async function signedRequest(body: string, sentAtSeconds?: number): Promise<Next
   } as unknown as NextRequest;
 }
 
-function falDelivery(output: unknown, status = "COMPLETED"): string {
+function falDelivery(
+  output: unknown,
+  status = "COMPLETED",
+  responseUrl?: string
+): string {
   return JSON.stringify({
     type: "queue.status.updated",
     status,
     request_id: JOB_ID,
     output,
+    ...(responseUrl ? { response_url: responseUrl } : {}),
   });
 }
 
@@ -210,12 +215,58 @@ describe("POST /api/inpaint/webhook", () => {
     });
   });
 
-  it("returns 400 for a delivery with neither an image nor an error", async () => {
+  it("accepts a mid-flight fal status as a 200 no-op", async () => {
     const response = await POST(await await signedRequest(falDelivery(undefined, "IN_PROGRESS")));
+    const outcome = await readOutcome(response);
+    expect(outcome.status).toBe(200);
+    expect(outcome.body.kind).toBe("in_progress");
+    expect(mockPrisma.inpaintRequest.update).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 for a delivery with neither an image, a known status, nor an error", async () => {
+    const response = await POST(await await signedRequest(falDelivery(undefined, "SOMETHING_ELSE")));
     const outcome = await readOutcome(response);
     expect(outcome.status).toBe(400);
     expect(outcome.body.kind).toBe("unrecognized");
     expect(mockPrisma.inpaintRequest.update).not.toHaveBeenCalled();
+  });
+
+  it("fetches fal's response_url when a completed delivery carries no inline image", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ images: [{ url: CDN_URL }] }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const response = await POST(
+        await await signedRequest(falDelivery(null, "OK", "https://queue.fal.run/requests/req/result"))
+      );
+      const outcome = await readOutcome(response);
+      expect(outcome.status).toBe(200);
+      expect(outcome.body.kind).toBe("completed");
+      expect(fetchMock).toHaveBeenCalledWith("https://queue.fal.run/requests/req/result");
+      expect(mockPrisma.inpaintRequest.update).toHaveBeenCalledWith({
+        where: { id: ROW_ID },
+        data: { status: "COMPLETED", resultUrl: PERSISTED_URL },
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("returns 503 when fal's response_url is unfetchable, so the provider redelivers", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("nope", { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const response = await POST(
+        await await signedRequest(falDelivery(null, "OK", "https://queue.fal.run/requests/req/result"))
+      );
+      const outcome = await readOutcome(response);
+      expect(outcome.status).toBe(503);
+      expect(outcome.body.kind).toBe("result_fetch_failed");
+      expect(mockPrisma.inpaintRequest.update).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
@@ -231,6 +282,7 @@ describe("parseInpaintWebhookBody", () => {
       providerJobId: JOB_ID,
       status: "COMPLETED",
       output: { image: { url: CDN_URL } },
+      responseUrl: null,
     });
   });
 

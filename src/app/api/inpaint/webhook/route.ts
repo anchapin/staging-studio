@@ -21,12 +21,14 @@ interface InpaintWebhookBody {
   status?: string;
   request_id?: string;
   id?: string;
+  response_url?: string;
   payload?: {
     request_id?: string;
     id?: string;
     status?: string;
     output?: unknown;
     error?: unknown;
+    response_url?: string;
   };
   output?: unknown;
   error?: unknown;
@@ -44,6 +46,7 @@ export function parseInpaintWebhookBody(body: InpaintWebhookBody): {
   providerJobId: string;
   status: string;
   output: unknown;
+  responseUrl: string | null;
 } | null {
   const payload = body.payload ?? body;
   const providerJobId =
@@ -57,6 +60,7 @@ export function parseInpaintWebhookBody(body: InpaintWebhookBody): {
     providerJobId,
     status: typeof status === "string" ? status : "",
     output: payload.output ?? body.output ?? null,
+    responseUrl: payload.response_url ?? body.response_url ?? null,
   };
 }
 
@@ -121,6 +125,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         return NextResponse.json({ ok: false, kind: "not_found" });
       case "provider_error":
         return NextResponse.json({ ok: true, kind: "provider_error" });
+      case "in_progress":
+        // Mid-flight fal status: accepted, nothing to persist.
+        return NextResponse.json({ ok: true, kind: "in_progress" });
+      case "result_fetch_failed":
+        // fal's response_url was unfetchable; the result is not
+        // durably recorded, so 503 asks the provider to redeliver.
+        return NextResponse.json(
+          { error: "Result fetch failed", kind: "result_fetch_failed" },
+          { status: 503 }
+        );
       case "persistence_failed":
       case "write_failed":
         // 503: the durable write did not land, so ask the provider
