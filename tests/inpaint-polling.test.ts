@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   classifyStatusResponse,
+  InpaintPollError,
   pollInpaintStatus,
   type FetchInpaintStatus,
   type InpaintStatusResponse,
@@ -215,5 +216,84 @@ describe("pollInpaintStatus completion result", () => {
       imageUrl: "https://fal.media/flux/tmp/expiring.png",
       persisted: false,
     });
+  });
+});
+
+// Issue #1120: the loop's wall-clock cap (maxWaitMs) and its abort contract
+// were enforced by pollInpaintStatus but never pinned. These tests hold the
+// shipped contract: the cap fires even with attempts remaining, an unmount
+// abort interrupts an in-flight backoff wait instead of riding it out, and a
+// pre-aborted signal never reaches the endpoint.
+describe("pollInpaintStatus wall-clock cap and abort contract (issue #1120)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("throws timeout once maxWaitMs passes even with attempts remaining", async () => {
+    vi.useFakeTimers();
+    const fetchStatus = vi.fn().mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      body: { status: "IN_PROGRESS" },
+    });
+
+    await expect(
+      pollInpaintStatus(fetchStatus as unknown as FetchInpaintStatus, "req-1", {
+        maxWaitMs: 100,
+        maxAttempts: 60,
+        // Advances the faked clock instead of sleeping, so the wall-clock
+        // check on the next iteration deterministically trips.
+        sleep: async () => {
+          vi.advanceTimersByTime(1000);
+        },
+      })
+    ).rejects.toMatchObject({ name: "InpaintPollError", reason: "timeout" });
+
+    // The cap is checked before the next attempt is burned.
+    expect(fetchStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("an abort during the backoff wait rejects promptly via the default sleep", async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const fetchStatus = vi.fn().mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      body: { status: "IN_PROGRESS" },
+    });
+    // No injected sleep: exercises the production abortable sleep.
+    const pending = pollInpaintStatus(
+      fetchStatus as unknown as FetchInpaintStatus,
+      "req-1",
+      { signal: controller.signal, maxAttempts: 10 }
+    ).catch((e) => e);
+
+    // First fetch resolves and registers the 1s abortable sleep; half of
+    // that wait elapses before the unmount abort fires.
+    await vi.advanceTimersByTimeAsync(500);
+    controller.abort();
+    const err = await pending;
+
+    expect(err).toBeInstanceOf(InpaintPollError);
+    expect(err.reason).toBe("aborted");
+    expect(fetchStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("an already-aborted signal never reaches the endpoint", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const fetchStatus = vi.fn().mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      body: { status: "IN_PROGRESS" },
+    });
+
+    await expect(
+      pollInpaintStatus(fetchStatus as unknown as FetchInpaintStatus, "req-1", {
+        signal: controller.signal,
+      })
+    ).rejects.toMatchObject({ name: "InpaintPollError", reason: "aborted" });
+
+    expect(fetchStatus).not.toHaveBeenCalled();
   });
 });
