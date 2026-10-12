@@ -24,6 +24,13 @@
  * - Forgery requires the secret (HMAC-SHA256 over the exact payload text).
  * - Tokens expire (embedded `exp`, default 5 minutes) — `verify` rejects
  *   expired tokens and never throws on malformed input.
+ * Revalidation contract (issue #1225): tokens control WHO can see the page,
+ * not whether the page is fresh. Every server action that mutates a
+ * lookbook-rendered field must revalidate `/preview/{projectId}` alongside
+ * its dashboard path; that contract is pinned statically by
+ * tests/revalidate-preview.test.ts and backed by `force-dynamic` on the
+ * preview page itself.
+ *
  * - Tokens are scoped: `verify` returns the signed projectId; callers
  *   (the preview page, via src/lib/preview-access.ts) MUST compare it to
  *   the URL's own projectId, so a token minted for project A cannot

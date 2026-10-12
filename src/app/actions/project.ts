@@ -61,6 +61,7 @@ export async function saveProjectMetadata(
       data: parsed.data,
     });
     revalidatePath(`/projects/${projectId}`);
+    revalidatePath(`/preview/${projectId}`);
     return { success: true };
   } catch (error) {
     console.error("Failed to save project metadata:", error);
@@ -144,6 +145,7 @@ export async function saveProjectSignature(
 
     revalidatePath(`/projects/${projectId}`);
     revalidatePath(`/projects/${projectId}/lookbook`);
+    revalidatePath(`/preview/${projectId}`);
     return { success: true };
   } catch (error) {
     console.error("Failed to save project signature:", error);

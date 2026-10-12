@@ -70,6 +70,7 @@ export async function deleteRoom(
   try {
     await prisma.room.delete({ where: { id: roomId } });
     revalidatePath(`/projects/${room.projectId}/rooms`);
+    revalidatePath(`/preview/${room.projectId}`);
     return { success: true };
   } catch (err) {
     console.error("[deleteRoom]", err);
