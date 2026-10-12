@@ -218,9 +218,18 @@ describe("GET /api/inpaint/[requestId]/status — COMPLETED result-endpoint fail
     // upload retry (e.g. after Supabase is restored) can still
     // complete it. The route attempts the update but tolerates a
     // DB failure (logs it) — the response is the same either way.
+    // Issue #1143: the failure write also memoizes the fal result URL
+    // and seeds the attempt bookkeeping (attempt 1 is this upload), so
+    // the retry path never re-fetches client.result.
     expect(update).toHaveBeenCalledWith({
       where: { id: REQUEST_ID },
-      data: { status: "PERSISTENCE_FAILED", resultUrl: null },
+      data: {
+        status: "PERSISTENCE_FAILED",
+        resultUrl: null,
+        falResultUrl: FAL_IMAGE_URL,
+        persistenceAttempts: { increment: 1 },
+        lastPersistenceAttemptAt: expect.any(Date),
+      },
     });
   });
 });
@@ -353,6 +362,9 @@ describe("GET /api/inpaint/[requestId]/status — PERSISTENCE_FAILED give-up bou
     findUnique.mockResolvedValue({
       status: "PERSISTENCE_FAILED",
       resultUrl: null,
+      falResultUrl: null, // legacy row: no memoized URL yet
+      persistenceAttempts: 0,
+      lastPersistenceAttemptAt: null,
       updatedAt: oldUpdatedAt,
       room: { project: { userId: "user-bound" } },
     });
@@ -376,8 +388,14 @@ describe("GET /api/inpaint/[requestId]/status — PERSISTENCE_FAILED give-up bou
       persisted: false,
     });
     // The row stays in PERSISTENCE_FAILED so a future upload retry
-    // (e.g. after Supabase is restored) can still complete it.
-    expect(update).not.toHaveBeenCalled();
+    // (e.g. after Supabase is restored) can still complete it. Issue
+    // #1143: the fetch result IS memoized before the give-up return
+    // (one best-effort write), so later polls skip client.result; no
+    // ERROR flip and no upload happen on this path.
+    expect(update).toHaveBeenCalledWith({
+      where: { id: "req-bound" },
+      data: { falResultUrl: FAL_IMAGE_URL },
+    });
   });
 });
 

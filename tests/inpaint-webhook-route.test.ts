@@ -188,9 +188,17 @@ describe("POST /api/inpaint/webhook", () => {
     const response = await POST(await await signedRequest(falDelivery({ image: { url: CDN_URL } })));
     const outcome = await readOutcome(response);
     expect(outcome.status).toBe(503);
+    // Issue #1143: the webhook's failure write also memoizes the URL
+    // and seeds the attempt bookkeeping.
     expect(mockPrisma.inpaintRequest.update).toHaveBeenCalledWith({
       where: { id: ROW_ID },
-      data: { status: "PERSISTENCE_FAILED", resultUrl: null },
+      data: {
+        status: "PERSISTENCE_FAILED",
+        resultUrl: null,
+        falResultUrl: null, // persistFalImage failed with imageUrl: null, so nothing to memoize
+        persistenceAttempts: { increment: 1 },
+        lastPersistenceAttemptAt: expect.any(Date),
+      },
     });
   });
 

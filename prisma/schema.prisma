@@ -107,6 +107,9 @@ model InpaintRequest {
                        // result-persistence semantics as the original submit.
   status      String   // mirrors fal queue status: IN_QUEUE | IN_PROGRESS | COMPLETED | ERROR | PERSISTENCE_FAILED
   resultUrl   String?  // filled when status is COMPLETED
+  falResultUrl String? // issue #1143: the provider's own result URL, memoized the moment it is known so a PERSISTENCE_FAILED retry never re-fetches it
+  persistenceAttempts Int @default(0) // issue #1143: provider-touching persistence attempts since entering PERSISTENCE_FAILED; caps the retry loop
+  lastPersistenceAttemptAt DateTime? // issue #1143: gates the exponential backoff between persistence attempts
   providerJobId String? @unique // issue #1221: the provider's own job id (fal request_id /
                        // Replicate prediction id). Lets the webhook delivery path
                        // match a callback to this row even when the URL path was
