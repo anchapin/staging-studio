@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { PREVIEW_TOKEN_TTL_SECONDS } from "@/lib/preview-token";
 
 // Issue #1225: every server action that mutates lookbook-rendered data must
 // revalidate the cookie-less print page /preview/{projectId} alongside its
 // dashboard path. This pins the contract statically: any file under
 // src/app/actions/ that revalidates a /projects/... path must also revalidate
-// a /preview/... path.
+// a /preview/... path. PREVIEW_TOKEN_TTL_SECONDS is imported so the file is
+// anchored to the real print-page module the contract protects.
 
 const ACTIONS_DIR = join(__dirname, "..", "src", "app", "actions");
 

@@ -64,9 +64,11 @@ describe("restoreInpaintVersion — revalidation target (issue #701)", () => {
       where: { id: ROOM_ID },
       data: { afterImageUrl: RESULT_URL },
     });
-    expect(revalidate).toHaveBeenCalledTimes(2);
+    expect(revalidate).toHaveBeenCalledTimes(3);
     expect(revalidate).toHaveBeenNthCalledWith(1, `/projects/${PROJECT_ID}`);
     expect(revalidate).toHaveBeenNthCalledWith(2, `/projects/${PROJECT_ID}/lookbook`);
+    // Issue #1225: the cookie-less print page is invalidated alongside the dashboard paths.
+    expect(revalidate).toHaveBeenNthCalledWith(3, `/preview/${PROJECT_ID}`);
     // The old bug revalidated /projects/{userId} — a route that does not exist.
     expect(revalidate).not.toHaveBeenCalledWith(`/projects/${USER_ID}`);
   });
