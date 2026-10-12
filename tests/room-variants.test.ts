@@ -70,15 +70,35 @@ describe("room-variants actions", () => {
 
     it("returns touch-up counts for valid room", async () => {
       vi.mocked(prisma.inpaintRequest.findMany).mockResolvedValue([
-        { id: "1", status: "succeeded", requestedAt: new Date() },
-        { id: "2", status: "succeeded", requestedAt: new Date() },
+        { id: "1", status: "COMPLETED", variantSlot: 0, sourceSlot: 0 },
+        { id: "2", status: "IN_PROGRESS", variantSlot: 1, sourceSlot: 1 },
       ] as never);
       // Override the beforeEach default (returns {0,0}) to match the expected counts
-      vi.mocked(mockTouchUpCountsBySlot).mockReturnValue({ 0: 2, 1: 2 });
+      vi.mocked(mockTouchUpCountsBySlot).mockReturnValue({ 0: 1, 1: 1 });
       const result = await getVariantTouchUpCounts(MOCK_ROOM_ID);
 
       expect(result.success).toBe(true);
-      expect(result.counts).toEqual({ 0: 2, 1: 2 });
+      expect(result.counts).toEqual({ 0: 1, 1: 1 });
+    });
+
+    it("exercises the findMany where clause (issue #1133)", async () => {
+      vi.mocked(prisma.inpaintRequest.findMany).mockResolvedValue([]);
+
+      await getVariantTouchUpCounts(MOCK_ROOM_ID);
+
+      // Issue #1133: the old query filtered on status "succeeded", a value
+      // nothing ever writes, so it always matched zero rows. Assert the
+      // query only uses statuses that are actually written and scopes to
+      // the authenticated user's room.
+      expect(prisma.inpaintRequest.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            roomId: MOCK_ROOM_ID,
+            status: { in: ["IN_QUEUE", "IN_PROGRESS", "COMPLETED"] },
+            room: { project: { userId: MOCK_USER_ID } },
+          },
+        })
+      );
     });
   });
 
