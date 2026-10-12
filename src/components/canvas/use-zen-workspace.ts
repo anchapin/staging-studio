@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+
+import {
+  getBrowserLocalStorage,
+  readZenModePreference,
+  writeZenModePreference,
+} from "@/lib/zen-preference";
+
 import { type MaskTool } from "./inpaint-mask-canvas";
 import { type StudioTool } from "./BrushToolRail";
 
@@ -37,8 +44,23 @@ export interface UseZenWorkspaceResult {
  * the mask canvas and the floating tool rail.
  */
 export function useZenWorkspace(onSelectRegionsTool: () => void): UseZenWorkspaceResult {
-  // Issue #560: Zen Mode state — hides all chrome for a distraction-free workspace.
-  const [zenMode, setZenMode] = useState(false);
+  // Issue #560/#1191: Zen Mode state — hides all chrome for a
+  // distraction-free workspace. Initialized from the per-browser
+  // stored choice (#1191); no stored choice keeps the historical
+  // `false` default, so existing users see no change until the
+  // default flip lands (gated on the demo, #1175).
+  const [zenMode, setZenModeState] = useState(
+    () => readZenModePreference(getBrowserLocalStorage()) ?? false
+  );
+  useEffect(() => {
+    writeZenModePreference(getBrowserLocalStorage(), zenMode);
+  }, [zenMode]);
+  const setZenMode = useCallback<React.Dispatch<React.SetStateAction<boolean>>>(
+    (update) => {
+      setZenModeState(update);
+    },
+    []
+  );
   // Issue #560: dark background toggle for eye comfort in Zen Mode.
   const [zenDarkBackground] = useState(false);
 
