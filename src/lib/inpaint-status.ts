@@ -414,21 +414,16 @@ export async function pollFalStatus(requestId: string): Promise<InpaintStatusRes
   // and (issue #1143) with memoized economics so each retry does not
   // re-download and re-upload the byte-identical result.
   if (inpaintRequest.status === "PERSISTENCE_FAILED") {
-    // Issue #1143: backoff gate. A row that just attempted persistence
-    // waits before the provider is touched again; the gate reads only
-    // row fields, so a poll inside the window costs no provider calls.
+    // Issue #1143: attempt cap FIRST (review finding 1): it reads only
+    // row fields and makes no provider call, so a capped row terminates
+    // the moment it is noticed instead of idling out the backoff. Once
+    // MAX_PERSISTENCE_ATTEMPTS tries have failed, stop touching the
+    // provider entirely and hand over via the #687 terminal shape
+    // (`completed` / `persisted: false`). The row STAYS
+    // PERSISTENCE_FAILED: #687's manual-recovery intent (Supabase
+    // restored -> the job can still complete) is preserved; terminal
+    // here means "no more provider traffic", not ERROR.
     const attempts = inpaintRequest.persistenceAttempts;
-    const lastAttemptAt = inpaintRequest.lastPersistenceAttemptAt?.getTime() ?? null;
-    if (lastAttemptAt !== null && Date.now() - lastAttemptAt < persistenceBackoffMs(attempts)) {
-      return { status: "retryable", imageUrl: null, persisted: false };
-    }
-
-    // Issue #1143: attempt cap. Once MAX_PERSISTENCE_ATTEMPTS tries
-    // have failed, stop touching the provider entirely and hand over
-    // via the #687 terminal shape (`completed` / `persisted: false`).
-    // The row STAYS PERSISTENCE_FAILED: #687's manual-recovery intent
-    // (Supabase restored -> the job can still complete) is preserved;
-    // terminal here means "no more provider traffic", not ERROR.
     if (attempts >= MAX_PERSISTENCE_ATTEMPTS && inpaintRequest.falResultUrl) {
       return {
         status: "completed",
@@ -439,6 +434,14 @@ export async function pollFalStatus(requestId: string): Promise<InpaintStatusRes
     // A capped row with no memoized URL (memo writes also failing) falls
     // through: it memoizes once below and the #687 give-up window stays
     // the final bound, so no path loops unbounded.
+
+    // Issue #1143: backoff gate. A row that just attempted persistence
+    // waits before the provider is touched again; the gate reads only
+    // row fields, so a poll inside the window costs no provider calls.
+    const lastAttemptAt = inpaintRequest.lastPersistenceAttemptAt?.getTime() ?? null;
+    if (lastAttemptAt !== null && Date.now() - lastAttemptAt < persistenceBackoffMs(attempts)) {
+      return { status: "retryable", imageUrl: null, persisted: false };
+    }
 
     // Issue #1143: memoized result URL. Use the stored provider URL
     // when present; only a legacy row (written before this column)
