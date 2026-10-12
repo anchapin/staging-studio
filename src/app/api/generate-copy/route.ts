@@ -1,7 +1,13 @@
 import { generateObject } from "ai";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { aiModel, assertOpenAIConfigured, generateWithCircuitBreaker } from "@/lib/ai";
+import {
+  FALLBACK_MODEL_ID,
+  aiModel,
+  assertOpenAIConfigured,
+  generateWithCircuitBreaker,
+  generateWithFailover,
+} from "@/lib/ai";
 import { prisma } from "@/lib/prisma";
 import {
   getAuthedPrismaUser,
@@ -188,10 +194,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { object: copy, finishReason, usage } = await generateWithCircuitBreaker(async () =>
-      generateObject({
-        model: aiModel,
-        schema: CopyOutputSchema,
+    // Issue #1224: the generation call runs through the failover wrapper —
+    // a vendor-availability failure on the primary (rate limit, timeout,
+    // network) gets exactly one attempt on the fallback model. The quality
+    // gate below deliberately stays on the primary via the breaker.
+    const { result: generation, modelId, failedOver } = await generateWithFailover(
+      (model) =>
+        generateObject({
+          model,
+          schema: CopyOutputSchema,
         prompt: buildCopyPrompt({
           roomName: room.name,
           aesthetic: room.project.stagingAesthetic,
@@ -225,6 +236,7 @@ export async function POST(request: NextRequest) {
         },
       })
     );
+    const { object: copy, finishReason, usage } = generation;
 
     // Count the billable generation only after the provider call resolves:
     // a failed/timeout attempt costs at most a few rejected tokens and does
@@ -313,12 +325,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Issue #1224: `model` names the tier that produced the copy (primary
+    // or fallback) so per-model spend can be attributed from the response;
+    // `usage` is that model's own usage object.
+    if (failedOver) {
+      console.warn(
+        JSON.stringify({
+          event: "generate_copy_failover",
+          roomId,
+          primaryModel: "gpt-4o-mini",
+          fallbackModel: FALLBACK_MODEL_ID,
+        })
+      );
+    }
     return NextResponse.json(
       {
         success: true,
         data: generatedCopy,
         finishReason,
         usage,
+        model: modelId,
         qualityWarnings,
       },
       { status: 200 }
