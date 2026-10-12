@@ -110,9 +110,10 @@ export async function createRoomsBatch(
   // client's own compression already targets the same ceiling, so this
   // only fires on raw oversized PUTs). Unreadable sizes pass.
   const supabase = await createSupabaseRequestClient();
-  for (const entry of parsed.data.entries) {
-    const storagePath = extractStoragePathFromUrl(entry.beforeImageUrl);
-    if (!storagePath) continue;
+  const uploadedPaths = parsed.data.entries
+    .map((entry) => extractStoragePathFromUrl(entry.beforeImageUrl))
+    .filter((p): p is string => Boolean(p));
+  for (const storagePath of uploadedPaths) {
     const uploadedSize = await readUploadedObjectSize(
       supabase as never,
       ROOM_PHOTOS_BUCKET,
@@ -128,7 +129,11 @@ export async function createRoomsBatch(
           max: MAX_ROOM_PHOTO_BYTES,
         })
       );
-      await removeStorageObjects([storagePath]);
+      // The batch will never commit, so none of the uploaded objects
+      // are referenced anymore. Reclaim all of them, not just the
+      // oversized one: a client retry mints fresh random paths, so
+      // these would otherwise be unrecoverable orphans (issue #1145).
+      await removeStorageObjects(uploadedPaths);
       return {
         success: false,
         error:

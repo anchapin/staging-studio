@@ -228,7 +228,7 @@ export async function confirmRoomPhotoUpload(
         max: MAX_ROOM_PHOTO_BYTES,
       })
     );
-    await supabase.storage.from("room-photos").remove([storagePath]);
+    await supabase.storage.from(ROOM_PHOTOS_BUCKET).remove([storagePath]);
     return failure(
       "Uploaded image is too large. Please use an image under 10 MB."
     );
