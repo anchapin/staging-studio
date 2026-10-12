@@ -32,7 +32,8 @@ The login page (`/login`) offers both password sign-in (`signInWithPassword`) an
 
 1. **Enable Email auth** — Authentication → Sign In / Providers → **Email**: enabled (it is by default). This single provider covers **both** methods: password sign-in and magic link (OTP). While in Authentication settings, leave **Allow new users to sign up** enabled (also on by default) — there is no separate signup page in the app; the first magic-link sign-in with a new email *creates* the account.
 2. **Set the Site URL** — Authentication → URL Configuration → **Site URL**: `http://localhost:3000`.
-3. **Add the callback to Redirect URLs** — Authentication → URL Configuration → **Redirect URLs**, add:
+3. **Keep "Confirm email" ON** — Authentication → Sign In / Providers → **Email**: leave **Confirm email** enabled (default). The app rejects any session whose email is unconfirmed (`src/lib/api-auth.ts`), so with it off, sign-ins still work but the unconfirmed email never resolves to a `User` row.
+4. **Add the callback to Redirect URLs** — Authentication → URL Configuration → **Redirect URLs**, add:
    - `http://localhost:3000/auth/callback`
 
    The login form sends `emailRedirectTo: <origin>/auth/callback`, and `/auth/callback` exchanges the code for a session and lands the user on `/dashboard`. Without this entry, Supabase refuses the redirect and sign-in dead-ends.
