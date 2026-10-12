@@ -246,11 +246,13 @@ async function main() {
     }
   }
   const activeSlotIds = new Set(slots.map((s) => s.id));
-  const slotHasSuccess = new Set<string>();
+  // Track successful (slot, case) pairs so we only fire what's missing.
+  const completedPairs = new Set<string>();
   for (const r of existingResults) {
-    if (r.ok && activeSlotIds.has(String(r.slot))) {
-      slotHasSuccess.add(String(r.slot));
-    }
+    const id = String(r.slot);
+    const cs = String(r.case);
+    if (!r.ok || !activeSlotIds.has(id)) continue;
+    completedPairs.add(`${id}::${cs}`);
   }
   // Keep rows that are either (a) successful OR (b) for a slot not in the
   // current list (e.g. a slot that was removed from slots.json). Drop rows
@@ -262,9 +264,11 @@ async function main() {
     if (r.ok) return true; // success, keep
     return false; // failed and being retried, drop
   });
-  const newSlots = slots.filter((s) => !slotHasSuccess.has(s.id));
+  const newSlots = slots.filter((s) =>
+    CASES.some((cs) => !completedPairs.has(`${s.id}::${cs}`)),
+  );
   if (newSlots.length === 0) {
-    console.log("all slots already have successful results; nothing to do");
+    console.log("all slots already have successful results for every case; nothing to do");
     return;
   }
 
@@ -283,6 +287,7 @@ async function main() {
   const results: Array<Record<string, unknown>> = [];
   for (const slot of newSlots) {
     for (const cs of CASES) {
+      if (completedPairs.has(`${slot.id}::${cs}`)) continue; // already have a successful row
       const caseInput = readCase(cs);
       const started = Date.now();
       try {

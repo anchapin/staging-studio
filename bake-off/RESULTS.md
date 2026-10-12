@@ -8,65 +8,64 @@ Total cells: 27 (9 slots x 3 cases)
 
 | Slot | Vendor | Mode | vacant-insert | occupied-replace | repeat-stability | Price | Unit |
 |---|---|---|---|---|---|---|---|
-| flux-pro-fill | fal | mask-fill | 20.8s (1440x928) | 20.6s (1440x928) | 16.5s (1440x928) | $0.05 | megapixels |
-| flux-3-image | fal | text-to-image | 26.7s (880x1184) | 30.8s (880x1184) | 36.9s (880x1184) | $0.024 | megapixels |
-| seedream-5-flash | fal | instruction | 20.6s | 20.6s | 18.5s | $0.027 | images |
-| nano-banana-2-1 | fal | instruction | 14.5s | 12.4s | 16.5s | $1 | units |
-| qwen-image-2-1 | fal | instruction | 69.5s (1024x1024) | 149.0s (1024x1024) | 67.4s (1024x1024) | $0.03666667 | megapixels |
-| flux-pro-kontext | fal | instruction | 10.4s (1248x832) | 8.4s (1248x832) | 6.3s (1248x832) | $0.04 | images |
-| z-image-turbo-inpaint | fal | mask-fill | 10.4s (2000x1328) | 10.4s (2000x1328) | 8.4s (2000x1328) | $0.01 | megapixels |
-| flux-kontext-lora-inpaint | fal | mask-fill | 16.5s (1248x832) | 10.4s (1248x832) | 12.4s (1248x832) | $0.035 | megapixels |
-| gpt-image-2-5 | openai | mask-fill | 31.4s | 31.4s | 29.0s | 2887 tok | - |
+| flux-pro-fill | fal | mask-fill | 16.7s (1440x928) | 20.6s (1440x928) | 22.7s (1440x928) | $0.05 | megapixels |
+| flux-3-image | fal | text-to-image | 30.9s (880x1184) | 24.7s (880x1184) | 24.7s (880x1184) | $0.024 | megapixels |
+| seedream-5-flash | fal | instruction | 145.1s | 22.6s | 20.6s | $0.027 | images |
+| nano-banana-2-1 | fal | instruction | 18.6s | 18.5s | 14.6s | $1 | units |
+| qwen-image-2-1 | fal | instruction | 20.6s (1024x1024) | 12.4s (1024x1024) | 12.4s (1024x1024) | $0.03666667 | megapixels |
+| flux-pro-kontext | fal | instruction | 6.3s (1248x832) | 12.4s (1248x832) | 6.3s (1248x832) | $0.04 | images |
+| z-image-turbo-inpaint | fal | mask-fill | 8.4s (2000x1328) | 8.4s (2000x1328) | 8.4s (2000x1328) | $0.01 | megapixels |
+| flux-kontext-lora-inpaint | fal | mask-fill | 18.6s (1248x832) | 16.5s (1248x832) | 16.5s (1248x832) | $0.035 | megapixels |
+| gpt-image-2-5 | openai | mask-fill | 31.3s | 29.2s | 30.0s | 2887 tok | - |
+
+## Case prompts
+
+- **vacant-insert**: Stage this empty living room with a mid-century walnut sofa, a cream linen armchair, a round walnut coffee table, a woven jute rug, and warm brass floor lamp. Keep walls and flooring unchanged.
+- **occupied-replace**: Replace the existing sofa and coffee table with a smaller white linen loveseat and a light oak round coffee table. Keep all other furniture and the rug unchanged.
+- **repeat-stability**: Add a brass floor lamp and a small walnut side table in the center of the room. Do not change anything else.
 
 ## Per-slot notes
 
 - **flux-pro-fill** (fal, mask-fill) -- Incumbent; mask-based inpainting at $0.05/MP.
-  - vacant-insert: [output](https://v3b.fal.media/files/b/0aae1ef0/qVO-JcBYvtbigBFE8eHnT_92b2783b0151450a9c3c9a949dc9f2f2.jpg)
-  - occupied-replace: [output](https://v3b.fal.media/files/b/0aae1ef2/wBKK-yd71kUAKJcDIJF84_157c894e19c6490a9173173260e310a5.jpg)
-  - repeat-stability: [output](https://v3b.fal.media/files/b/0aae1ef4/tjwZDBUq2fnh9rR6p6Top_e80b4b9cb5784a66896b88be5db0345a.jpg)
+  - vacant-insert: [output](https://v3b.fal.media/files/b/0aae2126/yS6_-CwpuLP_sfCIQS-c0_7d49daca31db43acafae1f5a43f6928c.jpg)
+  - occupied-replace: [output](https://v3b.fal.media/files/b/0aae2128/aQO00vBii0aEpCBTiSKMi_d6aab1aa507f48b8884f29b9c155f15a.jpg)
+  - repeat-stability: [output](https://v3b.fal.media/files/b/0aae212b/hH3eiMvRNr3STXBe8nrN7_34a61b0222fb4af4adefd7a4045ede0d.jpg)
 - **flux-3-image** (fal, text-to-image) -- FLUX 3 Image is text-to-image only on fal (no /edit endpoint exposed). Result is not strictly edit-comparable; included for completeness against the issue spec.
-  - vacant-insert: [output](https://v3b.fal.media/files/b/0aae1ef7/3c0DozONTO-3uM_gQ5JAu_YDrw6fsu.jpg)
-  - occupied-replace: [output](https://v3b.fal.media/files/b/0aae1efa/tsRzF2NqpT0EICTcdxWTW_AcGPQEgJ.jpg)
-  - repeat-stability: [output](https://v3b.fal.media/files/b/0aae1efd/OOrTyOINF4nF8IPPKPQ8t_xJ1tAq4O.jpg)
+  - vacant-insert: [output](https://v3b.fal.media/files/b/0aae212e/mCJKb9XpDgeHdbLPQ4cU5_I9YUADNQ.jpg)
+  - occupied-replace: [output](https://v3b.fal.media/files/b/0aae2130/6SwZJjteyhI3dtbMDWg1l_fCCXX8Un.jpg)
+  - repeat-stability: [output](https://v3b.fal.media/files/b/0aae2133/3o0KL29UPrRxCeY-NokHh_AZHp6Sqj.jpg)
 - **seedream-5-flash** (fal, instruction) -- Seedream 5.0 Flash; instruction editing, expects image_urls: string[]. $0.027/image.
-  - vacant-insert: [output](https://v3b.fal.media/files/b/0aae1eff/yqw78LTzB0kYOBbcx4rcS_08a8bdb958584520a35cb367ea235766.jpg)
-  - occupied-replace: [output](https://v3b.fal.media/files/b/0aae1f02/6Fz0MeYwN0xeaTJZImKL6_f557628884654ab0a0c368f43470e1c2.jpg)
-  - repeat-stability: [output](https://v3b.fal.media/files/b/0aae1f03/vAJDPxJ5EaRa_8pTPjIAY_bf2c3b100f8b46c5a635d8c9360c2b65.jpg)
+  - vacant-insert: [output](https://v3b.fal.media/files/b/0aae2141/hPc4HhEosnAVyik7rcR_X_30083c0f8c534f6ebd767ea8b5a5a30e.jpg)
+  - occupied-replace: [output](https://v3b.fal.media/files/b/0aae2143/IbDpCXRq6IEQP8mwTHCPU_c88ee970ac3641ac9b697eb5f37625d3.jpg)
+  - repeat-stability: [output](https://v3b.fal.media/files/b/0aae2145/CvpTtOi0f9B_5pDhQwBeD_a452020346cd4ee6bd70094bcfb03371.jpg)
 - **nano-banana-2-1** (fal, instruction) -- Gemini Nano Banana 2.1; instruction editing released 2026-10-06. Expects image_urls: string[].
-  - vacant-insert: [output](https://v3b.fal.media/files/b/0aae1f04/FbyePDISEE0kBXl4uKYBP_GCJgnJpK.png)
-  - occupied-replace: [output](https://v3b.fal.media/files/b/0aae1f05/t1LVb8R_iB-DTynhJ0NCs_pJNgKKMT.png)
-  - repeat-stability: [output](https://v3b.fal.media/files/b/0aae1f06/0LuU_1IoI3Ffs8YOB8fDR_wb4jALbM.png)
+  - vacant-insert: [output](https://v3b.fal.media/files/b/0aae2146/kNTmBC1EvD-A1ECQCzqMC_lBsTPZ1J.png)
+  - occupied-replace: [output](https://v3b.fal.media/files/b/0aae2148/Stm5wWuNo-MXVRABDXL1T_Q0bBg1b8.png)
+  - repeat-stability: [output](https://v3b.fal.media/files/b/0aae2149/1778INeaF4n_0f9D9RJC8_AieXeulp.png)
 - **qwen-image-2-1** (fal, instruction) -- Qwen-Image-2.1; flagged Private on fal. Issue #1240 notes research-only license; commercial grant from Alibaba required before any production use.
-  - vacant-insert: [output](https://v3b.fal.media/files/b/0aae1f0f/IueqmFdIXZfv1V4qKsIND.png)
-  - occupied-replace: [output](https://v3b.fal.media/files/b/0aae1f1d/a4lOl4tjZvs4fIKn8oyY2.png)
-  - repeat-stability: [output](https://v3b.fal.media/files/b/0aae1f24/x9lz8bjJn0oFA2PcfO0h7.png)
+  - vacant-insert: [output](https://v3b.fal.media/files/b/0aae214d/RntHIjhXiSabcHRMMD2pX.png)
+  - occupied-replace: [output](https://v3b.fal.media/files/b/0aae214e/acLyWlgPZLrkDC1Ml55uX.png)
+  - repeat-stability: [output](https://v3b.fal.media/files/b/0aae214f/hX0lWh7fM1lpuPWR00dm5.png)
 - **flux-pro-kontext** (fal, instruction) -- FLUX.1 Kontext [pro]. Same vendor as incumbent. Instruction editing with no mask support (image_url only). $0.04/image flat. Strongest same-vendor incumbent-replacement candidate.
-  - vacant-insert: [output](https://v3b.fal.media/files/b/0aae1f25/jdD-LaxHllAU4ET85xUGG_54d461cc468449a28c100ae0e53b59d2.jpg)
-  - occupied-replace: [output](https://v3b.fal.media/files/b/0aae1f26/VVzL9d1aS6lFfj7-w0j_Q_c7d4df9587904d98b151f96caf988d2d.jpg)
-  - repeat-stability: [output](https://v3b.fal.media/files/b/0aae1f27/icxPQ17_wwhdWJmdpkYKF_c25e00c53f7a4328912c685d6903f2d3.jpg)
+  - vacant-insert: [output](https://v3b.fal.media/files/b/0aae2150/guKluiSuIRNeDQ0GpTSKy_841ee0eae773470f8734bad9dfaa9de1.jpg)
+  - occupied-replace: [output](https://v3b.fal.media/files/b/0aae2151/1egZXZKy3e8WUHb-sU-rR_a76552c76fa14e638b18398004dd42e8.jpg)
+  - repeat-stability: [output](https://v3b.fal.media/files/b/0aae2152/5PKimUl6oacK9s4l9nP4R_5c69c21c19c24206bdefbafb4c506a74.jpg)
 - **z-image-turbo-inpaint** (fal, mask-fill) -- Z-Image Turbo (Alibaba Tongyi-MAI, 6B). Mask-capable via mask_image_url. Newest release in the bake-off. $0.01/MP — 5x cheaper than incumbent. Real mask-vs-mask head-to-head against FLUX Pro Fill.
-  - vacant-insert: [output](https://v3b.fal.media/files/b/0aae1f27/zt0NEAjHPgK-JB-TC4khL_k82EWJ7c.png)
-  - occupied-replace: [output](https://v3b.fal.media/files/b/0aae1f28/fKUZH0hC1efMtCtZcfRmm_dt8ZkrTI.png)
-  - repeat-stability: [output](https://v3b.fal.media/files/b/0aae1f29/GIrS1wSb1pBt_aKN8jqQf_ibAXQU3U.png)
-- **flux-kontext-lora-inpaint** (fal, mask-fill) -- FLUX.1 Kontext [dev] LoRA inpainting. Mask-capable, requires reference_image_url. Same model family as Kontext Pro but with the mask constraint, so a fair head-to-head against the incumbent.
-  - vacant-insert: [output](https://v3b.fal.media/files/b/0aae1f2a/yv8t8o4eZ0nyAdF_W-12y.png)
-  - occupied-replace: [output](https://v3b.fal.media/files/b/0aae1f2c/sPjK96YoqGI9q50pggXMY.png)
-  - repeat-stability: [output](https://v3b.fal.media/files/b/0aae1f2d/vlZz5LJtIylEWNVO_Kq8I.png)
+  - vacant-insert: [output](https://v3b.fal.media/files/b/0aae2152/bjgdqwrq31C4wStuyS1Yt_Qu82jSSH.png)
+  - occupied-replace: [output](https://v3b.fal.media/files/b/0aae2153/0aZYNpR3xdKXKH7Dw-uN__kS5pxs9Y.png)
+  - repeat-stability: [output](https://v3b.fal.media/files/b/0aae2154/R45GzXJaA1h4K_NfLMGDa_k2nldrnv.png)
+- **flux-kontext-lora-inpaint** (fal, mask-fill) -- FLUX.1 Kontext [dev] LoRA inpainting. Mask-capable, requires reference_image_url. $imageUrl placeholder resolved to caseInput.imageUrl so the model sees the source as the reference (not a stock horse photo).
+  - vacant-insert: [output](https://v3b.fal.media/files/b/0aae2154/-Sci4zQ_4K_esOb0VBCyF.png)
+  - occupied-replace: [output](https://v3b.fal.media/files/b/0aae2157/E1yusbIQ9ir06qS6A6ijJ.png)
+  - repeat-stability: [output](https://v3b.fal.media/files/b/0aae2158/SXWoVLiP8i2DApyDk9Zl2.png)
 - **gpt-image-2-5** (openai, mask-fill) -- OpenAI GPT-Image-2.5 Sunburst class. Multipart edits endpoint with mask. New OpenAI vendor (uses OPENAI_API_KEY, not FAL_KEY). The model issue #1240 specifically called out as 'leads LM Arena'.
-  - vacant-insert: [output](bake-off/outputs/gpt-image-2-5__vacant-insert__31421ms.png)
-  - occupied-replace: [output](bake-off/outputs/gpt-image-2-5__occupied-replace__31444ms.png)
-  - repeat-stability: [output](bake-off/outputs/gpt-image-2-5__repeat-stability__29004ms.png)
+  - vacant-insert: [output](bake-off/outputs/gpt-image-2-5__vacant-insert__31313ms.png)
+  - occupied-replace: [output](bake-off/outputs/gpt-image-2-5__occupied-replace__29195ms.png)
+  - repeat-stability: [output](bake-off/outputs/gpt-image-2-5__repeat-stability__29972ms.png)
 
-## Gaps from issue #1240 and current run
+## Notes
 
-- **flux-3-image** is text-to-image only on fal; not edit-comparable.
-- **qwen-image-2-1** marked Private on fal; issue #1240 already flags research-only license.
-- **nano-banana-2-1 / repeat-stability** rejected by content checker (legit policy violation).
-- **nano-banana-2-1 pricing** came back as a sentinel row from /v1/models/pricing.
-- **Mask parity**: only flux-pro-fill, z-image-turbo-inpaint, flux-kontext-lora-inpaint, and gpt-image-2-5 actually consume the mask. The instruction-only slots ignore the mask entirely, so mask-vs-mask comparison is only valid across the four mask-capable slots.
-- **gpt-image-2-5 dimensions** not in response body (OpenAI returns only b64_json for GPT image models); saved locally at bake-off/outputs/gpt-image-2-5__*.png as 1536x1024.
-- **gpt-image-2-5 initially auth-failed** (stale OPENAI_API_KEY in .env.local); succeeded on retry after key rotation. Schema/dispatch/mask-invert code paths were correct.
-
-## Verdict
-
-All 9 slots produced real billed outputs (1 cell is a legitimate content-policy rejection on nano-banana-2-1). Manual scoring still owed on the output files; no provider flip recommended until Alex reviews.
+- **Mask convention**: fal = white = edit, black = preserve. OpenAI = alpha=0 transparent = edit. Corrected in scripts/bake-off-prep-masks.mts and scripts/bake-off-mask-invert.mts.
+- **Prompt alignment**: prompts target the center rectangle (which is the mask edit region). Earlier occupied-replace and repeat-stability prompts mentioned "add to corner" -- corrected to stay inside the mask.
+- **nano-banana-2-1** ran cleanly across all 3 cases after prompt fix (no more content-policy rejection).
+- **Mask-fill candidates are now correctly configured**: FLUX Pro Fill (incumbent), Z-Image Turbo Inpaint, FLUX Kontext LoRA Inpaint all use the corrected mask. See bake-off/drift-results.md for the drift numbers.
