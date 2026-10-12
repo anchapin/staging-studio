@@ -9,6 +9,10 @@ const mockGetAuthedPrismaUser = vi.hoisted(() => vi.fn());
 const mockRoomFindFirst = vi.hoisted(() => vi.fn());
 const mockInpaintRequestFindFirst = vi.hoisted(() => vi.fn());
 const mockDailyApiUsageFindUnique = vi.hoisted(() => vi.fn());
+// Issue #1123: the v1 inpaint status route now runs the Postgres-backed poll
+// limiter, which records through create/update on the first (allowed) poll.
+const mockDailyApiUsageCreate = vi.hoisted(() => vi.fn());
+const mockDailyApiUsageUpdate = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: mockGetAuthedPrismaUser,
@@ -18,7 +22,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     room: { findFirst: mockRoomFindFirst },
     inpaintRequest: { findFirst: mockInpaintRequestFindFirst },
-    dailyApiUsage: { findUnique: mockDailyApiUsageFindUnique },
+    dailyApiUsage: { findUnique: mockDailyApiUsageFindUnique, create: mockDailyApiUsageCreate, update: mockDailyApiUsageUpdate },
   },
 }));
 
@@ -55,7 +59,9 @@ beforeEach(() => {
   mockGetAuthedPrismaUser.mockResolvedValue({ id: USER_ID });
   mockRoomFindFirst.mockResolvedValue({ id: ROOM_ID });
   mockInpaintRequestFindFirst.mockResolvedValue({ id: "req-1" });
-  mockDailyApiUsageFindUnique.mockResolvedValue({ count: 0 });
+  mockDailyApiUsageFindUnique.mockResolvedValue({ count: 0, timestamps: [] });
+  mockDailyApiUsageCreate.mockResolvedValue({});
+  mockDailyApiUsageUpdate.mockResolvedValue({});
 });
 
 describe("v1/twin request parity (issue #1125)", () => {
