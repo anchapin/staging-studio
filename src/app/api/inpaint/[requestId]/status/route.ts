@@ -45,7 +45,7 @@ export async function GET(
       );
     }
 
-    const rateLimit = checkInpaintStatusRateLimit(user.id, requestId);
+    const rateLimit = await checkInpaintStatusRateLimit(user.id, requestId);
     if (!rateLimit.allowed) {
       return NextResponse.json(
         {

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { checkAndRecordRateLimit } from "@/lib/sliding-window-ratelimit";
 import { createSupabaseRequestClient } from "@/lib/supabase";
 import { decideInpaintPersistence } from "@/lib/inpaint-persistence";
 import { classifyIntegrationError } from "@/lib/error-classify";
@@ -17,16 +18,7 @@ import {
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
 
 export const INPAINT_STATUS_RATE_LIMIT = 10;
-const INPAINT_STATUS_RATE_WINDOW_MS = 60_000;
-
-type RateLimitEntry = { count: number; windowStart: number };
-
-const inpaintStatusRateLimitMap = new Map<string, RateLimitEntry>();
-
-/** Test-only: clear the in-memory limiter so route tests don't trip it. */
-export function _resetInpaintStatusRateLimitForTests(): void {
-  inpaintStatusRateLimitMap.clear();
-}
+export const INPAINT_STATUS_RATE_WINDOW_MS = 60_000;
 
 export interface RateLimitResult {
   allowed: boolean;
@@ -35,40 +27,39 @@ export interface RateLimitResult {
 }
 
 /**
- * Sliding-window rate limiter for inpaint status polling. Tracks (userId, requestId)
- * to prevent a client from hammering a single inpaint request.
+ * Sliding-window rate limiter for inpaint status polling (10/min per user and
+ * request), backed by Postgres so the cap holds across serverless instances.
+ * Issue #1123: the previous module-level Map was per-lambda state — it never
+ * saw other instances' requests (cap effectively 10 × N instances) and its
+ * entries were never evicted (unbounded memory). The Postgres limiter stores
+ * the window in DailyApiUsage.timestamps under a per-(user, request) row key
+ * and prunes expired entries on every write.
  */
-export function checkInpaintStatusRateLimit(
+export async function checkInpaintStatusRateLimit(
   userId: string,
   requestId: string
-): RateLimitResult {
-  const now = Date.now();
-  const key = `${userId}:${requestId}`;
-  const entry = inpaintStatusRateLimitMap.get(key);
+): Promise<RateLimitResult> {
+  const result = await checkAndRecordRateLimit(
+    `inpaint-status:${userId}:${requestId}`,
+    INPAINT_STATUS_RATE_LIMIT,
+    INPAINT_STATUS_RATE_WINDOW_MS
+  );
 
-  if (!entry || now - entry.windowStart >= INPAINT_STATUS_RATE_WINDOW_MS) {
-    inpaintStatusRateLimitMap.set(key, { count: 1, windowStart: now });
+  if (!result.allowed) {
     return {
-      allowed: true,
-      remaining: INPAINT_STATUS_RATE_LIMIT - 1,
-      retryAfterSeconds: 60,
+      allowed: false,
+      remaining: 0,
+      retryAfterSeconds: Math.max(
+        1,
+        Math.ceil((result.resetAt - Date.now()) / 1000)
+      ),
     };
   }
 
-  if (entry.count >= INPAINT_STATUS_RATE_LIMIT) {
-    const retryAfterSeconds = Math.ceil(
-      (INPAINT_STATUS_RATE_WINDOW_MS - (now - entry.windowStart)) / 1000
-    );
-    return { allowed: false, remaining: 0, retryAfterSeconds };
-  }
-
-  entry.count++;
   return {
     allowed: true,
-    remaining: INPAINT_STATUS_RATE_LIMIT - entry.count,
-    retryAfterSeconds: Math.ceil(
-      (INPAINT_STATUS_RATE_WINDOW_MS - (now - entry.windowStart)) / 1000
-    ),
+    remaining: result.remaining,
+    retryAfterSeconds: 0,
   };
 }
 

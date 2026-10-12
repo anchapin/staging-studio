@@ -94,10 +94,18 @@ export async function checkRateLimit(
     return { allowed: true, remaining: limit, resetAt: we.getTime() };
   }
 
+  // Issue #1123: on a denial the constraint relaxes when the OLDEST valid
+  // entry slides out of the window, so resetAt must be that moment, not
+  // end-of-day (we). Callers surface resetAt as Retry-After on a 429.
+  const resetAtMs =
+    allowed || validTimestamps.length === 0
+      ? we.getTime()
+      : validTimestamps[0].getTime() + windowMs;
+
   return {
     allowed,
     remaining: Math.min(remaining, limit - validTimestamps.length),
-    resetAt: we.getTime(),
+    resetAt: resetAtMs,
   };
 }
 
@@ -137,9 +145,15 @@ export async function recordRateLimit(
   const allowed = newCount <= limit;
 
   if (!allowed) {
-    return { allowed: false, remaining: 0, resetAt: we.getTime() };
+    const resetAtMs =
+      validTimestamps.length > 0
+        ? validTimestamps[0].getTime() + windowMs
+        : we.getTime();
+    return { allowed: false, remaining: 0, resetAt: resetAtMs };
   }
 
+  // Write back the PRUNED array (not just the append) so stale entries
+  // leave the row instead of accumulating for the rest of the day (#1123).
   const newTimestamps = [...validTimestamps, now];
 
   await prisma.dailyApiUsage.update({

@@ -15,8 +15,13 @@ import { prisma } from "@/lib/prisma";
 import {
   API_ERROR_RATE_LIMIT_EXCEEDED,
   API_ERROR_REQUEST_NOT_FOUND,
+  API_ERROR_TOO_MANY_REQUESTS,
   API_ERROR_UNAUTHORIZED,
 } from "@/lib/api-errors";
+import {
+  INPAINT_STATUS_RATE_LIMIT,
+  checkInpaintStatusRateLimit,
+} from "@/lib/inpaint-status";
 import {
   DEFAULT_DAILY_INPAINT_LIMIT,
   DAILY_LIMIT_ENV_VAR,
@@ -43,9 +48,34 @@ export async function GET(
 
   const { requestId } = await params;
 
-  // Rate limit: today's charged inpaint units from the DailyApiUsage
-  // counter row (#985 counted InpaintRequest rows, which a room delete
-  // refunded — #1131).
+  // Poll-rate limit (issue #1123): the unversioned twin caps status checks
+  // at 10/min per user and request; this route skipped the cap entirely,
+  // so v1 was the one path where a client could hammer the fal queue
+  // unbounded. Postgres-backed sliding window, shared across instances.
+  const statusRateLimit = await checkInpaintStatusRateLimit(user.id, requestId);
+  if (!statusRateLimit.allowed) {
+    return NextResponse.json(
+      {
+        error: "Too many requests",
+        message: `Rate limit exceeded. Please wait ${statusRateLimit.retryAfterSeconds} seconds before trying again.`,
+        retryable: true,
+        code: API_ERROR_TOO_MANY_REQUESTS,
+      },
+      {
+        status: 429,
+        headers: {
+          ...buildVersionHeaders("v1"),
+          "Retry-After": String(statusRateLimit.retryAfterSeconds),
+          "X-RateLimit-Limit": String(INPAINT_STATUS_RATE_LIMIT),
+          "X-RateLimit-Remaining": "0",
+        },
+      }
+    );
+  }
+
+  // Daily-quota visibility: today's charged inpaint units from the
+  // DailyApiUsage counter row (#985 counted InpaintRequest rows, which a
+  // room delete refunded — #1131).
   const inpaintLimit = resolveDailyLimit(
     process.env[DAILY_LIMIT_ENV_VAR.inpaint],
     DEFAULT_DAILY_INPAINT_LIMIT

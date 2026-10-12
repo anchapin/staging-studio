@@ -1,13 +1,11 @@
-import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type { NextRequest } from "next/server";
 
 import { GET } from "@/app/api/inpaint/[requestId]/status/route";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { API_ERROR_TOO_MANY_REQUESTS } from "@/lib/api-errors";
 import { prisma } from "@/lib/prisma";
-import {
-  _resetInpaintStatusRateLimitForTests,
-  _setStatusGoneRetryDelaysForTests,
-} from "@/lib/inpaint-status";
+import { _setStatusGoneRetryDelaysForTests } from "@/lib/inpaint-status";
 
 // The inpaint status route goes through the inference abstraction.
 // We mock the abstraction so the test does not depend on a real
@@ -32,6 +30,15 @@ vi.mock("@/lib/inference", async (importOriginal) => {
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     inpaintRequest: { findUnique: vi.fn(), update: vi.fn() },
+    // Issue #1123: the status limiter is Postgres-backed; the default mocks
+    // below return undefined (no record), so every poll is allowed and no
+    // test in this file trips the 10/min cap.
+    dailyApiUsage: {
+      findUnique: vi.fn().mockResolvedValue(undefined),
+      create: vi.fn().mockResolvedValue({}),
+      update: vi.fn().mockResolvedValue({}),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
   },
 }));
 
@@ -101,9 +108,8 @@ beforeEach(() => {
   vi.resetAllMocks();
   // #1202: the 404-recovery retries sleep between attempts; keep tests instant.
   _setStatusGoneRetryDelaysForTests([0, 0]);
-  // The status route rate-limits per (user, request); 10 calls/min would
-  // otherwise start returning 429 partway through this file.
-  _resetInpaintStatusRateLimitForTests();
+  // Issue #1123: the limiter lives in Postgres now, so there is no in-memory
+  // state to reset; dailyApiUsage mocks stay on the no-record path above.
   authedUser.mockResolvedValue({ id: USER_ID });
   findUnique.mockResolvedValue(ownedRow());
   update.mockResolvedValue({});
@@ -540,5 +546,93 @@ describe("GET /api/inpaint/[requestId]/status — Replicate output shape (#1199)
     // poller keeps the job alive with the URL, rather than "no image".
     expect(body.status).toBe("retryable");
     expect(body.imageUrl).toBe("https://replicate.delivery/pbxt/retry.webp");
+  });
+});
+
+describe("GET /api/inpaint/[requestId]/status — Postgres-backed poll rate limit (issue #1123)", () => {
+  const dailyApiUsage = prisma.dailyApiUsage as unknown as {
+    findUnique: Mock;
+    create: Mock;
+    update: Mock;
+  };
+
+  // In-memory stand-in for the DailyApiUsage row so the limiter's
+  // sliding-window arithmetic runs against real timestamps under fake timers.
+  let row: {
+    userId: string;
+    surface: string;
+    dayKey: string;
+    count: number;
+    timestamps: Date[];
+  } | null;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-12T12:00:00Z"));
+    row = null;
+    dailyApiUsage.findUnique.mockImplementation(async ({ where }: { where: { userId_surface_dayKey: { userId: string; surface: string; dayKey: string } } }) => {
+      const w = where.userId_surface_dayKey;
+      return row && row.userId === w.userId && row.surface === w.surface && row.dayKey === w.dayKey ? row : null;
+    });
+    dailyApiUsage.create.mockImplementation(async ({ data }: { data: { userId: string; surface: string; dayKey: string; count: number; timestamps: Date[] } }) => {
+      row = { ...data, timestamps: [...data.timestamps] };
+      return row;
+    });
+    dailyApiUsage.update.mockImplementation(async ({ data }: { data: { count?: number; timestamps?: Date[] } }) => {
+      if (!row) return null;
+      if (data.timestamps) row.timestamps = [...data.timestamps];
+      if (data.count !== undefined) row.count = data.count;
+      return row;
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("allows 10 rapid polls and returns 429 on the 11th with a sliding Retry-After", async () => {
+    falQueueStatus.mockResolvedValue({ status: "IN_PROGRESS" });
+
+    for (let i = 0; i < 10; i++) {
+      const response = await callStatusRoute();
+      expect(response.status).toBe(200);
+    }
+
+    const limited = await callStatusRoute();
+    const body = await limited.json();
+
+    expect(limited.status).toBe(429);
+    expect(body.retryable).toBe(true);
+    expect(body.code).toBe(API_ERROR_TOO_MANY_REQUESTS);
+    expect(limited.headers.get("Retry-After")).toBe("60");
+    expect(limited.headers.get("X-RateLimit-Limit")).toBe("10");
+    expect(limited.headers.get("X-RateLimit-Remaining")).toBe("0");
+  });
+
+  it("Retry-After slides down as the window ages", async () => {
+    falQueueStatus.mockResolvedValue({ status: "IN_PROGRESS" });
+
+    for (let i = 0; i < 10; i++) {
+      await callStatusRoute();
+    }
+
+    vi.advanceTimersByTime(30_000);
+
+    const limited = await callStatusRoute();
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("Retry-After")).toBe("30");
+  });
+
+  it("releases the cap once the window slides past the earliest poll", async () => {
+    falQueueStatus.mockResolvedValue({ status: "IN_PROGRESS" });
+
+    for (let i = 0; i < 10; i++) {
+      await callStatusRoute();
+    }
+
+    vi.advanceTimersByTime(61_000);
+
+    const response = await callStatusRoute();
+    expect(response.status).toBe(200);
   });
 });
