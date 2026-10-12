@@ -14,6 +14,7 @@ const mockPrisma = vi.hoisted(() => ({
 }));
 const mockGetAuthedPrismaUser = vi.hoisted(() => vi.fn());
 const mockResolveSelectionAfterDelete = vi.hoisted(() => vi.fn<() => number | null>().mockReturnValue(0));
+const mockRevalidatePath = vi.hoisted(() => vi.fn());
 const mockTouchUpCountsBySlot = vi.hoisted(() =>
   vi
     .fn<(rows: { status: string; variantSlot: number }[]) => { 0: number; 1: number }>()
@@ -26,6 +27,10 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: mockGetAuthedPrismaUser,
+}));
+
+vi.mock("next/cache", () => ({
+  revalidatePath: mockRevalidatePath,
 }));
 
 vi.mock("@/lib/variant-legibility", () => ({
@@ -56,6 +61,7 @@ describe("room-variants actions", () => {
     mockGetAuthedPrismaUser.mockResolvedValue(mockUser as never);
     mockResolveSelectionAfterDelete.mockReturnValue(0);
     mockTouchUpCountsBySlot.mockReturnValue({ 0: 0, 1: 0 });
+    mockRevalidatePath.mockClear();
   });
 
   describe("getVariantTouchUpCounts", () => {
@@ -131,6 +137,7 @@ describe("room-variants actions", () => {
     it("deletes slot 0 and returns success", async () => {
       vi.mocked(prisma.room.findUnique).mockResolvedValue({
         id: MOCK_ROOM_ID,
+        projectId: "cproj12345678901234567890",
         afterImageUrl: "https://example.com/after0.jpg",
         afterImageUrl2: "https://example.com/after1.jpg",
         beforeImageUrl: "https://example.com/before0.jpg",
@@ -149,9 +156,42 @@ describe("room-variants actions", () => {
       });
     });
 
+    it("revalidates the project-scoped routes after a successful delete (issue #1149)", async () => {
+      vi.mocked(prisma.room.findUnique).mockResolvedValue({
+        id: MOCK_ROOM_ID,
+        projectId: "cproj12345678901234567890",
+        afterImageUrl: "https://example.com/after0.jpg",
+        afterImageUrl2: "https://example.com/after1.jpg",
+        beforeImageUrl: "https://example.com/before0.jpg",
+        beforeImageUrl2: "https://example.com/before1.jpg",
+        selectedVariantIndex: 0,
+        project: { id: "pid", userId: MOCK_USER_ID },
+      } as never);
+      vi.mocked(prisma.room.update).mockResolvedValue({ id: MOCK_ROOM_ID } as never);
+
+      const result = await deleteVariantAfterImage(MOCK_ROOM_ID, 0);
+
+      expect(result.success).toBe(true);
+      expect(mockRevalidatePath).toHaveBeenCalledTimes(6);
+      expect(mockRevalidatePath).toHaveBeenCalledWith("/projects/cproj12345678901234567890");
+      expect(mockRevalidatePath).toHaveBeenCalledWith("/projects/cproj12345678901234567890/rooms");
+      expect(mockRevalidatePath).toHaveBeenCalledWith("/projects/cproj12345678901234567890/lookbook");
+      expect(mockRevalidatePath).toHaveBeenCalledWith("/projects/cproj12345678901234567890/refine");
+      expect(mockRevalidatePath).toHaveBeenCalledWith("/projects/cproj12345678901234567890/report");
+      expect(mockRevalidatePath).toHaveBeenCalledWith("/preview/cproj12345678901234567890");
+    });
+
+    it("does not revalidate when the delete fails on an invalid slot (issue #1149)", async () => {
+      const result = await deleteVariantAfterImage(MOCK_ROOM_ID, 2);
+
+      expect(result.success).toBe(false);
+      expect(mockRevalidatePath).not.toHaveBeenCalled();
+    });
+
     it("deletes slot 1 and returns success", async () => {
       vi.mocked(prisma.room.findUnique).mockResolvedValue({
         id: MOCK_ROOM_ID,
+        projectId: "cproj12345678901234567890",
         afterImageUrl: "https://example.com/after0.jpg",
         afterImageUrl2: "https://example.com/after1.jpg",
         beforeImageUrl: "https://example.com/before0.jpg",
@@ -175,6 +215,7 @@ describe("room-variants actions", () => {
       // the server must NOT coerce to 0 before calling the resolver.
       vi.mocked(prisma.room.findUnique).mockResolvedValue({
         id: MOCK_ROOM_ID,
+        projectId: "cproj12345678901234567890",
         afterImageUrl: "https://example.com/after0.jpg",
         afterImageUrl2: "https://example.com/after1.jpg",
         beforeImageUrl: "https://example.com/before0.jpg",
@@ -206,6 +247,7 @@ describe("room-variants actions", () => {
       // Verify the end-to-end flow: null selection + any slot deletion → null stays null
       vi.mocked(prisma.room.findUnique).mockResolvedValue({
         id: MOCK_ROOM_ID,
+        projectId: "cproj12345678901234567890",
         afterImageUrl: "https://example.com/after0.jpg",
         afterImageUrl2: "https://example.com/after1.jpg",
         beforeImageUrl: "https://example.com/before0.jpg",

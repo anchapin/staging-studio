@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { setActiveVariant } from "@/lib/room-variant-service";
@@ -97,6 +98,7 @@ export async function deleteVariantAfterImage(
     const room = await prisma.room.findUnique({
       where: ownershipWhere,
       select: {
+        projectId: true,
         beforeImageUrl: true,
         afterImageUrl: true,
         beforeImageUrl2: true,
@@ -133,6 +135,19 @@ export async function deleteVariantAfterImage(
           ? { afterImageUrl: null, selectedVariantIndex: nextSelection }
           : { afterImageUrl2: null, selectedVariantIndex: nextSelection },
     });
+
+    // Issue #1149: every other mutating action pairs its write with
+    // revalidatePath. Without it, a deleted variant keeps rendering in the
+    // report, lookbook, and preview caches until an unrelated mutation
+    // invalidates those routes. revalidatePath with default type "page"
+    // invalidates only the exact URL given, so each consumer page from the
+    // issue's impact list is invalidated individually.
+    revalidatePath(`/projects/${room.projectId}`);
+    revalidatePath(`/projects/${room.projectId}/rooms`);
+    revalidatePath(`/projects/${room.projectId}/lookbook`);
+    revalidatePath(`/projects/${room.projectId}/refine`);
+    revalidatePath(`/projects/${room.projectId}/report`);
+    revalidatePath(`/preview/${room.projectId}`);
 
     return { success: true };
   } catch (err) {
