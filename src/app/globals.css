@@ -448,19 +448,23 @@
 
 /* Issue #1222 (docs/print-styling-audit.md): high-DPI physical output.
    At 300+ dpi a 6pt footer and Tailwind's 0.75rem/0.875rem small text
-   read tiny on paper; bump each ~11-15%. Browserless PDFs are
-   resolution-independent vectors, so this media query never fires for
-   the captured PDF and the on-screen preview is untouched. Tailwind
+   read tiny on paper; bump each ~11-15%. The bumps exclude the capture
+   path structurally (html:not(.pdf-capture)) and the on-screen preview
+   is untouched (print media only). Tailwind
    sizes are rem-based, so the bump targets those utility classes
    directly inside lookbook pages instead of scaling the root font
    (which would rescale spacing and risk reflowing pages past the safe
    area). */
 @media print and (min-resolution: 300dpi) {
-  .lookbook-page .text-xs {
+  /* :not(.pdf-capture) makes the "never fires for the captured PDF"
+     guarantee structural: even if a capture engine reported a 300dpi+
+     resolution, the capture render is excluded here by class, not by
+     trusting its reported resolution. */
+  html:not(.pdf-capture) .lookbook-page .text-xs {
     font-size: 0.83rem;
   }
 
-  .lookbook-page .text-sm {
+  html:not(.pdf-capture) .lookbook-page .text-sm {
     font-size: 1rem;
   }
 
