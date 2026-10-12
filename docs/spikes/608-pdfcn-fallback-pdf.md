@@ -21,7 +21,8 @@ base64 data URI. The PoC embedded a real 1600x1412 room photo and produced a
 ~307 KB single-page PDF with the photo intact. No re-encoding, no server round
 trip. One caveat: an invalid image is dropped **silently** (the page renders
 with a gap) rather than throwing, so a fallback generator should verify image
-bytes before rendering. Side finding while testing: `docs/demo/issue-248-verification-living-room.jpg`
+bytes before rendering; minimal check is a magic-byte sniff (JPEG: FF D8, PNG:
+89 50 4E 47). Side finding while testing: `docs/demo/issue-248-verification-living-room.jpg`
 is itself a corrupt file (UTF-8-mangled JPEG), so demo screenshots taken from
 it should be retaken.
 
@@ -37,8 +38,8 @@ route handler with no Browserless dependency.
 PoC recreated the lookbook report page from the same data model (project
 header, address, room section with before/after photo, challenge /
 recommendation / buyer-psychology copy, ROI trio, client sign-off line) and was
-verified visually side-by-side with the primary export. It reads as the same
-report, simplified: real selectable text (PDF-native, not a rasterized
+verified visually against the primary export's known layout. It reads as the
+same report, simplified: real selectable text (PDF-native, not a rasterized
 screenshot), consistent typography, colors, and table. Does not match the
 browser render's full CSS freedom (no arbitrary web fonts beyond the bundled
 set, no complex flex/grid edge cases). Good enough for an offline fallback;
@@ -60,9 +61,10 @@ not a candidate to replace the primary export.
 
 Forme (`@formepdf/*` packages) is the pick for this use case. It is PDF-native:
 real text objects, small files, direct report layout with tables and image
-embedding. Takumi is an HTML/CSS-to-raster-image engine aimed at OG images; a
-"PDF" from it is a stack of page-sized images: no selectable text, much larger
-files, higher latency.
+embedding. Takumi is an HTML/CSS-to-raster-image engine aimed at OG images, so its
+"PDF" output is a stack of page-sized images: no selectable text and larger
+files. (Assessed from documentation reading this spike; no Takumi run was
+performed, and the choice below does not depend on that unmeasured claim.)
 
 Maturity risk, stated plainly: the whole ecosystem is very young. pdfcn is
 roughly six weeks old, distributed via the shadcn CLI registry rather than npm,
@@ -75,11 +77,32 @@ later.
 
 ## PoC
 
-Throwaway, per the issue: rendered in `/tmp/pdfcn-poc` with @formepdf/react +
-@formepdf/core 0.28.0 installed --no-save, not committed. It rendered a
-complete one-page report (address "1506 Porters Mill Ter, Midlothian", living
-room photo, three-part AI copy, ROI table: 12 days on market / 4 offers /
-102.1% sale-to-list, client sign-off placeholder) as `fallback-poc.pdf`.
+Throwaway, per the issue: rendered in a scratch directory on Node v22.23.3
+with @formepdf/react + @formepdf/core + @formepdf/fonts-standard, all 0.28.0,
+installed --no-save; not committed. It rendered a complete one-page report
+(address "1506 Porters Mill Ter, Midlothian", living room photo, three-part AI
+copy, ROI table: 12 days on market / 4 offers / 102.1% sale-to-list, client
+sign-off placeholder) as `fallback-poc.pdf`.
+
+Minimal render call, for the #194 implementer:
+
+```tsx
+import React from "react";
+import { Document, Page, Text } from "@formepdf/react";
+import { renderDocument } from "@formepdf/core";
+
+const pdf = await renderDocument(
+  React.createElement(
+    Document,
+    null,
+    React.createElement(Page, { size: "Letter" },
+      React.createElement(Text, null, "fallback lookbook"))
+  )
+);
+```
+
+Remember the `serverExternalPackages` line from section 4 or the Next build
+fails at page-data collection.
 
 ## Go / no-go
 
