@@ -20,7 +20,7 @@ import {
   DEFAULT_DAILY_LABEL_LIMIT,
   DAILY_LIMIT_ENV_VAR,
   dailyQuotaExceededPayload,
-  evaluateDailyQuota,
+  evaluateDailyBatchQuota,
   getDailyUsage,
   recordDailyUsage,
   resolveDailyLimit,
@@ -45,30 +45,6 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     });
   }
 
-  const labelLimit = resolveDailyLimit(
-    process.env[DAILY_LIMIT_ENV_VAR.label],
-    DEFAULT_DAILY_LABEL_LIMIT
-  );
-  const labelQuota = evaluateDailyQuota(
-    await getDailyUsage("label", user.id),
-    labelLimit
-  );
-  if (!labelQuota.allowed) {
-    console.warn(
-      JSON.stringify({
-        event: "label_instances_daily_quota_exceeded",
-        userId: user.id,
-        used: labelQuota.used,
-        limit: labelQuota.limit,
-      })
-    );
-    throw new ApiError({
-      code: API_ERROR_RATE_LIMIT_EXCEEDED,
-      message: dailyQuotaExceededPayload(labelQuota, "Please try again tomorrow.").message,
-      status: 429,
-    });
-  }
-
   const parsed = visionLabelRequestSchema.safeParse(await request.json());
   if (!parsed.success) {
     throw new ApiError({
@@ -81,6 +57,36 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
 
   const { roomId, concept: rawConcept, crops, imageUrl } = parsed.data;
   const concept = sanitizePromptValue(rawConcept);
+
+  // #1144: the cap tracks vision inputs actually sent, one unit per
+  // crop, so the batch gate runs once the (validated) crop count is
+  // known and rejects a batch that would straddle the limit whole
+  // rather than overshooting it.
+  const labelLimit = resolveDailyLimit(
+    process.env[DAILY_LIMIT_ENV_VAR.label],
+    DEFAULT_DAILY_LABEL_LIMIT
+  );
+  const labelQuota = evaluateDailyBatchQuota(
+    await getDailyUsage("label", user.id),
+    crops.length,
+    labelLimit
+  );
+  if (!labelQuota.allowed) {
+    console.warn(
+      JSON.stringify({
+        event: "label_instances_daily_quota_exceeded",
+        userId: user.id,
+        used: labelQuota.used,
+        limit: labelQuota.limit,
+        crops: crops.length,
+      })
+    );
+    throw new ApiError({
+      code: API_ERROR_RATE_LIMIT_EXCEEDED,
+      message: dailyQuotaExceededPayload(labelQuota, "Please try again tomorrow.").message,
+      status: 429,
+    });
+  }
 
   const room = await prisma.room.findFirst({
     where: { id: roomId },
@@ -178,7 +184,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     requested.has(entry.instanceIndex)
   );
 
-  await recordDailyUsage("label", user.id);
+  await recordDailyUsage("label", user.id, crops.length);
 
   if (labels.length > 0) {
     await upsertVisionLabels({

@@ -162,13 +162,13 @@ describe("dailyQuotaExceededPayload", () => {
 
 describe("inpaint surface (FLUX.1 Fill runs, issue #1131)", () => {
   it("counts charged runs on its own counter row", async () => {
-    await expect(recordDailyUsage("inpaint", "inpaint-user-a", midDay)).resolves.toBe(1);
-    await expect(recordDailyUsage("inpaint", "inpaint-user-a", midDay)).resolves.toBe(2);
+    await expect(recordDailyUsage("inpaint", "inpaint-user-a", 1, midDay)).resolves.toBe(1);
+    await expect(recordDailyUsage("inpaint", "inpaint-user-a", 1, midDay)).resolves.toBe(2);
     await expect(getDailyUsage("inpaint", "inpaint-user-a", midDay)).resolves.toBe(2);
   });
 
   it("does not share a counter with any other surface", async () => {
-    await recordDailyUsage("inpaint", "inpaint-user-b", midDay);
+    await recordDailyUsage("inpaint", "inpaint-user-b", 1, midDay);
     await expect(getDailyUsage("copy", "inpaint-user-b", midDay)).resolves.toBe(0);
     await expect(getDailyUsage("segment", "inpaint-user-b", midDay)).resolves.toBe(0);
   });
@@ -182,8 +182,8 @@ beforeEach(() => {
 
 describe("Postgres-backed daily usage counter (issue #784)", () => {
   it("records billable units cumulatively on the composite key and returns the new count", async () => {
-    await expect(recordDailyUsage("copy", "counter-user-a", midDay)).resolves.toBe(1);
-    await expect(recordDailyUsage("copy", "counter-user-a", midDay)).resolves.toBe(2);
+    await expect(recordDailyUsage("copy", "counter-user-a", 1, midDay)).resolves.toBe(1);
+    await expect(recordDailyUsage("copy", "counter-user-a", 1, midDay)).resolves.toBe(2);
     await expect(getDailyUsage("copy", "counter-user-a", midDay)).resolves.toBe(2);
 
     // Both writes carry the (userId, surface, dayKey) composite from
@@ -201,13 +201,13 @@ describe("Postgres-backed daily usage counter (issue #784)", () => {
   });
 
   it("isolates usage per user", async () => {
-    await recordDailyUsage("export", "counter-user-b", midDay);
+    await recordDailyUsage("export", "counter-user-b", 1, midDay);
     await expect(getDailyUsage("export", "counter-user-b", midDay)).resolves.toBe(1);
     await expect(getDailyUsage("export", "counter-user-c", midDay)).resolves.toBe(0);
   });
 
   it("isolates usage per surface", async () => {
-    await recordDailyUsage("copy", "counter-user-d", midDay);
+    await recordDailyUsage("copy", "counter-user-d", 1, midDay);
     await expect(getDailyUsage("copy", "counter-user-d", midDay)).resolves.toBe(1);
     await expect(getDailyUsage("export", "counter-user-d", midDay)).resolves.toBe(0);
   });
@@ -216,13 +216,13 @@ describe("Postgres-backed daily usage counter (issue #784)", () => {
     const before = new Date(DAY.y, DAY.m, DAY.d, 23, 59, 59, 999);
     const after = new Date(DAY.y, DAY.m, DAY.d + 1, 0, 0, 0, 0);
 
-    await recordDailyUsage("copy", "counter-user-e", before);
-    await recordDailyUsage("copy", "counter-user-e", before);
+    await recordDailyUsage("copy", "counter-user-e", 1, before);
+    await recordDailyUsage("copy", "counter-user-e", 1, before);
     await expect(getDailyUsage("copy", "counter-user-e", before)).resolves.toBe(2);
 
     // Next day starts from zero...
     await expect(getDailyUsage("copy", "counter-user-e", after)).resolves.toBe(0);
-    await recordDailyUsage("copy", "counter-user-e", after);
+    await recordDailyUsage("copy", "counter-user-e", 1, after);
     await expect(getDailyUsage("copy", "counter-user-e", after)).resolves.toBe(1);
 
     // ...via a row with the new dayKey, not an increment of the old one.
@@ -240,7 +240,7 @@ describe("Postgres-backed daily usage counter (issue #784)", () => {
 
 describe("segment surface (SAM 3.1 concept calls, issue #226)", () => {
   it("records usage on its own Postgres counter", async () => {
-    await expect(recordDailyUsage("segment", "segment-user-a", midDay)).resolves.toBe(1);
+    await expect(recordDailyUsage("segment", "segment-user-a", 1, midDay)).resolves.toBe(1);
     await expect(getDailyUsage("segment", "segment-user-a", midDay)).resolves.toBe(1);
     await expect(getDailyUsage("copy", "segment-user-a", midDay)).resolves.toBe(0);
   });
@@ -273,19 +273,19 @@ describe("segment surface (SAM 3.1 concept calls, issue #226)", () => {
     const before = new Date(DAY.y, DAY.m, DAY.d, 23, 59, 59, 999);
     const after = new Date(DAY.y, DAY.m, DAY.d + 1, 0, 0, 0, 0);
 
-    await recordDailyUsage("segment", "segment-user-b", before);
+    await recordDailyUsage("segment", "segment-user-b", 1, before);
     await expect(getDailyUsage("segment", "segment-user-b", before)).resolves.toBe(1);
 
     // Next day starts from zero again.
     await expect(getDailyUsage("segment", "segment-user-b", after)).resolves.toBe(0);
-    await recordDailyUsage("segment", "segment-user-b", after);
+    await recordDailyUsage("segment", "segment-user-b", 1, after);
     await expect(getDailyUsage("segment", "segment-user-b", after)).resolves.toBe(1);
   });
 });
 
 describe("label surface (OpenAI gpt-4o-mini vision, issue #263)", () => {
   it("records usage on its own Postgres counter", async () => {
-    await expect(recordDailyUsage("label", "label-user-a", midDay)).resolves.toBe(1);
+    await expect(recordDailyUsage("label", "label-user-a", 1, midDay)).resolves.toBe(1);
     await expect(getDailyUsage("label", "label-user-a", midDay)).resolves.toBe(1);
     await expect(getDailyUsage("copy", "label-user-a", midDay)).resolves.toBe(0);
   });
@@ -318,12 +318,12 @@ describe("label surface (OpenAI gpt-4o-mini vision, issue #263)", () => {
     const before = new Date(DAY.y, DAY.m, DAY.d, 23, 59, 59, 999);
     const after = new Date(DAY.y, DAY.m, DAY.d + 1, 0, 0, 0, 0);
 
-    await recordDailyUsage("label", "label-user-b", before);
+    await recordDailyUsage("label", "label-user-b", 1, before);
     await expect(getDailyUsage("label", "label-user-b", before)).resolves.toBe(1);
 
     // Next day starts from zero again.
     await expect(getDailyUsage("label", "label-user-b", after)).resolves.toBe(0);
-    await recordDailyUsage("label", "label-user-b", after);
+    await recordDailyUsage("label", "label-user-b", 1, after);
     await expect(getDailyUsage("label", "label-user-b", after)).resolves.toBe(1);
   });
 });

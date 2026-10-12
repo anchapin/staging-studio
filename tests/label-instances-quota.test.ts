@@ -4,7 +4,7 @@ import { POST } from "@/app/api/label-instances/route";
 import {
   getDailyUsage,
   recordDailyUsage,
-  evaluateDailyQuota,
+  evaluateDailyBatchQuota,
   type QuotaDecision,
 } from "@/lib/api-quota";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
@@ -49,7 +49,7 @@ vi.mock("ai", () => ({
 vi.mock("@/lib/api-quota", () => ({
   getDailyUsage: vi.fn(),
   recordDailyUsage: vi.fn(),
-  evaluateDailyQuota: vi.fn(),
+  evaluateDailyBatchQuota: vi.fn(),
   resolveDailyLimit: vi.fn(() => 50),
   DEFAULT_DAILY_LABEL_LIMIT: 50,
   DAILY_LIMIT_ENV_VAR: { label: "DAILY_LABEL_LIMIT" },
@@ -95,7 +95,7 @@ describe("POST /api/label-instances", () => {
     vi.resetAllMocks();
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser as never);
     vi.mocked(getDailyUsage).mockResolvedValue(0);
-    vi.mocked(evaluateDailyQuota).mockReturnValue({
+    vi.mocked(evaluateDailyBatchQuota).mockReturnValue({
       allowed: true,
       used: 0,
       limit: 50,
@@ -119,7 +119,7 @@ describe("POST /api/label-instances", () => {
   });
 
   it("returns 429 when daily label quota exceeded", async () => {
-    vi.mocked(evaluateDailyQuota).mockReturnValue({
+    vi.mocked(evaluateDailyBatchQuota).mockReturnValue({
       allowed: false,
       used: 50,
       limit: 50,
@@ -131,6 +131,37 @@ describe("POST /api/label-instances", () => {
     expect(response.status).toBe(429);
     const json = await response.json();
     expect(json.error.code).toBe("rate-limit-exceeded");
+  });
+
+  it("gates the batch by crop count and rejects a batch that would straddle the limit (issue #1144)", async () => {
+    vi.mocked(getDailyUsage).mockResolvedValue(48);
+    vi.mocked(evaluateDailyBatchQuota).mockImplementation(
+      (used: number, count: number, limit: number) =>
+        ({
+          allowed: used + count <= limit,
+          used,
+          limit,
+          remaining: limit - used,
+          ...(used + count > limit
+            ? { resetsAt: new Date(Date.now() + 86400000).toISOString() }
+            : {}),
+        }) as QuotaDecision
+    );
+    const body = validBody();
+    body.crops = [0, 1, 2, 3, 4].map((i) => ({
+      instanceIndex: i,
+      cropDataUrl:
+        "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMCwsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCwAB//2Q==",
+    }));
+
+    const response = await POST(buildNextRequest(body));
+
+    // 48 used + 5 crops > 50 limit: the whole batch is refused
+    expect(response.status).toBe(429);
+    const json = await response.json();
+    expect(json.error.code).toBe("rate-limit-exceeded");
+    expect(evaluateDailyBatchQuota).toHaveBeenCalledWith(48, 5, 50);
+    expect(recordDailyUsage).not.toHaveBeenCalled();
   });
 
   it("does not consume quota on cache hit", async () => {
@@ -160,7 +191,29 @@ describe("POST /api/label-instances", () => {
 
     expect(response.status).toBe(200);
     expect(recordDailyUsage).toHaveBeenCalledTimes(1);
-    expect(recordDailyUsage).toHaveBeenCalledWith("label", MOCK_USER_ID);
+    expect(recordDailyUsage).toHaveBeenCalledWith("label", MOCK_USER_ID, 1);
+  });
+
+  it("charges one quota unit per vision crop (issue #1144)", async () => {
+    vi.mocked(generateWithCircuitBreaker).mockImplementation(async (fn: () => Promise<unknown>) => {
+      return fn();
+    });
+    vi.mocked(generateObject).mockResolvedValue({
+      object: {
+        labels: [0, 1, 2].map((i) => ({ instanceIndex: i, label: `item ${i}` })),
+      },
+    } as never);
+    const body = validBody();
+    body.crops = [0, 1, 2].map((i) => ({
+      instanceIndex: i,
+      cropDataUrl:
+        "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMCwsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCwAB//2Q==",
+    }));
+
+    const response = await POST(buildNextRequest(body));
+
+    expect(response.status).toBe(200);
+    expect(recordDailyUsage).toHaveBeenCalledWith("label", MOCK_USER_ID, 3);
   });
 
   it("does not consume quota when API call fails", async () => {

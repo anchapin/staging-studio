@@ -219,20 +219,25 @@ export async function getDailyUsage(
 }
 
 /**
- * Records one billable unit for a user on a Postgres-counted surface.
+ * Records billable units for a user on a Postgres-counted surface.
  * Uses upsert so concurrent requests for the same user+surface+dayKey are
- * safe. Returns the new usage count for the current day.
+ * safe. `count` lets a request that consumed several underlying units
+ * (e.g. `label-instances` charging one unit per vision crop, issue
+ * #1144) record them in one write; the default of 1 preserves the
+ * per-request behavior of every existing call site. Returns the new
+ * usage count for the current day.
  */
 export async function recordDailyUsage(
   surface: QuotaSurface,
   userId: string,
+  count: number = 1,
   now: Date = new Date()
 ): Promise<number> {
   const { dayKey } = dailyWindow(now);
   const record = await prisma.dailyApiUsage.upsert({
     where: { userId_surface_dayKey: { userId, surface, dayKey } },
-    create: { userId, surface, dayKey, count: 1 },
-    update: { count: { increment: 1 } },
+    create: { userId, surface, dayKey, count },
+    update: { count: { increment: count } },
   });
   return record.count;
 }
