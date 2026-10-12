@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { useAutoSaveStatus } from "@/lib/autosave-controller";
 import { DEFAULT_MASK_EXPANSION_RADIUS } from "@/lib/mask-dilation";
 import {
   useCollapsiblePanel,
@@ -57,6 +56,7 @@ export default function InpaintEditor({
   projectName,
   onExitToProject,
   onProcessingChange,
+  saveStatus = "idle",
 }: InpaintEditorProps) {
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
   // Natural-dimension tracking for the base photo (issue #691 hook).
@@ -217,8 +217,6 @@ export default function InpaintEditor({
     }),
     [promptStrength, maskBlur, seed, creativeMode, lockSeed]
   );
-  const saveStatus = useAutoSaveStatus(roomId);
-
   const {
     isProcessing,
     statusText,
