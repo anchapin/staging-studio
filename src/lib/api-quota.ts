@@ -1,8 +1,9 @@
 /**
  * Daily per-user cost/quota guardrails for the paid-API surfaces
- * (issue #201): fal.ai inpainting, OpenAI copy generation, OpenAI
- * vision label instances (issue #263), Browserless PDF export, and
- * fal.ai SAM 3.1 segmentation (issue #226).
+ * (issue #201): Alibaba Cloud DashScope inpainting (#1240),
+ * OpenAI copy generation, OpenAI vision label instances (issue #263),
+ * Browserless PDF export, and Alibaba Cloud DashScope SAM 3.1
+ * segmentation.
  *
  * Mechanism: every surface is counted in the `DailyApiUsage` Postgres
  * table, one row per `@@unique([userId, surface, dayKey])` — so usage
@@ -24,23 +25,24 @@
  * deletable table; `tests/api-quota-ledger.test.ts` pins that.
  *
  * Known remaining race (tracked as #1111 and #1132): the `inpaint` charge
- * is written AFTER the fal.ai submit, so a request that is in flight
- * concurrently is not yet counted and the cap can be overshot by in-flight
- * submissions; the same check-then-act window exists on every surface.
- * Acceptable for a guardrail, not an accounting ledger.
+ * is written AFTER the provider call returns, so a request that is in
+ * flight concurrently is not yet counted and the cap can be overshot by
+ * in-flight submissions; the same check-then-act window exists on every
+ * surface. Acceptable for a guardrail, not an accounting ledger.
  *
  * Window semantics: a "day" is the server-local calendar day (local
  * midnight → next local midnight, wall clock of the machine running the
  * route). On UTC-based hosts (e.g. Vercel) that is the UTC day.
  *
  * Ballpark spend baseline at the default limits (approximate list prices,
- * Sep 2026 — re-check before relying on these):
- * - fal.ai FLUX.1 Fill: ~$0.02–0.03/image → 20/day ≈ $0.60/day max
+ * Oct 2026 — re-check before relying on these):
+ * - Alibaba Cloud DashScope qwen-image-2.1-pro: ~$0.04/image →
+ *   20/day ≈ $0.80/day max
  * - OpenAI gpt-4o-mini copy generation: ~$0.0002/generation → 50/day
  *   ≈ $0.01/day max
  * - Browserless PDF: ~$0.001–0.006/export on scaled plans → 20/day
  *   ≈ $0.12/day max
- * Worst case per user ≈ $0.75/day (~$22/month at the cap every single
+ * Worst case per user ≈ $0.95/day (~$28/month at the cap every single
  * day) — compare against the providers' dashboard spend alerts.
  */
 

@@ -153,9 +153,17 @@ export interface InpaintRecordCreateData {
   roomId: string;
   variantSlot: number;
   sourceSlot: number | null;
-  status: "IN_QUEUE";
+  /** "IN_QUEUE" for async providers (fal queue, Replicate); "COMPLETED"
+   *  for synchronous providers that returned the durable result URL
+   *  inline (#1240 multi-instance fix). */
+  status: "IN_QUEUE" | "COMPLETED";
   /** Provider job id for webhook matching (issue #1221); equals `id`. */
   providerJobId?: string;
+  /** Durable result URL for synchronous providers; the poller's
+   *  decideInpaintPersistence() short-circuits to return-stored when
+   *  status="COMPLETED" + resultUrl is set, so the route's first poll
+   *  on a different Vercel instance still finds the result. */
+  resultUrl?: string;
 }
 
 /**
@@ -266,7 +274,15 @@ export async function evaluateQualityGate(
 
 // ─── Fal Submit ───────────────────────────────────────────────────────────────
 
-export interface FalSubmitOptions {
+/**
+ * Provider-neutral input for `submitInpaintToActiveProvider`. The
+ * fields map 1:1 to the historical FalSubmitOptions shape so the
+ * call site in `submitInpaintRequest` is unchanged after the
+ * Alibaba migration; the provider adapter decides which fields it
+ * actually consumes (e.g. Alibaba ignores `maskUrl` because its
+ * endpoint is instruction-mode only).
+ */
+export interface InpaintSubmitOptions {
   imageUrl: string;
   maskUrl: string;
   aesthetic: string;
@@ -279,15 +295,19 @@ export interface FalSubmitOptions {
 }
 
 /**
- * Fire-and-forget submit: returns as soon as the job is queued (~2s),
- * instead of holding the request open for the full generation.
- * submitWithRetry handles transient errors; the abstraction's
+ * Fire-and-forget submit: returns as soon as the job is queued (or, for
+ * the synchronous Alibaba adapter, as soon as the response comes back —
+ * the route's status-poll then sees COMPLETED on the first call).
+ * `submitWithRetry` handles transient errors; the abstraction's
  * circuit breaker wrapper (per provider) prevents cascading failures
  * when the service is degraded.
  */
-export async function submitInpaintToFal(
-  options: FalSubmitOptions
-): Promise<{ request_id: string }> {
+export async function submitInpaintToActiveProvider(
+  options: InpaintSubmitOptions
+): Promise<{
+  request_id: string;
+  result?: { imageUrl: string; width: number | null; height: number | null };
+}> {
   const { imageUrl, maskUrl, aesthetic, promptDirectives, negativePrompt, promptStrength, maskBlur, seed, creativeMode } = options;
   const prompt = buildInpaintPrompt(aesthetic, promptDirectives);
 
@@ -315,8 +335,15 @@ export async function submitInpaintToFal(
   // retry on auth 401/403) is provider-agnostic and lives here.
   // `submitWithRetry` types the first arg as `string`; the
   // `LogicalModel` union is a string-literal, so the cast is safe.
-  const submit: (id: string, options: { input: Record<string, unknown> }) => Promise<{ request_id: string }> =
-    (id, options) => client.submit(id as LogicalModel, options);
+  // The return type carries the optional `result` field for
+  // synchronous providers (see InferenceClient.submit, #1240).
+  const submit: (
+    id: string,
+    options: { input: Record<string, unknown> },
+  ) => Promise<{
+    request_id: string;
+    result?: { imageUrl: string; width: number | null; height: number | null };
+  }> = (id, options) => client.submit(id as LogicalModel, options);
   // Issue #1221: only opt-in deployments hand the provider a callback
   // URL. Unset `INFERENCE_DELIVERY` keeps the payload (and the wire
   // request) byte-identical to the polling path.
@@ -481,7 +508,7 @@ export async function submitInpaintRequest(
     params.promptDirectives
   );
 
-  const submission = await submitInpaintToFal({
+  const submission = await submitInpaintToActiveProvider({
     imageUrl: params.imageUrl,
     maskUrl: params.maskUrl,
     aesthetic: params.aesthetic,
@@ -517,13 +544,23 @@ export async function submitInpaintRequest(
 
   let recordDegraded = false;
   try {
+    // #1240 multi-instance fix: for synchronous providers (Alibaba
+    // DashScope today), `submit()` returns the durable result URL
+    // inline. Persist the URL alongside the row write so a Vercel
+    // multi-instance deploy doesn't lose the result when the POST lands
+    // on instance A and the first poll lands on instance B (B's
+    // module-local cache is empty). Async providers (fal queue,
+    // Replicate) leave `submission.result` undefined and the poller
+    // fills the URL on a later poll — unchanged behavior.
+    const syncResult = submission.result;
     await createInpaintRequestWithRetry({
       id: submission.request_id,
       roomId: room.id,
       variantSlot: params.variantSlot,
       sourceSlot: params.sourceSlot,
-      status: "IN_QUEUE",
+      status: syncResult ? "COMPLETED" : "IN_QUEUE",
       providerJobId: submission.request_id,
+      ...(syncResult ? { resultUrl: syncResult.imageUrl } : {}),
     });
   } catch (recordError) {
     recordDegraded = true;

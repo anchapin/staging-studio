@@ -1,0 +1,79 @@
+[
+  {
+    "id": "flux-pro-fill",
+    "vendor": "fal",
+    "falModelId": "fal-ai/flux-pro/v1/fill",
+    "mode": "mask-fill",
+    "expectedEndpoint": "fal-ai/flux-pro/v1/fill",
+    "notes": "Incumbent; mask-based inpainting at $0.05/MP."
+  },
+  {
+    "id": "flux-3-image",
+    "vendor": "fal",
+    "falModelId": "fal-ai/flux-3-image",
+    "mode": "text-to-image",
+    "expectedEndpoint": "fal-ai/flux-3-image",
+    "notes": "FLUX 3 Image is text-to-image only on fal (no /edit endpoint exposed). Result is not strictly edit-comparable; included for completeness against the issue spec."
+  },
+  {
+    "id": "seedream-5-flash",
+    "vendor": "fal",
+    "falModelId": "bytedance/seedream/v5/flash/edit",
+    "mode": "instruction",
+    "expectedEndpoint": "bytedance/seedream/v5/flash/edit",
+    "notes": "Seedream 5.0 Flash; instruction editing, expects image_urls: string[]. $0.027/image."
+  },
+  {
+    "id": "nano-banana-2-1",
+    "vendor": "fal",
+    "falModelId": "fal-ai/nano-banana-2.1/edit",
+    "mode": "instruction",
+    "expectedEndpoint": "fal-ai/nano-banana-2.1/edit",
+    "notes": "Gemini Nano Banana 2.1; instruction editing released 2026-10-06. Expects image_urls: string[]."
+  },
+  {
+    "id": "qwen-image-2-1",
+    "vendor": "alibaba",
+    "falModelId": null,
+    "mode": "instruction",
+    "expectedEndpoint": "https://{workspaceId}.ap-southeast-1.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+    "alibabaWorkspaceId": "llm-x83c15vnd001kxij",
+    "alibabaModel": "qwen-image-2.1-pro",
+    "notes": "Qwen-Image-2.1 Pro routed via Alibaba Cloud Model Studio Singapore endpoint. Commercial terms bundled with Alibaba Cloud account ($0.04/image per Alibaba pricing). Replaces the fal-hosted slot which was flagged Private/research-only. Uses DashScope multimodal-conversation endpoint with image+text content; instruction-mode only (no mask on the wire)."
+  },
+  {
+    "id": "flux-pro-kontext",
+    "vendor": "fal",
+    "falModelId": "fal-ai/flux-pro/kontext",
+    "mode": "instruction",
+    "expectedEndpoint": "fal-ai/flux-pro/kontext",
+    "inputShape": { "imageField": "image_url", "imageIsArray": false },
+    "notes": "FLUX.1 Kontext [pro]. Same vendor as incumbent. Instruction editing with no mask support (image_url only). $0.04/image flat. Strongest same-vendor incumbent-replacement candidate."
+  },
+  {
+    "id": "z-image-turbo-inpaint",
+    "vendor": "fal",
+    "falModelId": "fal-ai/z-image/turbo/inpaint",
+    "mode": "mask-fill",
+    "expectedEndpoint": "fal-ai/z-image/turbo/inpaint",
+    "inputShape": { "maskField": "mask_image_url" },
+    "notes": "Z-Image Turbo (Alibaba Tongyi-MAI, 6B). Mask-capable via mask_image_url. Newest release in the bake-off. $0.01/MP — 5x cheaper than incumbent. Real mask-vs-mask head-to-head against FLUX Pro Fill."
+  },
+  {
+    "id": "flux-kontext-lora-inpaint",
+    "vendor": "fal",
+    "falModelId": "fal-ai/flux-kontext-lora/inpaint",
+    "mode": "mask-fill",
+    "expectedEndpoint": "fal-ai/flux-kontext-lora/inpaint",
+    "inputShape": { "extraFields": { "reference_image_url": "$imageUrl" } },
+    "notes": "FLUX.1 Kontext [dev] LoRA inpainting. Mask-capable, requires reference_image_url. $imageUrl placeholder resolved to caseInput.imageUrl so the model sees the source as the reference (not a stock horse photo)."
+  },
+  {
+    "id": "gpt-image-2-5",
+    "vendor": "openai",
+    "falModelId": null,
+    "mode": "mask-fill",
+    "expectedEndpoint": "https://api.openai.com/v1/images/edits",
+    "notes": "OpenAI GPT-Image-2.5 Sunburst class. Multipart edits endpoint with mask. New OpenAI vendor (uses OPENAI_API_KEY, not FAL_KEY). The model issue #1240 specifically called out as 'leads LM Arena'."
+  }
+]

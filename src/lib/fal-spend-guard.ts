@@ -1,5 +1,5 @@
 /**
- * Issue #1105: a paid fal.ai call must never be reachable without a daily cap.
+ * Issue #1105: a paid inference call must never be reachable without a daily cap.
  *
  * `POST /api/segment` shipped an uncapped `fal.subscribe` on the legacy
  * SAM model: it imported nothing from `@/lib/api-quota`, so a
@@ -11,16 +11,29 @@
  * cap applied to that route, so deleting it alone would leave the same hole
  * reopenable.
  *
+ * As of #1240 the production inpaint provider is Alibaba Cloud (DashScope).
+ * fal is no longer a wired provider — `lib/fal.ts` and `lib/fal-adapter.ts`
+ * are deleted. This guard's purpose now is:
+ *   1. Trip if a future change reintroduces a direct `fal.subscribe` or
+ *      `fal.queue.*` call outside the abstraction. The legacy regex
+ *      anchors survive so a deleted-module re-add or a vendored fork
+ *      that bypasses the abstraction is still caught.
+ *   2. Trip on the Alibaba call shape too. The `inference.(subscribe|submit)`
+ *      regex catches any future direct dispatcher in a route — same
+ *      shape that was the #1105 regression vector.
+ *
  * Scope — what this guard does and does not prove:
- * - The generic rule flags any route that *itself* invokes a paid fal
- *   helper. That is precisely the #1105 shape, and it has no false
- *   positives: a route that calls fal on the request path always needs a cap.
- * - The transitive case (a route spending fal through a lib helper, e.g.
- *   `api/inpaint` -> `lib/inpaint-submit`) is covered by pinned assertions
- *   rather than by import-graph reachability, on purpose: `pollFalStatus`
- *   makes a NON-billable status call, so walking the import graph flags
- *   polling routes that share the chain and are already governed by their
- *   own rate limit. Reachability is therefore too coarse to be an oracle.
+ * - The generic rule flags any route that *itself* invokes a paid
+ *   inference helper. That is precisely the #1105 shape, and it has no
+ *   false positives: a route that calls inference on the request path
+ *   always needs a cap.
+ * - The transitive case (a route spending inference through a lib helper,
+ *   e.g. `api/inpaint` -> `lib/inpaint-submit`) is covered by pinned
+ *   assertions rather than by import-graph reachability, on purpose:
+ *   `pollAlibabaStatus` makes a NON-billable cache lookup, so walking
+ *   the import graph flags polling routes that share the chain and are
+ *   already governed by their own rate limit. Reachability is therefore
+ *   too coarse to be an oracle.
  * - Route discovery is from disk, so a newly added uncapped route fails
  *   here rather than waiting to be found by a cost incident.
  */
@@ -36,13 +49,13 @@ import path from "node:path";
  * the #1105 route did `const falSubscribe = fal.subscribe as …;` and
  * then called the alias, which a call-shaped pattern would not match.
  *
- * After the inference abstraction (#1187 follow-up) routes go
- * through `inference.subscribe` / `inference.submit` on the active
- * `InferenceClient` — the spend-guard matches those calls by name.
- * The legacy `falSubscribeWithCircuitBreaker` /
- * `falQueueSubmitWithCircuitBreaker` patterns stay in the regex so
- * a rollback or a direct-fal call (e.g. a half-merged PR) still
- * trips the guard.
+ * After the inference abstraction (#1187 follow-up) routes go through
+ * `inference.subscribe` / `inference.submit` on the active
+ * `InferenceClient` — the spend-guard matches those calls by name. The
+ * legacy `falSubscribeWithCircuitBreaker` /
+ * `falQueueSubmitWithCircuitBreaker` patterns stay in the regex so a
+ * rollback (re-adding the fal adapter) or a direct-fal call (e.g. a
+ * half-merged PR) still trips the guard.
  */
 export const FAL_SPEND_CALL =
   /falSubscribeWithCircuitBreaker\b|falQueueSubmitWithCircuitBreaker\b|(?:^|[^.\w])fal\s*\.\s*subscribe\b|inference\.(?:subscribe|submit)\b/;

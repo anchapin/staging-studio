@@ -312,6 +312,56 @@ export function buildFalFillPayload(
   return payload;
 }
 
+// ─── Alibaba (DashScope multimodal-conversation) payload ───────────────
+
+/**
+ * Alibaba Cloud's DashScope multimodal-conversation endpoint
+ * (`/v1/services/aigc/multimodal-generation/generation`) takes a much
+ * smaller payload than fal or Replicate: `image_url` + `prompt` are
+ * the only call-shape fields used today. Provider-specific knobs
+ * (`guidance`, `mask_blur`, `num_inference_steps`, `negative_prompt`,
+ * `seed`) are not exposed — DashScope accepts a single `seed` at the
+ * top level of `parameters`, and the alibaba-adapter hardcodes the
+ * other values. Documenting the dropped fields here so a future
+ * operator who tries to wire one through is pointed at the right place.
+ */
+export interface AlibabaFillPayloadInput {
+  imageUrl: string;
+  /** Alibaba is instruction-mode; mask_url is ignored by the model. */
+  maskUrl: string;
+  prompt: string;
+  /** Held for API parity; the adapter does not forward `negativePrompt`. */
+  negativePrompt?: string;
+  /** Held for API parity; the adapter uses a fixed guidance scale. */
+  promptStrength?: number;
+  /** Held for API parity; the adapter does not forward `maskBlur`. */
+  maskBlur?: number;
+  /** Held for API parity; the adapter hardcodes its own seed value. */
+  seed?: number;
+  /** Held for API parity; the adapter hardcodes its own sampling choice. */
+  creativeMode?: boolean;
+}
+
+/**
+ * The DashScope multimodal-conversation payload, provider-neutral.
+ * Only the fields the model actually consumes are populated; the
+ * "held for parity" fields above are intentionally NOT included so
+ * the wire shape is the minimum the API accepts.
+ */
+export type AlibabaFillPayload = {
+  image_url: string;
+  prompt: string;
+};
+
+export function buildAlibabaFillPayload(
+  input: AlibabaFillPayloadInput
+): AlibabaFillPayload {
+  return {
+    image_url: input.imageUrl,
+    prompt: input.prompt,
+  };
+}
+
 // ─── Replicate payload ─────────────────────────────────────────────────────
 
 /**
@@ -390,11 +440,18 @@ export function buildReplicateFillPayload(
  * submit shapes, and prompts is the natural home for those).
  */
 export function buildInpaintPayloadForActiveProvider(
-  input: FalFillPayloadInput | ReplicateFillPayloadInput
+  input:
+    | FalFillPayloadInput
+    | ReplicateFillPayloadInput
+    | AlibabaFillPayloadInput
 ): Record<string, unknown> {
   const provider = process.env.INFERENCE_PROVIDER?.trim().toLowerCase();
   if (provider === "replicate") {
-    return buildReplicateFillPayload(input) as unknown as Record<string, unknown>;
+    return buildReplicateFillPayload(input as ReplicateFillPayloadInput) as unknown as Record<string, unknown>;
   }
-  return buildFalFillPayload(input) as unknown as Record<string, unknown>;
+  if (provider === "fal") {
+    return buildFalFillPayload(input as FalFillPayloadInput) as unknown as Record<string, unknown>;
+  }
+  // alibaba (default), or any unknown value
+  return buildAlibabaFillPayload(input as AlibabaFillPayloadInput) as unknown as Record<string, unknown>;
 }
