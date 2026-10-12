@@ -63,8 +63,8 @@
     "falModelId": "fal-ai/flux-kontext-lora/inpaint",
     "mode": "mask-fill",
     "expectedEndpoint": "fal-ai/flux-kontext-lora/inpaint",
-    "inputShape": { "extraFields": { "reference_image_url": "https://storage.googleapis.com/falserverless/example_inputs/reference_kontext_inpaint.jpeg" } },
-    "notes": "FLUX.1 Kontext [dev] LoRA inpainting. Mask-capable, requires reference_image_url. Same model family as Kontext Pro but with the mask constraint, so a fair head-to-head against the incumbent."
+    "inputShape": { "extraFields": { "reference_image_url": "$imageUrl" } },
+    "notes": "FLUX.1 Kontext [dev] LoRA inpainting. Mask-capable, requires reference_image_url. $imageUrl placeholder resolved to caseInput.imageUrl so the model sees the source as the reference (not a stock horse photo)."
   },
   {
     "id": "gpt-image-2-5",

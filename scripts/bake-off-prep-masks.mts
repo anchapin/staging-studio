@@ -27,14 +27,18 @@ interface CaseFixture {
 
 function maskPng(width: number, height: number): Buffer {
   // Centered rectangle covering ~45% of the image area — the staging zone.
+  // Convention (fal FLUX/Kontext/Z-Image inpaint endpoints):
+  //   white pixels = area to edit
+  //   black pixels = area to preserve
+  // So: black background, white rectangle.
   const w = Math.round(width * 0.55);
   const h = Math.round(height * 0.55);
   const x0 = Math.round((width - w) / 2);
   const y0 = Math.round((height - h) / 2);
 
   const png = new PngBuilder(width, height);
-  png.fillWhite();
-  png.fillBlackRect(x0, y0, w, h);
+  png.fillBlack();
+  png.fillWhiteRect(x0, y0, w, h);
   return png.toBuffer();
 }
 
@@ -47,6 +51,9 @@ class PngBuilder {
     // RGBA pixel buffer (Buffer so we can use .copy in the PNG encoder).
     this.pixels = Buffer.alloc(width * height * 4);
   }
+  fillBlack() {
+    this.pixels.fill(0x00);
+  }
   fillWhite() {
     this.pixels.fill(0xff);
   }
@@ -57,6 +64,17 @@ class PngBuilder {
         this.pixels[i] = 0;
         this.pixels[i + 1] = 0;
         this.pixels[i + 2] = 0;
+        this.pixels[i + 3] = 0xff;
+      }
+    }
+  }
+  fillWhiteRect(x: number, y: number, w: number, h: number) {
+    for (let row = y; row < y + h; row++) {
+      for (let col = x; col < x + w; col++) {
+        const i = (row * this.width + col) * 4;
+        this.pixels[i] = 0xff;
+        this.pixels[i + 1] = 0xff;
+        this.pixels[i + 2] = 0xff;
         this.pixels[i + 3] = 0xff;
       }
     }

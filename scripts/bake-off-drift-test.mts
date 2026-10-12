@@ -153,6 +153,9 @@ interface SlotConfig {
   vendor: "fal" | "openai";
   mode: "mask-fill" | "instruction";
   expectedEndpoint: string;
+  // Per-slot field overrides mirroring scripts/bake-off-slots.json inputShape.
+  maskField?: string;
+  referenceImageUrl?: string | null;
 }
 
 async function falQueueSubmit(
@@ -199,11 +202,19 @@ async function runSlot(
       prompt: caseInput.prompt,
       seed: SEED,
     };
+    const maskField = slot.maskField ?? "mask_url";
     if (slot.mode === "instruction" && caseInput.imageUrl) {
       input.image_urls = [caseInput.imageUrl];
     } else if (slot.mode === "mask-fill") {
       input.image_url = caseInput.imageUrl;
-      input.mask_url = caseInput.maskUrl;
+      input[maskField] = caseInput.maskUrl;
+      // Kontext LoRA requires reference_image_url. Pass the source image as
+      // the reference so the model has full context of the existing scene
+      // rather than getting distracted by an arbitrary stock photo.
+      if (slot.referenceImageUrl !== undefined) {
+        input.reference_image_url =
+          slot.referenceImageUrl === "$imageUrl" ? caseInput.imageUrl : slot.referenceImageUrl;
+      }
     }
     const t0 = Date.now();
     const out = await falQueueSubmit(slot.expectedEndpoint, input, key);
@@ -245,11 +256,13 @@ function diffImages(a: RgbaImage, b: RgbaImage, mask: RgbaImage): DiffStats {
   let maxB = 0;
   let compared = 0;
   for (let i = 0; i < a.width * a.height; i++) {
-    // Skip pixels inside the mask (black == edit area == excluded from drift check).
+    // Skip pixels inside the mask (white == edit area, black == preserve). Drift
+    // is measured only in the preserved region so we exclude the model's actual
+    // edit output from the comparison.
     const mr = mask.pixels[i * 4];
     const mg = mask.pixels[i * 4 + 1];
     const mb = mask.pixels[i * 4 + 2];
-    if ((mr + mg + mb) / 3 < 128) continue;
+    if ((mr + mg + mb) / 3 >= 128) continue;
     const dr = Math.abs(a.pixels[i * 4] - b.pixels[i * 4]);
     const dg = Math.abs(a.pixels[i * 4 + 1] - b.pixels[i * 4 + 1]);
     const db = Math.abs(a.pixels[i * 4 + 2] - b.pixels[i * 4 + 2]);
@@ -280,7 +293,8 @@ function fmtStats(label: string, stats: DiffStats): string {
 
 async function resizeMaskTo(mask: RgbaImage, target: RgbaImage): Promise<RgbaImage> {
   if (mask.width === target.width && mask.height === target.height) return mask;
-  // Use sharp to resize the mask's white-rect-on-black PNG to target dims.
+  // Use sharp to resize the mask's white-rect-on-black PNG (white = edit area)
+  // to the output's dimensions.
   // sharp expects RGBA layout and infers format from input buffer dimensions.
   const result = await sharp(mask.pixels, {
     raw: { width: mask.width, height: mask.height, channels: 4 },
@@ -312,16 +326,18 @@ async function main() {
       expectedEndpoint: "fal-ai/flux-pro/v1/fill",
     },
     {
-      id: "seedream-5-flash",
+      id: "z-image-turbo-inpaint",
       vendor: "fal",
-      mode: "instruction",
-      expectedEndpoint: "bytedance/seedream/v5/flash/edit",
+      mode: "mask-fill",
+      expectedEndpoint: "fal-ai/z-image/turbo/inpaint",
+      maskField: "mask_image_url",
     },
     {
-      id: "seedream-5-pro",
+      id: "flux-kontext-lora-inpaint",
       vendor: "fal",
-      mode: "instruction",
-      expectedEndpoint: "bytedance/seedream/v5/pro/edit",
+      mode: "mask-fill",
+      expectedEndpoint: "fal-ai/flux-kontext-lora/inpaint",
+      referenceImageUrl: "$imageUrl",
     },
   ];
 

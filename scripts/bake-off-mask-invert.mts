@@ -1,12 +1,12 @@
 /**
  * Helpers for OpenAI's edits endpoint, which uses a different mask convention
  * than fal: transparent pixels = area to edit, opaque = area to keep. Our
- * existing fal masks are black-rect-on-white (black = edit, white = keep).
+ * fal masks follow fal's convention: white pixels = edit area, black pixels = keep.
  *
- * invertFalMaskToOpenAIDataUrl(blackMaskUrl)
- *   Fetches the black-rect mask, inverts it to alpha-based (transparent inside
- *   the rect, opaque outside), and returns a base64 data URL ready for
- *   OpenAI's image_url field. Keeps pixel dimensions unchanged.
+ * invertFalMaskToOpenAIDataUrl(maskUrl)
+ *   Fetches the white-rect-on-black mask, converts white pixels (the fal edit area)
+ *   to alpha=0 transparent and black pixels to alpha=255 opaque, returning a base64
+ *   data URL ready for OpenAI's image_url field. Pixel dimensions unchanged.
  */
 import zlib from "node:zlib";
 
@@ -30,11 +30,11 @@ async function probeDims(url: string): Promise<PngDims> {
 interface ParsedMask {
   width: number;
   height: number;
-  // RGBA pixel buffer: black-rect-on-white convention (fal style).
+  // RGBA pixel buffer: white-rect-on-black convention (fal style; white = edit).
   pixels: Buffer;
 }
 
-async function loadBlackRectMask(url: string): Promise<ParsedMask> {
+async function loadMask(url: string): Promise<ParsedMask> {
   const r = await fetch(url);
   const buf = Buffer.from(await r.arrayBuffer());
   return decodePng(buf);
@@ -189,18 +189,18 @@ function encodePng(width: number, height: number, rgba: Buffer): Buffer {
 }
 
 /**
- * Detect whether a pixel is "edit" (black on white) or "keep" (white on white)
- * by luminance threshold. Treats anything < 128 as edit.
+ * Detect whether a pixel is the "edit" area (white on the fal mask) or the
+ * "keep" area (black) by luminance threshold. White = edit (luminance >= 128).
  */
 function isEdit(r: number, g: number, b: number): boolean {
-  return (r + g + b) / 3 < 128;
+  return (r + g + b) / 3 >= 128;
 }
 
 export async function invertFalMaskToOpenAIDataUrl(
-  blackMaskUrl: string,
+  maskUrl: string,
 ): Promise<string> {
-  const dims = await probeDims(blackMaskUrl);
-  const mask = await loadBlackRectMask(blackMaskUrl);
+  const dims = await probeDims(maskUrl);
+  const mask = await loadMask(maskUrl);
   if (mask.width !== dims.width || mask.height !== dims.height) {
     throw new Error("PNG dimension probe mismatch");
   }

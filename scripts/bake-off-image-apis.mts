@@ -189,7 +189,13 @@ function buildFalInput(
   }
   if (shape.extraFields) {
     for (const [k, v] of Object.entries(shape.extraFields)) {
-      input[k] = v;
+      // $imageUrl / $maskUrl placeholders are resolved against the current
+      // case input so per-slot defaults can reference the source image or
+      // mask rather than hard-coding a stock example URL.
+      let resolved: unknown = v;
+      if (v === "$imageUrl") resolved = caseInput.imageUrl;
+      else if (v === "$maskUrl") resolved = caseInput.maskUrl;
+      input[k] = resolved;
     }
   }
   return input;
