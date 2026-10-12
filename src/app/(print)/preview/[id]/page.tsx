@@ -2,6 +2,14 @@ import { cache } from "react";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 
+// Issue #1225: this page is fully data-driven (Prisma fetch per request) and
+// is read both by co-workers' browsers and by Browserless, which has no
+// session. A cached render would show one visitor a previous visitor's data.
+// Route freshness is also enforced by the revalidation contract: every server
+// action that mutates lookbook-rendered data must revalidate /preview/{id}
+// alongside the dashboard path (pinned by tests/revalidate-preview.test.ts).
+export const dynamic = "force-dynamic";
+
 import { prisma } from "@/lib/prisma";
 import { PREVIEW_TOKEN_QUERY_PARAM } from "@/lib/preview-token";
 import { parseBuyerDemographics } from "@/lib/project-create-schema";

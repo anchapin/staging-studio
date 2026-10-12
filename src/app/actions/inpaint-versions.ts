@@ -276,5 +276,6 @@ export async function restoreInpaintVersion(
   const projectId = version.room.project.id;
   revalidatePath(`/projects/${projectId}`);
   revalidatePath(`/projects/${projectId}/lookbook`);
+  revalidatePath(`/preview/${projectId}`);
   return { success: true };
 }

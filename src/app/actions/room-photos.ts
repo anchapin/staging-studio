@@ -221,5 +221,6 @@ export async function confirmRoomPhotoUpload(
   }
 
   revalidatePath(`/projects/${projectId}`);
+  revalidatePath(`/preview/${projectId}`);
   return { success: true, publicUrl };
 }

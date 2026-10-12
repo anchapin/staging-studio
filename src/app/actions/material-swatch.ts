@@ -72,6 +72,7 @@ export async function saveMaterialSwatch(
         },
       });
       revalidatePath(`/projects/${projectId}`);
+      revalidatePath(`/preview/${projectId}`);
       return { success: true, id: result.id };
     } else {
       const result = await prisma.materialSwatch.create({
@@ -87,6 +88,7 @@ export async function saveMaterialSwatch(
         },
       });
       revalidatePath(`/projects/${projectId}`);
+      revalidatePath(`/preview/${projectId}`);
       return { success: true, id: result.id };
     }
   } catch (error) {
@@ -126,6 +128,7 @@ export async function deleteMaterialSwatch(
       where: { id: swatchId, projectId },
     });
     revalidatePath(`/projects/${projectId}`);
+      revalidatePath(`/preview/${projectId}`);
     return { success: true };
   } catch (error) {
     console.error(
@@ -185,6 +188,7 @@ export async function replaceMaterialSwatches(
       ),
     ]);
     revalidatePath(`/projects/${projectId}`);
+      revalidatePath(`/preview/${projectId}`);
     return { success: true };
   } catch (error) {
     console.error(

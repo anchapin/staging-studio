@@ -37,6 +37,7 @@ export async function bulkUpdateRoomAesthetic(
 
     for (const room of rooms) {
       revalidatePath(`/projects/${room.projectId}`);
+      revalidatePath(`/preview/${room.projectId}`);
     }
 
     return { success: true };

@@ -51,7 +51,7 @@ export async function saveRoomCopy(
   }
 
   try {
-    await prisma.room.update({
+    const updated = await prisma.room.update({
       where: { id: roomId },
       data: {
         observedChallenge: parsed.data.observedChallenge,
@@ -59,8 +59,10 @@ export async function saveRoomCopy(
         recommendation: parsed.data.recommendation,
         checklistItems: parsed.data.checklist,
       },
+      select: { projectId: true },
     });
     revalidatePath(`/projects/[id]/rooms`, "page");
+    revalidatePath(`/preview/${updated.projectId}`);
     return { success: true };
   } catch (err) {
     console.error("[saveRoomCopy]", err);
@@ -95,7 +97,7 @@ export async function saveRoomCopyEdits(
   }
 
   try {
-    await prisma.room.update({
+    const updated = await prisma.room.update({
       where: { id: roomId },
       data: {
         observedChallenge: parsed.data.observedChallenge,
@@ -103,8 +105,10 @@ export async function saveRoomCopyEdits(
         recommendation: parsed.data.recommendation,
         checklistItems: parsed.data.checklistItems,
       },
+      select: { projectId: true },
     });
     revalidatePath(`/projects/[id]/rooms`, "page");
+    revalidatePath(`/preview/${updated.projectId}`);
     return { success: true };
   } catch (err) {
     console.error("[saveRoomCopyEdits]", err);

@@ -113,6 +113,7 @@ export async function createRoomsBatch(
     );
 
     revalidatePath(`/projects/${parsed.data.projectId}`);
+    revalidatePath(`/preview/${parsed.data.projectId}`);
     return { success: true, rooms };
   } catch (error) {
     console.error("Failed to create rooms batch:", error);
