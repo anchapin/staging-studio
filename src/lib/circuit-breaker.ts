@@ -1,7 +1,36 @@
+import {
+  checkAndRecordRateLimit,
+  checkRateLimit,
+  clearRateLimit,
+  type RateLimitResult,
+} from "@/lib/sliding-window-ratelimit";
+
+/**
+ * Circuit breaker for external provider calls (fal.ai, Browserless).
+ *
+ * Issue #1123: breaker state used to live in a module-level Map, which on
+ * serverless is per-lambda-instance — each instance counted its own
+ * failures, so the threshold was effectively `failureThreshold x N`
+ * instances and the breaker never opened for real traffic. State now lives
+ * in the Postgres sliding-window limiter (DailyApiUsage rows keyed
+ * `circuit-breaker:<service>`), shared across every instance.
+ *
+ * Semantics (deliberate changes from the in-memory version):
+ * - OPEN is implicit: `failureThreshold` recorded failures inside
+ *   `cooldownMs` make `execute` throw CircuitBreakerOpenError before the
+ *   call is attempted. There is no HALF_OPEN probe state; recovery is
+ *   implicit as failures slide out of the window, and any success clears
+ *   the circuit outright.
+ * - The call whose failure trips the threshold surfaces the ORIGINAL
+ *   error; the breaker opens for calls from the next attempt onward.
+ * - If the breaker store is unreachable, the breaker fails OPEN (the call
+ *   proceeds) — the breaker protects availability, it must not compound
+ *   a store outage into a total provider outage.
+ */
+
 export const CircuitState = {
   CLOSED: "CLOSED",
   OPEN: "OPEN",
-  HALF_OPEN: "HALF_OPEN",
 } as const;
 
 export type CircuitStateValue = (typeof CircuitState)[keyof typeof CircuitState];
@@ -27,164 +56,81 @@ export class CircuitBreakerOpenError extends Error {
 export interface CircuitBreakerConfig {
   failureThreshold?: number;
   cooldownMs?: number;
-  halfOpenMaxCalls?: number;
-}
-
-interface CircuitBreakerState {
-  state: CircuitStateValue;
-  failureCount: number;
-  lastFailureTime: number | null;
-  halfOpenCalls: number;
 }
 
 export class CircuitBreaker {
-  private _state: CircuitBreakerState = {
-    state: CircuitState.CLOSED,
-    failureCount: 0,
-    lastFailureTime: null,
-    halfOpenCalls: 0,
-  };
-
   readonly service: string;
   readonly failureThreshold: number;
   readonly cooldownMs: number;
-  readonly halfOpenMaxCalls: number;
 
   constructor(service: string, config: CircuitBreakerConfig = {}) {
     this.service = service;
     this.failureThreshold = config.failureThreshold ?? 3;
     this.cooldownMs = config.cooldownMs ?? 30_000;
-    this.halfOpenMaxCalls = config.halfOpenMaxCalls ?? 1;
   }
 
-  private getCurrentState(): CircuitBreakerState {
-    const s = this._state;
-    if (s.state === CircuitState.OPEN && s.lastFailureTime !== null) {
-      const now = Date.now();
-      if (now - s.lastFailureTime >= this.cooldownMs) {
-        return {
-          state: CircuitState.HALF_OPEN,
-          failureCount: 0,
-          lastFailureTime: s.lastFailureTime,
-          halfOpenCalls: 0,
-        };
-      }
-    }
-    return s;
-  }
-
-  private transition(next: CircuitBreakerState): void {
-    this._state = next;
-  }
-
-  get currentState(): CircuitStateValue {
-    return this.getCurrentState().state;
-  }
-
-  private computeNextState(
-    current: CircuitBreakerState,
-    shouldFail: boolean
-  ): CircuitBreakerState {
-    if (!shouldFail) {
-      if (current.state === CircuitState.HALF_OPEN) {
-        const newHalfOpenCalls = current.halfOpenCalls + 1;
-        if (newHalfOpenCalls >= this.halfOpenMaxCalls) {
-          return {
-            state: CircuitState.CLOSED,
-            failureCount: 0,
-            lastFailureTime: null,
-            halfOpenCalls: 0,
-          };
-        }
-        return {
-          ...current,
-          halfOpenCalls: newHalfOpenCalls,
-        };
-      }
-      return {
-        state: CircuitState.CLOSED,
-        failureCount: 0,
-        lastFailureTime: null,
-        halfOpenCalls: 0,
-      };
-    }
-
-    const newFailureCount = current.failureCount + 1;
-    const now = Date.now();
-
-    if (
-      current.state === CircuitState.HALF_OPEN ||
-      newFailureCount >= this.failureThreshold
-    ) {
-      return {
-        state: CircuitState.OPEN,
-        failureCount: newFailureCount,
-        lastFailureTime: now,
-        halfOpenCalls: 0,
-      };
-    }
-
-    return {
-      ...current,
-      failureCount: newFailureCount,
-      lastFailureTime: now,
-    };
+  private get identifier(): string {
+    return `circuit-breaker:${this.service}`;
   }
 
   async execute<T>(fn: () => Promise<T>): Promise<T> {
-    const current = this.getCurrentState();
+    let status: RateLimitResult;
+    try {
+      status = await checkRateLimit(
+        this.identifier,
+        this.failureThreshold,
+        this.cooldownMs
+      );
+    } catch (storeError) {
+      console.warn(
+        JSON.stringify({
+          event: "circuit_breaker_state_unavailable",
+          service: this.service,
+        }),
+        storeError
+      );
+      return fn();
+    }
 
-    if (current.state === CircuitState.OPEN) {
-      if (
-        current.lastFailureTime !== null &&
-        Date.now() - current.lastFailureTime < this.cooldownMs
-      ) {
-        throw new CircuitBreakerOpenError(
-          this.service,
-          this.cooldownMs - (Date.now() - current.lastFailureTime)
-        );
-      }
-      this.transition({
-        state: CircuitState.HALF_OPEN,
-        failureCount: 0,
-        lastFailureTime: current.lastFailureTime,
-        halfOpenCalls: 0,
-      });
+    if (!status.allowed) {
+      throw new CircuitBreakerOpenError(
+        this.service,
+        Math.max(1, status.resetAt - Date.now())
+      );
     }
 
     try {
       const result = await fn();
-      this.transition(this.computeNextState(this.getCurrentState(), false));
+      try {
+        await clearRateLimit(this.identifier);
+      } catch (storeError) {
+        console.warn(
+          JSON.stringify({
+            event: "circuit_breaker_clear_failed",
+            service: this.service,
+          }),
+          storeError
+        );
+      }
       return result;
     } catch (error) {
-      this.transition(this.computeNextState(this.getCurrentState(), true));
-      if (this.getCurrentState().state === CircuitState.OPEN) {
-        throw new CircuitBreakerOpenError(
-          this.service,
-          this.cooldownMs,
-          `Circuit breaker opened for "${this.service}" after consecutive failures`
+      try {
+        await checkAndRecordRateLimit(
+          this.identifier,
+          this.failureThreshold,
+          this.cooldownMs
+        );
+      } catch (storeError) {
+        console.warn(
+          JSON.stringify({
+            event: "circuit_breaker_record_failed",
+            service: this.service,
+          }),
+          storeError
         );
       }
       throw error;
     }
-  }
-
-  reset(): void {
-    this._state = {
-      state: CircuitState.CLOSED,
-      failureCount: 0,
-      lastFailureTime: null,
-      halfOpenCalls: 0,
-    };
-  }
-
-  getStatus(): { service: string; state: CircuitStateValue; failureCount: number } {
-    const s = this.getCurrentState();
-    return {
-      service: this.service,
-      state: s.state,
-      failureCount: s.failureCount,
-    };
   }
 }
 
@@ -200,6 +146,8 @@ export function getCircuitBreaker(
   return circuitBreakers.get(service)!;
 }
 
+/** Test-only: drop the cached handles. State lives in Postgres, so tests
+ * that exercise real breaker semantics reset the store mock instead. */
 export function resetAllCircuitBreakers(): void {
-  circuitBreakers.forEach((cb) => cb.reset());
+  circuitBreakers.clear();
 }
