@@ -30,6 +30,7 @@
  *   - ALIBABA_INPAINT_MODEL       — DashScope model id (qwen-image-2.1-pro etc.)
  */
 import { requireEnvVars } from "@/lib/env";
+import { getCircuitBreaker } from "@/lib/circuit-breaker";
 import { logger } from "@/lib/logger";
 import {
   InferenceRequestGoneError,
@@ -75,6 +76,26 @@ function requireAlibabaEnv(): {
     workspaceId: env.ALIBABA_BAILIAN_WORKSPACE_ID,
     model: env.ALIBABA_INPAINT_MODEL,
   };
+}
+
+/**
+ * Asserts that the Alibaba Cloud (DashScope) provider is configured.
+ *
+ * Purpose: preflight guard for inpainting routes — throws
+ * `MissingEnvVarsError` naming the three Alibaba env vars if any are
+ * unset or blank. The adapter reads them lazily inside the HTTP helper
+ * so a misconfiguration without this guard surfaces as an opaque
+ * `MissingEnvVarsError` deep inside a fetch — this helper gives the
+ * error at the call site instead.
+ *
+ * Side effects: reads `process.env`; throws when missing.
+ */
+export function assertAlibabaConfigured(): void {
+  requireEnvVars(
+    "ALIBABA_DASHSCOPE_API_KEY",
+    "ALIBABA_BAILIAN_WORKSPACE_ID",
+    "ALIBABA_INPAINT_MODEL",
+  );
 }
 
 /**
@@ -132,6 +153,13 @@ interface DashScopeResponse {
  * Issues the DashScope multimodal-conversation call. Pure HTTP via fetch;
  * the DashScope Python SDK is not used so we don't take a new runtime
  * dependency. Throws on non-2xx with the upstream message in `error`.
+ *
+ * Wrapped in the shared circuit breaker (`getCircuitBreaker("alibaba-cloud", …)`)
+ * for the same reason the fal adapter wrapped its calls: a single
+ * degraded provider shouldn't be able to take down the inpaint route,
+ * and the breaker gives the route a fast-fail path when the upstream
+ * is in cooldown. Mirrors the historical pattern in `src/lib/fal.ts`
+ * that this PR deleted.
  */
 async function dashscopeGenerate(
   workspaceId: string,
@@ -140,40 +168,61 @@ async function dashscopeGenerate(
   imageUrl: string,
   prompt: string,
 ): Promise<DashScopeResponse> {
-  const url = dashscopeEndpoint(workspaceId);
-  const body = {
-    model,
-    input: {
-      messages: [
-        {
-          role: "user",
-          content: [{ image: imageUrl }, { text: prompt }],
-        },
-      ],
-    },
-    parameters: {
-      n: 1,
-      watermark: false,
-      prompt_extend: true,
-      seed: 42,
-      size: "2048*1536",
-    },
-  };
-  const r = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
+  const cb = getCircuitBreaker("alibaba-cloud", {
+    failureThreshold: 3,
+    cooldownMs: 30_000,
   });
-  const respBody = (await r.json()) as DashScopeResponse;
-  if (!r.ok || respBody.code) {
-    throw new Error(
-      `DashScope ${model} returned ${r.status} (code=${respBody.code ?? "n/a"}): ${respBody.message ?? "no message"}`,
+  try {
+    const url = dashscopeEndpoint(workspaceId);
+    const body = {
+      model,
+      input: {
+        messages: [
+          {
+            role: "user",
+            content: [{ image: imageUrl }, { text: prompt }],
+          },
+        ],
+      },
+      parameters: {
+        n: 1,
+        watermark: false,
+        prompt_extend: true,
+        seed: 42,
+        size: "2048*1536",
+      },
+    };
+    return await cb.execute(() =>
+      fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      }).then(async (r) => {
+        const respBody = (await r.json()) as DashScopeResponse;
+        if (!r.ok || respBody.code) {
+          throw new Error(
+            `DashScope ${model} returned ${r.status} (code=${respBody.code ?? "n/a"}): ${respBody.message ?? "no message"}`,
+          );
+        }
+        return respBody;
+      }),
     );
+  } catch (error) {
+    logger.error(
+      {
+        event: "alibaba_error",
+        errorType: "ExternalApiError",
+        model,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      },
+      `[ExternalApiError] alibaba-cloud dashscope error: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    throw error;
   }
-  return respBody;
 }
 
 /**

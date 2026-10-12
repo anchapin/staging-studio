@@ -243,6 +243,11 @@ export function assertInferenceConfigured(): void {
         `Use "alibaba" (default).`,
     );
   }
+  // Inline the env-var list (rather than importing alibaba-adapter)
+  // to avoid a circular import -- alibaba-adapter imports
+  // `InferenceClient` from here. `assertAlibabaConfigured` in
+  // `lib/alibaba-adapter.ts` is the canonical helper for callers that
+  // don't go through the abstraction.
   requireEnvVars(
     "ALIBABA_DASHSCOPE_API_KEY",
     "ALIBABA_BAILIAN_WORKSPACE_ID",
