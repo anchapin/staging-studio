@@ -433,11 +433,20 @@ export async function pollFalStatus(requestId: string): Promise<InpaintStatusRes
 
     const { persisted, imageUrl } = await persistFalImage(falImageUrl, requestId);
     if (persisted && imageUrl) {
-      await prisma.inpaintRequest.update({
-        where: { id: requestId },
-        data: { status: "COMPLETED", resultUrl: imageUrl },
-      });
-      return { status: "completed", imageUrl, persisted: true };
+      // Issue #1136 (review): same record-write contract as
+      // finishCompletedJob — a failed write surfaces as `retryable`,
+      // never as a completed result. Unguarded, this throw bypassed
+      // the give-up window and hit the route as an unclassified 500.
+      try {
+        await prisma.inpaintRequest.update({
+          where: { id: requestId },
+          data: { status: "COMPLETED", resultUrl: imageUrl },
+        });
+        return { status: "completed", imageUrl, persisted: true };
+      } catch (recordError) {
+        console.error(JSON.stringify({ event: "inpaint_record_failed", requestId }), recordError);
+        return { status: "retryable", imageUrl: null, persisted: false };
+      }
     }
     return { status: "retryable", imageUrl: falImageUrl, persisted: false };
   }

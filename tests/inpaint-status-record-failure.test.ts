@@ -80,6 +80,23 @@ describe("pollFalStatus record-write failure (issue #1136)", () => {
     expect(result.imageUrl).toBeNull();
   });
 
+  it("returns retryable when the write fails on a PERSISTENCE_FAILED retry", async () => {
+    // Fresh updatedAt stays inside the PERSISTENCE_GIVE_UP_MS window
+    // (2 min), so the branch reaches the persistence path.
+    mockPrisma.inpaintRequest.findUnique.mockResolvedValue({
+      ...ROW,
+      status: "PERSISTENCE_FAILED",
+      updatedAt: new Date(),
+    });
+    mockPrisma.inpaintRequest.update.mockRejectedValue(new Error("connection refused"));
+
+    const result = await pollFalStatus(REQUEST_ID);
+
+    expect(result.status).toBe("retryable");
+    expect(result.persisted).toBe(false);
+    expect(result.imageUrl).toBeNull();
+  });
+
   it("returns completed/persisted when the record write lands", async () => {
     mockPrisma.inpaintRequest.update.mockResolvedValue(ROW);
 
