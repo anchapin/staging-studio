@@ -9,30 +9,23 @@
   {
     "id": "flux-3-image",
     "falModelId": "fal-ai/flux-3-image",
-    "mode": "instruction",
+    "mode": "text-to-image",
     "expectedEndpoint": "fal-ai/flux-3-image",
-    "notes": "FLUX 3 Image; instruction editing, native 2K/4K. No /edit endpoint on fal — text-to-image only."
+    "notes": "FLUX 3 Image is text-to-image only on fal (no /edit endpoint exposed). Result is not strictly edit-comparable; included for completeness against the issue spec."
   },
   {
     "id": "seedream-5-flash",
     "falModelId": "bytedance/seedream/v5/flash/edit",
     "mode": "instruction",
     "expectedEndpoint": "bytedance/seedream/v5/flash/edit",
-    "notes": "Seedream 5.0 Flash; instruction editing with up to 10 reference images, $0.027/image."
+    "notes": "Seedream 5.0 Flash; instruction editing, expects image_urls: string[]. $0.027/image."
   },
   {
     "id": "nano-banana-2-1",
     "falModelId": "fal-ai/nano-banana-2.1/edit",
     "mode": "instruction",
     "expectedEndpoint": "fal-ai/nano-banana-2.1/edit",
-    "notes": "Gemini Nano Banana 2.1; instruction editing released 2026-10-06."
-  },
-  {
-    "id": "gpt-image-2-5",
-    "falModelId": "fal-ai/gpt-image-2.5/edit",
-    "mode": "instruction",
-    "expectedEndpoint": "fal-ai/gpt-image-2.5/edit",
-    "notes": "OpenAI GPT-Image-2.5 Sunburst class; instruction editing."
+    "notes": "Gemini Nano Banana 2.1; instruction editing released 2026-10-06. Expects image_urls: string[]."
   },
   {
     "id": "qwen-image-2-1",

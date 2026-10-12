@@ -22,7 +22,7 @@ const CASES = ["vacant-insert", "occupied-replace", "repeat-stability"];
 interface Slot {
   id: string;
   falModelId: string;
-  mode: "mask-fill" | "instruction";
+  mode: "mask-fill" | "instruction" | "text-to-image";
   expectedEndpoint: string;
   notes?: string;
 }
@@ -45,25 +45,54 @@ function requireFalKey(): string {
   return key;
 }
 
-async function falQueueRun(model: string, input: Record<string, unknown>, key: string) {
+async function falQueueRun(
+  model: string,
+  input: Record<string, unknown>,
+  key: string,
+): Promise<{ status: string; body: Record<string, unknown> | null; errorDetail?: string }> {
   const submit = await fetch(`https://queue.fal.run/${model}`, {
     method: "POST",
     headers: { Authorization: `Key ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
-  if (!submit.ok) throw new Error(`submit ${submit.status}: ${await submit.text()}`);
+  if (!submit.ok) {
+    throw new Error(`submit ${submit.status}: ${await submit.text()}`);
+  }
   const { status_url, response_url } = (await submit.json()) as {
     status_url: string;
     response_url: string;
   };
-  for (let i = 0; i < 120; i++) {
-    const poll = await fetch(status_url, { headers: { Authorization: `Key ${key}` } });
+  let finalStatus = "IN_QUEUE";
+  for (let i = 0; i < 150; i++) {
+    const poll = await fetch(status_url, {
+      headers: { Authorization: `Key ${key}` },
+    });
     const { status } = (await poll.json()) as { status: string };
+    finalStatus = status;
     if (status === "COMPLETED") break;
-    if (status === "FAILED") throw new Error("provider reported FAILED");
+    if (status === "FAILED") {
+      const failBody = await poll.text();
+      throw new Error(`provider reported FAILED: ${failBody}`);
+    }
     await new Promise((r) => setTimeout(r, 2000));
   }
-  return fetch(response_url, { headers: { Authorization: `Key ${key}` } });
+  if (finalStatus !== "COMPLETED") {
+    throw new Error(`timeout: final status ${finalStatus}`);
+  }
+  const res = await fetch(response_url, {
+    headers: { Authorization: `Key ${key}` },
+  });
+  const body = (await res.json()) as Record<string, unknown>;
+  // fal's queue returns a FastAPI validation error as JSON with a "detail"
+  // field. Surface it so the row is marked failed instead of silently ok=true.
+  if (Array.isArray((body as { detail?: unknown }).detail)) {
+    return {
+      status: finalStatus,
+      body: null,
+      errorDetail: JSON.stringify((body as { detail: unknown }).detail),
+    };
+  }
+  return { status: finalStatus, body };
 }
 
 async function fetchPricing(
@@ -109,31 +138,55 @@ async function main() {
         fs.readFileSync(path.join(BAKE_OFF_DIR, `${cs}.json`), "utf8"),
       );
       const input: Record<string, unknown> = { prompt: casePrompt(caseInput) };
-      if (caseInput.imageUrl) input.image_url = caseInput.imageUrl;
-      if (slot.mode === "mask-fill" && caseInput.maskUrl) {
-        input.mask_url = caseInput.maskUrl;
+      if (slot.mode === "instruction" && caseInput.imageUrl) {
+        // instruction-mode slots on fal take an array of reference images.
+        input.image_urls = [caseInput.imageUrl];
+      } else if (slot.mode === "mask-fill") {
+        if (caseInput.imageUrl) input.image_url = caseInput.imageUrl;
+        if (caseInput.maskUrl) input.mask_url = caseInput.maskUrl;
       }
+      // text-to-image mode: no image inputs.
       const started = Date.now();
       try {
-        const res = await falQueueRun(slot.expectedEndpoint, input, key);
-        const body = (await res.json()) as Record<string, unknown>;
-        const images = (body as { images?: Array<{ url: string }> }).images;
+        const { status, body, errorDetail } = await falQueueRun(
+          slot.expectedEndpoint,
+          input,
+          key,
+        );
+        if (!body) {
+          results.push({
+            slot: slot.id,
+            case: cs,
+            ok: false,
+            latency_ms: Date.now() - started,
+            error: `provider returned validation error: ${errorDetail ?? "(no detail)"}`,
+          });
+          continue;
+        }
+        const images = (body as { images?: Array<{ url: string; width?: number; height?: number }> }).images;
         const firstImage = images?.[0];
         results.push({
           slot: slot.id,
           case: cs,
+          ok: true,
           latency_ms: Date.now() - started,
           unit_price_usd: pricing.get(slot.expectedEndpoint)?.unit_price ?? null,
           billing_unit: pricing.get(slot.expectedEndpoint)?.unit ?? null,
           output: firstImage?.url ?? null,
           output_dimensions:
-            firstImage && "width" in firstImage && "height" in firstImage
-              ? `${(firstImage as { width: number }).width}x${(firstImage as { height: number }).height}`
+            firstImage?.width && firstImage?.height
+              ? `${firstImage.width}x${firstImage.height}`
               : null,
-          ok: true,
+          queue_status: status,
         });
       } catch (err) {
-        results.push({ slot: slot.id, case: cs, ok: false, error: String(err) });
+        results.push({
+          slot: slot.id,
+          case: cs,
+          ok: false,
+          latency_ms: Date.now() - started,
+          error: String(err),
+        });
       }
     }
   }
