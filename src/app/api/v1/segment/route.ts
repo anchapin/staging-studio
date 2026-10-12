@@ -9,10 +9,16 @@
  * Version header: X-Supabase-API-Version: v1
  */
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { buildVersionHeaders } from "@/lib/api-version";
 import { prisma } from "@/lib/prisma";
+import { furnishingsSegmentRequestSchema } from "@/lib/ai-route-schemas";
+import {
+  API_ERROR_INVALID_REQUEST,
+  API_ERROR_RATE_LIMIT_EXCEEDED,
+  API_ERROR_ROOM_NOT_FOUND,
+  API_ERROR_UNAUTHORIZED,
+} from "@/lib/api-errors";
 import {
   DEFAULT_DAILY_SEGMENT_LIMIT,
   DAILY_LIMIT_ENV_VAR,
@@ -22,18 +28,6 @@ import {
   resolveDailyLimit,
 } from "@/lib/api-quota";
 
-const SegmentRequestBodySchema = z.object({
-  roomId: z.string().min(1),
-  imageUrl: z.string().url(),
-  clickPoint: z.object({
-    x: z.number(),
-    y: z.number(),
-  }),
-  imageWidth: z.number().positive(),
-  imageHeight: z.number().positive(),
-  warm: z.boolean().optional(),
-});
-
 export const dynamic = "force-dynamic";
 
 /** POST /api/v1/segment – submit a segmentation request. */
@@ -41,7 +35,7 @@ export async function POST(request: NextRequest) {
   const user = await getAuthedPrismaUser();
   if (!user) {
     return NextResponse.json(
-      { error: "Unauthorized", message: "You must be signed in to segment images." },
+      { error: "Unauthorized", code: API_ERROR_UNAUTHORIZED, message: "You must be signed in to segment images." },
       { status: 401 }
     );
   }
@@ -62,17 +56,18 @@ export async function POST(request: NextRequest) {
         limit: segmentQuota.limit,
       })
     );
-    return NextResponse.json(dailyQuotaExceededPayload(segmentQuota, "Submitting segmentation requests"), {
-      status: 429,
-    });
+    return NextResponse.json(
+      { ...dailyQuotaExceededPayload(segmentQuota, "Submitting segmentation requests"), code: API_ERROR_RATE_LIMIT_EXCEEDED },
+      { status: 429 }
+    );
   }
 
   // Parse and validate request body
   const body = await request.json().catch(() => null);
-  const parsed = SegmentRequestBodySchema.safeParse(body);
+  const parsed = furnishingsSegmentRequestSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "Invalid request", message: "Request body is invalid." },
+      { error: "Invalid request", code: API_ERROR_INVALID_REQUEST, message: "Request body is invalid." },
       { status: 400 }
     );
   }
@@ -84,11 +79,15 @@ export async function POST(request: NextRequest) {
   });
   if (!room) {
     return NextResponse.json(
-      { error: "Forbidden", message: "Room not found or access denied." },
+      { error: "Forbidden", code: API_ERROR_ROOM_NOT_FOUND, message: "Room not found or access denied." },
       { status: 403 }
     );
   }
 
+  // IMPLEMENTATION NOTE (issue #1125): this stub does no work, so the quota
+  // check above only READS today's counter and nothing is charged. When this
+  // stub is implemented, claimDailyQuota(...) (issue #1132) must run before
+  // the provider call, or this route becomes a silent cap bypass.
   return NextResponse.json(
     {
       message: "v1 segment endpoint stub",

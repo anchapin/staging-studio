@@ -10,10 +10,16 @@
  * Version header: X-Supabase-API-Version: v1
  */
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { buildVersionHeaders } from "@/lib/api-version";
 import { prisma } from "@/lib/prisma";
+import { inpaintSubmitSchema } from "@/lib/inpaint-submit";
+import {
+  API_ERROR_INVALID_REQUEST,
+  API_ERROR_RATE_LIMIT_EXCEEDED,
+  API_ERROR_ROOM_NOT_FOUND,
+  API_ERROR_UNAUTHORIZED,
+} from "@/lib/api-errors";
 import {
   DEFAULT_DAILY_INPAINT_LIMIT,
   DAILY_LIMIT_ENV_VAR,
@@ -23,14 +29,6 @@ import {
   resolveDailyLimit,
 } from "@/lib/api-quota";
 
-const InpaintRequestBodySchema = z.object({
-  roomId: z.string().min(1),
-  imageUrl: z.string().url(),
-  maskImageUrl: z.string().url(),
-  prompt: z.string().min(1).max(1000),
-  seed: z.number().int().optional(),
-});
-
 export const dynamic = "force-dynamic";
 
 /** POST /api/v1/inpaint – submit an inpaint request. */
@@ -38,7 +36,7 @@ export async function POST(request: NextRequest) {
   const user = await getAuthedPrismaUser();
   if (!user) {
     return NextResponse.json(
-      { error: "Unauthorized", message: "You must be signed in to submit inpaint requests." },
+      { error: "Unauthorized", code: API_ERROR_UNAUTHORIZED, message: "You must be signed in to submit inpaint requests." },
       { status: 401 }
     );
   }
@@ -61,17 +59,18 @@ export async function POST(request: NextRequest) {
         limit: inpaintQuota.limit,
       })
     );
-    return NextResponse.json(dailyQuotaExceededPayload(inpaintQuota, "Submitting inpaint requests"), {
-      status: 429,
-    });
+    return NextResponse.json(
+      { ...dailyQuotaExceededPayload(inpaintQuota, "Submitting inpaint requests"), code: API_ERROR_RATE_LIMIT_EXCEEDED },
+      { status: 429 }
+    );
   }
 
   // Parse and validate request body
   const body = await request.json().catch(() => null);
-  const parsed = InpaintRequestBodySchema.safeParse(body);
+  const parsed = inpaintSubmitSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "Invalid request", message: "Request body is invalid." },
+      { error: "Invalid request", code: API_ERROR_INVALID_REQUEST, message: "Request body is invalid." },
       { status: 400 }
     );
   }
@@ -83,11 +82,15 @@ export async function POST(request: NextRequest) {
   });
   if (!room) {
     return NextResponse.json(
-      { error: "Forbidden", message: "Room not found or access denied." },
+      { error: "Forbidden", code: API_ERROR_ROOM_NOT_FOUND, message: "Room not found or access denied." },
       { status: 403 }
     );
   }
 
+  // IMPLEMENTATION NOTE (issue #1125): this stub does no work, so the quota
+  // check above only READS today's counter and nothing is charged. When this
+  // stub is implemented, claimDailyQuota(...) (issue #1132) must run before
+  // the provider call, or this route becomes a silent cap bypass.
   return NextResponse.json(
     {
       message: "v1 inpaint endpoint stub",
