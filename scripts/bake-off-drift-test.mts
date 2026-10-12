@@ -317,6 +317,12 @@ async function main() {
       mode: "instruction",
       expectedEndpoint: "bytedance/seedream/v5/flash/edit",
     },
+    {
+      id: "seedream-5-pro",
+      vendor: "fal",
+      mode: "instruction",
+      expectedEndpoint: "bytedance/seedream/v5/pro/edit",
+    },
   ];
 
   for (const slot of slots) {
