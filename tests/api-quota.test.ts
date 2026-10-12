@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Prisma } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
 
 import {
   DEFAULT_DAILY_COPY_LIMIT,
@@ -8,12 +10,14 @@ import {
   DEFAULT_DAILY_SEGMENT_LIMIT,
   DAILY_LIMIT_ENV_VAR,
   SEGMENT_DAILY_LIMIT,
+  claimDailyQuota,
   dailyQuotaExceededPayload,
   dailyWindow,
   evaluateDailyBatchQuota,
   evaluateDailyQuota,
   getDailyUsage,
   recordDailyUsage,
+  refundDailyQuota,
   resolveDailyLimit,
 } from "@/lib/api-quota";
 
@@ -41,6 +45,38 @@ vi.mock("@/lib/prisma", () => ({
           mockUsageStore[key] = create?.count ?? 0;
         }
         return { count: mockUsageStore[key] };
+      }),
+      // Issue #1132: the atomic-claim primitives share the same in-memory
+      // store so the real claimDailyQuota / refundDailyQuota implementations
+      // are exercised end to end.
+      updateMany: vi.fn(async ({
+        where,
+        data,
+      }: {
+        where: { userId: string; surface: string; dayKey: string; count?: { lte: number; gte: number } };
+        data: { count: { increment?: number; decrement?: number } };
+      }) => {
+        const key = `${where.userId}|${where.surface}|${where.dayKey}`;
+        if (!(key in mockUsageStore)) return { count: 0 };
+        if (where.count?.lte !== undefined && mockUsageStore[key] > where.count.lte) {
+          return { count: 0 };
+        }
+        if (where.count?.gte !== undefined && mockUsageStore[key] < where.count.gte) {
+          return { count: 0 };
+        }
+        mockUsageStore[key] += (data.count.increment ?? 0) - (data.count.decrement ?? 0);
+        return { count: 1 };
+      }),
+      create: vi.fn(async ({ data }: { data: { userId: string; surface: string; dayKey: string; count: number } }) => {
+        const key = `${data.userId}|${data.surface}|${data.dayKey}`;
+        if (key in mockUsageStore) {
+          throw new Prisma.PrismaClientKnownRequestError(
+            "Unique constraint failed on the fields: (`userId`,`surface`,`dayKey`)",
+            { code: "P2002", clientVersion: "5.22.0" }
+          );
+        }
+        mockUsageStore[key] = data.count;
+        return { count: data.count };
       }),
       findUnique: vi.fn(async ({ where }: (typeof mockUpsertCalls)[number]) => {
         const { userId, surface, dayKey } = where.userId_surface_dayKey;
@@ -382,5 +418,98 @@ describe("evaluateDailyBatchQuota (batch room-type detection, issue #681)", () =
       expect(decision.resetsAt).toBe(nextMidnight.toISOString());
       expect(decision.resetsAt).toBe(dailyWindow(midDay).endAt.toISOString());
     }
+  });
+});
+
+describe("claimDailyQuota (atomic claim, issue #1132)", () => {
+  const userId = "user-claim";
+  beforeEach(() => {
+    for (const key in mockUsageStore) delete mockUsageStore[key];
+  });
+
+  it("claims a unit on an untouched day (first-of-day create)", async () => {
+    const claim = await claimDailyQuota("segment", userId, 100, 1, midDay);
+    expect(claim).toEqual({ claimed: true, allowed: true, used: 1, limit: 100, remaining: 99 });
+  });
+
+  it("claims via the conditional increment when today's row exists", async () => {
+    await recordDailyUsage("copy", userId, 10, midDay);
+    const claim = await claimDailyQuota("copy", userId, 50, 1, midDay);
+    expect(claim).toEqual({ claimed: true, allowed: true, used: 11, limit: 50, remaining: 39 });
+  });
+
+  it("allows the exact-fill claim and denies the straddler", async () => {
+    await recordDailyUsage("label", userId, 48, midDay);
+    const fill = await claimDailyQuota("label", userId, 50, 2, midDay);
+    expect(fill.claimed).toBe(true);
+    expect(fill).toMatchObject({ used: 50, remaining: 0 });
+    // The next claim overshoots: zero rows updated, denied with today's count.
+    const denied = await claimDailyQuota("label", userId, 50, 1, midDay);
+    expect(denied).toEqual({
+      claimed: false,
+      allowed: false,
+      used: 50,
+      limit: 50,
+      resetsAt: nextMidnight.toISOString(),
+    });
+  });
+
+  it("denies a single request larger than the whole cap without writing", async () => {
+    const claim = await claimDailyQuota("copy", userId, 50, 51, midDay);
+    expect(claim.claimed).toBe(false);
+    expect(claim).toMatchObject({ used: 0, limit: 50 });
+    expect(Object.keys(mockUsageStore)).toHaveLength(0);
+  });
+
+  it("arbitrates concurrent first-of-day claims through the P2002 retry", async () => {
+    // Two claims racing on an empty store: the loser of the create gets
+    // P2002, retries the conditional increment, and both claims land.
+    const [a, b] = await Promise.all([
+      claimDailyQuota("export", userId, 20, 1, midDay),
+      claimDailyQuota("export", userId, 20, 1, midDay),
+    ]);
+    expect(a.claimed).toBe(true);
+    expect(b.claimed).toBe(true);
+    expect(await getDailyUsage("export", userId, midDay)).toBe(2);
+  });
+
+  it("claims a multi-unit batch in one conditional increment", async () => {
+    const claim = await claimDailyQuota("label", userId, 50, 5, midDay);
+    expect(claim).toEqual({ claimed: true, allowed: true, used: 5, limit: 50, remaining: 45 });
+  });
+});
+
+describe("refundDailyQuota (issue #1132)", () => {
+  const userId = "user-refund";
+  beforeEach(() => {
+    for (const key in mockUsageStore) delete mockUsageStore[key];
+  });
+
+  it("decrements the claimed units", async () => {
+    await claimDailyQuota("segment", userId, 100, 3, midDay);
+    await refundDailyQuota("segment", userId, 3, midDay);
+    expect(await getDailyUsage("segment", userId, midDay)).toBe(0);
+  });
+
+  it("never drives a row negative", async () => {
+    await claimDailyQuota("copy", userId, 50, 1, midDay);
+    await refundDailyQuota("copy", userId, 5, midDay);
+    expect(await getDailyUsage("copy", userId, midDay)).toBe(1);
+  });
+
+  it("is a no-op for a user with no row today and never throws", async () => {
+    await expect(refundDailyQuota("export", userId, 1, midDay)).resolves.toBeUndefined();
+    expect(await getDailyUsage("export", userId, midDay)).toBe(0);
+  });
+
+  it("swallows store failures instead of throwing", async () => {
+    await claimDailyQuota("label", userId, 50, 1, midDay);
+    const spy = vi
+      .spyOn(prisma.dailyApiUsage, "updateMany")
+      .mockRejectedValueOnce(new Error("store down"));
+    await expect(refundDailyQuota("label", userId, 1, midDay)).resolves.toBeUndefined();
+    spy.mockRestore();
+    // Conservative: the failed refund leaves the count standing.
+    expect(await getDailyUsage("label", userId, midDay)).toBe(1);
   });
 });

@@ -105,7 +105,7 @@ describe("no uncapped fal.ai calls (#1105)", () => {
           QUOTA_ENFORCEMENT.test(source),
           `${repoRelative(file, REPO_ROOT)} calls a paid fal.ai helper but imports no quota ` +
             `enforcement (checkDailyQuota / evaluateDailyQuota / ` +
-            `evaluateDailyBatchQuota). Add the cap as ` +
+            `evaluateDailyBatchQuota / claimDailyQuota). Add the cap as ` +
             `src/app/api/segment/furnishings/route.ts does — or delete the route if ` +
             `no client calls it. This is the exact shape of #1105.`
         ).toBe(true);

@@ -71,7 +71,10 @@ vi.mock("@/lib/api-quota", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api-quota")>();
   return {
     ...actual,
-    getDailyUsage: vi.fn(() => Promise.resolve(0)),
+    claimDailyQuota: vi.fn(() =>
+      Promise.resolve({ claimed: true, allowed: true, used: 1, limit: 50, remaining: 49 })
+    ),
+    refundDailyQuota: vi.fn(() => Promise.resolve(undefined)),
     resolveDailyLimit: vi.fn(() => 50),
   };
 });

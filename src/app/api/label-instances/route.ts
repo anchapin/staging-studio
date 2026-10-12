@@ -20,11 +20,11 @@ import {
   DEFAULT_DAILY_LABEL_LIMIT,
   DAILY_LIMIT_ENV_VAR,
   dailyQuotaExceededPayload,
-  evaluateDailyBatchQuota,
-  getDailyUsage,
-  recordDailyUsage,
+  claimDailyQuota,
+  refundDailyQuota,
   resolveDailyLimit,
 } from "@/lib/api-quota";
+import type { QuotaClaim } from "@/lib/api-quota";
 import {
   API_ERROR_UNAUTHORIZED,
   API_ERROR_RATE_LIMIT_EXCEEDED,
@@ -59,34 +59,14 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   const concept = sanitizePromptValue(rawConcept);
 
   // #1144: the cap tracks vision inputs actually sent, one unit per
-  // crop, so the batch gate runs once the (validated) crop count is
-  // known and rejects a batch that would straddle the limit whole
-  // rather than overshooting it.
+  // crop. #1132: the units are claimed ATOMICALLY just before the paid
+  // call (below, after the cached short-circuit), not gate-read up
+  // front, so a concurrent burst can no longer all read the same
+  // pre-spend count and overshoot the cap.
   const labelLimit = resolveDailyLimit(
     process.env[DAILY_LIMIT_ENV_VAR.label],
     DEFAULT_DAILY_LABEL_LIMIT
   );
-  const labelQuota = evaluateDailyBatchQuota(
-    await getDailyUsage("label", user.id),
-    crops.length,
-    labelLimit
-  );
-  if (!labelQuota.allowed) {
-    console.warn(
-      JSON.stringify({
-        event: "label_instances_daily_quota_exceeded",
-        userId: user.id,
-        used: labelQuota.used,
-        limit: labelQuota.limit,
-        crops: crops.length,
-      })
-    );
-    throw new ApiError({
-      code: API_ERROR_RATE_LIMIT_EXCEEDED,
-      message: dailyQuotaExceededPayload(labelQuota, "Please try again tomorrow.").message,
-      status: 429,
-    });
-  }
 
   const room = await prisma.room.findFirst({
     where: { id: roomId },
@@ -128,6 +108,36 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     base64: crop.cropDataUrl.slice(crop.cropDataUrl.indexOf(",") + 1),
   }));
 
+  // Issue #1132: claim one unit per crop ATOMICALLY on the eve of the
+  // paid OpenAI call. The conditional increment is serialized by
+  // Postgres, so only headroom-sized claims land; losers get 429 with
+  // the same message as before. Sits after the cached short-circuit so
+  // a cache hit consumes no units (the #1144 rule). A generation
+  // failure refunds the claim in the catch below; a failure persisting
+  // labels afterwards keeps the charge (the vision work was consumed).
+  const labelClaim: QuotaClaim = await claimDailyQuota(
+    "label",
+    user.id,
+    labelLimit,
+    crops.length
+  );
+  if (!labelClaim.claimed) {
+    console.warn(
+      JSON.stringify({
+        event: "label_instances_daily_quota_exceeded",
+        userId: user.id,
+        used: labelClaim.used,
+        limit: labelClaim.limit,
+        crops: crops.length,
+      })
+    );
+    throw new ApiError({
+      code: API_ERROR_RATE_LIMIT_EXCEEDED,
+      message: dailyQuotaExceededPayload(labelClaim, "Please try again tomorrow.").message,
+      status: 429,
+    });
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let object: any;
   try {
@@ -165,6 +175,11 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     object = result.object as any;
   } catch (error) {
+    // Issue #1132: give the claimed units back when generation fails, so
+    // a failed attempt costs the user nothing (the pre-#1132 behavior).
+    if (labelClaim.claimed) {
+      await refundDailyQuota("label", user.id, crops.length);
+    }
     console.error(
       JSON.stringify({
         event: "label_instances_generation_error",
@@ -184,7 +199,8 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     requested.has(entry.instanceIndex)
   );
 
-  await recordDailyUsage("label", user.id, crops.length);
+  // No charge is written here: the per-crop units were claimed
+  // atomically before the call (issue #1132).
 
   if (labels.length > 0) {
     await upsertVisionLabels({
