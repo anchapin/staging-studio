@@ -266,7 +266,15 @@ export async function evaluateQualityGate(
 
 // ─── Fal Submit ───────────────────────────────────────────────────────────────
 
-export interface FalSubmitOptions {
+/**
+ * Provider-neutral input for `submitInpaintToActiveProvider`. The
+ * fields map 1:1 to the historical FalSubmitOptions shape so the
+ * call site in `submitInpaintRequest` is unchanged after the
+ * Alibaba migration; the provider adapter decides which fields it
+ * actually consumes (e.g. Alibaba ignores `maskUrl` because its
+ * endpoint is instruction-mode only).
+ */
+export interface InpaintSubmitOptions {
   imageUrl: string;
   maskUrl: string;
   aesthetic: string;
@@ -279,14 +287,15 @@ export interface FalSubmitOptions {
 }
 
 /**
- * Fire-and-forget submit: returns as soon as the job is queued (~2s),
- * instead of holding the request open for the full generation.
- * submitWithRetry handles transient errors; the abstraction's
+ * Fire-and-forget submit: returns as soon as the job is queued (or, for
+ * the synchronous Alibaba adapter, as soon as the response comes back —
+ * the route's status-poll then sees COMPLETED on the first call).
+ * `submitWithRetry` handles transient errors; the abstraction's
  * circuit breaker wrapper (per provider) prevents cascading failures
  * when the service is degraded.
  */
-export async function submitInpaintToFal(
-  options: FalSubmitOptions
+export async function submitInpaintToActiveProvider(
+  options: InpaintSubmitOptions
 ): Promise<{ request_id: string }> {
   const { imageUrl, maskUrl, aesthetic, promptDirectives, negativePrompt, promptStrength, maskBlur, seed, creativeMode } = options;
   const prompt = buildInpaintPrompt(aesthetic, promptDirectives);
@@ -481,7 +490,7 @@ export async function submitInpaintRequest(
     params.promptDirectives
   );
 
-  const submission = await submitInpaintToFal({
+  const submission = await submitInpaintToActiveProvider({
     imageUrl: params.imageUrl,
     maskUrl: params.maskUrl,
     aesthetic: params.aesthetic,

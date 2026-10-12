@@ -2,11 +2,13 @@
  * Provider-agnostic inference abstraction.
  *
  * Purpose: decouple the inpainting pipeline from any single remote
- * inference provider. Today the project calls fal.ai (`@fal-ai/client`)
- * for both FLUX.1 Fill (inpaint) and SAM 3.1 (furnishings detection);
- * the abstraction lets us swap providers (e.g. to Replicate) without
- * touching every call site, by selecting the implementation at module
- * load via `INFERENCE_PROVIDER` (defaults to `fal`).
+ * inference provider. As of #1240 the only wired provider is Alibaba
+ * Cloud DashScope (`qwen-image-2.1-pro`); the `fal` and `replicate`
+ * adapters were retired (their modules deleted, their `INFERENCE_PROVIDER`
+ * values are accepted by the parser but rejected at configure time with a
+ * clear error). Adding a future provider (Together, Stability, etc.) is
+ * a new adapter file plus one switch arm in `resolveProvider` /
+ * `getInferenceClient` — the `InferenceClient` interface stays the same.
  *
  * Why a flag and not per-call-site provider choice: in production we
  * run a single provider at a time. The flag is for incidents and A/B
@@ -30,7 +32,8 @@
  *   envelope), so call sites can keep their parsers.
  *
  * Pure logic. Side effects: each adapter binds its own client at
- * module load (e.g. `fal.config(...)`); the `inference.ts` import is
+ * module load (e.g. `fal.config(...)` for the legacy fal path, or
+ * `requireAlibabaEnv()` for DashScope); the `inference.ts` import is
  * a no-op until a method is called.
  */
 
@@ -51,28 +54,36 @@ export type LogicalModel = (typeof LOGICAL_MODEL)[keyof typeof LOGICAL_MODEL];
 
 // ─── Provider selection ────────────────────────────────────────────────────
 
-export type InferenceProviderName = "fal" | "replicate";
+/**
+ * The literal `"alibaba"` is the only wired provider as of #1240. The
+ * `fal | replicate` strings remain in this union so an operator that
+ * sets `INFERENCE_PROVIDER=fal|replicate` gets a clear error from
+ * `assertInferenceConfigured` / `getInferenceClient` instead of a
+ * runtime import failure when those modules were deleted. Once a
+ * future provider is added, drop its literal in here too.
+ */
+export type InferenceProviderName = "alibaba" | "fal" | "replicate";
 
 /**
  * Resolves the active provider from `INFERENCE_PROVIDER`. Defaults to
- * `fal` when unset or empty, which keeps today's behavior identical
- * for any deploy that has not opted in. Side effects: reads
- * `process.env` only.
+ * `alibaba` (the production inpaint provider as of #1240) when unset
+ * or empty. Side effects: reads `process.env` only.
  */
 export function resolveProvider(): InferenceProviderName {
   const raw = process.env.INFERENCE_PROVIDER?.trim().toLowerCase();
+  if (raw === "fal") return "fal";
   if (raw === "replicate") return "replicate";
-  // `fal` is the default for any other value, including unset. A typo
-  // in the env (e.g. `INFERENCE_PROVIDER=falk`) is intentionally
-  // ignored — silent fall-through to fal beats a hard fail on
-  // production deploys; the warning is logged once below.
-  if (raw && raw !== "fal") {
-    // eslint-disable-next-line no-console
+  if (raw === "alibaba") return "alibaba";
+  // `alibaba` is the default for any other value, including unset. A typo
+  // in the env (e.g. `INFERENCE_PROVIDER=Alibaba` after a case mismatch)
+  // is intentionally ignored — silent fall-through to alibaba beats a
+  // hard fail on production deploys; the warning is logged once below.
+  if (raw) {
     console.warn(
-      `[inference] Unknown INFERENCE_PROVIDER="${raw}"; falling back to "fal". Valid: fal, replicate.`
+      `[inference] Unknown INFERENCE_PROVIDER="${raw}"; falling back to "alibaba". Valid: alibaba.`,
     );
   }
-  return "fal";
+  return "alibaba";
 }
 
 // ─── Normalized status ─────────────────────────────────────────────────────
@@ -214,40 +225,52 @@ export class InferenceRequestGoneError extends Error {
 
 /**
  * Pre-flight check that the active provider is configured. Throws
- * `MissingEnvVarsError` naming the right env var for the active
- * provider (FAL_KEY or REPLICATE_API_TOKEN). Call this before
- * enqueueing work so a misconfiguration surfaces as a clear error
- * instead of a downstream provider auth failure. Side effects: reads
- * `process.env`.
+ * `MissingEnvVarsError` naming the right env vars for the active
+ * provider. Call this before enqueueing work so a misconfiguration
+ * surfaces as a clear error instead of a downstream provider auth
+ * failure. Side effects: reads `process.env`.
  */
 export function assertInferenceConfigured(): void {
-  if (resolveProvider() === "replicate") {
-    requireEnvVars("REPLICATE_API_TOKEN");
-  } else {
-    requireEnvVars("FAL_KEY");
+  // The fal and replicate adapters were retired in #1240 — production
+  // runs Alibaba. Selecting either of the legacy values still parses
+  // (so a stale `INFERENCE_PROVIDER=fal` in a deploy logs a clear error
+  // instead of silently falling through to Alibaba), but throws on
+  // configure so a misconfigured deploy fails fast.
+  const provider = resolveProvider();
+  if (provider === "replicate" || provider === "fal") {
+    throw new Error(
+      `INFERENCE_PROVIDER="${provider}" is no longer supported after #1240. ` +
+        `Use "alibaba" (default).`,
+    );
   }
+  requireEnvVars(
+    "ALIBABA_DASHSCOPE_API_KEY",
+    "ALIBABA_BAILIAN_WORKSPACE_ID",
+    "ALIBABA_INPAINT_MODEL",
+  );
 }
 
 let cachedClient: InferenceClient | null = null;
 
 /**
  * Returns the active `InferenceClient`, instantiating it on the first
- * call. The active client is selected by `resolveProvider()` at
- * module load — flipping `INFERENCE_PROVIDER` requires a process
- * restart. Side effects: imports `@/lib/fal-adapter` or
- * `@/lib/replicate-adapter` (transitively binding whichever provider
- * is active).
+ * call. As of #1240 the only wired provider is Alibaba Cloud (DashScope).
+ * Side effects: imports `@/lib/alibaba-adapter` on first call.
  */
 export async function getInferenceClient(): Promise<InferenceClient> {
   if (cachedClient) return cachedClient;
   const provider = resolveProvider();
-  if (provider === "replicate") {
-    const { createReplicateClient } = await import("@/lib/replicate-adapter");
-    cachedClient = createReplicateClient();
-  } else {
-    const { createFalClient } = await import("@/lib/fal-adapter");
-    cachedClient = createFalClient();
+  if (provider === "replicate" || provider === "fal") {
+    // Mirror assertInferenceConfigured: refuse to silently fall back
+    // when an operator flips to a retired provider. The error is loud,
+    // not silent, because the right action is to update INFERENCE_PROVIDER.
+    throw new Error(
+      `INFERENCE_PROVIDER="${provider}" is no longer supported after #1240. ` +
+        `Use "alibaba" (default).`,
+    );
   }
+  const { createAlibabaClient } = await import("@/lib/alibaba-adapter");
+  cachedClient = createAlibabaClient();
   return cachedClient;
 }
 

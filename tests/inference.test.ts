@@ -1,12 +1,12 @@
 /**
  * Provider-agnostic inference abstraction (#1187 follow-up).
  *
- * Each adapter (fal, replicate) implements the same `InferenceClient`
- * surface; this file pins the contract that the rest of the system
- * relies on (logical-model names, status normalization, request-gone
- * detection). The Replicate adapter's wire format is verified by
- * integration tests with a mocked fetch; this file is provider-free
- * and uses pure-logic checks.
+ * Each adapter (currently only Alibaba, as of #1240) implements the same
+ * `InferenceClient` surface; this file pins the contract that the rest
+ * of the system relies on (logical-model names, status normalization,
+ * request-gone detection). The Alibaba adapter's wire format is
+ * verified by `tests/alibaba-adapter.test.ts`; this file is provider-
+ * agnostic and uses pure-logic checks.
  */
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -39,46 +39,57 @@ describe("resolveProvider", () => {
     }
   });
 
-  it("defaults to fal when INFERENCE_PROVIDER is unset", () => {
+  it("defaults to alibaba when INFERENCE_PROVIDER is unset", () => {
     delete process.env.INFERENCE_PROVIDER;
-    expect(resolveProvider()).toBe("fal");
+    expect(resolveProvider()).toBe("alibaba");
   });
 
-  it("defaults to fal when INFERENCE_PROVIDER is empty", () => {
+  it("defaults to alibaba when INFERENCE_PROVIDER is empty", () => {
     process.env.INFERENCE_PROVIDER = "";
-    expect(resolveProvider()).toBe("fal");
+    expect(resolveProvider()).toBe("alibaba");
   });
 
-  it("defaults to fal when INFERENCE_PROVIDER is whitespace", () => {
+  it("defaults to alibaba when INFERENCE_PROVIDER is whitespace", () => {
     process.env.INFERENCE_PROVIDER = "   ";
-    expect(resolveProvider()).toBe("fal");
+    expect(resolveProvider()).toBe("alibaba");
   });
 
-  it("returns replicate when INFERENCE_PROVIDER=replicate", () => {
+  it("returns alibaba when INFERENCE_PROVIDER=alibaba", () => {
+    process.env.INFERENCE_PROVIDER = "alibaba";
+    expect(resolveProvider()).toBe("alibaba");
+  });
+
+  it("returns alibaba for mixed-case INFERENCE_PROVIDER=Alibaba", () => {
+    process.env.INFERENCE_PROVIDER = "Alibaba";
+    expect(resolveProvider()).toBe("alibaba");
+  });
+
+  it("parses fal|replicate but the value is unused after #1240", () => {
+    // The retired provider values still parse through resolveProvider so
+    // a misconfigured deploy surfaces a clear "no longer supported"
+    // error from assertInferenceConfigured / getInferenceClient
+    // instead of an opaque runtime import failure. These assertions
+    // pin that parser behavior.
+    process.env.INFERENCE_PROVIDER = "fal";
+    expect(resolveProvider()).toBe("fal");
     process.env.INFERENCE_PROVIDER = "replicate";
     expect(resolveProvider()).toBe("replicate");
   });
 
-  it("returns replicate for mixed-case INFERENCE_PROVIDER=Replicate", () => {
-    process.env.INFERENCE_PROVIDER = "Replicate";
-    expect(resolveProvider()).toBe("replicate");
-  });
-
-  it("falls back to fal for unknown provider names", () => {
+  it("falls back to alibaba for unknown provider names", () => {
     // Intentional: a typo in the env should not crash a production
     // deploy. The default is the safe choice; the warn-once is logged
     // from `resolveProvider` so ops can spot the misconfig.
-    process.env.INFERENCE_PROVIDER = "falk";
-    expect(resolveProvider()).toBe("fal");
+    process.env.INFERENCE_PROVIDER = "Alibab";
+    expect(resolveProvider()).toBe("alibaba");
   });
 });
 
 /**
  * The status / 404 normalization contract is exercised end-to-end
- * inside the fal and replicate adapter modules. This file does not
- * re-import those adapters — that would require a real
- * `FAL_KEY` / `REPLICATE_API_TOKEN` env at module load. The
- * adapters' own tests cover the contract.
+ * inside the Alibaba adapter module. This file does not re-import
+ * the adapter — that would require real `ALIBABA_*` env at module
+ * load. The adapter's own tests cover the contract.
  */
 describe("NormalizedStatus type", () => {
   it("covers the four states the poller understands", () => {
