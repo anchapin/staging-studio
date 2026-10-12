@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { CSP_VALUE } from "@/lib/security-headers";
+import nextConfig from "../next.config";
+import { CSP_VALUE, SECURITY_HEADERS } from "@/lib/security-headers";
 
 /**
  * Pins the Content-Security-Policy allowlist so the hermetic e2e
@@ -42,5 +43,83 @@ describe("security-headers CSP allowlist (issue #1076)", () => {
     // wss://*.supabase.co for Supabase Auth/Realtime.
     expect(CSP_VALUE).toMatch(/connect-src[^;]*https:\/\/\*\.supabase\.co/);
     expect(CSP_VALUE).toMatch(/connect-src[^;]*wss:\/\/\*\.supabase\.co/);
+  });
+});
+
+/**
+ * Pins the security-header wiring itself (issue #1127). Before this block
+ * the `headers()` export in `next.config.ts` was referenced by no test:
+ * deleting the block (or gutting SECURITY_HEADERS) kept the suite green
+ * while dropping CSP, clickjacking and referrer protection site-wide.
+ *
+ * Deliberately NOT a directive-by-directive copy of the whole CSP here —
+ * the #1076 describe block above owns the loopback allowlist; this block
+ * pins the five security-critical directives plus the full
+ * headers()-to-SECURITY_HEADERS contract.
+ */
+describe("security headers wiring (issue #1127)", () => {
+  it("headers() applies every SECURITY_HEADERS entry to /:path*", async () => {
+    const headers = nextConfig.headers;
+    expect(
+      headers,
+      "next.config.ts lost its headers() block — CSP, clickjacking and referrer protection are gone site-wide (issue #1127)"
+    ).toBeDefined();
+    const rules = await headers!();
+    expect(rules).toHaveLength(1);
+    expect(rules[0].source).toBe("/:path*");
+    // Full key+value map: a removed header or a drifted value fails, not
+    // just an absence.
+    expect(rules[0].headers).toEqual([...SECURITY_HEADERS]);
+  });
+
+  it("pins X-Frame-Options: DENY (clickjacking)", () => {
+    expect(SECURITY_HEADERS).toContainEqual({
+      key: "X-Frame-Options",
+      value: "DENY",
+    });
+  });
+
+  it("pins X-Content-Type-Options: nosniff (MIME confusion)", () => {
+    expect(SECURITY_HEADERS).toContainEqual({
+      key: "X-Content-Type-Options",
+      value: "nosniff",
+    });
+  });
+
+  it("pins Referrer-Policy: strict-origin-when-cross-origin", () => {
+    expect(SECURITY_HEADERS).toContainEqual({
+      key: "Referrer-Policy",
+      value: "strict-origin-when-cross-origin",
+    });
+  });
+
+  it("pins Permissions-Policy: no camera, microphone, geolocation, payment, FLoC", () => {
+    expect(SECURITY_HEADERS).toContainEqual({
+      key: "Permissions-Policy",
+      value:
+        "camera=(), microphone=(), geolocation=(), payment=(), interest-cohort=()",
+    });
+  });
+
+  const directives = CSP_VALUE.split(";").map((d) => d.trim());
+
+  it("pins frame-ancestors 'none' (CSP framing counterpart to X-Frame-Options)", () => {
+    expect(directives).toContain("frame-ancestors 'none'");
+  });
+
+  it("pins object-src 'none' (no plugin/object embeds)", () => {
+    expect(directives).toContain("object-src 'none'");
+  });
+
+  it("pins base-uri 'self' (blocks injected <base> hijacking)", () => {
+    expect(directives).toContain("base-uri 'self'");
+  });
+
+  it("pins form-action 'self' (blocks exfil via injected form targets)", () => {
+    expect(directives).toContain("form-action 'self'");
+  });
+
+  it("pins upgrade-insecure-requests", () => {
+    expect(directives).toContain("upgrade-insecure-requests");
   });
 });
