@@ -3,30 +3,42 @@
     "id": "flux-pro-fill",
     "falModelId": "fal-ai/flux-pro/v1/fill",
     "mode": "mask-fill",
-    "expectedEndpoint": "fal-ai/flux-pro/v1/fill"
+    "expectedEndpoint": "fal-ai/flux-pro/v1/fill",
+    "notes": "Incumbent; mask-based inpainting at $0.05/MP."
   },
   {
     "id": "flux-3-image",
     "falModelId": "fal-ai/flux-3-image",
     "mode": "instruction",
-    "expectedEndpoint": "fal-ai/flux-3-image"
+    "expectedEndpoint": "fal-ai/flux-3-image",
+    "notes": "FLUX 3 Image; instruction editing, native 2K/4K. No /edit endpoint on fal — text-to-image only."
   },
   {
-    "id": "qwen-25-edit",
-    "falModelId": "fal-ai/qwen-image-edit",
+    "id": "seedream-5-flash",
+    "falModelId": "bytedance/seedream/v5/flash/edit",
     "mode": "instruction",
-    "expectedEndpoint": "fal-ai/qwen-image-edit"
+    "expectedEndpoint": "bytedance/seedream/v5/flash/edit",
+    "notes": "Seedream 5.0 Flash; instruction editing with up to 10 reference images, $0.027/image."
   },
   {
-    "id": "nano-banana-25-edit",
-    "falModelId": "fal-ai/nano-banana/edit",
+    "id": "nano-banana-2-1",
+    "falModelId": "fal-ai/nano-banana-2.1/edit",
     "mode": "instruction",
-    "expectedEndpoint": "fal-ai/nano-banana/edit"
+    "expectedEndpoint": "fal-ai/nano-banana-2.1/edit",
+    "notes": "Gemini Nano Banana 2.1; instruction editing released 2026-10-06."
   },
   {
-    "id": "seedream-25-flash-edit",
-    "falModelId": "fal-ai/seedream/edit",
+    "id": "gpt-image-2-5",
+    "falModelId": "fal-ai/gpt-image-2.5/edit",
     "mode": "instruction",
-    "expectedEndpoint": "fal-ai/seedream/edit"
+    "expectedEndpoint": "fal-ai/gpt-image-2.5/edit",
+    "notes": "OpenAI GPT-Image-2.5 Sunburst class; instruction editing."
+  },
+  {
+    "id": "qwen-image-2-1",
+    "falModelId": "fal-ai/qwen-image-2.1/edit",
+    "mode": "instruction",
+    "expectedEndpoint": "fal-ai/qwen-image-2.1/edit",
+    "notes": "Qwen-Image-2.1; flagged Private on fal. Issue #1240 notes research-only license; commercial grant from Alibaba required before any production use."
   }
 ]

@@ -1,5 +1,5 @@
 {
-  "prompt": "[edit instruction for repeat-stability, e.g. insert a mid-century sofa against the left wall]",
-  "imageUrl": "[public URL of the before room photo]",
-  "maskUrl": "[public URL of the region mask; mask-fill slots only]"
+  "prompt": "Add a potted fiddle-leaf fig tree in the corner near the window. Do not change anything else in the room.",
+  "imageUrl": "https://images.unsplash.com/photo-1493663284031-b7e3aefcae8e?w=2000&q=80",
+  "maskUrl": null
 }

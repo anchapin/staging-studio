@@ -24,6 +24,14 @@ interface Slot {
   falModelId: string;
   mode: "mask-fill" | "instruction";
   expectedEndpoint: string;
+  notes?: string;
+}
+
+interface PricingRow {
+  endpoint_id: string;
+  unit_price: number;
+  unit: string;
+  currency: string;
 }
 
 function requireFalKey(): string {
@@ -58,6 +66,32 @@ async function falQueueRun(model: string, input: Record<string, unknown>, key: s
   return fetch(response_url, { headers: { Authorization: `Key ${key}` } });
 }
 
+async function fetchPricing(
+  endpointIds: string[],
+  key: string,
+): Promise<Map<string, PricingRow>> {
+  // fal pricing API is not key-gated but we pass FAL_KEY for parity with queue calls.
+  const map = new Map<string, PricingRow>();
+  for (const id of endpointIds) {
+    try {
+      const r = await fetch(
+        `https://api.fal.ai/v1/models/pricing?endpoint_id=${encodeURIComponent(id)}`,
+        { headers: { Authorization: `Key ${key}` } },
+      );
+      if (!r.ok) {
+        console.warn(`pricing lookup failed for ${id}: ${r.status}`);
+        continue;
+      }
+      const body = (await r.json()) as { prices?: PricingRow[] };
+      const row = body.prices?.find((p) => p.endpoint_id === id);
+      if (row) map.set(id, row);
+    } catch (err) {
+      console.warn(`pricing lookup errored for ${id}: ${String(err)}`);
+    }
+  }
+  return map;
+}
+
 async function main() {
   const key = requireFalKey();
   const slots: Slot[] = JSON.parse(
@@ -65,26 +99,37 @@ async function main() {
   );
   fs.mkdirSync(BAKE_OFF_DIR, { recursive: true });
 
+  // Pre-cache pricing per endpoint so the table Alex signs off on has real USD figures.
+  const pricing = await fetchPricing(slots.map((s) => s.expectedEndpoint), key);
+
   const results: Array<Record<string, unknown>> = [];
   for (const slot of slots) {
     for (const cs of CASES) {
       const caseInput = JSON.parse(
         fs.readFileSync(path.join(BAKE_OFF_DIR, `${cs}.json`), "utf8"),
       );
-      const input =
-        slot.mode === "mask-fill"
-          ? { prompt: casePrompt(caseInput), image_url: caseInput.imageUrl, mask_url: caseInput.maskUrl }
-          : { prompt: casePrompt(caseInput), image_url: caseInput.imageUrl };
+      const input: Record<string, unknown> = { prompt: casePrompt(caseInput) };
+      if (caseInput.imageUrl) input.image_url = caseInput.imageUrl;
+      if (slot.mode === "mask-fill" && caseInput.maskUrl) {
+        input.mask_url = caseInput.maskUrl;
+      }
       const started = Date.now();
       try {
         const res = await falQueueRun(slot.expectedEndpoint, input, key);
         const body = (await res.json()) as Record<string, unknown>;
+        const images = (body as { images?: Array<{ url: string }> }).images;
+        const firstImage = images?.[0];
         results.push({
           slot: slot.id,
           case: cs,
           latency_ms: Date.now() - started,
-          price_usd: (body as { cost_usd?: number }).cost_usd ?? null,
-          output: (body as { images?: Array<{ url: string }> }).images?.[0]?.url ?? null,
+          unit_price_usd: pricing.get(slot.expectedEndpoint)?.unit_price ?? null,
+          billing_unit: pricing.get(slot.expectedEndpoint)?.unit ?? null,
+          output: firstImage?.url ?? null,
+          output_dimensions:
+            firstImage && "width" in firstImage && "height" in firstImage
+              ? `${(firstImage as { width: number }).width}x${(firstImage as { height: number }).height}`
+              : null,
           ok: true,
         });
       } catch (err) {
