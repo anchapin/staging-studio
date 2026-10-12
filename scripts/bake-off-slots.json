@@ -1,0 +1,32 @@
+[
+  {
+    "id": "flux-pro-fill",
+    "falModelId": "fal-ai/flux-pro/v1/fill",
+    "mode": "mask-fill",
+    "expectedEndpoint": "fal-ai/flux-pro/v1/fill"
+  },
+  {
+    "id": "flux-3-image",
+    "falModelId": "fal-ai/flux-3-image",
+    "mode": "instruction",
+    "expectedEndpoint": "fal-ai/flux-3-image"
+  },
+  {
+    "id": "qwen-25-edit",
+    "falModelId": "fal-ai/qwen-image-edit",
+    "mode": "instruction",
+    "expectedEndpoint": "fal-ai/qwen-image-edit"
+  },
+  {
+    "id": "nano-banana-25-edit",
+    "falModelId": "fal-ai/nano-banana/edit",
+    "mode": "instruction",
+    "expectedEndpoint": "fal-ai/nano-banana/edit"
+  },
+  {
+    "id": "seedream-25-flash-edit",
+    "falModelId": "fal-ai/seedream/edit",
+    "mode": "instruction",
+    "expectedEndpoint": "fal-ai/seedream/edit"
+  }
+]

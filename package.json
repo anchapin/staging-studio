@@ -16,7 +16,8 @@
     "prepare": "bash scripts/enable-hooks.sh",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "bake-off": "tsx scripts/bake-off-image-apis.mts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.67",
