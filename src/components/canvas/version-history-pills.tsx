@@ -185,6 +185,7 @@ export default function VersionHistoryPills({
                 key={version.id}
                 type="button"
                 onClick={() => handlePillClick(version, actualIndex)}
+                aria-pressed={isActive}
                 title={`Pass ${actualIndex + 1} — ${formatRelativeTime(version.createdAt)}`}
                 className={`
                   relative h-7 px-2.5 rounded-full font-mono text-xs font-semibold transition-all
