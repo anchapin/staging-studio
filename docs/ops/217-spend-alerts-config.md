@@ -5,8 +5,9 @@ Operational setup for Sep 26–27 demo. Alerts must route to an inbox Lauren and
 ## Alert Destination
 
 **Use the existing Circle G Designs inbox:**
-- Account holder: lauren@circle g designs / alex@circle g designs (verify correct addresses)
+- Account holder: lauren@circlegdesigns.com (Circle G Designs owner) / Alex: a.n.chapin@gmail.com
 - Confirm both Lauren and Alex have access to the inbox before configuring alerts
+- (Corrected 2026-10-12 per issue #1130: the previous line listed addresses that do not exist.)
 - Alternatively: create a dedicated `staging-alerts@circlegdesigns.com` alias if neither Lauren nor Alex checks a shared inbox regularly
 
 ## 1. OpenAI — Monthly Usage Alert
@@ -28,7 +29,11 @@ Operational setup for Sep 26–27 demo. Alerts must route to an inbox Lauren and
 
 ---
 
-## 2. fal.ai — Spending Alert
+## 2. fal.ai — Spending Alert (legacy, paused)
+
+> Paused 2026-10-12: inpaint migrated from fal.ai to Alibaba Cloud DashScope
+> (issue #1240, PR #1242). fal alerts matter only if fal is re-enabled
+> elsewhere. Steps kept for reference.
 
 ### Steps
 
@@ -65,11 +70,32 @@ Operational setup for Sep 26–27 demo. Alerts must route to an inbox Lauren and
 
 ---
 
+## 4. Alibaba Cloud DashScope — Spending Alert (image provider since Oct 12, 2026)
+
+### Steps
+
+1. Log in to the Alibaba Cloud console ([dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) or [console.aliyun.com](https://console.aliyun.com)) with the firm account
+2. Navigate to **Expenses and Costs** (billing center) → **Budget Management**, or the DashScope model-service billing page
+3. Set:
+   - A **monthly budget** appropriate for image-editing volume (DashScope bills per image/token)
+   - An alert threshold at 80% of the budget so it fires before the cap
+4. Set the alert delivery to **Email** and enter the alert inbox above
+5. Save
+
+### Notes
+
+- DashScope usage is visible per model under the billing center's usage/export views.
+- If the account was created with a regional partition, check the correct region's console; billing is per-account, not per-region.
+- The in-app quota counters (`DailyApiUsage`) are the fallback read: `npx tsx scripts/export-usage.ts` prints today's per-surface counts (issue #1130).
+
+---
+
 ## Verification Checklist
 
 - [ ] OpenAI monthly usage alert set and test email received
-- [ ] fal.ai spending alert set and test email received (or confirmed feature unavailable + ticket opened)
+- [ ] fal.ai spending alert set and test email received (legacy: only if fal is re-enabled; or confirmed feature unavailable + ticket opened)
 - [ ] Browserless usage alert set and test email received (or confirmed feature unavailable + ticket opened)
+- [ ] Alibaba Cloud DashScope spending alert set and test email received (or confirmed feature unavailable + ticket opened)
 - [ ] Both Lauren and Alex confirmed they receive the alert emails
 - [ ] All three providers confirmed to route to the same inbox
 
@@ -78,5 +104,5 @@ Operational setup for Sep 26–27 demo. Alerts must route to an inbox Lauren and
 | Provider | Issue | Resolution |
 |---|---|---|
 | OpenAI | No billing access | Verify account ownership; check if org is on a legacy billing plan |
-| fal.ai | No spending alert UI | Contact fal.ai support; consider manual daily usage check |
-| Browserless | No alert UI | Contact Browserless support; set up a manual usage tracking check |
+| fal.ai | No spending alert UI | Contact fal.ai support; run `npx tsx scripts/export-usage.ts` for a manual daily usage read (issue #1130) |
+| Browserless | No alert UI | Contact Browserless support; run `npx tsx scripts/export-usage.ts` for a manual daily usage read (issue #1130) |
