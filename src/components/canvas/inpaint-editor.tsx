@@ -18,6 +18,7 @@ import { isOperationModeAvailable } from "@/lib/operation-mode-availability";
 import FocusRestorePill from "./focus-restore-pill";
 import EditorCanvasPane from "./editor-canvas-pane";
 import ZenToolRail from "./zen-tool-rail";
+import ZenFirstVisitHint from "./zen-first-visit-hint";
 import { useEditorTabs } from "./use-editor-tabs";
 import { useImageDimensions } from "./use-image-dimensions";
 import { useZenWorkspace } from "./use-zen-workspace";
@@ -501,6 +502,7 @@ export default function InpaintEditor({
           <ExitToProjectButton onClick={handleExitToProject} />
         </div>
       )}
+      {zenMode && <ZenFirstVisitHint />}
       {zenMode && (
         <ZenToolRail
           studioActiveTool={studioActiveTool}
