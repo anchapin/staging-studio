@@ -13,20 +13,24 @@ import {
  * pointing at the floating toolbar and the Z shortcut so a first-time
  * Zen user is never lost. Auto-dismisses after 8 seconds; shown once
  * per browser. Safe to read localStorage in the initializer because
- * this component only mounts client-side (its parent renders it only
- * while zenMode is true, which is always false during SSR).
+ * this component only mounts client-side (the editor subtree renders
+ * only after a room is opened; editorRoomId is client state that
+ * starts null).
  */
-export default function ZenFirstVisitHint({ visible }: { visible: boolean }) {
+export default function ZenFirstVisitHint() {
+  // The parent renders this only while zenMode is true, so mounting IS
+  // a Zen activation; no visibility prop is needed (rubber-duck review,
+  // PR #1239).
   const [eligible] = useState(() => !readZenHintShown(getBrowserLocalStorage()));
   const [dismissed, setDismissed] = useState(false);
   const show = eligible && !dismissed;
 
   useEffect(() => {
-    if (!visible || !show) return;
+    if (!show) return;
     writeZenHintShown(getBrowserLocalStorage());
     const timer = setTimeout(() => setDismissed(true), 8000);
     return () => clearTimeout(timer);
-  }, [visible, show]);
+  }, [show]);
 
   if (!show) return null;
 

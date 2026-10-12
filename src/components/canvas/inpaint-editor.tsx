@@ -502,7 +502,7 @@ export default function InpaintEditor({
           <ExitToProjectButton onClick={handleExitToProject} />
         </div>
       )}
-      {zenMode && <ZenFirstVisitHint visible={zenMode} />}
+      {zenMode && <ZenFirstVisitHint />}
       {zenMode && (
         <ZenToolRail
           studioActiveTool={studioActiveTool}

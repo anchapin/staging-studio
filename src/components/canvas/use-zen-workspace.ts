@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   getBrowserLocalStorage,
@@ -49,18 +49,20 @@ export function useZenWorkspace(onSelectRegionsTool: () => void): UseZenWorkspac
   // stored choice (#1191); no stored choice keeps the historical
   // `false` default, so existing users see no change until the
   // default flip lands (gated on the demo, #1175).
-  const [zenMode, setZenModeState] = useState(
+  const [zenMode, setZenMode] = useState(
     () => readZenModePreference(getBrowserLocalStorage()) ?? false
   );
+  // Persist only on user-driven changes: skipping the first effect run
+  // keeps a "never chose" visitor un-pinned, so the future default flip
+  // still reaches them (rubber-duck review, PR #1239).
+  const skipFirstPersist = useRef(true);
   useEffect(() => {
+    if (skipFirstPersist.current) {
+      skipFirstPersist.current = false;
+      return;
+    }
     writeZenModePreference(getBrowserLocalStorage(), zenMode);
   }, [zenMode]);
-  const setZenMode = useCallback<React.Dispatch<React.SetStateAction<boolean>>>(
-    (update) => {
-      setZenModeState(update);
-    },
-    []
-  );
   // Issue #560: dark background toggle for eye comfort in Zen Mode.
   const [zenDarkBackground] = useState(false);
 
