@@ -364,6 +364,23 @@
 }
 
 /* Print styles for lookbook PDF export */
+
+/* Issue #1222 (docs/print-styling-audit.md): --print-margin is the
+   real-printer safe area applied as the @page margin below. The
+   Browserless capture path marks itself (?capture=pdf, appended by
+   src/app/api/export-pdf) and the preview page turns that into
+   `pdf-capture` on <html>, which pins the margin back to 0 so the cloud
+   render stays full-bleed, matching buildBrowserlessPdfBody's zero
+   margins (src/lib/browserless.ts). @page resolves var() against the
+   root element, which is why the class lives on <html>. */
+:root {
+  --print-margin: 6mm;
+}
+
+.pdf-capture {
+  --print-margin: 0mm;
+}
+
 @media print {
   .page-break {
     page-break-after: always;
@@ -383,7 +400,12 @@
      full viewport width, so no negative-margin compensation — each page
      ends with a hard break and the last one avoids a trailing blank. */
   .lookbook-page {
-    width: 100vw;
+    /* Issue #1222 (docs/print-styling-audit.md): 100% of the page content
+       box, not 100vw — with a non-zero @page margin (--print-margin) a
+       100vw element overflows the printable area, the classic "prints
+       wrong from Preview" failure. With the capture path's 0 margin the
+       content box is the full page, so 100% is full-bleed there too. */
+    width: 100%;
     margin: 0;
     page-break-after: always;
   }
@@ -407,9 +429,12 @@
      directly onto the @bottom-center box preserves the visual (thin
      horizontal line with 2pt gap above the centered footer text) without
      the unsupported pseudo-element. */
+  /* Issue #1222 (docs/print-styling-audit.md): the margin now comes from
+     --print-margin so real printers get a safe area while the marked
+     capture path stays full-bleed; see the token definition above. */
   @page {
     size: letter portrait;
-    margin: 0mm;
+    margin: var(--print-margin, 6mm);
     @bottom-center {
       content: "Atelier\u{2009}Canvas  \00A9\u{2009}2026\u{2009}Circle\u{2009}G\u{2009}Designs\u{2009}\u00B7\u{2009}Staging\u{2009}Studio  \u{2009}\u{2009}\u{2009}\u{2009}\u{2009}Policy\u{2009}\u00B7\u{2009}Privacy\u{2009}\u00B7\u{2009}Terms";
       font-family: var(--font-jakarta), sans-serif;
@@ -417,6 +442,31 @@
       color: #8C827A;
       border-top: 0.5pt solid #8C827A;
       padding-top: 2pt;
+    }
+  }
+}
+
+/* Issue #1222 (docs/print-styling-audit.md): high-DPI physical output.
+   At 300+ dpi a 6pt footer and Tailwind's 0.75rem/0.875rem small text
+   read tiny on paper; bump each ~11-15%. Browserless PDFs are
+   resolution-independent vectors, so this media query never fires for
+   the captured PDF and the on-screen preview is untouched. Tailwind
+   sizes are rem-based, so the bump targets those utility classes
+   directly inside lookbook pages instead of scaling the root font
+   (which would rescale spacing and risk reflowing pages past the safe
+   area). */
+@media print and (min-resolution: 300dpi) {
+  .lookbook-page .text-xs {
+    font-size: 0.83rem;
+  }
+
+  .lookbook-page .text-sm {
+    font-size: 1rem;
+  }
+
+  @page {
+    @bottom-center {
+      font-size: 7pt;
     }
   }
 }

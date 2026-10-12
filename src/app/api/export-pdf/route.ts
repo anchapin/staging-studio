@@ -11,7 +11,10 @@ import {
   requireProjectOwnershipOrThrow,
 } from "@/lib/api-auth";
 import { buildDeprecationHeaders } from "@/lib/api-version";
-import { PREVIEW_TOKEN_QUERY_PARAM, signPreviewToken } from "@/lib/preview-token";
+import { PREVIEW_TOKEN_QUERY_PARAM, signPreviewToken,
+  PREVIEW_CAPTURE_QUERY_PARAM,
+  PREVIEW_CAPTURE_QUERY_VALUE,
+} from "@/lib/preview-token";
 import { classifyIntegrationError } from "@/lib/error-classify";
 import {
   DEFAULT_DAILY_EXPORT_LIMIT,
@@ -190,7 +193,12 @@ export async function POST(req: NextRequest) {
     //    Browserless queueing delays that can exceed the default 5-minute TTL
     //    (issue #1036).
     const token = await signPreviewToken(projectId, 15 * 60);
-    const previewUrl = `${appUrl}/preview/${projectId}?${PREVIEW_TOKEN_QUERY_PARAM}=${encodeURIComponent(token)}`;
+    // Issue #1222: the capture path marks itself so the print CSS can keep
+    // this render full-bleed (@page margin 0, matching the zero margins in
+    // buildBrowserlessPdfBody) while a human printing the preview from a
+    // browser gets the --print-margin safe area. The param is additive to
+    // the signed token and changes nothing about preview access.
+    const previewUrl = `${appUrl}/preview/${projectId}?${PREVIEW_TOKEN_QUERY_PARAM}=${encodeURIComponent(token)}&${PREVIEW_CAPTURE_QUERY_PARAM}=${PREVIEW_CAPTURE_QUERY_VALUE}`;
 
     // 6. Credential rides in a header (Basic auth, `apiKey:`), never the
     //    query string; bounded by an AbortController so a hung Browserless

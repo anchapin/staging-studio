@@ -62,6 +62,8 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/preview-token", () => ({
   signPreviewToken: vi.fn(),
   PREVIEW_TOKEN_QUERY_PARAM: "token",
+  PREVIEW_CAPTURE_QUERY_PARAM: "capture",
+  PREVIEW_CAPTURE_QUERY_VALUE: "pdf",
 }));
 
 vi.mock("@/lib/browserless", () => ({
