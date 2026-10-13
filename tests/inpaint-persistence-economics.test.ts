@@ -46,7 +46,7 @@ vi.mock("@/lib/inference", async (importOriginal) => {
 import {
   MAX_PERSISTENCE_ATTEMPTS,
   persistenceBackoffMs,
-  pollFalStatus,
+  pollInpaintStatus,
 } from "@/lib/inpaint-status";
 
 const REQUEST_ID = "req-1";
@@ -91,10 +91,10 @@ describe("persistenceBackoffMs", () => {
   });
 });
 
-describe("pollFalStatus PERSISTENCE_FAILED economics (issue #1143)", () => {
+describe("pollInpaintStatus PERSISTENCE_FAILED economics (issue #1143)", () => {
   it("skips client.result entirely when falResultUrl is memoized", async () => {
     mockPrisma.inpaintRequest.findUnique.mockResolvedValue(row());
-    const out = await pollFalStatus(REQUEST_ID);
+    const out = await pollInpaintStatus(REQUEST_ID);
     expect(mockClient.result).not.toHaveBeenCalled();
     expect(out.status).toBe("completed");
     expect(out.imageUrl).toContain("example.supabase.co/storage/v1/object/public/staging-images");
@@ -110,7 +110,7 @@ describe("pollFalStatus PERSISTENCE_FAILED economics (issue #1143)", () => {
         lastPersistenceAttemptAt: new Date(Date.now() - 500),
       })
     );
-    const out = await pollFalStatus(REQUEST_ID);
+    const out = await pollInpaintStatus(REQUEST_ID);
     expect(out.status).toBe("retryable");
     expect(mockClient.result).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
@@ -125,7 +125,7 @@ describe("pollFalStatus PERSISTENCE_FAILED economics (issue #1143)", () => {
         lastPersistenceAttemptAt: new Date(Date.now() - 60_000),
       })
     );
-    const out = await pollFalStatus(REQUEST_ID);
+    const out = await pollInpaintStatus(REQUEST_ID);
     expect(out.status).toBe("completed");
     expect(out.persisted).toBe(false);
     expect(out.imageUrl).toBe(FAL_URL);
@@ -136,7 +136,7 @@ describe("pollFalStatus PERSISTENCE_FAILED economics (issue #1143)", () => {
 
   it("fetches and memoizes the result URL for a legacy row with no stored URL", async () => {
     mockPrisma.inpaintRequest.findUnique.mockResolvedValue(row({ falResultUrl: null }));
-    await pollFalStatus(REQUEST_ID);
+    await pollInpaintStatus(REQUEST_ID);
     expect(mockClient.result).toHaveBeenCalledTimes(1);
     const memoWrite = mockPrisma.inpaintRequest.update.mock.calls.find(
       ([args]) => args.data?.falResultUrl === FAL_URL
@@ -146,7 +146,7 @@ describe("pollFalStatus PERSISTENCE_FAILED economics (issue #1143)", () => {
 
   it("records the attempt before the upload try", async () => {
     mockPrisma.inpaintRequest.findUnique.mockResolvedValue(row());
-    await pollFalStatus(REQUEST_ID);
+    await pollInpaintStatus(REQUEST_ID);
     const attemptWrite = mockPrisma.inpaintRequest.update.mock.calls.find(
       ([args]) => args.data?.persistenceAttempts?.increment === 1
     );

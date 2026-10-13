@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Issue #1121: persistFalImage's failure paths and the PERSISTENCE_FAILED
+// Issue #1121: persistInpaintImage's failure paths and the PERSISTENCE_FAILED
 // re-entry branch were untested. Four distinct failure branches inside
-// persistFalImage must each return { persisted: false, imageUrl: null }
+// persistInpaintImage must each return { persisted: false, imageUrl: null }
 // with a correlatable console.error event (#717), and the PERSISTENCE_FAILED
-// retry path in pollFalStatus must call client.result exactly once for a
+// retry path in pollInpaintStatus must call client.result exactly once for a
 // legacy row (no memoized URL) and persist on success.
 //
 // Already pinned elsewhere (not re-covered here): the :655 PERSISTENCE_FAILED
@@ -41,7 +41,7 @@ vi.mock("@/lib/inference", async (importOriginal) => {
   };
 });
 
-import { persistFalImage, pollFalStatus } from "@/lib/inpaint-status";
+import { persistInpaintImage, pollInpaintStatus } from "@/lib/inpaint-status";
 
 const REQUEST_ID = "req-1";
 const FAL_URL = "https://fal-cdn.example/result.png";
@@ -62,14 +62,14 @@ beforeEach(() => {
   consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
-describe("persistFalImage failure branches (issue #1121)", () => {
+describe("persistInpaintImage failure branches (issue #1121)", () => {
   it("non-ok fal CDN response: no upload, inpaint_persist_failed, persisted false", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({ ok: false, status: 403, statusText: "Forbidden" }))
     );
 
-    const out = await persistFalImage(FAL_URL, REQUEST_ID);
+    const out = await persistInpaintImage(FAL_URL, REQUEST_ID);
 
     expect(out).toEqual({ persisted: false, imageUrl: null });
     expect(mockSupabase.upload).not.toHaveBeenCalled();
@@ -86,7 +86,7 @@ describe("persistFalImage failure branches (issue #1121)", () => {
       error: { message: "bucket unavailable" },
     });
 
-    const out = await persistFalImage(FAL_URL, REQUEST_ID);
+    const out = await persistInpaintImage(FAL_URL, REQUEST_ID);
 
     expect(out).toEqual({ persisted: false, imageUrl: null });
     expect(mockSupabase.upload).toHaveBeenCalledWith(
@@ -104,7 +104,7 @@ describe("persistFalImage failure branches (issue #1121)", () => {
   it("upload resolving without data counts as a failure too", async () => {
     mockSupabase.upload.mockResolvedValue({ data: null, error: null });
 
-    const out = await persistFalImage(FAL_URL, REQUEST_ID);
+    const out = await persistInpaintImage(FAL_URL, REQUEST_ID);
 
     expect(out).toEqual({ persisted: false, imageUrl: null });
     expect(mockSupabase.getPublicUrl).not.toHaveBeenCalled();
@@ -117,7 +117,7 @@ describe("persistFalImage failure branches (issue #1121)", () => {
   it("missing publicUrl: upload landed but inpaint_public_url_missing, persisted false", async () => {
     mockSupabase.getPublicUrl.mockReturnValue({ data: { publicUrl: null } });
 
-    const out = await persistFalImage(FAL_URL, REQUEST_ID);
+    const out = await persistInpaintImage(FAL_URL, REQUEST_ID);
 
     expect(out).toEqual({ persisted: false, imageUrl: null });
     expect(consoleError).toHaveBeenCalledWith(
@@ -128,7 +128,7 @@ describe("persistFalImage failure branches (issue #1121)", () => {
   it("fetch rejecting (network down): catch-all inpaint_persist_failed, persisted false", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("network down"); }));
 
-    const out = await persistFalImage(FAL_URL, REQUEST_ID);
+    const out = await persistInpaintImage(FAL_URL, REQUEST_ID);
 
     expect(out).toEqual({ persisted: false, imageUrl: null });
     expect(mockSupabase.upload).not.toHaveBeenCalled();
@@ -139,7 +139,7 @@ describe("persistFalImage failure branches (issue #1121)", () => {
   });
 
   it("happy path still returns the public URL", async () => {
-    const out = await persistFalImage(FAL_URL, REQUEST_ID);
+    const out = await persistInpaintImage(FAL_URL, REQUEST_ID);
     expect(out).toEqual({ persisted: true, imageUrl: PUBLIC_URL });
     expect(consoleError).not.toHaveBeenCalled();
   });
@@ -159,7 +159,7 @@ describe("PERSISTENCE_FAILED re-entry persists on success (issue #1121)", () => 
     });
     mockClient.result.mockResolvedValue({ data: { images: [{ url: FAL_URL }] } });
 
-    const out = await pollFalStatus(REQUEST_ID);
+    const out = await pollInpaintStatus(REQUEST_ID);
 
     // Exactly one provider result fetch, then durable persistence.
     expect(mockClient.result).toHaveBeenCalledTimes(1);

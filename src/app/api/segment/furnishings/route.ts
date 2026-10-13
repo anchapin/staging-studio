@@ -222,7 +222,7 @@ export async function POST(request: NextRequest) {
     // ZERO regions after an already-billed SAM call — auto-detect
     // dead-ends on one bad URL. The classified error path is taken only
     // when every mask fails, matching the failure tolerance the inpaint
-    // path already has (`persistFalImage` returns `{persisted:false}`
+    // path already has (`persistInpaintImage` returns `{persisted:false}`
     // and the status route retries).
     const settled = await Promise.allSettled(
       detection.maskUrls.map((maskUrl) => fetchMaskAsDataUrl(maskUrl))

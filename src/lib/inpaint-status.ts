@@ -155,7 +155,7 @@ interface PersistenceResult {
  * Returns { persisted: true, imageUrl } on success, { persisted: false, imageUrl: null } on failure.
  * Issue #717: download failures are logged and correlatable.
  */
-export async function persistFalImage(
+export async function persistInpaintImage(
   falImageUrl: string,
   requestId: string
 ): Promise<PersistenceResult> {
@@ -398,7 +398,7 @@ async function recoverFromStatusGone(
  * - PERSISTENCE_FAILED: retry persistence
  * - IN_QUEUE/PROCESSING: return current status
  */
-export async function pollFalStatus(requestId: string): Promise<InpaintStatusResult> {
+export async function pollInpaintStatus(requestId: string): Promise<InpaintStatusResult> {
   const inpaintRequest = await prisma.inpaintRequest.findUnique({
     where: { id: requestId },
     select: {
@@ -549,7 +549,7 @@ export async function pollFalStatus(requestId: string): Promise<InpaintStatusRes
         );
       });
 
-    const { persisted, imageUrl } = await persistFalImage(falImageUrl, requestId);
+    const { persisted, imageUrl } = await persistInpaintImage(falImageUrl, requestId);
     if (persisted && imageUrl) {
       // Issue #1136 (review): same record-write contract as
       // finishCompletedJob — a failed write surfaces as `retryable`,
@@ -647,7 +647,7 @@ export async function pollFalStatus(requestId: string): Promise<InpaintStatusRes
  * Shared by the normal COMPLETED path and the #1202 404-recovery path,
  * so a recovered job reuses the existing row's lifecycle (no second
  * billed InpaintRequest). Side effects: one image download + Supabase
- * upload (via `persistFalImage`) and one Prisma update whose failure
+ * upload (via `persistInpaintImage`) and one Prisma update whose failure
  * surfaces as `retryable` (issue #1136), never as a completed result.
  */
 async function finishCompletedJob(
@@ -662,7 +662,7 @@ async function finishCompletedJob(
     return { status: "retryable", imageUrl: null, persisted: false };
   }
 
-  const { persisted, imageUrl } = await persistFalImage(falImageUrl, requestId);
+  const { persisted, imageUrl } = await persistInpaintImage(falImageUrl, requestId);
 
   if (persisted && imageUrl) {
     try {

@@ -7,7 +7,7 @@
  * completion callback lands on `/api/inpaint/webhook`, the handler
  * matches the row by `providerJobId`, and writes the result through
  * the SAME persistence contract the poller uses
- * (`persistFalImage` -> durable `COMPLETED`+resultUrl write, or
+ * (`persistInpaintImage` -> durable `COMPLETED`+resultUrl write, or
  * `PERSISTENCE_FAILED` when the upload fails).
  *
  * Idempotency: fal retries on non-2xx. The row's `status` is the dedup
@@ -23,7 +23,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { firstInpaintImageUrl } from "@/lib/inpaint-output";
-import { logInpaintTransition, persistFalImage } from "@/lib/inpaint-status";
+import { logInpaintTransition, persistInpaintImage } from "@/lib/inpaint-status";
 
 export type InpaintWebhookOutcome =
   | { kind: "completed"; imageUrl: string }
@@ -169,7 +169,7 @@ async function persistCompletion(
   providerJobId: string,
   providerImageUrl: string
 ): Promise<InpaintWebhookOutcome> {
-  const { persisted, imageUrl } = await persistFalImage(
+  const { persisted, imageUrl } = await persistInpaintImage(
     providerImageUrl,
     requestId
   );
