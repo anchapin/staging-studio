@@ -146,6 +146,64 @@ User: id, firmName, ownerName, logoUrl, email, psychologyPageContent, signoffCon
 
 ---
 
+## 4. Per-Room Aesthetic Overrides — Issue #1214
+
+> **Status: Deferred until after the Lauren demo by decision.** Tracked here so it is not lost. Revisit after the demo period when Lauren has had a chance to express the per-room aesthetic-mixing need in real client work.
+
+### Current State
+
+Rooms have **no aesthetic of their own today**. Every generation path reads `Project.stagingAesthetic` directly.
+
+**Data model** (`prisma/schema.prisma`):
+- `Project.stagingAesthetic` (String?) — the single source of truth for project-wide aesthetic.
+- `Room.stagingAesthetic` does **not** exist.
+- Every consumer (`holistic-prompt.ts`, `holistic-preset.ts`, the editor's `aesthetic` prop, `generate-copy`) reads from `Project.stagingAesthetic`.
+
+**Resolution seam to extend:** `resolveRoomAesthetic` in `src/lib/project-aesthetic.ts` is the central helper. Today it returns the project's aesthetic unconditionally; the override would live behind the same function so every consumer picks it up automatically.
+
+**Reference trace:** [#1189 (comment 5965187096)](https://github.com/anchapin/staging-studio/issues/1189#issuecomment-5965187096) for the original "all rooms inherit project" assumption.
+
+### Scope (when implementation begins)
+
+1. **Schema change** — Add nullable `Room.stagingAesthetic` (String?). Cascade-free. `db push` workflow (no migration history to maintain, per AGENTS.md).
+2. **Prompt builder updates** — `holistic-prompt.ts`, `holistic-preset.ts`, the editor `aesthetic` prop, and `generate-copy` resolve `room.stagingAesthetic ?? project.stagingAesthetic` via `resolveRoomAesthetic`.
+3. **Room card UI** — Show "Inherits project" (muted) when `room.stagingAesthetic` is null; otherwise show "Override: <name>" badge with a "Reset to project" action.
+4. **Bulk toolbar** — "Apply aesthetic to selected rooms" action that writes the room column, with a confirmation step showing the room count before applying.
+5. **Helper line** — Render a short "Room override > Project aesthetic" hint in the relevant editor surfaces.
+
+### Acceptance Criteria
+
+- [ ] Changing the project aesthetic updates **inheriting** rooms (no override) and leaves rooms with an explicit override **untouched**.
+- [ ] Reset returns a room to the project aesthetic (clears the override).
+- [ ] Tests cover all three paths: **inherit**, **override**, **reset**.
+- [ ] Rooms with no override render **exactly as before** — no badge, no helper line, no behavioral drift for the 99% case that does not use overrides.
+
+### Estimated Complexity
+
+**Medium.** Requires a schema push, prompt-builder changes in 3-4 files, a focused UI addition, bulk-action surface, and tests. The trickiest part is making "rooms with no override render exactly as before" a hard contract — easy to break by accidentally rendering the badge when `null`.
+
+### Files Reserved for Implementation
+
+When this issue exits deferral, edits are expected in:
+- `prisma/schema.prisma` — add `Room.stagingAesthetic String?`.
+- `src/lib/project-aesthetic.ts` — extend `resolveRoomAesthetic` to honor `room ?? project`.
+- `src/lib/holistic-prompt.ts` — read through `resolveRoomAesthetic`.
+- `src/lib/holistic-preset.ts` — read through `resolveRoomAesthetic`.
+- Room card components under `src/components/` — badge + reset affordance.
+- Bulk toolbar surfaces — selected-rooms writer.
+- Tests under `tests/` — inherit/override/reset coverage.
+
+### Trigger to Revisit
+
+The signal to unblock this: after the Lauren demo period, **does Lauren (or any prospect) ask to stage different rooms in different aesthetics within a single project?** Examples that would signal yes:
+- "Can the great room be coastal and the primary bedroom be modern organic?"
+- "I want to show the same house two ways — one warm traditional, one cool contemporary."
+- Any conversation about *per-room* mood/tone flexibility.
+
+Until that signal appears, the single-project-aesthetic model is the simpler default and the override surface is speculative.
+
+---
+
 ## Summary: Priority After First Solo Sessions
 
 | Feature | Current State | Usage Signal to Watch | Recommended Priority |
@@ -153,9 +211,10 @@ User: id, firmName, ownerName, logoUrl, email, psychologyPageContent, signoffCon
 | **Variant History** | 2 fixed slots, no branching | Does Lauren want to keep more than 2 options or "save" an exploratory result? | Low (hold until observed) |
 | **Photo Intake** | Manual upload per room via editor | Does Lauren chase listing agents for photos or re-upload photos from email/text? | Medium-Low |
 | **Multi-Tenant / Team Seats** | Single-firm, single-user | Does Lauren mention an assistant, partner, or growing her team? | Low (hold until observed) |
+| **Per-Room Aesthetic Overrides (#1214)** | All rooms inherit project aesthetic | Does Lauren ask to mix aesthetics per room within a single project? | Low — deferred until after Lauren demo by decision |
 
 **Tier 3 rule applies:** none of these should be built speculatively. Ship v1, observe Lauren's first solo sessions, then re-rank based on actual friction points.
 
 ---
 
-*Last updated: post-demo research, issue #204*
+*Last updated: post-demo research, issue #204; added #1214 (per-room aesthetic overrides) entry on its explicit deferral.*
