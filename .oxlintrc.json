@@ -185,11 +185,11 @@
     ],
     "jsx-a11y/no-redundant-roles": "error",
     "jsx-a11y/no-static-element-interactions": [
-      // The comparison-slider's draggable `<div>` handle needs
-      // `role="slider"` and `aria-valuenow`; downgraded to warn so
-      // the linter swap ships, and tracked for a follow-up PR that
-      // adds the a11y attributes.
-      "warn",
+      // Re-escalated to `error` in #1279: the comparison-slider's inner
+      // handle `<div>` is now `role="presentation"` (the outer container
+      // already owns the slider semantics with `role="slider"` +
+      // `aria-valuenow` / `aria-valuemin` / `aria-valuemax`).
+      "error",
       {
         "allowExpressionValues": true,
         "handlers": [

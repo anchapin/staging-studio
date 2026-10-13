@@ -250,6 +250,13 @@ export default function ComparisonSlider({
         <div
           className="absolute top-0 bottom-0 w-11 cursor-ew-resize z-10"
           style={{ left: `${sliderPosition}%`, transform: "translateX(-50%)" }}
+          // The outer container is the actual `role="slider"` (lines
+          // 202-207) and owns the keyboard / mouse event handlers. This
+          // inner div is purely the visual hit area for the handle, so
+          // mark it as a presentation node — screen readers see only the
+          // outer slider semantics, and the lint rule gets a role to
+          // anchor on.
+          role="presentation"
           onMouseDown={report ? undefined : handleMouseDown}
         >
           {/* 1px visual line — Issue #645 */}
