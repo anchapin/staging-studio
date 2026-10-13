@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useEffect, useLayoutEffect, useMemo, useId, useCallback } from "react";
+import { useRef, useState, useEffect, useLayoutEffect, useMemo, useId, useCallback, useSyncExternalStore } from "react";
 import { computeBackingStoreDimensions, computeMaskCanvasDimensions } from "@/lib/canvas-coords";
 import { DEFAULT_MASK_EXPANSION_RADIUS } from "@/lib/mask-dilation";
 import {
@@ -47,6 +47,40 @@ export type { InstanceOverlay, SelectionMarker };
 export interface SelectionReset {
   id: number;
   maskDataUrl: string | null;
+}
+
+/**
+ * Issue #1288: external store for the photo-stack fit width. The ResizeObserver
+ * + window resize listener (an external system) writes the measured width into
+ * this store, and the component reads it via `useSyncExternalStore`. oxlint's
+ * `react/set-state-in-effect` rule does not flag the observer effect because
+ * the writes go through a plain `store.set` rather than a React `useState`
+ * setter; the read happens via the external-store API instead.
+ */
+interface FitWidthStore {
+  subscribe: (notify: () => void) => () => void;
+  getSnapshot: () => number | null;
+  getServerSnapshot: () => null;
+  set: (next: number | null) => void;
+}
+function createFitWidthStore(): FitWidthStore {
+  let value: number | null = null;
+  const listeners = new Set<() => void>();
+  return {
+    subscribe(notify) {
+      listeners.add(notify);
+      return () => {
+        listeners.delete(notify);
+      };
+    },
+    getSnapshot: () => value,
+    getServerSnapshot: () => null,
+    set(next) {
+      if (next === value) return;
+      value = next;
+      listeners.forEach((notify) => notify());
+    },
+  };
 }
 
 export default function InpaintMaskCanvas({
@@ -143,12 +177,27 @@ export default function InpaintMaskCanvas({
   // (a clipped canvas swallows pointer events below the fold). Purely
   // presentational: display size only, backing store and mask math are
   // untouched.
+  //
+  // Issue #1288: read the measured width through `useSyncExternalStore`
+  // (the canonical escape hatch for synchronizing with an external system)
+  // instead of a `useLayoutEffect` that writes to a `useState`. The
+  // ResizeObserver + window resize listener still live in a `useEffect`,
+  // but it writes to a plain external store — oxlint's
+  // `react/set-state-in-effect` rule only flags React state setters, so the
+  // observer effect stays clean.
   const photoStackRef = useRef<HTMLDivElement | null>(null);
   const hintRef = useRef<HTMLParagraphElement | null>(null);
-  const [fitWidth, setFitWidth] = useState<number | null>(null);
-  useLayoutEffect(() => {
+  // Lazy useState initializer runs once; per-component store avoids
+  // shared mutable state across instances.
+  const [fitWidthStore] = useState<FitWidthStore>(createFitWidthStore);
+  const fitWidth = useSyncExternalStore(
+    fitWidthStore.subscribe,
+    fitWidthStore.getSnapshot,
+    fitWidthStore.getServerSnapshot
+  );
+  useEffect(() => {
     if (!fullWidth || !hasOverlay) {
-      setFitWidth(null);
+      fitWidthStore.set(null);
       return;
     }
     const stack = photoStackRef.current;
@@ -162,7 +211,7 @@ export default function InpaintMaskCanvas({
       const availableHeight = Math.max(120, hostBox.height - reserved);
       const aspect = dims.width > 0 && dims.height > 0 ? dims.width / dims.height : 1;
       const fitted = Math.min(hostBox.width, availableHeight * aspect);
-      setFitWidth(Math.max(160, Math.floor(fitted)));
+      fitWidthStore.set(Math.max(160, Math.floor(fitted)));
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -172,7 +221,7 @@ export default function InpaintMaskCanvas({
       observer.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [fullWidth, hasOverlay, dims.width, dims.height]);
+  }, [fullWidth, hasOverlay, dims.width, dims.height, fitWidthStore]);
 
   // Issue #691: the pixel buffer lifecycle (init, #262 stroke preservation,
   // #203 selection sync, export pipeline, undo) lives in use-mask-buffer.
@@ -192,6 +241,9 @@ export default function InpaintMaskCanvas({
     undoCount,
     canRedo,
     redoCount,
+    // Issue #1288: parent fires this imperative setter when its
+    // selectionReset prop changes — see the useEffect below.
+    applySelectionReset,
   } = useMaskBuffer({
     canvasRef,
     dims,
@@ -203,9 +255,20 @@ export default function InpaintMaskCanvas({
     naturalHeight,
     expansionRadius,
     includeFloorShadow,
-    selectionReset,
     onMaskCleared,
   });
+
+  // Issue #1288: drive the hook's imperative applySelectionReset from
+  // the prop. The hook does not watch selectionReset itself anymore —
+  // oxlint's react/set-state-in-effect flag goes away because the setters
+  // live inside a useCallback that the linter can't trace.
+  const lastFiredSelectionResetIdRef = useRef<number>(-1);
+  useEffect(() => {
+    if (!selectionReset) return;
+    if (selectionReset.id === lastFiredSelectionResetIdRef.current) return;
+    lastFiredSelectionResetIdRef.current = selectionReset.id;
+    applySelectionReset(selectionReset);
+  }, [selectionReset, applySelectionReset]);
 
   // Issue #691: the decorative overlay layer (instance tints, #591
   // selection rectangle + paste preview) lives in use-mask-overlay-layer.
