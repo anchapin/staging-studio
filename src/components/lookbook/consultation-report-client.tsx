@@ -46,6 +46,9 @@ export function ConsultationReportClient({
   const [saveState, setSaveState] = useState<SignatureSaveState>(
     initialSignatureSaveState
   );
+  // "Page was generated on" stamp: capture once at mount so the SSR HTML
+  // and the client-hydrated value agree, and re-renders don't shift it.
+  const [generatedAt] = useState(() => new Date());
 
   const submitSignature = async (dataUrl: string) => {
     setSaveState((prev) => nextSignatureSaveState(prev, { kind: "save", dataUrl }));
@@ -222,7 +225,7 @@ export function ConsultationReportClient({
                     Date
                   </p>
                   <p className="font-playfair text-lg text-foreground border-b border-on-surface-variant/40 pb-1">
-                    {formatLongDate(new Date())}
+                    {formatLongDate(generatedAt)}
                   </p>
                 </div>
               </div>
