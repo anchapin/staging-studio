@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState, useRef } from "react";
 import { X, RefreshCw } from "lucide-react";
 import { applyDismissErrorOnSuccess } from "@/lib/toast-stale-error-dismiss";
 
@@ -21,6 +21,15 @@ interface ToastItemProps {
 }
 
 function ToastItem({ toast, onDismiss }: ToastItemProps) {
+  // The toast slides in from the right via a CSS `transition` on the
+  // `translate-x` / `opacity` classes (line 94 below). To make the
+  // transition play on the very first render — when the element is
+  // already mounted but its initial class is the "off-screen" one —
+  // we render with `isVisible=false` and flip to `true` on the next
+  // frame. The `react/set-state-in-effect` rule flags this; it is
+  // genuinely an "external system" sync (the browser needs to commit
+  // the hidden state before the transition has a starting point), so
+  // suppress the rule for this one call.
   const [isVisible, setIsVisible] = useState(false);
   const dismissButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -32,8 +41,12 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
     }
   }, [toast.triggerSelector]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
     setIsVisible(true);
+  }, []);
+
+  useEffect(() => {
     // Non-error toasts auto-dismiss at 4s; errors persist until manually dismissed
     const timeout = toast.type === "error" ? 8000 : 4000;
     const timer = setTimeout(() => {

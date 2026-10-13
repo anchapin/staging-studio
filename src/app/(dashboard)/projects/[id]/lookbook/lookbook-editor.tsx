@@ -45,8 +45,17 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
   const router = useRouter();
 
   // ─── Room copy autosave ────────────────────────────────────────────
+  // The `getController` factory below references `setStatuses` in its
+  // inner `onStatusChange`, but the `useState` declaration for
+  // `statuses` lives a few lines below. The `react/immutability` rule
+  // flags reading a state setter while its declaration is still being
+  // initialized. Mirror `setStatuses` into a ref so the closure can
+  // see it without forward-declaration gymnastics.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const controllersRef = useRef<Record<string, any>>({});
+  const setStatusesRef = useRef<
+    React.Dispatch<React.SetStateAction<Record<string, SaveIndicatorState>>>
+  >(() => {});
 
   const getController = useCallback(
     (roomId: string) => {
@@ -58,7 +67,7 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
           },
           idleMs: 2000,
           onStatusChange: (status: AutosaveStatus) =>
-            setStatuses((prev) => ({ ...prev, [roomId]: status })),
+            setStatusesRef.current((prev) => ({ ...prev, [roomId]: status })),
         });
       }
       return controllersRef.current[roomId];
@@ -70,6 +79,14 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
     {}
   );
   const [statuses, setStatuses] = useState<Record<string, SaveIndicatorState>>({});
+
+  // Sync the latest `setStatuses` into the ref so `getController`'s
+  // `onStatusChange` (defined above) can call it. The setter is stable
+  // across renders but React 19's compiler still wants the explicit
+  // mirror so it can prove there's no temporal-dead-zone access.
+  useEffect(() => {
+    setStatusesRef.current = setStatuses;
+  }, [setStatuses]);
 
   const editRoom = useCallback(
     (roomId: string, patch: Partial<RoomCopyEditInput>) => {
@@ -247,6 +264,12 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
   const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    // The "Saved." dot indicator auto-hides after 3s via a setTimeout;
+    // both the show and the auto-hide are setState calls, but the
+    // trigger is the external `indicator` prop + a wall-clock timer,
+    // not a derived value. The `react/set-state-in-effect` rule flags
+    // them; suppress for the body of this effect.
+    /* oxlint-disable react/set-state-in-effect */
     if (indicator === "saved") {
       setShowDotText(true);
       if (fadeTimerRef.current !== null) clearTimeout(fadeTimerRef.current);
@@ -261,6 +284,7 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
         fadeTimerRef.current = null;
       }
     }
+    /* oxlint-enable react/set-state-in-effect */
     return () => {
       if (fadeTimerRef.current !== null) {
         clearTimeout(fadeTimerRef.current);

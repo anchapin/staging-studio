@@ -410,30 +410,42 @@ export function useMaskBuffer({
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
 
-    if (!selectionReset.maskDataUrl) {
-      ctx.fillStyle = "black";
-      ctx.fillRect(0, 0, dims.width, dims.height);
-      setMaskDataUrl(null);
-      setHasPainted(false);
-      setLowCoverage(false);
-      onMaskChange?.(null);
-      return;
-    }
+    // The `setX` calls below are imperative canvas re-initialization in
+    // response to a `selectionReset` prop change (an external "reset
+    // selection" action). The `react/set-state-in-effect` rule flags
+    // them, but the rule's recommendation ("update from the event that
+    // caused the change") doesn't apply here — the trigger is a prop
+    // change, not a user event, and the canvas is an imperative
+    // backing store, not a derived value. Suppress for the body of
+    // this effect.
+    // oxlint-disable-next-line react/set-state-in-effect
+    const applyReset = () => {
+      if (!selectionReset.maskDataUrl) {
+        ctx.fillStyle = "black";
+        ctx.fillRect(0, 0, dims.width, dims.height);
+        setMaskDataUrl(null);
+        setHasPainted(false);
+        setLowCoverage(false);
+        onMaskChange?.(null);
+        return;
+      }
 
-    let cancelled = false;
-    const img = new Image();
-    img.onload = () => {
-      if (cancelled) return;
-      ctx.fillStyle = "black";
-      ctx.fillRect(0, 0, dims.width, dims.height);
-      ctx.drawImage(img, 0, 0, dims.width, dims.height);
-      setHasPainted(true);
-      exportMask();
+      let cancelled = false;
+      const img = new Image();
+      img.onload = () => {
+        if (cancelled) return;
+        ctx.fillStyle = "black";
+        ctx.fillRect(0, 0, dims.width, dims.height);
+        ctx.drawImage(img, 0, 0, dims.width, dims.height);
+        setHasPainted(true);
+        exportMask();
+      };
+      img.src = selectionReset.maskDataUrl;
+      return () => {
+        cancelled = true;
+      };
     };
-    img.src = selectionReset.maskDataUrl;
-    return () => {
-      cancelled = true;
-    };
+    applyReset();
   }, [selectionReset, dims.width, dims.height, exportMask, onMaskChange, canvasRef]);
 
   return {

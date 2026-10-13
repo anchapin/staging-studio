@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import BufferedDirectivesTextarea from "@/components/canvas/buffered-directives-textarea";
@@ -587,6 +587,19 @@ export default function ProjectDetailView({
     [fetchTouchUpCounts]
   );
 
+  // The retry callbacks below self-invoke their parent
+  // (`handleVariantSelect`, `handleStripSelect`, `persistInpaintResult`),
+  // which the `react/immutability` rule flags as reading a variable
+  // while it's still being initialized. Use the "latest-ref" pattern:
+  // store the callback in a ref, then a stable wrapper reads from
+  // the ref. The wrapper is the public-facing `useCallback`; the ref
+  // always holds the latest implementation. The useEffect that syncs
+  // the ref is positioned AFTER the callback's declaration so the
+  // compiler sees a forward reference and the dep array is well-typed.
+  const handleVariantSelectRef = useRef<
+    (room: Room, index: number) => Promise<void>
+  >(async () => {});
+
   const handleVariantSelect = useCallback(
     async (room: Room, index: number) => {
       const pair = variantPairsOf(room)[index];
@@ -609,7 +622,7 @@ export default function ProjectDetailView({
           result.error || "Failed to save variant selection",
           true,
           () => {
-            void handleVariantSelect(room, index);
+            void handleVariantSelectRef.current(room, index);
           },
           "Retry saving variant selection"
         );
@@ -619,6 +632,14 @@ export default function ProjectDetailView({
     },
     [applyRoomUpdate, showError, showInfo, router]
   );
+
+  // The React 19 rule treats `ref.current = …` after a `useRef` call
+  // as "modifying a value passed to a hook." The latest-ref pattern
+  // needs exactly that, so suppress the rule for the assignment.
+  useEffect(() => {
+    // oxlint-disable-next-line react/immutability
+    handleVariantSelectRef.current = handleVariantSelect;
+  }, [handleVariantSelect]);
 
   /**
    * Issue #192: single entry point for the thumbnail strip's select
@@ -646,7 +667,7 @@ export default function ProjectDetailView({
             result.error || "Failed to save variant selection",
             true,
             () => {
-              void handleStripSelect(room, selection);
+              void handleStripSelectRef.current(room, selection);
             },
             "Retry saving variant selection"
           );
@@ -656,10 +677,19 @@ export default function ProjectDetailView({
         return;
       }
 
-      await handleVariantSelect(room, selection);
+      await handleVariantSelectRef.current(room, selection);
     },
-    [applyRoomUpdate, handleVariantSelect, showError, router]
+    [applyRoomUpdate, showError, router]
   );
+
+  const handleStripSelectRef = useRef<
+    (room: Room, selection: VariantStripSelection) => Promise<void>
+  >(async () => {});
+
+  useEffect(() => {
+    // oxlint-disable-next-line react/immutability
+    handleStripSelectRef.current = handleStripSelect;
+  }, [handleStripSelect]);
 
   /**
    * Issue #192: deletes one variant's staged after-image. Optimistically
@@ -760,14 +790,23 @@ export default function ProjectDetailView({
           message,
           true,
           () => {
-            void persistInpaintResult(room, resultImageUrl, source);
+            void persistInpaintResultRef.current(room, resultImageUrl, source);
           },
           "Retry saving staged image"
         );
       }
     },
-    [project?.id, applyRoomUpdate, showError, showSuccess, router]
+    [project, applyRoomUpdate, showError, showSuccess, router]
   );
+
+  const persistInpaintResultRef = useRef<
+    (room: Room, resultImageUrl: string, source: InpaintSource) => Promise<void>
+  >(async () => {});
+
+  useEffect(() => {
+    // oxlint-disable-next-line react/immutability
+    persistInpaintResultRef.current = persistInpaintResult;
+  }, [persistInpaintResult]);
 
   const handleInpaintSourceChange = useCallback(
     (roomId: string, next: InpaintSource) => {

@@ -41,7 +41,6 @@ export default function VersionHistoryPills({
     redoStack: [], // Stack of resultUrls for redo
     currentIndex: 0, // Index into versions array
   });
-  const [animatingPill, setAnimatingPill] = useState(false);
   const [pendingRestore, setPendingRestore] = useState<{
     plan: VersionRestorePlan;
     version: InpaintVersion;
@@ -60,15 +59,17 @@ export default function VersionHistoryPills({
     });
   }, [activeResultUrl, loadVersions]);
 
-
-  // Watch for new versions: if activeResultUrl is not in versions, it's new → animate
+  // Watch for new versions: if activeResultUrl is not in versions, it's new
+  // → refetch. The "new pill animation" is no longer state-driven: the
+  // <button> for the new version gets `key={version.id}`, so it remounts
+  // when a fresh version lands, and the CSS `animation` plays once on
+  // mount (`.animate-new-pill`). The previous implementation toggled a
+  // boolean via `setState`-in-effect, which the `react/set-state-in-effect`
+  // rule flags.
   useEffect(() => {
     if (!activeResultUrl) return;
     const exists = versions.some((v) => v.resultUrl === activeResultUrl);
     if (!exists && versions.length > 0) {
-      // New version was added - trigger animation and reload
-      setAnimatingPill(true);
-      setTimeout(() => setAnimatingPill(false), 400);
       void loadVersions();
     }
   }, [activeResultUrl, versions, loadVersions]);
@@ -193,7 +194,7 @@ export default function VersionHistoryPills({
                     ? "bg-primary text-primary-foreground"
                     : "bg-transparent text-muted-foreground hover:bg-muted"
                   }
-                  ${animatingPill && i === visibleVersions.length - 1 ? "animate-new-pill" : ""}
+                  ${i === visibleVersions.length - 1 ? "animate-new-pill" : ""}
                 `}
               >
                 v{actualIndex + 1}

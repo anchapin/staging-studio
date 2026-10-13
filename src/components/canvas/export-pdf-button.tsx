@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useToast, ToastContainer } from "@/components/ui/toast";
 import { Loader2, FileText } from "lucide-react";
 
@@ -26,6 +26,12 @@ export default function ExportPdfButton({
 }: ExportPdfButtonProps) {
   const [isExporting, setIsExporting] = useState(false);
   const { toasts, showError, showSuccess, dismissToast } = useToast();
+
+  // The retry callback below calls `handleExport` itself, which is
+  // what the `react/immutability` rule flags. Use a ref so the retry
+  // path invokes the current `handleExport` (the latest closure with
+  // fresh deps) without a self-reference during initialization.
+  const handleExportRef = useRef<() => Promise<void>>(async () => {});
 
   const handleExport = useCallback(async () => {
     setIsExporting(true);
@@ -66,7 +72,7 @@ export default function ExportPdfButton({
         message,
         true,
         () => {
-          handleExport();
+          void handleExportRef.current();
         },
         "Retry PDF export"
       );
@@ -74,6 +80,10 @@ export default function ExportPdfButton({
       setIsExporting(false);
     }
   }, [projectId, projectName, onExportStart, onExportComplete, onBeforeExport, showError, showSuccess]);
+
+  useEffect(() => {
+    handleExportRef.current = handleExport;
+  }, [handleExport]);
 
   return (
     <div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast, ToastContainer } from "@/components/ui/toast";
@@ -69,6 +69,8 @@ export default function GenerateCopyForm({
     [roomId, onCopyGenerated, showSuccess, showError]
   );
 
+  const handleGenerateRef = useRef<() => Promise<void>>(async () => {});
+
   const handleGenerate = useCallback(async () => {
     const trimmedDirectives = rawDirectives.trim();
     if (!trimmedDirectives) {
@@ -116,7 +118,7 @@ export default function GenerateCopyForm({
         message,
         true,
         () => {
-          handleGenerate();
+          void handleGenerateRef.current();
         },
         "Retry copy generation"
       );
@@ -124,6 +126,11 @@ export default function GenerateCopyForm({
       setIsGenerating(false);
     }
   }, [roomId, rawDirectives, onCopyGenerated, persistCopy, showError, showSuccess]);
+
+  useEffect(() => {
+    // oxlint-disable-next-line react/immutability
+    handleGenerateRef.current = handleGenerate;
+  }, [handleGenerate]);
 
   return (
     <div className="space-y-4">
