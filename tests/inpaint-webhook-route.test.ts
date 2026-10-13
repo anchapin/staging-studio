@@ -15,9 +15,8 @@
  * - provider error delivery → row ERROR, 200
  */
 
-import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
-import { webcrypto } from "node:crypto";
 
 const mockPersistFalImage = vi.hoisted(() => vi.fn());
 // Issue #1116: the completion/error transitions log a pipeline event
