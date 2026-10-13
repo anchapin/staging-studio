@@ -1,5 +1,6 @@
 import { execSync, spawnSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 
 import {
   APP_URL,
@@ -137,7 +138,10 @@ async function pushSchema(): Promise<void> {
   // moment (bootstrap → restart cycle); retry a few times before giving up.
   let lastError: unknown = null;
   for (let attempt = 1; attempt <= 5; attempt += 1) {
-    const result = spawnSync("npx", ["prisma", "db", "push", "--skip-generate"], {
+    // Prisma 7: `--skip-generate` was removed (the new flag set is
+    // `--config`, `--schema`, `--url`, `--accept-data-loss`). The default
+    // is to generate as part of `db push`, which is what we want anyway.
+    const result = spawnSync("npx", ["prisma", "db", "push"], {
       stdio: "inherit",
       env: { ...process.env, DATABASE_URL },
     });
@@ -152,7 +156,11 @@ async function pushSchema(): Promise<void> {
 }
 
 async function seed(): Promise<void> {
-  const prisma = new PrismaClient({ datasources: { db: { url: DATABASE_URL } } });
+  // Prisma 7: `datasources: { db: { url } }` is no longer accepted by the
+  // PrismaClient constructor; pass a driver adapter instead.
+  const prisma = new PrismaClient({
+    adapter: new PrismaPg({ connectionString: DATABASE_URL }),
+  });
   try {
     const beforePhotoUrl = roomPhotoPublicUrl(`rooms/${E2E_EDITOR_ROOM_ID}/before-image.png`);
     const conceptBeforePhotoUrl = roomPhotoPublicUrl(

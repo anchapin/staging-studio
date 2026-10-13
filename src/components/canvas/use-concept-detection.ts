@@ -20,7 +20,7 @@ import {
 import { findInstanceAtPoint, instanceSeedPoint } from "@/lib/instance-hit-test";
 import { logSelectionEvent } from "@/app/actions/selection-log";
 import { computeMaskCanvasDimensions } from "@/lib/canvas-coords";
-import { maskBounds } from "@/lib/vision-labels";
+import { maskBounds } from "@/lib/vision-labels-pure";
 import {
   MAX_BATCH_OBJECTS,
   applyConceptSelectAll,

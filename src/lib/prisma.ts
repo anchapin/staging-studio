@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 import { logger } from "@/lib/logger";
 
 const globalForPrisma = globalThis as unknown as {
@@ -6,7 +7,22 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 function createPrismaClient() {
+  // Prisma 7: connection strings no longer flow through the schema's
+  // `datasource.url`; the PrismaClient must be instantiated with a driver
+  // adapter instead. See
+  // https://pris.ly/d/prisma7-client-config and
+  // https://pris.ly/d/config-datasource. CLI commands (db push, db studio)
+  // read the URL from prisma.config.ts.
+  //
+  // `process.env.DATABASE_URL` is read at construction time (the previous
+  // Prisma 5 client read it lazily from the schema's `datasource.url`).
+  // Tests that exercise this module without a DATABASE_URL set will see
+  // Prisma's own "missing connection string" error at first query, which
+  // is the same failure mode the production app surfaces.
+  const databaseUrl = process.env.DATABASE_URL;
+  const adapter = new PrismaPg({ connectionString: databaseUrl });
   const client = new PrismaClient({
+    adapter,
     log:
       process.env.NODE_ENV === "development"
         ? ["query", "error", "warn"]

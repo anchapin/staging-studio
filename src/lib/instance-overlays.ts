@@ -1,4 +1,4 @@
-import { topmostLeftmostPoint } from "@/lib/vision-labels";
+import { topmostLeftmostPoint } from "@/lib/vision-labels-pure";
 import type { BatchSelection } from "@/lib/multi-select-batch";
 
 /**

@@ -26,6 +26,7 @@ const asUrl = (p: string) => pathToFileURL(p).href;
 // Resolved against the repo so this file can live outside the checkout.
 const repoRequire = createRequire(path.join(REPO, "package.json"));
 const { PrismaClient } = repoRequire("@prisma/client") as typeof import("@prisma/client");
+const { PrismaPg } = repoRequire("@prisma/adapter-pg") as typeof import("@prisma/adapter-pg");
 
 interface TestHelpers {
   MockSupabase: new () => { start(): Promise<void> };
@@ -60,7 +61,13 @@ async function pushSchema(): Promise<void> {
 }
 
 async function seed(helpers: TestHelpers): Promise<void> {
-  const prisma = new PrismaClient({ datasources: { db: { url: DATABASE_URL } } });
+  // Prisma 7: see src/lib/prisma.ts and prisma.config.ts for context. The
+  // dana-rig is offline tooling (NOT the repo test suite); we still mirror
+  // the production client shape so the rig's local Postgres interactions
+  // behave identically to a real deploy.
+  const prisma = new PrismaClient({
+    adapter: new PrismaPg({ connectionString: DATABASE_URL }),
+  });
   try {
     // Idempotent: wipe previous proto rows.
     await prisma.user.deleteMany({ where: { email: helpers.E2E_EMAIL } });
