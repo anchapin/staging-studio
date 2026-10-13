@@ -78,7 +78,12 @@ export default function InpaintMaskCanvas({
   onSelectRegionsActivate,
   zenMode = false,
 }: InpaintMaskCanvasProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  // React 19 tightens `useRef<T>(null)` to return `RefObject<T | null>`; the
+  // canvas ref is naturally nullable (mounts late, may unmount) so we declare
+  // the nullability explicitly and the consumers in `useMaskBuffer`,
+  // `useMaskPainting`, `useMaskKeyboardPainting`, and `MaskCanvasStage` all
+  // accept `RefObject<HTMLCanvasElement | null>`.
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Issue #560: external brush size takes priority (Zen Mode lifts state to parent).
   const [internalBrushSize, setInternalBrushSize] = useState(externalBrushSize ?? 20);

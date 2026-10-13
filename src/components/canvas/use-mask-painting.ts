@@ -12,7 +12,8 @@ import type { MaskTool, CopiedMaskRegion } from "./inpaint-mask-canvas";
 import type { InstanceOverlay } from "@/lib/instance-overlays";
 
 export interface UseMaskPaintingInput {
-  canvasRef: React.RefObject<HTMLCanvasElement>;
+  // React 19: see inpaint-mask-canvas.tsx for context.
+  canvasRef: React.RefObject<HTMLCanvasElement | null>;
   /** Logical grid + DPR-scaled backing store (issue #181). */
   dims: { width: number; height: number };
   backing: { width: number; height: number };

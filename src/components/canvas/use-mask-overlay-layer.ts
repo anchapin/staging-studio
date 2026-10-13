@@ -129,7 +129,9 @@ export interface UseMaskOverlayLayerInput {
  * canvas. Never touches the exported mask pixels.
  */
 export function useMaskOverlayLayer({ dims, instanceOverlays }: UseMaskOverlayLayerInput) {
-  const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
+  // React 19: see inpaint-mask-canvas.tsx — `useRef<T>(null)` infers
+  // `RefObject<T | null>`, so declare the nullability here too.
+  const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const instanceImageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const [overlayTick, setOverlayTick] = useState(0);
 

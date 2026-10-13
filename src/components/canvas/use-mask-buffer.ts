@@ -21,7 +21,8 @@ import { fillHoles } from "@/lib/mask-postprocess";
 import type { SelectionReset } from "./inpaint-mask-canvas";
 
 export interface UseMaskBufferInput {
-  canvasRef: React.RefObject<HTMLCanvasElement>;
+  // React 19: see inpaint-mask-canvas.tsx for context.
+  canvasRef: React.RefObject<HTMLCanvasElement | null>;
   /** Logical grid + DPR-scaled backing store (issue #181). */
   dims: { width: number; height: number };
   backing: { width: number; height: number };
