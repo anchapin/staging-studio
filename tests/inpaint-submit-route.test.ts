@@ -7,10 +7,10 @@ import { evaluateInpaintQualityGate } from "@/lib/inpaint-quality-gate";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 
-// The inpaint route goes through the inference abstraction. We mock
-// the abstraction's `getInferenceClient` so the test does not depend
-// on a real fal or Replicate token, and the mock returns a stub
-// client whose `submit` is a `vi.fn()` we can configure per-test.
+// Issue #1262: the inpaint route now goes through the inference
+// abstraction in a fire-and-forget background tick, after pre-writing
+// the InpaintRequest row with a locally-generated UUID. We mock the
+// abstraction so the test does not depend on a real provider.
 const mockInferenceSubmit = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/inference", async (importOriginal) => {
@@ -18,7 +18,7 @@ vi.mock("@/lib/inference", async (importOriginal) => {
   return {
     ...actual,
     // `assertInferenceConfigured` is a no-op for tests; it would
-    // otherwise throw because the test env has no FAL_KEY.
+    // otherwise throw because the test env has no provider key.
     assertInferenceConfigured: vi.fn(),
     getInferenceClient: vi.fn(async () => ({
       subscribe: vi.fn(),
@@ -32,7 +32,13 @@ vi.mock("@/lib/inference", async (importOriginal) => {
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     room: { findFirst: vi.fn() },
-    inpaintRequest: { count: vi.fn(), create: vi.fn() },
+    inpaintRequest: {
+      count: vi.fn(),
+      create: vi.fn(),
+      // Issue #1262: the background tick now calls `update` to flip
+      // status / write providerJobId / write resultUrl.
+      update: vi.fn(),
+    },
     // Real (unmocked) @/lib/api-quota reads and writes the ledger through
     // these, so the inpaint cap is exercised for real here rather than
     // stubbed — see the "quota ledger" tests at the bottom.
@@ -50,6 +56,7 @@ vi.mock("@/lib/inpaint-quality-gate", () => ({
 
 const inferenceSubmit = mockInferenceSubmit as unknown as Mock;
 const create = prisma.inpaintRequest.create as unknown as Mock;
+const update = prisma.inpaintRequest.update as unknown as Mock;
 const findFirst = prisma.room.findFirst as unknown as Mock;
 const count = prisma.inpaintRequest.count as unknown as Mock;
 const findUsage = prisma.dailyApiUsage.findUnique as unknown as Mock;
@@ -59,7 +66,10 @@ const qualityGate = evaluateInpaintQualityGate as unknown as Mock;
 
 const USER_ID = "user-1";
 const ROOM_ID = "room-1";
-const REQUEST_ID = "req-1";
+// Issue #1262: the requestId is now locally generated, NOT the provider's
+// own id. The provider's id flows into `providerJobId` via the
+// background tick, never into the response.
+const PROVIDER_REQUEST_ID = "provider-req-1";
 
 const VALID_BODY = {
   imageUrl: "https://example.supabase.co/storage/v1/object/public/staging-images/before.png",
@@ -69,15 +79,6 @@ const VALID_BODY = {
   roomId: ROOM_ID,
   variantSlot: 0,
   sourceSlot: null,
-};
-
-const EXPECTED_RECORD_DATA = {
-  id: REQUEST_ID,
-  roomId: ROOM_ID,
-  variantSlot: 0,
-  sourceSlot: null,
-  status: "IN_QUEUE",
-  providerJobId: REQUEST_ID, // issue #1221: the row's webhook lookup key
 };
 
 async function callSubmitRoute(): Promise<Response> {
@@ -100,8 +101,9 @@ beforeEach(() => {
     afterImageUrl2: null,
   });
   qualityGate.mockResolvedValue([]);
-  inferenceSubmit.mockResolvedValue({ request_id: REQUEST_ID });
+  inferenceSubmit.mockResolvedValue({ request_id: PROVIDER_REQUEST_ID });
   create.mockResolvedValue({});
+  update.mockResolvedValue({});
   findUsage.mockResolvedValue(null);
   upsertUsage.mockResolvedValue({ count: 1 });
 });
@@ -110,61 +112,61 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("POST /api/inpaint — InpaintRequest create compensation (issue #688)", () => {
-  it("compensates a one-shot create failure: one billed fal submit, row created, no degraded flag", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    create
-      .mockRejectedValueOnce(new Error("connection reset"))
-      .mockResolvedValue({});
+describe("POST /api/inpaint — InpaintRequest pre-write (issue #1262)", () => {
+  it("pre-writes the row with a local UUID and status=IN_QUEUE before firing the background submit", async () => {
+    create.mockResolvedValue({ id: "local-uuid-1" });
+    update.mockResolvedValue({});
 
     const response = await callSubmitRoute();
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body.requestId).toBe(REQUEST_ID);
-    expect(body.degraded).toBeUndefined();
-    // Exactly one billed fal run — the retry must never re-submit.
-    expect(inferenceSubmit).toHaveBeenCalledTimes(1);
-    expect(create).toHaveBeenCalledTimes(2);
-    expect(create).toHaveBeenNthCalledWith(1, { data: EXPECTED_RECORD_DATA });
-    expect(create).toHaveBeenNthCalledWith(2, { data: EXPECTED_RECORD_DATA });
-    expect(
-      errorSpy.mock.calls.some((call) =>
-        String(call[0]).includes("inpaint_record_create_retry")
-      )
-    ).toBe(true);
+    // Exactly one create — the row is written ONCE, with a local id,
+    // before the background submit is even kicked off.
+    expect(create).toHaveBeenCalledTimes(1);
+    const createCall = create.mock.calls[0]?.[0];
+    const createData = (createCall as { data: Record<string, unknown> }).data;
+    expect(createData.roomId).toBe(ROOM_ID);
+    expect(createData.variantSlot).toBe(0);
+    expect(createData.sourceSlot).toBeNull();
+    expect(createData.status).toBe("IN_QUEUE");
+    // providerJobId is NOT set at pre-write time — it lands in the
+    // background `update` call once the provider returns its id.
+    expect(createData).not.toHaveProperty("providerJobId");
+    // The id is a fresh local UUID — distinct from the provider's id
+    // because the route returns BEFORE the provider responds.
+    expect(typeof createData.id).toBe("string");
+    expect(createData.id).not.toBe(PROVIDER_REQUEST_ID);
+    // The response carries the same local id so the client polls for it.
+    expect(body.requestId).toBe(createData.id);
   });
 
-  it("returns degraded:true with the requestId after all create attempts fail", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  it("does NOT issue the background submit when the pre-write fails (#1262)", async () => {
     create.mockRejectedValue(new Error("db down"));
 
     const response = await callSubmitRoute();
-    const body = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(body.requestId).toBe(REQUEST_ID);
-    expect(body.degraded).toBe(true);
-    expect(body.qualityWarnings).toEqual([]);
-    // Still exactly one billed fal run — a 500 here is what caused the
-    // duplicate paid re-submit.
-    expect(inferenceSubmit).toHaveBeenCalledTimes(1);
-    expect(create).toHaveBeenCalledTimes(3);
-    expect(
-      errorSpy.mock.calls.some((call) =>
-        String(call[0]).includes("inpaint_record_create_failed")
-      )
-    ).toBe(true);
+    expect(response.status).toBe(500);
+    // Failed pre-write must not trigger the provider call, otherwise a
+    // 500 would invite the client into a retry that double-bills.
+    expect(inferenceSubmit).not.toHaveBeenCalled();
   });
 
-  it("does not retry when the create succeeds on the first attempt", async () => {
-    const response = await callSubmitRoute();
-    const body = await response.json();
+  it("does NOT await the background submit — the response returns before it settles (#1262)", async () => {
+    // The background submit settles in microtasks; the route's
+    // response must already be built by the time it does.
+    let resolveSubmit!: (value: unknown) => void;
+    inferenceSubmit.mockImplementation(
+      () => new Promise((resolve) => {
+        resolveSubmit = resolve;
+      })
+    );
 
+    const response = await callSubmitRoute();
     expect(response.status).toBe(200);
-    expect(body).toEqual({ requestId: REQUEST_ID, qualityWarnings: [] });
-    expect(create).toHaveBeenCalledTimes(1);
-    expect(create).toHaveBeenCalledWith({ data: EXPECTED_RECORD_DATA });
+    // We never resolved the submit — the response still came back.
+    // (Resolve it now so the detached promise does not leak across tests.)
+    resolveSubmit({ request_id: PROVIDER_REQUEST_ID });
   });
 });
 
@@ -175,14 +177,19 @@ describe("POST /api/inpaint — InpaintRequest create compensation (issue #688)"
  * zero cost. Usage is now a `DailyApiUsage` counter row, charged once the
  * fal job is queued. `@/lib/api-quota` is deliberately NOT mocked here, so
  * these assertions run against the real ledger code.
+ *
+ * Issue #1262 rewrites the timing: the cap is still READ in the request
+ * handler (no change), and the counter row is still WRITTEN (no change) —
+ * but the write is fired in a detached promise instead of awaited, so the
+ * assertions below verify the call happens without depending on its
+ * resolution order.
  */
 describe("POST /api/inpaint — inpaint quota ledger (issue #1131)", () => {
-  it("charges one inpaint unit for a billed fal submit", async () => {
+  it("charges one inpaint unit for a billed submit", async () => {
     const response = await callSubmitRoute();
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body.quotaChargeDegraded).toBeUndefined();
     // The cap is READ from the ledger, never derived from deletable rows.
     expect(findUsage).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -202,85 +209,51 @@ describe("POST /api/inpaint — inpaint quota ledger (issue #1131)", () => {
       surface: "inpaint",
       count: 1,
     });
+    void body;
   });
 
-  it("charges the ledger before the InpaintRequest row, so a record failure still bills", async () => {
+  it("fires the pre-write first, then the ledger, then the background submit (#1262 ordering)", async () => {
     const order: string[] = [];
-    upsertUsage.mockImplementation(async () => {
-      order.push("ledger");
-      return { count: 1 };
-    });
     create.mockImplementation(async () => {
       order.push("record");
       return {};
     });
+    upsertUsage.mockImplementation(async () => {
+      order.push("ledger");
+      return { count: 1 };
+    });
+    inferenceSubmit.mockImplementation(async () => {
+      order.push("submit");
+      return { request_id: PROVIDER_REQUEST_ID };
+    });
 
-    const response = await callSubmitRoute();
+    await callSubmitRoute();
+    // Wait one tick so the detached promise settles. The route's
+    // synchronous response is unaffected by the background ordering.
+    await new Promise((resolve) => setImmediate(resolve));
 
-    expect(response.status).toBe(200);
-    expect(order).toEqual(["ledger", "record"]);
-  });
-
-  it("returns the requestId with quotaChargeDegraded when every ledger write fails", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    upsertUsage.mockRejectedValue(new Error("db down"));
-
-    const response = await callSubmitRoute();
-    const body = await response.json();
-
-    // Still 200 with the fal requestId: a failure here must not invite the
-    // client to retry into a SECOND billable job.
-    expect(response.status).toBe(200);
-    expect(body.requestId).toBe(REQUEST_ID);
-    expect(body.quotaChargeDegraded).toBe(true);
-    expect(inferenceSubmit).toHaveBeenCalledTimes(1);
-    // Bounded retry, mirroring the record write.
-    expect(upsertUsage).toHaveBeenCalledTimes(3);
-    // The InpaintRequest row is still written — the two writes are
-    // independent, so a ledger outage does not lose the job record.
-    expect(create).toHaveBeenCalledTimes(1);
-    expect(
-      errorSpy.mock.calls.some((call) =>
-        String(call[0]).includes("inpaint_quota_charge_retry")
-      )
-    ).toBe(true);
-    expect(
-      errorSpy.mock.calls.some((call) =>
-        String(call[0]).includes("inpaint_quota_charge_failed")
-      )
-    ).toBe(true);
-  });
-
-  it("recovers when the ledger write fails once, with no degraded flag", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    upsertUsage
-      .mockRejectedValueOnce(new Error("connection reset"))
-      .mockResolvedValue({ count: 1 });
-
-    const response = await callSubmitRoute();
-    const body = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(body.quotaChargeDegraded).toBeUndefined();
-    expect(upsertUsage).toHaveBeenCalledTimes(2);
-    expect(
-      errorSpy.mock.calls.some((call) =>
-        String(call[0]).includes("inpaint_quota_charge_retry")
-      )
-    ).toBe(true);
+    expect(order).toEqual(["record", "ledger", "submit"]);
   });
 });
 
 describe("POST /api/inpaint — pipeline event wiring (issue #1116)", () => {
-  it("logs the submitted inpaint event and echoes the pipeline requestId", async () => {
+  it("logs the submitted inpaint event and echoes the requestId in x-request-id", async () => {
+    create.mockResolvedValue({ id: "local-uuid-2" });
+    update.mockResolvedValue({});
+
     const infoSpy = vi.spyOn(logger, "info").mockImplementation(() => logger);
     const response = await callSubmitRoute();
-    expect(response.headers.get("x-request-id")).toBe(REQUEST_ID);
+
+    const requestId = response.headers.get("x-request-id");
+    expect(requestId).not.toBeNull();
+    // The x-request-id is the LOCAL row id, not the provider's request id.
+    expect(requestId).not.toBe(PROVIDER_REQUEST_ID);
+
     expect(infoSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         event: "inpaint",
         userId: USER_ID,
-        requestId: REQUEST_ID,
+        requestId: expect.any(String),
         roomId: ROOM_ID,
         variantSlot: 0,
         status: "submitted",
