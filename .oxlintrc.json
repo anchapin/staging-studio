@@ -219,7 +219,11 @@
     // shippable, and tracked for a follow-up PR that converts them to
     // `next/link`'s `<Link>`. Same posture as the `react-hooks/*` warn
     // downgrades below.
-    "nextjs/no-html-link-for-pages": "warn",
+    // Re-escalated to `error` in #1278: the two `<a href="/dashboard">`
+    // call sites in `app/(dashboard)/projects/new/page.tsx` and
+    // `app/(dashboard)/projects/[id]/error.tsx` were converted to
+    // `<Link>` from `next/link`.
+    "nextjs/no-html-link-for-pages": "error",
     "nextjs/no-img-element": "warn",
     "nextjs/no-page-custom-font": "warn",
     "nextjs/no-styled-jsx-in-document": "warn",
