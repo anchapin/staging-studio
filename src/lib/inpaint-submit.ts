@@ -3,7 +3,6 @@ import { prisma } from "@/lib/prisma";
 import { inpaintRequestSchema } from "@/lib/ai-route-schemas";
 import { evaluateInpaintQualityGate } from "@/lib/inpaint-quality-gate";
 import { classifyIntegrationError } from "@/lib/error-classify";
-import { resolveInpaintDelivery } from "@/lib/inpaint-webhook";
 import {
   buildInpaintPayloadForActiveProvider,
   buildInpaintPrompt,
@@ -94,7 +93,7 @@ type FalQueueSubmitFunction = (
 export async function submitWithRetry(
   falQueueSubmit: FalQueueSubmitFunction,
   model: string,
-  payload: { input: Record<string, unknown>; webhookUrl?: string }
+  payload: { input: Record<string, unknown> }
 ): Promise<{ request_id: string }> {
   let goneRetried = false;
   for (let attempt = 1; attempt <= FAL_SUBMIT_ATTEMPTS; attempt += 1) {
@@ -344,25 +343,9 @@ export async function submitInpaintToActiveProvider(
     request_id: string;
     result?: { imageUrl: string; width: number | null; height: number | null };
   }> = (id, options) => client.submit(id as LogicalModel, options);
-  // Issue #1221: only opt-in deployments hand the provider a callback
-  // URL. Unset `INFERENCE_DELIVERY` keeps the payload (and the wire
-  // request) byte-identical to the polling path.
-  const webhookUrl = resolveInpaintDelivery() === "webhook"
-    ? `${getAppBaseUrl()}/api/inpaint/webhook`
-    : undefined;
-  return submitWithRetry(submit, LOGICAL_MODEL.FLUX_FILL, { input, webhookUrl });
+  return submitWithRetry(submit, LOGICAL_MODEL.FLUX_FILL, { input });
 }
 
-
-/**
- * Public base URL for provider callbacks (issue #1221). Mirrors
- * cors.ts's resolution so a deploy with no NEXT_PUBLIC_APP_URL falls
- * back to localhost:3000 rather than minting a malformed URL.
- */
-function getAppBaseUrl(): string {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
-  return appUrl && appUrl.length > 0 ? appUrl : "http://localhost:3000";
-}
 
 // ─── Error Classification ─────────────────────────────────────────────────────
 
