@@ -410,7 +410,7 @@ describe("GET /api/inpaint/[requestId]/status — recovering from a transient st
   // retry status, then ask result, before declaring the work lost.
 
   function mockPersistenceSucceeds() {
-    // persistFalImage downloads the provider URL, then uploads to Supabase.
+    // persistInpaintImage downloads the provider URL, then uploads to Supabase.
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), {

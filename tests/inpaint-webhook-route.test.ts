@@ -7,7 +7,7 @@
  * - 400 on unparseable payloads; nothing written
  * - unknown providerJobId → 200 not_found (row deleted mid-flight)
  * - completed delivery → same persistence contract as the poller:
- *   persistFalImage, then a durable COMPLETED+resultUrl write
+ *   persistInpaintImage, then a durable COMPLETED+resultUrl write
  * - durable-write failure → 503; the provider's retry re-runs the
  *   path (issue #1136 rule: never report completion after a failed write)
  * - persistence failure → 503 + row PERSISTENCE_FAILED
@@ -30,7 +30,7 @@ const mockPrisma = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/inpaint-status", () => ({
-  persistFalImage: mockPersistFalImage,
+  persistInpaintImage: mockPersistFalImage,
   logInpaintTransition: mockLogInpaintTransition,
 }));
 
@@ -204,7 +204,7 @@ describe("POST /api/inpaint/webhook", () => {
       data: {
         status: "PERSISTENCE_FAILED",
         resultUrl: null,
-        falResultUrl: null, // persistFalImage failed with imageUrl: null, so nothing to memoize
+        falResultUrl: null, // persistInpaintImage failed with imageUrl: null, so nothing to memoize
         persistenceAttempts: { increment: 1 },
         lastPersistenceAttemptAt: expect.any(Date),
       },

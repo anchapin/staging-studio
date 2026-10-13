@@ -39,7 +39,7 @@ vi.mock("@/lib/inference", async (importOriginal) => {
   };
 });
 
-import { pollFalStatus } from "@/lib/inpaint-status";
+import { pollInpaintStatus } from "@/lib/inpaint-status";
 
 const REQUEST_ID = "req-1";
 const ROW = {
@@ -50,7 +50,7 @@ const ROW = {
   room: { project: { userId: "cuser12345678901234567890" } },
 };
 
-describe("pollFalStatus record-write failure (issue #1136)", () => {
+describe("pollInpaintStatus record-write failure (issue #1136)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubGlobal(
@@ -67,7 +67,7 @@ describe("pollFalStatus record-write failure (issue #1136)", () => {
   it("returns retryable (not completed) when the record write fails", async () => {
     mockPrisma.inpaintRequest.update.mockRejectedValue(new Error("connection refused"));
 
-    const result = await pollFalStatus(REQUEST_ID);
+    const result = await pollInpaintStatus(REQUEST_ID);
 
     expect(mockPrisma.inpaintRequest.update).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -90,7 +90,7 @@ describe("pollFalStatus record-write failure (issue #1136)", () => {
     });
     mockPrisma.inpaintRequest.update.mockRejectedValue(new Error("connection refused"));
 
-    const result = await pollFalStatus(REQUEST_ID);
+    const result = await pollInpaintStatus(REQUEST_ID);
 
     expect(result.status).toBe("retryable");
     expect(result.persisted).toBe(false);
@@ -100,7 +100,7 @@ describe("pollFalStatus record-write failure (issue #1136)", () => {
   it("returns completed/persisted when the record write lands", async () => {
     mockPrisma.inpaintRequest.update.mockResolvedValue(ROW);
 
-    const result = await pollFalStatus(REQUEST_ID);
+    const result = await pollInpaintStatus(REQUEST_ID);
 
     expect(result.status).toBe("completed");
     expect(result.persisted).toBe(true);
