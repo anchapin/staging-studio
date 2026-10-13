@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  InpaintPollError,
   pollInpaintStatus,
   type FetchInpaintStatus,
   type InpaintStatusResponse,
@@ -136,6 +135,10 @@ export function useInpaintStatus(
       setIsProcessing(false);
       setStatusText("");
       const message = error instanceof Error ? error.message : "Inpainting failed";
+      // The catch narrows via instanceof InpaintJobLostError and
+      // resolveInpaintRetry (both from @/lib/inpaint-retry); InpaintPollError
+      // is intentionally not imported here (#1287) — see inpaint-retry.ts
+      // for the upstream classifier.
       // Issue #1135: a lost job has no row to poll and no result to
       // recover. Offering Retry here would bill a second fal job, so
       // report it without one.

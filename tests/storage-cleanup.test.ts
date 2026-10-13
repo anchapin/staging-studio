@@ -8,7 +8,6 @@ import type { StorageClientLike } from "@/lib/storage-cleanup";
 import {
   extractStoragePathFromUrl,
   isReclaimableRoomStoragePath,
-  MAX_ROOM_PHOTO_BYTES,
   readUploadedObjectSize,
   removeStorageObjects,
 } from "@/lib/storage-cleanup";

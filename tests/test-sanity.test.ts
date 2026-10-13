@@ -30,8 +30,15 @@ import { describe, expect, it } from "vitest";
 
 /** Test files that legitimately import no module, with the reason each is pending removal. */
 const ALLOWED_NO_MODULE_IMPORTS: readonly Record<string, string>[] = [
-  // Empty since #694 landed: inpaint-undo.test.ts was replaced by
-  // mask-undo-stack.test.ts, which imports the real @/lib module.
+  {
+    // revalidate-preview.test.ts pins the issue #1225 contract statically
+    // (walks src/app/actions/*.ts and asserts revalidatePath pairings) — it
+    // has no production call to make. A previous anchor import of
+    // PREVIEW_TOKEN_TTL_SECONDS was removed by #1287 as a dead
+    // no-unused-vars hit; the contract is enforceable without it.
+    "revalidate-preview.test.ts":
+      "static-analysis contract pin for issue #1225; no production call is appropriate (see #1287)",
+  },
 ];
 
 const TESTS_DIR = path.dirname(new URL(import.meta.url).pathname);
