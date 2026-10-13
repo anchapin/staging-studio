@@ -62,6 +62,9 @@ const getPreviewProject = cache(async (id: string) =>
       clientSignatureStatus: true,
       clientSignatureTimestamp: true,
       buyerDemographics: true,
+      // Issue #1186: surface the disclosure toggle so the lookbook
+      // preview can render the "Virtually staged" mark on AI after-images.
+      virtuallyStagedLabelEnabled: true,
       user: {
         select: {
           firmName: true,
@@ -198,6 +201,8 @@ export default async function LookbookPreviewPage({
     clientName: project.clientName,
     targetBuyer: project.targetBuyer,
     stagingAesthetic: project.stagingAesthetic,
+    // Issue #1186: thread the disclosure toggle into the preview render.
+    virtuallyStagedLabelEnabled: project.virtuallyStagedLabelEnabled,
     roiMetrics: buildROIMetrics(project),
     stagingPackage: project.stagingPackage,
     clientSignature: project.clientSignature,

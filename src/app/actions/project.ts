@@ -7,6 +7,7 @@ import {
   type ProjectMetadataInput,
 } from "@/lib/metadata-schemas";
 import { signProjectPayloadSchema } from "@/lib/sign-project-schema";
+import { virtuallyStagedLabelEnabledSchema } from "@/lib/metadata-schemas";
 import { revalidatePath } from "next/cache";
 
 /**
@@ -149,6 +150,76 @@ export async function saveProjectSignature(
     return { success: true };
   } catch (error) {
     console.error("Failed to save project signature:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+/**
+ * Server action: toggles the "Virtually staged" disclosure mark for a
+ * project (issue #1186).
+ *
+ * Purpose: lets Lauren turn the disclosure mark on/off per project so
+ * she can match her local MLS or the listing agent's requirements.
+ * Defaults to ON — an unlabelled staged photo is the exact thing the
+ * disclosure exists to prevent.
+ *
+ * Contract: requires an authenticated session; ownership is enforced by
+ * the Prisma `where` filter (`id: projectId, userId: user.id`). The
+ * payload is validated by {@link virtuallyStagedLabelEnabledSchema} — a
+ * boolean only, strict, so a crafted payload carrying `userId` (or any
+ * other persisted column) can never transfer ownership or write a
+ * non-editable field.
+ *
+ * Side effects: needs `DATABASE_URL` and a valid Supabase session
+ * cookie; performs a Prisma `project.update` and calls
+ * `revalidatePath(/projects/{projectId})` and
+ * `revalidatePath(/preview/{projectId})` so both the project dashboard
+ * and the cookie-less preview reflect the change immediately. Logs
+ * failures to `console.error`.
+ *
+ * @param projectId ID of the project to update.
+ * @param enabled `true` to show the "Virtually staged" mark on AI
+ *   after-images in the lookbook preview; `false` to hide it.
+ * @returns `{ success: true }` on write, or
+ *   `{ success: false, error }` when unauthenticated, the payload is
+ *   invalid, or the update fails.
+ */
+export async function saveVirtuallyStagedLabelEnabled(
+  projectId: string,
+  enabled: boolean
+): Promise<{ success: boolean; error?: string }> {
+  const parsed = virtuallyStagedLabelEnabledSchema.safeParse({
+    projectId,
+    enabled,
+  });
+  if (!parsed.success) {
+    return {
+      success: false,
+      error:
+        parsed.error.issues[0]?.message ??
+        "Invalid virtually-staged-label payload",
+    };
+  }
+
+  const user = await getAuthedPrismaUser();
+  if (!user) {
+    return { success: false, error: "Not authenticated" };
+  }
+
+  try {
+    await prisma.project.update({
+      where: { id: parsed.data.projectId, userId: user.id },
+      data: { virtuallyStagedLabelEnabled: parsed.data.enabled },
+    });
+    revalidatePath(`/projects/${projectId}`);
+    revalidatePath(`/projects/${projectId}/lookbook`);
+    revalidatePath(`/preview/${projectId}`);
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to save virtually-staged-label setting:", error);
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",

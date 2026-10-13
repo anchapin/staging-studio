@@ -40,6 +40,10 @@ export interface PreviewProject {
   clientSignature?: string | null;
   clientSignatureStatus?: string | null;
   clientSignatureTimestamp?: string | null;
+  /** Issue #1186: project-scoped disclosure toggle for AI-staged
+   *  after-images in the lookbook preview. Null/undefined reads as
+   *  enabled (the conservative default). */
+  virtuallyStagedLabelEnabled?: boolean | null;
   /** Buyer Demographics (issue #589) */
   buyerDemographics?: BuyerDemographics | null;
   user: {
@@ -95,6 +99,9 @@ export function LookbookPreviewView({ project, previewToken }: LookbookPreviewVi
     clientSignatureTimestamp: project.clientSignatureTimestamp
       ? String(project.clientSignatureTimestamp)
       : null,
+    // Issue #1186: pass through so the room spread can decide whether to
+    // overlay the disclosure mark on each AI after-image.
+    virtuallyStagedLabelEnabled: project.virtuallyStagedLabelEnabled,
   };
 
   const signoffRooms: LookbookRoomData[] = project.rooms.map((room) => ({

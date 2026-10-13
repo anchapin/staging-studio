@@ -2,10 +2,14 @@ import Image from "next/image";
 import { parseChecklistItems } from "@/lib/checklist-schema";
 import { extractPillars } from "@/lib/lookbook-pillars";
 import { ProposalFooter } from "./proposal-footer";
+import { VirtuallyStagedBadge } from "./virtually-staged-badge";
 import {
   resolveStagedResultDisplay,
   type StagedVariantPair,
 } from "@/lib/staged-result";
+import {
+  shouldRenderVirtuallyStagedBadge,
+} from "@/lib/virtually-staged-label";
 import { LookbookRoomData, ChecklistItem } from "./types";
 import { ComparisonPill } from "@/components/canvas/comparison-pill";
 import ComparisonSlider from "@/components/canvas/comparison-slider";
@@ -49,6 +53,16 @@ export function RoomSpread({ room, project }: RoomSpreadProps) {
     : room.beforeImageUrl;
   const afterImageUrl = display?.afterImageUrl ?? room.afterImageUrl;
 
+  // Issue #1186: the disclosure mark only renders when the project toggle
+  // is on AND the after image in view is actually AI-staged (a complete
+  // variant pair). The toggle defaults to enabled via
+  // shouldRenderVirtuallyStagedBadge's null-handling.
+  const showVirtuallyStagedBadge = shouldRenderVirtuallyStagedBadge({
+    projectEnabled: project.virtuallyStagedLabelEnabled,
+    beforeImageUrl,
+    afterImageUrl,
+  });
+
   return (
     <div className="lookbook-page min-h-screen flex flex-col bg-stone-50">
       <div className="p-8 border-b border-border">
@@ -75,6 +89,12 @@ export function RoomSpread({ room, project }: RoomSpreadProps) {
               afterLabel="After"
               report
             />
+            {/* Issue #1186: "Virtually staged" disclosure mark on AI
+                after-images — overlays the slider from outside so its
+                own DOM (handles, pills, tooltip, progress bar) is
+                untouched. pointer-events-none so it never blocks the
+                slider's drag/hover surface. */}
+            {showVirtuallyStagedBadge && <VirtuallyStagedBadge />}
           </div>
         ) : (
           // Fallback: static before/after when one image is missing
@@ -117,6 +137,10 @@ export function RoomSpread({ room, project }: RoomSpreadProps) {
               <div className="absolute right-3 top-3 pointer-events-none">
                 <ComparisonPill variant="after">After</ComparisonPill>
               </div>
+              {/* Issue #1186: same disclosure mark on the static after
+                  path. Only the after-image container carries it — the
+                  before image (left) is never marked. */}
+              {showVirtuallyStagedBadge && <VirtuallyStagedBadge />}
             </div>
           </div>
         )}

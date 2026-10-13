@@ -52,6 +52,7 @@ import {
   saveVariantSelection,
 } from "@/app/actions/room";
 import { saveProjectMetadata } from "@/app/actions/project";
+import { saveVirtuallyStagedLabelEnabled } from "@/app/actions/project";
 import {
   AutosaveController,
   type AutosaveStatus,
@@ -107,6 +108,9 @@ interface Project {
   stagingAesthetic: string;
   stagingPackage?: string | null;
   stagingDirectives?: string | null; // Issue #562: global project-level directives
+  // Issue #1186: per-project disclosure toggle for the "Virtually staged"
+  // mark on AI after-images in the lookbook preview.
+  virtuallyStagedLabelEnabled?: boolean | null;
   rooms: Room[];
 }
 
@@ -562,6 +566,35 @@ export default function ProjectDetailView({
       showSuccess("Package saved");
     },
     [project, showError, showSuccess]
+  );
+
+  /**
+   * Issue #1186: toggles the "Virtually staged" disclosure mark for the
+   * project. Persists via {@link saveVirtuallyStagedLabelEnabled};
+   * optimistic update + revert on failure mirrors the package toggle.
+   * Treats `null`/`undefined` as enabled (the schema default) when
+   * computing the next value.
+   */
+  const handleVirtuallyStagedLabelToggle = useCallback(
+    async (next: boolean) => {
+      if (!project) return;
+      const previous = project.virtuallyStagedLabelEnabled ?? true;
+      setProject((prev) =>
+        prev ? { ...prev, virtuallyStagedLabelEnabled: next } : prev
+      );
+      const result = await saveVirtuallyStagedLabelEnabled(project.id, next);
+      if (!result.success) {
+        setProject((prev) =>
+          prev ? { ...prev, virtuallyStagedLabelEnabled: previous } : prev
+        );
+        showError(
+          result.error || "Failed to save disclosure setting",
+          true
+        );
+        return;
+      }
+    },
+    [project, showError]
   );
 
   /**
@@ -1246,6 +1279,44 @@ export default function ProjectDetailView({
                 </div>
               </section>
             )}
+
+            {/* Issue #1186: disclosure toggle for the "Virtually staged"
+                mark on AI after-images. Project-scoped so Lauren can
+                match local MLS / listing-agent rules per market. */}
+            <section aria-label="Disclosure settings" className="mb-8">
+              <h2 className="font-playfair text-xl font-semibold text-foreground mb-4">
+                Disclosure
+              </h2>
+              <div className="rounded-lg border border-border bg-card p-4">
+                <label
+                  htmlFor="virtually-staged-label-toggle"
+                  aria-label="Show Virtually Staged mark on AI after-images"
+                  className="flex items-start gap-3 cursor-pointer"
+                >
+                  <input
+                    id="virtually-staged-label-toggle"
+                    type="checkbox"
+                    checked={project.virtuallyStagedLabelEnabled ?? true}
+                    onChange={(e) =>
+                      void handleVirtuallyStagedLabelToggle(e.target.checked)
+                    }
+                    className="mt-1 h-4 w-4 rounded border-input text-primary accent-primary"
+                    data-testid="virtually-staged-label-toggle"
+                  />
+                  <span className="flex-1">
+                    <span className="block text-sm font-medium text-foreground">
+                      Show &quot;Virtually Staged&quot; mark on AI after-images
+                    </span>
+                    <span className="mt-1 block text-xs text-muted-foreground font-jakarta">
+                      Adds a small disclosure label to every AI-staged
+                      after-image in the lookbook preview. Most MLSes
+                      require this disclosure — leave on unless your
+                      market or listing agent says otherwise.
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </section>
 
             <div className="flex items-center justify-between mb-6">
               <h2 className="font-playfair text-xl font-semibold text-foreground">Rooms</h2>

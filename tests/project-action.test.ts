@@ -77,6 +77,8 @@ describe("saveProjectMetadata", () => {
       clientSignature: null,
       clientSignatureStatus: null,
       clientSignatureTimestamp: null,
+      // Issue #1186: default-on; mirrors the Prisma schema default.
+      virtuallyStagedLabelEnabled: true,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
