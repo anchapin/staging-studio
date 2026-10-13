@@ -37,7 +37,8 @@ export function isMaskRedoShortcut(e: {
 
 export interface UseMaskKeyboardPaintingInput {
   /** The interactive mask canvas (toggle paints only when it exists). */
-  canvasRef: React.RefObject<HTMLCanvasElement>;
+  // React 19: see inpaint-mask-canvas.tsx for context.
+  canvasRef: React.RefObject<HTMLCanvasElement | null>;
   /** Logical canvas grid dimensions (issue #181 space). */
   dims: { width: number; height: number };
   activeTool: MaskTool;
