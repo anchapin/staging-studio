@@ -60,6 +60,10 @@
     "typescript": "^5.0.0",
     "vitest": "^5.0.1"
   },
+  "engines": {
+    "node": ">=24.0.0 <25",
+    "npm": ">=10"
+  },
   "overrides": {
     "braces": "npm:@dieub/braces-depth-guard@3.0.3-pn.3"
   }

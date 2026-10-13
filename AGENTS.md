@@ -25,6 +25,7 @@ scripts/dev-tunnel.sh        # local PDF export only: public tunnel (cloudflared
 - No CI, no formatter config. Run lint, typecheck, and build (and `npm test` if you touched logic with tests) before finishing a change.
 - Prisma uses `db push`, not migrations — there is no `prisma/migrations/` dir and no migration history to maintain.
 - Prisma CLI (`db push`, `db studio`, `migrate`) loads env vars only from `.env` — it does NOT read Next.js's `.env.local`. Keep a `.env → .env.local` symlink (both names gitignored) so Prisma and Next.js share one source of truth; without it, `npx prisma db push` fails with `Environment variable not found: DATABASE_URL` even when `.env.local` is fully populated.
+- **Node version: pinned to 24.x LTS (Krypton) — see `.nvmrc`.** The Dockerfile (`builder` and `runner` stages) and `.github/workflows/ci.yml` both use `node:24-slim` / `node-version: '24'`. Do not run `npm` on Node 22 or 26 without first updating all three (`.nvmrc`, `Dockerfile`, `ci.yml`) and `package.json#engines.node` together. Per the upstream release schedule (nodejs.org/en/about/previous-releases), v22 is still LTS but on its way to Maintenance; v24 is the current Active LTS; v26 is Current (not yet LTS). Production deploys use whichever Node the Dockerfile pins, NOT the host's installed Node.
 
 ## Shell environment (rtk)
 
