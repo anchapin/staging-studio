@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 
 import { DATABASE_URL, E2E_DAILY_INPAINT_LIMIT, E2E_USER_ID } from "../env";
 import { login } from "../helpers";
@@ -48,7 +49,11 @@ const VALID_BODY = {
 };
 
 async function withDiscardedRoom<T>(fn: () => Promise<T>): Promise<T> {
-  const prisma = new PrismaClient({ datasources: { db: { url: DATABASE_URL } } });
+  // Prisma 7: `datasources: { db: { url } }` is no longer accepted by the
+  // PrismaClient constructor; pass a driver adapter instead.
+  const prisma = new PrismaClient({
+    adapter: new PrismaPg({ connectionString: DATABASE_URL }),
+  });
   try {
     // A project+room of this spec's own, deleted before the assertion: no
     // other spec's seeded room is ever removed (specs share one database).

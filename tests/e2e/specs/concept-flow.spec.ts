@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 
 import {
   DATABASE_URL,
@@ -239,8 +240,10 @@ test.describe("sam 3.1 concept find-and-replace flow", () => {
     // action into the suite's Postgres; poll until both instances of
     // this room's log appear, then assert the same W3 shape the old
     // console emission carried.
+    // Prisma 7: `datasources: { db: { url } }` is no longer accepted by the
+    // PrismaClient constructor; pass a driver adapter instead.
     const prisma = new PrismaClient({
-      datasources: { db: { url: DATABASE_URL } },
+      adapter: new PrismaPg({ connectionString: DATABASE_URL }),
     });
     try {
       const selectionRows = () =>

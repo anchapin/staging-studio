@@ -1,9 +1,14 @@
 // Prisma Schema for StagingStudio
 
 // Datasource
+// Prisma 7 forbids `datasource.url` in the schema: the URL must live in
+// `prisma.config.ts` (used by the Prisma CLI for `db push`, `db studio`,
+// `migrate`, etc.) and a driver adapter (see `src/lib/prisma.ts` and the
+// e2e harness under `tests/e2e/`) is what feeds the PrismaClient at
+// runtime. See https://pris.ly/d/prisma7-client-config and
+// https://pris.ly/d/config-datasource.
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 generator client {

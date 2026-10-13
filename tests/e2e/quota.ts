@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 
 import {
   DATABASE_URL,
@@ -90,7 +91,11 @@ export async function withUsageAtCount<T>(
   count: number,
   fn: () => Promise<T>
 ): Promise<T> {
-  const prisma = new PrismaClient({ datasources: { db: { url: DATABASE_URL } } });
+  // Prisma 7: `datasources: { db: { url } }` is no longer accepted by the
+  // PrismaClient constructor; pass a driver adapter instead.
+  const prisma = new PrismaClient({
+    adapter: new PrismaPg({ connectionString: DATABASE_URL }),
+  });
   const dayKey = dailyUsageDayKey();
   const key = { userId: E2E_USER_ID, surface, dayKey };
   let prior: { count: number } | null = null;
