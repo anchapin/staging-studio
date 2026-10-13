@@ -38,6 +38,9 @@ const getOwnedLookbookProject = cache(async (projectId: string) => {
       clientSignature: true,
       clientSignatureStatus: true,
       clientSignatureTimestamp: true,
+      // Issue #1186: disclosure toggle for AI after-images in the
+      // lookbook preview/edit page.
+      virtuallyStagedLabelEnabled: true,
       user: {
         select: {
           firmName: true,
@@ -88,6 +91,8 @@ export default async function LookbookPage({ params }: LookbookPageProps) {
     clientName: project.clientName,
     targetBuyer: project.targetBuyer,
     stagingAesthetic: project.stagingAesthetic,
+    // Issue #1186: disclosure toggle, threaded into the preview render.
+    virtuallyStagedLabelEnabled: project.virtuallyStagedLabelEnabled,
     roiMetrics: buildROIMetrics(project),
     clientSignature: project.clientSignature,
     clientSignatureStatus: project.clientSignatureStatus,

@@ -62,6 +62,9 @@ const mockProject = {
   clientSignature: null,
   clientSignatureStatus: "Pending",
   clientSignatureTimestamp: null,
+  // Issue #1186: default-on; the route reads this via the
+  // `shouldRenderVirtuallyStagedBadge` helper.
+  virtuallyStagedLabelEnabled: true,
   createdAt: new Date(),
   updatedAt: new Date(),
   user: {

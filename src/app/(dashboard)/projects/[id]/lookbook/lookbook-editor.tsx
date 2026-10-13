@@ -290,6 +290,8 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
     clientSignatureTimestamp: project.clientSignatureTimestamp
       ? String(project.clientSignatureTimestamp)
       : null,
+    // Issue #1186: thread the disclosure toggle into the lookbook render.
+    virtuallyStagedLabelEnabled: project.virtuallyStagedLabelEnabled,
   };
 
   const signoffRooms = project.rooms.map((room) => ({

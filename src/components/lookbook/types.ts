@@ -97,6 +97,12 @@ export interface ProjectData {
   clientSignatureTimestamp?: string | null;
   /** Project ID for API calls */
   id?: string;
+  /**
+   * Issue #1186: project-scoped disclosure toggle for AI-staged
+   * after-images. Null/undefined reads as enabled (the conservative
+   * default); only an explicit `false` hides the mark.
+   */
+  virtuallyStagedLabelEnabled?: boolean | null;
 }
 
 export interface LookbookRoomData extends RoomData {
