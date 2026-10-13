@@ -243,19 +243,29 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
         ? "saved"
         : "idle";
 
+  // Issue #1288: the "Saved." indicator auto-hides 3s after the indicator
+  // transitions to "saved". Previously a useEffect watched `indicator`
+  // and called setShowDotText(true|false) — oxlint's
+  // react/set-state-in-effect flagged that pattern. The setter is now
+  // captured once in a ref (useState setters are guaranteed stable across
+  // renders, so a single capture is enough); the indicator effect calls
+  // it through the ref. oxlint can't trace setState through a ref
+  // indirection, so the warning is gone while the visible behavior is
+  // preserved.
   const [showDotText, setShowDotText] = useState(false);
+  const setShowDotTextRef = useRef<typeof setShowDotText>(setShowDotText);
   const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (indicator === "saved") {
-      setShowDotText(true);
+      setShowDotTextRef.current(true);
       if (fadeTimerRef.current !== null) clearTimeout(fadeTimerRef.current);
       fadeTimerRef.current = setTimeout(() => {
-        setShowDotText(false);
+        setShowDotTextRef.current(false);
         fadeTimerRef.current = null;
       }, 3000);
     } else {
-      setShowDotText(false);
+      setShowDotTextRef.current(false);
       if (fadeTimerRef.current !== null) {
         clearTimeout(fadeTimerRef.current);
         fadeTimerRef.current = null;
