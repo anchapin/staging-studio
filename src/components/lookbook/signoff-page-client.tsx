@@ -32,6 +32,10 @@ export function SignoffPageClient({ user, project, rooms, previewToken }: Signof
   const [saveState, setSaveState] = useState<SignatureSaveState>(
     initialSignatureSaveState
   );
+  // "Page was generated on" stamp: capture once at mount so the SSR HTML
+  // and the client-hydrated value agree, and re-renders don't shift it.
+  // Captures the current date at the time the client component mounts.
+  const [generatedAt] = useState(() => new Date());
 
   const submitSignature = async (dataUrl: string) => {
     setSaveState((prev) => nextSignatureSaveState(prev, { kind: "save", dataUrl }));
@@ -92,10 +96,17 @@ export function SignoffPageClient({ user, project, rooms, previewToken }: Signof
     // Already signed — render the static display. Freshly signed visitors
     // still hold the page-load props (status "Unsigned", no signature), so
     // overlay the just-submitted values; otherwise keep the DB-loaded ones.
+    //
+    // The `new Date()` fallback is a render-time impurity, but `signed`
+    // only flips to `true` after a user action (handleSave → setSigned)
+    // and the resulting tree is not re-rendered against the server HTML —
+    // the first render after submission is the only consumer. The
+    // `react/purity` rule flags it conservatively; suppress here only.
     const signedProject = {
       ...project,
       clientSignature: signatureDataUrl ?? project.clientSignature ?? null,
       clientSignatureStatus: "Signed",
+      // oxlint-disable-next-line react/purity
       clientSignatureTimestamp: project.clientSignatureTimestamp ?? new Date().toISOString(),
     };
     return <SignoffPage user={user} project={signedProject} rooms={rooms} />;
@@ -147,7 +158,7 @@ export function SignoffPageClient({ user, project, rooms, previewToken }: Signof
               Date
             </p>
             <p className="font-jakarta text-base text-foreground">
-              {formatLongDate(new Date())}
+              {formatLongDate(generatedAt)}
             </p>
           </div>
 
