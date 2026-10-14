@@ -67,6 +67,20 @@ export const E2E_USER_ID = "e2euser0000000000000000000user";
 export const E2E_EMAIL = "e2e@stagingstudio.test";
 export const E2E_PASSWORD = "e2e-password";
 
+/**
+ * Second GoTrue identity, used to exercise ownership-check 403 branches
+ * that a single-user seed can't reach (issue #1101). The mock GoTrue
+ * (`mock-supabase.ts`) mints a session for this identity when the
+ * password grant arrives with `E2E_OTHER_EMAIL`; a Prisma `User` row
+ * with `E2E_OTHER_USER_ID` is seeded in `global-setup.ts` so
+ * `getAuthedPrismaUser` can resolve it. It owns NO projects, which is
+ * the whole point — every seeded project belongs to {@link E2E_USER_ID},
+ * so any export-pdf request from this user must hit the 403 branch.
+ */
+export const E2E_OTHER_USER_ID = "e2eotheruser000000000000000other";
+export const E2E_OTHER_EMAIL = "e2e-other@stagingstudio.test";
+export const E2E_OTHER_PASSWORD = "e2e-other-password";
+
 export const E2E_UPLOAD_PROJECT_ID = "cupload000000000000000000";
 export const E2E_UPLOAD_ROOM_ID = "e2euploadroom0000000000000room";
 
