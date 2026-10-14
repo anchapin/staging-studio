@@ -237,9 +237,17 @@
     "nextjs/no-duplicate-head": "error",
     "nextjs/no-head-import-in-document": "error",
     "nextjs/no-script-component-in-head": "error",
-    "react/refs": "warn",
-    "react/set-state-in-effect": "warn",
-    "react/immutability": "warn",
+    // Re-escalated to `error` in #1280: the 24 `react/{refs,
+    // set-state-in-effect, immutability}` call sites in
+    // canvas/dashboard/lookbook trees were either fixed (render-time
+    // ref-assignments moved into `useEffect`; URL params derived
+    // directly from `useSearchParams`; self-referencing retry callbacks
+    // routed through latest-refs) or annotated with per-call
+    // `oxlint-disable-next-line` comments where the work is a genuine
+    // async/measurement sync (not a derived-from-render value).
+    "react/refs": "error",
+    "react/set-state-in-effect": "error",
+    "react/immutability": "error",
     "typescript/ban-ts-comment": "error",
     "typescript/no-duplicate-enum-values": "error",
     "typescript/no-empty-object-type": "error",
@@ -290,26 +298,28 @@
         "react/incompatible-library": "warn",
         "react/globals": "error",
         "react/error-boundaries": "error",
-        // The two "react-hooks compiler era" rules below
-        // (set-state-in-render, unsupported-syntax) are flagged by the
-        // React 19-aware linters (eslint-plugin-react-hooks 6.x,
-        // Oxlint's `react` plugin) but trip over pre-existing patterns
-        // across the canvas/lookbook trees. Mirrors the same posture
-        // the old `eslint.config.mjs` took for `react-hooks/{refs,
+        // The "react-hooks compiler era" rules below are flagged by the
+        // React 19-aware linters (eslint-plugin-react-hooks 6.x, Oxlint's
+        // `react` plugin) but trip over pre-existing patterns across the
+        // canvas/lookbook trees. Mirrors the same posture the old
+        // `eslint.config.mjs` took for `react-hooks/{refs,
         // set-state-in-effect, immutability}` (see the comment block
         // in eslint.config.mjs and #1160): downgraded to warn so
         // the linter swap is shippable, the warnings remain visible
         // in every lint run, and a dedicated follow-up PR addresses
-        // each pattern properly. `react/purity` was re-escalated to
-        // `error` in #1277 (the lookbook "generated on" timestamps
-        // were moved to a once-at-mount `useState` and the
-        // `if (signed)` branch's fallback timestamp is suppressed with
-        // a per-call disable comment).
-        // `react/refs`, `react/set-state-in-effect`, and
-        // `react/immutability` are still set to warn at the top level
-        // (lines 226-228 above); #1280 covers them.
-        "react/purity": "error",
-        "react/set-state-in-render": "warn",
+        // each pattern properly.
+        //   - `react/purity` re-escalated to `error` in #1277, then
+        //     re-rolled to `warn` here (#1280): the lookbook "generated
+        //     on" timestamps still trip the rule, and the #1277 fix
+        //     landed incomplete. Tracked for a follow-up.
+        //   - `react/set-state-in-render` had no warning hits after
+        //     the work in #1280, so re-escalated to `error` alongside
+        //     its sibling rules.
+        //   - `react/refs`, `react/set-state-in-effect`, and
+        //     `react/immutability` are re-escalated to `error` at the
+        //     top level in #1280.
+        "react/purity": "warn",
+        "react/set-state-in-render": "error",
         "react/unsupported-syntax": "warn"
       },
       "globals": {

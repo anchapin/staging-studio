@@ -48,7 +48,14 @@ export default function BufferedDirectivesTextarea({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = useRef<string | null>(null);
   const onCommitRef = useRef(onCommit);
-  onCommitRef.current = onCommit;
+  // Sync the latest `onCommit` prop into the ref after each render so
+  // async debounce flushes see the freshest callback without a
+  // `useEffect` per-render. The `react/refs` rule disallows
+  // `ref.current = …` during render; `useEffect` runs the same number
+  // of times as the render-time assignment would.
+  useEffect(() => {
+    onCommitRef.current = onCommit;
+  });
 
   // Adopt external updates (room switch, autosave reconcile, undo) only
   // while the user is not mid-keystroke in this field.

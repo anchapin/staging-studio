@@ -73,7 +73,13 @@ export function useInpaintStatus(
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusText, setStatusText] = useState("");
   const callbacksRef = useRef(callbacks);
-  callbacksRef.current = callbacks;
+  // The `react/refs` rule disallows `ref.current = …` during render;
+  // the `useEffect` form below runs after every render with the same
+  // frequency, so async paths reading the ref still see the freshest
+  // callbacks.
+  useEffect(() => {
+    callbacksRef.current = callbacks;
+  });
   const controllerRef = useRef<AbortController | null>(null);
   const lastSubmitRef = useRef<StartInpaint | null>(null);
   // Issue #698: requestId captured once the submit phase succeeded —
@@ -170,7 +176,12 @@ export function useInpaintStatus(
       );
     }
   }, []);
-  runRef.current = run;
+  useEffect(() => {
+    // Same `react/refs` rule fix as `callbacksRef` above: `runRef`
+    // mirrors the latest `run` so async flushes (e.g. the abort
+    // path in `useEffect` cleanup) can call the current version.
+    runRef.current = run;
+  });
 
   const retryPoll = useCallback(() => {
     const id = lastRequestIdRef.current;

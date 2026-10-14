@@ -204,6 +204,7 @@ export default function InpaintMaskCanvas({
     const host = stack?.parentElement?.parentElement ?? null; // the flex-1 scroll container
     if (!stack || !host) return;
 
+    // oxlint-disable-next-line react/set-state-in-effect
     const measure = () => {
       const hostBox = host.getBoundingClientRect();
       if (hostBox.height <= 0) return;
@@ -376,7 +377,13 @@ export default function InpaintMaskCanvas({
       }
     },
   });
-  keyboardCursorRef.current = cursorRef.current;
+  // Sync the keyboard cursor ref after each render — the `react/refs`
+  // rule disallows `ref.current = …` during render. The ref is read
+  // by paste-point fallbacks outside this hook, so it must track the
+  // hook's `cursorRef.current` exactly.
+  useEffect(() => {
+    keyboardCursorRef.current = cursorRef.current;
+  });
 
   // Issue #1223: view-state zoom + pan. The transform lives on a wrapper
   // div, never on the mask buffer, so zooming re-renders no mask pixels.
@@ -403,7 +410,13 @@ export default function InpaintMaskCanvas({
     pan: { x: number; y: number };
   } | null>(null);
   const zoomPanRef = useRef({ zoom: 1, pan: { x: 0, y: 0 } });
-  zoomPanRef.current = { zoom: maskZoom, pan: maskPan };
+  // Same `react/refs` rule fix as `keyboardCursorRef` above: the
+  // ref is read by event handlers (clampPan, pinchStart, mouseWheel,
+  // etc.) outside this component's render path, so it must track the
+  // current `maskZoom` / `maskPan` state. Mirror via useEffect.
+  useEffect(() => {
+    zoomPanRef.current = { zoom: maskZoom, pan: maskPan };
+  }, [maskZoom, maskPan]);
 
   // Clamp the pan so some part of the canvas always stays on screen.
   const clampPan = useCallback(
