@@ -10,6 +10,8 @@ import {
   E2E_EDITOR_PROJECT_ID,
   E2E_EDITOR_ROOM_ID,
   E2E_EMAIL,
+  E2E_OTHER_EMAIL,
+  E2E_OTHER_USER_ID,
   E2E_REHEARSAL_PROJECT_ID,
   E2E_REHEARSAL_ROOM_ID,
   E2E_LOOKBOOK_ROOM_ID,
@@ -194,6 +196,15 @@ async function seed(): Promise<void> {
     const conceptBeforePhotoUrl = roomPhotoPublicUrl(
       `rooms/${E2E_CONCEPT_ROOM_ID}/before-image.png`
     );
+
+    await prisma.user.create({
+      data: {
+        id: E2E_OTHER_USER_ID,
+        email: E2E_OTHER_EMAIL,
+        firmName: "Other Firm — E2E",
+        ownerName: "E2E Other Harness",
+      },
+    });
 
     await prisma.user.create({
       data: {
