@@ -17,7 +17,7 @@
  *   positives: a route that calls fal on the request path always needs a cap.
  * - The transitive case (a route spending fal through a lib helper, e.g.
  *   `api/inpaint` -> `lib/inpaint-submit`) is covered by pinned assertions
- *   rather than by import-graph reachability, on purpose: `pollFalStatus`
+ *   rather than by import-graph reachability, on purpose: `pollInpaintStatus`
  *   makes a NON-billable status call, so walking the import graph flags
  *   polling routes that share the chain and are already governed by their
  *   own rate limit. Reachability is therefore too coarse to be an oracle.

@@ -5,7 +5,7 @@ import {
   INPAINT_STATUS_RATE_LIMIT,
   checkInpaintStatusRateLimit,
   INPAINT_TERMINAL_ERROR_BODY,
-  pollFalStatus,
+  pollInpaintStatus,
   validateInpaintRequestOwnership,
   classifyStatusError,
 } from "@/lib/inpaint-status";
@@ -78,7 +78,7 @@ export async function GET(
       );
     }
 
-    const result = await pollFalStatus(requestId);
+    const result = await pollInpaintStatus(requestId);
 
     if (result.status === "ERROR") {
       return NextResponse.json(INPAINT_TERMINAL_ERROR_BODY, { status: 500 });

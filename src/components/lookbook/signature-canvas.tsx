@@ -13,13 +13,41 @@ interface SignatureCanvasProps {
 
 type SignatureMode = "draw" | "type";
 
+// Detect whether a 2D canvas contains any non-transparent pixels.
+// Returns true if at least one sampled pixel has a non-zero alpha channel,
+// meaning a stroke (typed text or user ink) has been drawn.
+function canvasHasInk(canvas: HTMLCanvasElement): boolean {
+  const ctx = canvas.getContext("2d");
+  if (!ctx || canvas.width === 0 || canvas.height === 0) return false;
+  // getImageData reads backing-store pixels; safe with a HiDPI-scaled ctx.
+  let data: Uint8ClampedArray;
+  try {
+    data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  } catch {
+    // Tainted canvases (cross-origin) can't be read; treat as inky.
+    return true;
+  }
+  // Step by 4 (RGBA). Any non-zero alpha byte means a stroke was painted.
+  for (let i = 3; i < data.length; i += 4) {
+    if (data[i] !== 0) return true;
+  }
+  return false;
+}
+
 export function SignatureCanvas({ onSave, clientName, disabled }: SignatureCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // #1114: the keyboard-accessible Draw mode (#79 parity) is out of scope
+  // for this issue. Until keyboard input is wired up, hide the Draw option
+  // so users cannot export a blank PNG through it.
   const [mode, setMode] = useState<SignatureMode>("type");
   const [typedName, setTypedName] = useState(clientName);
   const [isDrawing, setIsDrawing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [lastPos, setLastPos] = useState<{ x: number; y: number } | null>(null);
+  // Track whether the canvas currently contains any non-transparent pixel.
+  // For `type` mode it's set after the typed signature has been rasterized;
+  // for `draw` mode it's set whenever a stroke has been painted.
+  const [hasInk, setHasInk] = useState(false);
 
   // Initialize canvas on mount and resize
   useEffect(() => {
@@ -90,6 +118,10 @@ export function SignatureCanvas({ onSave, clientName, disabled }: SignatureCanva
   const stopDrawing = useCallback(() => {
     setIsDrawing(false);
     setLastPos(null);
+    // Refresh the ink flag once the user lifts the pointer so the Sign
+    // button only enables when something has actually been painted.
+    const canvas = canvasRef.current;
+    if (canvas) setHasInk(canvasHasInk(canvas));
   }, []);
 
   const clearCanvas = useCallback(() => {
@@ -105,7 +137,10 @@ export function SignatureCanvas({ onSave, clientName, disabled }: SignatureCanva
     try {
       let dataUrl: string;
       if (mode === "draw") {
-        dataUrl = canvasRef.current?.toDataURL("image/png") ?? "";
+        const canvas = canvasRef.current;
+        if (!canvas) throw new Error("Canvas not found");
+        dataUrl = canvas.toDataURL("image/png");
+        setHasInk(canvasHasInk(canvas));
       } else {
         // Render typed signature to a canvas and export as PNG
         const canvas = canvasRef.current;
@@ -122,6 +157,8 @@ export function SignatureCanvas({ onSave, clientName, disabled }: SignatureCanva
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(typedName, rect.width / 2, rect.height / 2);
+        // Re-sample after rendering so the ink flag tracks the typed glyph.
+        setHasInk(canvasHasInk(canvas));
         dataUrl = canvas.toDataURL("image/png");
       }
       await onSave(dataUrl);
@@ -129,6 +166,39 @@ export function SignatureCanvas({ onSave, clientName, disabled }: SignatureCanva
       setIsSaving(false);
     }
   }, [mode, typedName, onSave]);
+
+  // #1114: disable Sign until both a typed name AND a non-empty canvas exist.
+  // The previous gate (`!typedName.trim()` only) shipped a blank PNG when the
+  // user typed nothing and exported the empty canvas.
+  const canSign =
+    !disabled && !isSaving && typedName.trim().length > 0 && hasInk;
+
+  // Re-rasterize the typed name on every change so `hasInk` (and therefore
+  // the Sign button) reflects what the user has actually typed. Without
+  // this the gate would only flip on Save, leaving the button disabled the
+  // whole time the user is composing their signature.
+  useEffect(() => {
+    if (mode !== "type") return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+    canvas.width = rect.width * window.devicePixelRatio;
+    canvas.height = rect.height * window.devicePixelRatio;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (typedName.trim().length > 0) {
+      ctx.font = `italic 48px "Playfair Display", Georgia, serif`;
+      ctx.fillStyle = ATELIER_COLOR_TOKENS.primary;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(typedName, rect.width / 2, rect.height / 2);
+    }
+    setHasInk(canvasHasInk(canvas));
+  }, [mode, typedName]);
 
   // Attach mouse/touch events
   useEffect(() => {
@@ -165,12 +235,19 @@ export function SignatureCanvas({ onSave, clientName, disabled }: SignatureCanva
 
   return (
     <div className="space-y-4">
-      {/* Mode toggle */}
-      <div className="flex gap-2">
+      {/* Mode toggle — #1114: the Draw button is intentionally hidden until
+          a keyboard-input path is implemented (mirroring mask-canvas #79).
+          The draw-mode state, pointer handlers, and brush logic are all
+          still intact in this component; re-enabling is a one-line JSX
+          change. Until then the only one-trust surface for the canvas is
+          the typed input, gated on both typedName and a non-empty
+          rasterized canvas (no blank PNG can ship). */}
+      <div className="flex gap-2" role="group" aria-label="Signature input mode">
         <button
           type="button"
           onClick={() => setMode("type")}
           disabled={disabled}
+          aria-pressed={mode === "type"}
           className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${
             mode === "type"
               ? "bg-stone-800 text-white border-stone-800"
@@ -178,18 +255,6 @@ export function SignatureCanvas({ onSave, clientName, disabled }: SignatureCanva
           } ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
         >
           Type
-        </button>
-        <button
-          type="button"
-          onClick={() => setMode("draw")}
-          disabled={disabled}
-          className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${
-            mode === "draw"
-              ? "bg-stone-800 text-white border-stone-800"
-              : "bg-white text-stone-600 border-stone-300 hover:bg-stone-50"
-          } ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
-        >
-          Draw
         </button>
       </div>
 
@@ -240,7 +305,15 @@ export function SignatureCanvas({ onSave, clientName, disabled }: SignatureCanva
         <button
           type="button"
           onClick={handleSave}
-          disabled={disabled || isSaving || !typedName.trim()}
+          disabled={!canSign}
+          aria-disabled={!canSign}
+          title={
+            !typedName.trim()
+              ? "Type your full name to enable signing"
+              : !hasInk
+                ? "Signature appears empty"
+                : undefined
+          }
           className="flex items-center gap-2 px-4 py-2 bg-stone-800 text-white text-sm rounded-md hover:bg-stone-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isSaving && <Loader2 className="w-4 h-4 animate-spin" />}

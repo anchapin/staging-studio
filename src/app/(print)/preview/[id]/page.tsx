@@ -21,6 +21,7 @@ import {
   extractPreviewToken,
   getPreviewAccess as resolvePreviewAccessRequest,
 } from "@/lib/preview-access";
+import { decryptSignature } from "@/lib/signature-encryption";
 
 import {
   LookbookPreviewView,
@@ -62,6 +63,9 @@ const getPreviewProject = cache(async (id: string) =>
       clientSignatureStatus: true,
       clientSignatureTimestamp: true,
       buyerDemographics: true,
+      // Issue #1186: surface the disclosure toggle so the lookbook
+      // preview can render the "Virtually staged" mark on AI after-images.
+      virtuallyStagedLabelEnabled: true,
       user: {
         select: {
           firmName: true,
@@ -192,15 +196,27 @@ export default async function LookbookPreviewPage({
     notFound();
   }
 
+  // Issue #1106: `clientSignature` is stored encrypted at rest. Decrypt
+  // here so every downstream consumer (LookbookPreviewView → SignoffPage,
+  // the Browserless PDF capture) sees plaintext. A missing or empty
+  // stored value is allowed (unsigned project) and is passed through
+  // as null without touching the crypto path.
+  const decryptedSignature =
+    project.clientSignature && project.clientSignature.length > 0
+      ? await decryptSignature(project.clientSignature)
+      : null;
+
   const previewProject: PreviewProject = {
     id: project.id,
     propertyAddress: project.propertyAddress,
     clientName: project.clientName,
     targetBuyer: project.targetBuyer,
     stagingAesthetic: project.stagingAesthetic,
+    // Issue #1186: thread the disclosure toggle into the preview render.
+    virtuallyStagedLabelEnabled: project.virtuallyStagedLabelEnabled,
     roiMetrics: buildROIMetrics(project),
     stagingPackage: project.stagingPackage,
-    clientSignature: project.clientSignature,
+    clientSignature: decryptedSignature,
     clientSignatureStatus: project.clientSignatureStatus,
     clientSignatureTimestamp: project.clientSignatureTimestamp
       ? project.clientSignatureTimestamp.toISOString()

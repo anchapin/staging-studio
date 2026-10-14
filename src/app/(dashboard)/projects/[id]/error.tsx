@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 /**
  * Error boundary for the /projects/[id] segment (issue #83). The project
  * is server-rendered now, so a failed server read lands here instead of a
@@ -27,12 +29,12 @@ export default function ProjectDetailError({
         >
           Retry
         </button>
-        <a
+        <Link
           href="/dashboard"
           className="mt-4 block text-stone-600 hover:underline text-sm"
         >
           Back to dashboard
-        </a>
+        </Link>
       </div>
     </div>
   );

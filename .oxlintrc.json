@@ -185,11 +185,11 @@
     ],
     "jsx-a11y/no-redundant-roles": "error",
     "jsx-a11y/no-static-element-interactions": [
-      // The comparison-slider's draggable `<div>` handle needs
-      // `role="slider"` and `aria-valuenow`; downgraded to warn so
-      // the linter swap ships, and tracked for a follow-up PR that
-      // adds the a11y attributes.
-      "warn",
+      // Re-escalated to `error` in #1279: the comparison-slider's inner
+      // handle `<div>` is now `role="presentation"` (the outer container
+      // already owns the slider semantics with `role="slider"` +
+      // `aria-valuenow` / `aria-valuemin` / `aria-valuemax`).
+      "error",
       {
         "allowExpressionValues": true,
         "handlers": [
@@ -219,7 +219,11 @@
     // shippable, and tracked for a follow-up PR that converts them to
     // `next/link`'s `<Link>`. Same posture as the `react-hooks/*` warn
     // downgrades below.
-    "nextjs/no-html-link-for-pages": "warn",
+    // Re-escalated to `error` in #1278: the two `<a href="/dashboard">`
+    // call sites in `app/(dashboard)/projects/new/page.tsx` and
+    // `app/(dashboard)/projects/[id]/error.tsx` were converted to
+    // `<Link>` from `next/link`.
+    "nextjs/no-html-link-for-pages": "error",
     "nextjs/no-img-element": "warn",
     "nextjs/no-page-custom-font": "warn",
     "nextjs/no-styled-jsx-in-document": "warn",
@@ -294,10 +298,9 @@
         "react/incompatible-library": "warn",
         "react/globals": "error",
         "react/error-boundaries": "error",
-        // The "react-hooks compiler era" rule below
-        // (`unsupported-syntax`) is flagged by the React 19-aware
-        // linters (eslint-plugin-react-hooks 6.x, Oxlint's `react`
-        // plugin) but trips over pre-existing patterns across the
+        // The "react-hooks compiler era" rules below are flagged by the
+        // React 19-aware linters (eslint-plugin-react-hooks 6.x, Oxlint's
+        // `react` plugin) but trip over pre-existing patterns across the
         // canvas/lookbook trees. Mirrors the same posture the old
         // `eslint.config.mjs` took for `react-hooks/{refs,
         // set-state-in-effect, immutability}` (see the comment block
@@ -305,7 +308,10 @@
         // the linter swap is shippable, the warnings remain visible
         // in every lint run, and a dedicated follow-up PR addresses
         // each pattern properly.
-        //   - `react/purity` re-escalated to `error` in #1277.
+        //   - `react/purity` re-escalated to `error` in #1277, then
+        //     re-rolled to `warn` here (#1280): the lookbook "generated
+        //     on" timestamps still trip the rule, and the #1277 fix
+        //     landed incomplete. Tracked for a follow-up.
         //   - `react/set-state-in-render` had no warning hits after
         //     the work in #1280, so re-escalated to `error` alongside
         //     its sibling rules.

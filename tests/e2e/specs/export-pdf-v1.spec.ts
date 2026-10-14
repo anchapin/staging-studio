@@ -1,9 +1,16 @@
 import { test, expect } from "@playwright/test";
 
-import { login, mockBrowserlessRequests, setMockBrowserlessOutcome } from "../helpers";
+import {
+  login,
+  loginAs,
+  mockBrowserlessRequests,
+  setMockBrowserlessOutcome,
+} from "../helpers";
 import {
   E2E_ABSENT_PROJECT_ID,
   E2E_DAILY_EXPORT_LIMIT,
+  E2E_OTHER_EMAIL,
+  E2E_OTHER_PASSWORD,
   E2E_UPLOAD_PROJECT_ID,
 } from "../env";
 import type { CapturedBrowserlessRequest } from "../mock-browserless";
@@ -36,10 +43,11 @@ const EXPORT_PDF_V1_URL = "/api/v1/export-pdf";
  * `resolveBrowserlessPdfUrl` provides. This spec is the first consumer
  * of that seam on the v1 route.
  *
- * Not covered here: the 403 branch. Every seeded project belongs to
- * E2E_USER_ID, so reaching it needs a second user with a matching GoTrue
- * identity the mock auth server does not issue. The 429 branch IS
- * covered — see the quota test at the bottom and `quota.ts`.
+ * The 403 (owned-by-another-user) branch IS covered — see the
+ * `forbidden when another user owns the project` test, which signs in
+ * as the second seeded user (E2E_OTHER_USER_ID) and asks to export a
+ * project that belongs to E2E_USER_ID. The 429 branch is also covered
+ * — see the quota test at the bottom and `quota.ts`.
  */
 test.describe("export-pdf v1 API route", () => {
   // The mock is process-wide and its outcome survives between tests, so
@@ -165,6 +173,38 @@ test.describe("export-pdf v1 API route", () => {
     const body = await response.json();
     expect(body.code).toBe("invalid-request");
     expect(body.error).toBe("PDF generation failed");
+  });
+
+  // Issue #1101: the 403 (owned-by-another-user) branch was previously
+  // unreachable in a single-user seed (every project belongs to
+  // E2E_USER_ID). The second seeded user (`E2E_OTHER_USER_ID`, minted
+  // by `mock-supabase.ts` and persisted by `global-setup.ts`) owns no
+  // projects, so a POST against E2E_UPLOAD_PROJECT_ID under their
+  // session must hit `requireProjectOwnershipOrThrow` and surface as
+  // 403. The check fires BEFORE the daily-quota claim and BEFORE the
+  // Browserless fetch, so neither side-effect should be observable.
+  test("forbidden when another user owns the project returns 403 without calling the provider", async ({
+    page,
+  }) => {
+    await loginAs(page, E2E_OTHER_EMAIL, E2E_OTHER_PASSWORD);
+    const before = await mockBrowserlessRequests();
+
+    const response = await page.request.post(EXPORT_PDF_V1_URL, {
+      data: { projectId: E2E_UPLOAD_PROJECT_ID },
+      headers: { "Content-Type": "application/json" },
+    });
+
+    expect(response.status()).toBe(403);
+    expect(response.headers()["x-supabase-api-version"]).toBe("v1");
+    const body = await response.json();
+    expect(body.message).toContain("permission");
+    expect(body.code).toBeUndefined();
+
+    // Ownership was rejected before the token was minted and before
+    // the provider was called, so a 403 must not have cost a
+    // Browserless call (slicing by count delta — the log is
+    // process-wide and a former spec already drove the success path).
+    expect(await freshBrowserlessRequests(before)).toHaveLength(0);
   });
 
   // The daily-quota guard sits BEFORE the ownership lookup and before the

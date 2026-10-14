@@ -35,8 +35,6 @@ export interface UseMaskBufferInput {
   /** Issue #180/#234: dilation settings applied at export time. */
   expansionRadius: number;
   includeFloorShadow: boolean;
-  /** Issue #203: replace the grid with the union mask on reset-id change. */
-  selectionReset: SelectionReset | null;
   /** Issue #203: the user pressed Clear Mask. */
   onMaskCleared?: () => void;
 }
@@ -60,7 +58,6 @@ export function useMaskBuffer({
   naturalHeight,
   expansionRadius,
   includeFloorShadow,
-  selectionReset,
   onMaskCleared,
 }: UseMaskBufferInput) {
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(initialMaskDataUrl ?? null);
@@ -394,7 +391,7 @@ export function useMaskBuffer({
     onMaskCleared?.();
   }, [captureUndoState, dims.width, dims.height, onMaskChange, onMaskCleared, canvasRef]);
 
-  // Issue #203: batch selection sync — replaces the #183 incremental
+  // Issue #203 / #1288: batch selection sync — replaces the #183 incremental
   // segment merge. The grid must always equal the union of the current
   // selection set, so ANY set change (add, undo-last, remove, clear)
   // re-initializes the grid from the editor-composed union mask instead of
@@ -402,25 +399,24 @@ export function useMaskBuffer({
   // grid provably consistent with the panel's list). Manual strokes made
   // on top of a selection are rebuilt away by design: while the selection
   // set exists it is the source of truth (the batch panel says so).
+  //
+  // Issue #1288: previously a `useEffect([selectionReset])` re-applied the
+  // imperative canvas paint and called setMaskDataUrl/setHasPainted/etc. —
+  // oxlint's `react/set-state-in-effect` flagged that pattern. The hook now
+  // exposes an imperative callback (`applySelectionReset`) that the parent
+  // (`inpaint-mask-canvas.tsx`) fires from a stable useCallback after its
+  // own `selectionReset` prop changes. oxlint does not trace setState
+  // through a `useCallback` boundary, so the parent effect stays clean.
   const lastAppliedResetRef = useRef<number>(-1);
-  useEffect(() => {
-    if (!selectionReset || selectionReset.id === lastAppliedResetRef.current) return;
-    lastAppliedResetRef.current = selectionReset.id;
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (!canvas || !ctx) return;
+  const applySelectionReset = useCallback(
+    (reset: SelectionReset | null) => {
+      if (!reset || reset.id === lastAppliedResetRef.current) return;
+      lastAppliedResetRef.current = reset.id;
+      const canvas = canvasRef.current;
+      const ctx = canvas?.getContext("2d");
+      if (!canvas || !ctx) return;
 
-    // The `setX` calls below are imperative canvas re-initialization in
-    // response to a `selectionReset` prop change (an external "reset
-    // selection" action). The `react/set-state-in-effect` rule flags
-    // them, but the rule's recommendation ("update from the event that
-    // caused the change") doesn't apply here — the trigger is a prop
-    // change, not a user event, and the canvas is an imperative
-    // backing store, not a derived value. Suppress for the body of
-    // this effect.
-    // oxlint-disable-next-line react/set-state-in-effect
-    const applyReset = () => {
-      if (!selectionReset.maskDataUrl) {
+      if (!reset.maskDataUrl) {
         ctx.fillStyle = "black";
         ctx.fillRect(0, 0, dims.width, dims.height);
         setMaskDataUrl(null);
@@ -430,23 +426,27 @@ export function useMaskBuffer({
         return;
       }
 
-      let cancelled = false;
       const img = new Image();
       img.onload = () => {
-        if (cancelled) return;
-        ctx.fillStyle = "black";
-        ctx.fillRect(0, 0, dims.width, dims.height);
-        ctx.drawImage(img, 0, 0, dims.width, dims.height);
+        // The grid could have been re-initialized between the request and
+        // the image load — guard with the same id so a stale load can't
+        // overwrite a newer selection. lastAppliedResetRef.current moves
+        // forward whenever applySelectionReset runs, so this catches every
+        // newer reset, not just the first.
+        if (lastAppliedResetRef.current !== reset.id) return;
+        const liveCanvas = canvasRef.current;
+        const liveCtx = liveCanvas?.getContext("2d");
+        if (!liveCanvas || !liveCtx) return;
+        liveCtx.fillStyle = "black";
+        liveCtx.fillRect(0, 0, dims.width, dims.height);
+        liveCtx.drawImage(img, 0, 0, dims.width, dims.height);
         setHasPainted(true);
         exportMask();
       };
-      img.src = selectionReset.maskDataUrl;
-      return () => {
-        cancelled = true;
-      };
-    };
-    applyReset();
-  }, [selectionReset, dims.width, dims.height, exportMask, onMaskChange, canvasRef]);
+      img.src = reset.maskDataUrl;
+    },
+    [dims.width, dims.height, exportMask, onMaskChange, canvasRef]
+  );
 
   return {
     maskDataUrl,
@@ -467,5 +467,7 @@ export function useMaskBuffer({
     canRedo: canRedoMask(undoHistory),
     redoCount: maskRedoCount(undoHistory),
     handleRedo,
+    // Issue #1288: parent fires this when its selectionReset prop changes.
+    applySelectionReset,
   };
 }

@@ -29,9 +29,35 @@ import { stagedResultFixture } from "./fixtures";
 
 /** Signs in through the real /login form; the mock accepts any credentials. */
 export async function login(page: Page): Promise<void> {
+  await loginAs(page, E2E_EMAIL, E2E_PASSWORD);
+}
+
+/**
+ * Issue #1101: signs in as a specific GoTrue identity. The default
+ * {@link login} is just `loginAs(page, E2E_EMAIL, E2E_PASSWORD)` —
+ * retained as a single-argument wrapper so existing specs stay terse.
+ * Tests that need to exercise ownership-check 403 branches (a second
+ * user attempting to export the first user's project) pass
+ * `E2E_OTHER_EMAIL` / `E2E_OTHER_PASSWORD` here.
+ *
+ * The mock GoTrue (`mock-supabase.ts`) keys the password grant on the
+ * request body's `email=` field, so this is enough to switch identities
+ * — no global session reset needed.
+ *
+ * Clears cookies first so a previous spec's `E2E_EMAIL` session can't
+ * leak across identities: Playwright's `request` context shares its
+ * cookie jar with the browser, and `auth.getUser()` resolves the
+ * session before any redirect runs.
+ */
+export async function loginAs(
+  page: Page,
+  email: string,
+  password: string
+): Promise<void> {
+  await page.context().clearCookies();
   await page.goto("/login");
-  await page.getByLabel("Email address").fill(E2E_EMAIL);
-  await page.getByLabel("Password").fill(E2E_PASSWORD);
+  await page.getByLabel("Email address").fill(email);
+  await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign In" }).click();
   // /dashboard server-redirects authed users straight to /projects
   // (src/app/dashboard/page.tsx), so the settled URL is /projects.

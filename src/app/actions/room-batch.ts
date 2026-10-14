@@ -21,7 +21,7 @@ import {
   DEFAULT_DAILY_LABEL_LIMIT,
   DAILY_LIMIT_ENV_VAR,
   dailyQuotaExceededPayload,
-  evaluateDailyQuota,
+  evaluateDailyBatchQuota,
   getDailyUsage,
   recordDailyUsage,
   resolveDailyLimit,
@@ -280,17 +280,23 @@ export async function detectBatchRoomTypes(
     };
   }
 
-  // Issue #681: daily label quota — tracked in the `DailyApiUsage`
+  // Issue #681 + #1110: daily label quota — tracked in the `DailyApiUsage`
   // Postgres table via atomic upserts, so usage survives serverless
   // cold starts and multi-instance traffic splitting (issue #784).
   // Checked BEFORE any AI work so a user at their cap never reaches
-  // gpt-4o-mini; the whole batch must fit in headroom.
+  // gpt-4o-mini. Issue #1110: the batch rides the `evaluateDailyBatchQuota`
+  // semantic (whole batch fits entirely in headroom — `used + count <= limit`)
+  // rather than per-unit `evaluateDailyQuota` (`used < limit`); a batch that
+  // would straddle the cap used to pass the per-unit gate and overshoot
+  // by `count - 1` once `recordDailyUsage` ran per entry.
   const labelLimit = resolveDailyLimit(
     process.env[DAILY_LIMIT_ENV_VAR.label],
     DEFAULT_DAILY_LABEL_LIMIT
   );
-  const labelQuota = evaluateDailyQuota(
+  const batchSize = parsed.data.imageUrls.length;
+  const labelQuota = evaluateDailyBatchQuota(
     await getDailyUsage("label", user.id),
+    batchSize,
     labelLimit
   );
   if (!labelQuota.allowed) {
@@ -300,7 +306,7 @@ export async function detectBatchRoomTypes(
         userId: user.id,
         used: labelQuota.used,
         limit: labelQuota.limit,
-        requested: parsed.data.imageUrls.length,
+        requested: batchSize,
       })
     );
     return {

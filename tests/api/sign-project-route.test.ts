@@ -18,6 +18,25 @@ function buildRequest(body: unknown): NextRequest {
   } as unknown as NextRequest;
 }
 
+// Helper: a body that satisfies every schema field after issue #1113
+// added `consentAttested: true` as a literal gate. Tests below use
+// this for happy-path cases; missing-token / wrong-project cases
+// still hand-build to assert schema-error paths.
+function validBody(overrides: Partial<{
+  projectId: string;
+  signatureDataUrl: string;
+  token: string;
+  consentAttested: boolean;
+}> = {}) {
+  return {
+    projectId: MOCK_PROJECT_ID,
+    signatureDataUrl: MOCK_SIGNATURE,
+    token: MOCK_TOKEN,
+    consentAttested: true,
+    ...overrides,
+  };
+}
+
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
   requireProjectOwnershipOrThrow: vi.fn(async () => {}),
@@ -54,7 +73,7 @@ describe("POST /api/sign-project", () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(null);
     vi.mocked(verifyPreviewToken).mockResolvedValue({ valid: false });
 
-    const req = buildRequest({ projectId: MOCK_PROJECT_ID, signatureDataUrl: MOCK_SIGNATURE, token: "tampered-token" });
+    const req = buildRequest(validBody({ token: "tampered-token" }));
     const res = await POST(req);
 
     expect(res.status).toBe(401);
@@ -69,7 +88,7 @@ describe("POST /api/sign-project", () => {
     vi.mocked(requireProjectOwnershipOrThrow).mockRejectedValueOnce(new ProjectForbiddenError("not owner"));
     vi.mocked(verifyPreviewToken).mockResolvedValue({ valid: true, projectId: MOCK_PROJECT_ID });
 
-    const req = buildRequest({ projectId: MOCK_PROJECT_ID, signatureDataUrl: MOCK_SIGNATURE, token: MOCK_TOKEN });
+    const req = buildRequest(validBody());
     const res = await POST(req);
 
     expect(res.status).toBe(403);
@@ -82,7 +101,7 @@ describe("POST /api/sign-project", () => {
     vi.mocked(requireProjectOwnershipOrThrow).mockRejectedValueOnce(new ProjectNotFoundError("missing"));
     vi.mocked(verifyPreviewToken).mockResolvedValue({ valid: true, projectId: MOCK_PROJECT_ID });
 
-    const req = buildRequest({ projectId: MOCK_PROJECT_ID, signatureDataUrl: MOCK_SIGNATURE, token: MOCK_TOKEN });
+    const req = buildRequest(validBody());
     const res = await POST(req);
 
     expect(res.status).toBe(404);
@@ -94,7 +113,7 @@ describe("POST /api/sign-project", () => {
     // updateMany returns count === 0 when no rows match the predicate
     vi.mocked(prisma.project.updateMany).mockResolvedValue({ count: 0 });
 
-    const req = buildRequest({ projectId: MOCK_PROJECT_ID, signatureDataUrl: MOCK_SIGNATURE, token: MOCK_TOKEN });
+    const req = buildRequest(validBody());
     const res = await POST(req);
 
     expect(res.status).toBe(409);
@@ -108,9 +127,16 @@ describe("POST /api/sign-project", () => {
         ],
       },
       data: {
-        clientSignature: MOCK_SIGNATURE,
+        // Issue #1106: the route encrypts the signature at rest. The
+        // stored value is the AES-GCM ciphertext, never the plaintext
+        // PNG data URL.
+        clientSignature: expect.any(String),
         clientSignatureStatus: "Signed",
         clientSignatureTimestamp: expect.any(Date),
+        // Issue #1113: consent attestation is written alongside the
+        // signature so the legal attestation is auditable.
+        clientConsentAttested: true,
+        clientConsentAttestedAt: expect.any(Date),
       },
     });
     // The fix ensures no write happened when already signed
@@ -123,7 +149,7 @@ describe("POST /api/sign-project", () => {
     // updateMany returns count === 1 when the row was successfully updated
     vi.mocked(prisma.project.updateMany).mockResolvedValue({ count: 1 });
 
-    const req = buildRequest({ projectId: MOCK_PROJECT_ID, signatureDataUrl: MOCK_SIGNATURE, token: MOCK_TOKEN });
+    const req = buildRequest(validBody());
     const res = await POST(req);
 
     expect(res.status).toBe(200);
@@ -138,11 +164,17 @@ describe("POST /api/sign-project", () => {
         ],
       },
       data: {
-        clientSignature: MOCK_SIGNATURE,
+        // Issue #1106: the stored value is the AES-GCM ciphertext
+        // (a non-empty base64 string), not the plaintext PNG data URL.
+        clientSignature: expect.any(String),
         clientSignatureStatus: "Signed",
         clientSignatureTimestamp: expect.any(Date),
+        clientConsentAttested: true,
+        clientConsentAttestedAt: expect.any(Date),
       },
     });
+    const writeCall = vi.mocked(prisma.project.updateMany).mock.calls[0]![0];
+    expect(writeCall.data.clientSignature).not.toBe(MOCK_SIGNATURE);
   });
 
   it("captures timestamp once before retry loop (issue #1146)", async () => {
@@ -155,7 +187,7 @@ describe("POST /api/sign-project", () => {
       return { count: 1 };
     }) as unknown as typeof prisma.project.updateMany);
 
-    const req = buildRequest({ projectId: MOCK_PROJECT_ID, signatureDataUrl: MOCK_SIGNATURE, token: MOCK_TOKEN });
+    const req = buildRequest(validBody());
     const res = await POST(req);
 
     expect(res.status).toBe(200);
@@ -165,10 +197,45 @@ describe("POST /api/sign-project", () => {
     expect(prisma.project.updateMany).toHaveBeenCalled();
     const calls = vi.mocked(prisma.project.updateMany).mock.calls;
     expect(calls.length).toBeGreaterThanOrEqual(1);
-    // All calls should have the same timestamp (captured once before the loop)
-    const firstTimestamp = calls[0][0].data.clientSignatureTimestamp;
+    // All calls should have the same signature timestamp (captured once
+    // before the loop) and the same consent timestamp (issue #1113).
+    const firstSignatureTimestamp = calls[0][0].data.clientSignatureTimestamp;
+    const firstConsentTimestamp = calls[0][0].data.clientConsentAttestedAt;
     for (const call of calls) {
-      expect(call[0].data.clientSignatureTimestamp).toBe(firstTimestamp);
+      expect(call[0].data.clientSignatureTimestamp).toBe(firstSignatureTimestamp);
+      expect(call[0].data.clientConsentAttestedAt).toBe(firstConsentTimestamp);
     }
+  });
+
+  // Issue #1113: the legally-worded approval checkbox is no longer
+  // decorative. A request without `consentAttested: true` must be
+  // rejected before any token/session/Prisma work.
+  it("returns 400 when consentAttested is false (issue #1113)", async () => {
+    vi.mocked(verifyPreviewToken).mockResolvedValue({ valid: true, projectId: MOCK_PROJECT_ID });
+
+    const req = buildRequest(validBody({ consentAttested: false }));
+    const res = await POST(req);
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.message).toContain(
+      "staging-plan approval statement before signing",
+    );
+    // Token-gate, session-gate, and Prisma write must NOT have run.
+    expect(verifyPreviewToken).not.toHaveBeenCalled();
+    expect(prisma.project.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when consentAttested is missing (issue #1113)", async () => {
+    vi.mocked(verifyPreviewToken).mockResolvedValue({ valid: true, projectId: MOCK_PROJECT_ID });
+
+    const { consentAttested: _omit, ...withoutConsent } = validBody();
+    void _omit;
+    const req = buildRequest(withoutConsent);
+    const res = await POST(req);
+
+    expect(res.status).toBe(400);
+    expect(verifyPreviewToken).not.toHaveBeenCalled();
+    expect(prisma.project.updateMany).not.toHaveBeenCalled();
   });
 });

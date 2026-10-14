@@ -54,6 +54,20 @@ model Project {
   clientSignature          String?   // PNG data URL of the signature
   clientSignatureStatus    String?   // "Pending" | "Signed"
   clientSignatureTimestamp  DateTime? // ISO 8601 timestamp of when signed
+  // Issue #1113: explicit attestation that the client reviewed and
+  // agreed to the legally-worded approval text on the sign-off form.
+  // Persisted (not just a client-side flag) so the attestation is
+  // auditable: a `Signed` project without a recorded `clientConsentAttestedAt`
+  // exposes that the prior control was decorative.
+  clientConsentAttested    Boolean   @default(false)
+  clientConsentAttestedAt  DateTime? // ISO 8601 timestamp of attestation
+
+  // Issue #1186: "Virtually staged" disclosure mark on AI after-images.
+  // Project-scoped so Lauren can match her local MLS / listing-agent
+  // requirement per market. Defaults ON: an unlabelled staged photo is the
+  // exact thing the disclosure exists to prevent. Null on existing rows
+  // is treated as enabled by `resolveVirtuallyStagedLabelEnabled`.
+  virtuallyStagedLabelEnabled Boolean? @default(true)
 
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
@@ -94,6 +108,18 @@ model Room {
   inpaintRequests InpaintRequest[]
   inpaintVersions InpaintVersion[]
   selectionLogs  SelectionLog[]
+
+  // Issue #1182: room-level finish reuse. When a room has multiple
+  // photos (different angles of the same kitchen, etc.) the user can
+  // save one chosen finish (MaterialSwatch + directives + concept
+  // label) on the room, then opt-in to seed it into the next photo's
+  // inpaint directives. Nullable + onDelete: SetNull so removing the
+  // referenced swatch clears the choice without cascade-deleting the
+  // room's directive text.
+  materialFinishId        String?
+  materialFinish          MaterialSwatch? @relation("RoomMaterialFinish", fields: [materialFinishId], references: [id], onDelete: SetNull)
+  materialFinishDirectives  String? // the staging directives captured with the finish
+  materialFinishConceptLabel String? // the SAM/GPT-4o-mini concept label captured with the finish
 
   @@index([projectId])
 }
@@ -197,6 +223,8 @@ model MaterialSwatch {
   vendor      String? // e.g. "Wayfair", "Sherwin-Williams"
   sku         String? // e.g. "WF-HW-1234"
   sortOrder   Int     @default(0)
+
+  roomsUsingFinish Room[] @relation("RoomMaterialFinish") // issue #1182 inverse
 
   @@index([projectId])
 }

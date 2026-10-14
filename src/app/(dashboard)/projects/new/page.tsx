@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { StagingPackageCard } from "@/components/packages";
@@ -759,12 +760,12 @@ export default function NewProjectPage() {
             >
               {submitting ? "Creating..." : "Create Project"}
             </button>
-            <a
+            <Link
               href="/dashboard"
               className="rounded-md px-4 py-2.5 text-sm font-medium text-stone-600 hover:text-stone-800"
             >
               Cancel
-            </a>
+            </Link>
           </div>
         </div>
       </form>

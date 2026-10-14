@@ -42,6 +42,10 @@ const mockRoom = {
   buyerPsychology: null,
   checklistItems: null,
   sortOrder: 0,
+  // issue #1182 room-finish fields (always null in fixture)
+  materialFinishId: null,
+  materialFinishDirectives: null,
+  materialFinishConceptLabel: null,
   createdAt: new Date(),
 };
 

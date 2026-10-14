@@ -28,6 +28,26 @@
  * the whole suite run, and specs are sequential (`workers: 1`), so a spec
  * that needs its OWN provider calls must slice the log by a count delta
  * taken before the request — never index from 0.
+ *
+ * **Hermeticity / dotenv dependency (issue #1102):** the one place the
+ * harness writes to a database is `pushSchema()` in `global-setup.ts`,
+ * which shells out to `npx prisma db push` with `DATABASE_URL` set in
+ * the spawn env, plus `seed()`, which constructs its own `PrismaClient`.
+ * Prisma 7 loads `.env` (via `prisma.config.ts`'s `import "dotenv/config"`)
+ * and the `DATABASE_URL` it reads from `.env` would OVERRIDE the spawn-env
+ * value if dotenv's "do not overwrite existing process.env" rule ever
+ * changed (it is documented behavior today, but is one Prisma major bump
+ * away from silently shifting). On a developer machine that `.env` is the
+ * symlink to `.env.local`, which holds the **real** Supabase connection
+ * string — so a regression here would push the schema to, and seed rows
+ * into, production. The contract rests on that dotenv rule continuing to
+ * hold. To make the regression impossible rather than "verifiable," the harness
+ * ALSO calls `assertEphemeralDatabaseUrl()` (defined in
+ * `tests/e2e/database-url-guard.ts`, imported by `global-setup.ts`) at
+ * the top of `main()`, `pushSchema()`, and `seed()`, which rejects any
+ * URL whose shape doesn't match the disposable container
+ * (`postgresql://e2e:e2e@127.0.0.1:<POSTGRES_PORT>/…e2e…`). Do not weaken
+ * those checks without replacing them with something stricter.
  */
 
 /**
@@ -46,6 +66,20 @@
 export const E2E_USER_ID = "e2euser0000000000000000000user";
 export const E2E_EMAIL = "e2e@stagingstudio.test";
 export const E2E_PASSWORD = "e2e-password";
+
+/**
+ * Second GoTrue identity, used to exercise ownership-check 403 branches
+ * that a single-user seed can't reach (issue #1101). The mock GoTrue
+ * (`mock-supabase.ts`) mints a session for this identity when the
+ * password grant arrives with `E2E_OTHER_EMAIL`; a Prisma `User` row
+ * with `E2E_OTHER_USER_ID` is seeded in `global-setup.ts` so
+ * `getAuthedPrismaUser` can resolve it. It owns NO projects, which is
+ * the whole point — every seeded project belongs to {@link E2E_USER_ID},
+ * so any export-pdf request from this user must hit the 403 branch.
+ */
+export const E2E_OTHER_USER_ID = "e2eotheruser000000000000000other";
+export const E2E_OTHER_EMAIL = "e2e-other@stagingstudio.test";
+export const E2E_OTHER_PASSWORD = "e2e-other-password";
 
 export const E2E_UPLOAD_PROJECT_ID = "cupload000000000000000000";
 export const E2E_UPLOAD_ROOM_ID = "e2euploadroom0000000000000room";

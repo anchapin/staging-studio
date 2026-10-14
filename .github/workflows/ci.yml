@@ -13,6 +13,17 @@ on:
     branches:
       - develop
       - main
+    # Issue #1104: markdown-only commits (docs, ops notes, spike writeups,
+    # handoff notes) don't touch the browser surface, the image build, or
+    # the lint/typecheck/test surface in a way fast-checks wouldn't already
+    # have caught when the change first landed. Skipping the whole run for
+    # those saves ~3min of hosted runner time per push during docs-heavy
+    # periods. `paths-ignore` MUST live here at the trigger level — it is
+    # NOT a valid job-level key, and placing it inside `e2e:` is a workflow
+    # schema error that causes GitHub to reject the entire file (which is
+    # why CI has been failing since PR #1313 first placed it there).
+    paths-ignore:
+      - '**.md'
   pull_request:
     types:
       - opened
@@ -86,6 +97,10 @@ jobs:
     name: E2E (Playwright)
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
+    # The markdown-only filter lives on `on.push.paths-ignore` (above),
+    # not here — `paths-ignore` is not a valid job-level key and placing
+    # it here is the schema error GitHub was rejecting the whole file
+    # with since PR #1313. See issue #1104.
     timeout-minutes: 30
     # Measured on a clean checkout with no env files (the closest thing to
     # this runner available locally): `npm ci` ~20s, then ~4min for the

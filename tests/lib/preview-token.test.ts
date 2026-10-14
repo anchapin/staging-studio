@@ -24,8 +24,8 @@ describe("exports", () => {
     expect(PREVIEW_TOKEN_QUERY_PARAM).toBe("token");
   });
 
-  test("PREVIEW_TOKEN_TTL_SECONDS is 300 (5 minutes)", () => {
-    expect(PREVIEW_TOKEN_TTL_SECONDS).toBe(300);
+  test("PREVIEW_TOKEN_TTL_SECONDS is 1800 (30 minutes, issue #1109)", () => {
+    expect(PREVIEW_TOKEN_TTL_SECONDS).toBe(30 * 60);
   });
 });
 

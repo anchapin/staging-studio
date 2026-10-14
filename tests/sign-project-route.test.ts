@@ -33,6 +33,8 @@ function validPayload(projectId: string = MOCK_PROJECT_ID, token: string = "vali
     projectId,
     signatureDataUrl: TINY_PNG_DATA_URL,
     token,
+    // Issue #1113: the request schema requires `consentAttested: true`.
+    consentAttested: true,
   };
 }
 
@@ -82,7 +84,7 @@ vi.mock("@/lib/preview-token", () => ({
   signPreviewToken: vi.fn(),
   verifyPreviewToken: vi.fn(),
   PREVIEW_TOKEN_QUERY_PARAM: "token",
-  PREVIEW_TOKEN_TTL_SECONDS: 300,
+  PREVIEW_TOKEN_TTL_SECONDS: 30 * 60,
 }));
 
 vi.mock("@/lib/retry", () => ({
@@ -168,11 +170,28 @@ describe("POST /api/sign-project — issue #1078 token-first gate order", () => 
         ],
       },
       data: {
-        clientSignature: TINY_PNG_DATA_URL,
+        // Issue #1106: the route encrypts the signature before writing.
+        // The stored value is the AES-GCM ciphertext (a non-empty
+        // base64 string), never the plaintext PNG data URL.
+        clientSignature: expect.any(String),
         clientSignatureStatus: "Signed",
         clientSignatureTimestamp: expect.any(Date),
+        // Issue #1113: consent attestation is persisted alongside the
+        // signature. Same Date instance so the two timestamps agree.
+        clientConsentAttested: true,
+        clientConsentAttestedAt: expect.any(Date),
       },
     });
+    const writeCall = vi.mocked(prisma.project.updateMany).mock.calls[0]![0];
+    // Issue #1106: the route encrypts the signature before writing, so
+    // the stored value is the AES-GCM ciphertext rather than the raw
+    // PNG data URL.
+    expect(writeCall.data.clientSignature).not.toBe(TINY_PNG_DATA_URL);
+    // The consent timestamp shares the same instance as the signature
+    // timestamp so the two fields agree to the millisecond on disk.
+    expect(writeCall.data.clientConsentAttestedAt).toBe(
+      writeCall.data.clientSignatureTimestamp
+    );
     // No session was needed, so no ownership check ran.
     expect(mockRequireProjectOwnershipOrThrow).not.toHaveBeenCalled();
   });
@@ -266,10 +285,45 @@ describe("POST /api/sign-project — issue #1078 token-first gate order", () => 
     expect(json.message).toContain("could not be found");
   });
 
+  // Issue #1113: the legally-worded approval checkbox is no longer
+  // decorative. The schema rejects `consentAttested !== true` BEFORE
+  // any token/session/Prisma work — a client pressing Sign & Approve
+  // without ticking the box must not get a Signed record.
+  it("returns 400 when consentAttested is false (issue #1113)", async () => {
+    const req = buildRequest({
+      ...validPayload(),
+      consentAttested: false,
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.message).toContain(
+      "staging-plan approval statement before signing",
+    );
+    // The token-gate, session-gate, and Prisma write must NOT have run.
+    expect(verifyPreviewToken).not.toHaveBeenCalled();
+    expect(prisma.project.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when consentAttested is missing (issue #1113)", async () => {
+    const { consentAttested: _omit, ...withoutConsent } = validPayload();
+    void _omit;
+    const req = buildRequest(withoutConsent);
+    const res = await POST(req);
+
+    expect(res.status).toBe(400);
+    expect(prisma.project.updateMany).not.toHaveBeenCalled();
+  });
+
   it("returns 400 when token is missing from the payload", async () => {
     const req = buildRequest({
       projectId: MOCK_PROJECT_ID,
       signatureDataUrl: TINY_PNG_DATA_URL,
+      // consentAttested is provided so the only missing field is the
+      // token — issue #1113 added consentAttested to the schema, so an
+      // older two-key body would fail consent validation instead.
+      consentAttested: true,
       // token intentionally omitted — schema requires min(1).
     });
     const res = await POST(req);

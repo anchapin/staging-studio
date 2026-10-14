@@ -71,3 +71,41 @@ export const roomMetadataSchema = z
 
 /** The validated shape of a {@link roomMetadataSchema} parse. */
 export type RoomMetadataInput = z.infer<typeof roomMetadataSchema>;
+
+/**
+ * Zod schema for the "Virtually staged" disclosure toggle accepted by the
+ * `saveVirtuallyStagedLabelEnabled` server action (issue #1186).
+ *
+ * Purpose: validates the client-controlled payload before it reaches
+ * Prisma so only the two allowed fields can ever be written —
+ * `projectId` (string) and `enabled` (boolean). `.strict()` rejects
+ * unknown keys outright, so a crafted payload carrying `userId`
+ * (ownership transfer) or any other persisted column cannot ride this
+ * path. The boolean is required (not `.optional()`) so a missing or
+ * `undefined` value — which would otherwise null-out the persisted
+ * Boolean? column via Prisma — is rejected at the parse step.
+ *
+ * Contract: `projectId` is a non-empty string (so an update can never
+ * target `""` and silently match nothing); `enabled` is a strict boolean
+ * (so a `null` or string-coerced value cannot reach Prisma).
+ *
+ * Side effects: none — pure validation.
+ */
+export const virtuallyStagedLabelEnabledSchema = z
+  .object({
+    projectId: z.string().min(1, {
+      message: "projectId must be a non-empty string",
+    }),
+    enabled: z.boolean({
+      // Required, not optional: an undefined would Prisma-null the
+      // column (Boolean? accepts null) and quietly hide the disclosure
+      // mark, which is the unsafe direction. Force a deliberate choice.
+      message: "enabled must be a boolean",
+    }),
+  })
+  .strict();
+
+/** The validated shape of a {@link virtuallyStagedLabelEnabledSchema} parse. */
+export type VirtuallyStagedLabelEnabledInput = z.infer<
+  typeof virtuallyStagedLabelEnabledSchema
+>;
