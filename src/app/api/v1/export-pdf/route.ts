@@ -65,9 +65,40 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Shape-validate projectId from the JSON body BEFORE it is interpolated
-    // into the preview URL handed to an external service.
-    const { projectId } = await req.json();
+    // Shape-validate the JSON body BEFORE projectId is interpolated into the
+    // preview URL handed to an external service. Issue #1109: a malformed
+    // body (truncated upload, wrong content-type, empty payload) used to
+    // throw here and surface as a 500 internal error; a missing or
+    // malformed request payload is a client-side mistake and must answer
+    // 400 so the user can retry.
+    let payload: unknown;
+    try {
+      payload = await req.json();
+    } catch {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Invalid request",
+          message: "Request body must be valid JSON.",
+          code: API_ERROR_INVALID_REQUEST,
+        },
+        { status: 400, headers: versionInfo }
+      );
+    }
+
+    if (typeof payload !== "object" || payload === null) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Invalid request",
+          message: "Request body must be a JSON object.",
+          code: API_ERROR_INVALID_REQUEST,
+        },
+        { status: 400, headers: versionInfo }
+      );
+    }
+
+    const { projectId } = payload as { projectId?: unknown };
 
     if (typeof projectId !== "string" || !PROJECT_ID_PATTERN.test(projectId)) {
       return NextResponse.json(

@@ -50,7 +50,7 @@ These match `.env.example` exactly — that file is the source of truth for what
 | `NEXT_PUBLIC_APP_URL` | **Yes** | The app's public origin (not a PDF-export-only value). `api/export-pdf` builds the cookie-less preview URL its cloud browser fetches from it. **Must be publicly reachable.** See [the section above](#the-one-thing-to-get-right-next_public_app_url) | Your deployment's URL (e.g. the Vercel production domain) |
 | `PREVIEW_TOKEN_SECRET` | **Yes** | HMAC secret signing short-lived (5 min) lookbook-preview tokens, read by `lib/preview-token.ts`. Optional in dev, where a fixed **public** fallback is used — production must set a real secret | Generate with `openssl rand -base64 32` |
 
-Why `PREVIEW_TOKEN_SECRET` matters for export: Browserless's Chrome is a cookie-less browser, so the preview page would redirect it to `/login` and the PDF would capture the login page. The export route instead mints a signed token (scoped to one project, 5-minute TTL) that both the root middleware and the preview page verify. An unset secret in production means every deployment runs on a publicly known key.
+Why `PREVIEW_TOKEN_SECRET` matters for export: Browserless's Chrome is a cookie-less browser, so the preview page would redirect it to `/login` and the PDF would capture the login page. The export route instead mints a signed token (scoped to one project, 30-minute TTL via `PREVIEW_TOKEN_TTL_SECONDS`, #1109) that both the root middleware and the preview page verify. An unset secret in production means every deployment runs on a publicly known key.
 
 ### Supabase auth configuration
 
