@@ -111,6 +111,16 @@ npm run dev
 
 Deploying to production? See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — every env var to configure, plus why `NEXT_PUBLIC_APP_URL` must be publicly reachable for PDF export.
 
+## Vercel CLI env commands (#1100)
+
+The Vercel CLI's `env` subcommands look like a free source of truth for the keys above, and they are — but they are also a footgun. Read this before running any of them.
+
+- **Never run bare `vercel env pull`.** With no path argument, the CLI writes to `.env.local` — which in this repo is the app's real env file AND the target of the `.env → .env.local` symlink the Prisma CLI depends on. The command will silently overwrite your entire local environment and break the symlink in one shot. (#1100 lost 4 credentials this way.) **Always pass an explicit path**: `vercel env pull .env.vercel-backup` (or any other filename that isn't `.env.local` / `.env`). `vercel env pull .env.local` itself is the same footgun — the override must be a different file.
+- **Vercel is not a backup. Secrets are unrecoverable.** Only variables of Vercel `Config` type are returned by `env pull`. Secrets (the `Sensitive` / encrypted type) are not, and there is no CLI or dashboard path to retrieve a secret value once it has been set — only to rotate it. That means any key that you stored as a Secret (including, historically, `BROWSERLESS_API_KEY` and `OPENAI_API_KEY` before they were migrated to `Config` for this very reason) must live somewhere durable outside Vercel, or it is one project reset away from gone. `DATABASE_URL` and the API keys above all need an off-Vercel source of truth.
+- **`vercel env ls`'s `created` column is not a sync signal.** That timestamp is set when the variable was first created and is not bumped when the value is rotated in place via `vercel env add`. A matching `created` on local and remote is not evidence that the two are in sync; it only means both rows were created at the same moment. Diff values, not timestamps.
+- **Strip surrounding quotes from any pulled `DATABASE_URL` before Prisma will accept it.** Vercel stores the Postgres URL with double quotes around it, and `env pull` writes them through verbatim. Prisma's CLI reads the raw value from `.env` and the surrounding `"` makes the connection string unparseable, so `npx prisma db push` then fails with a connection error that does not point at the quoting. After pulling, grep for `^DATABASE_URL=` and remove the wrapping quotes by hand (or pipe through a one-liner) before running any Prisma command.
+- **Re-check `.gitignore` after any Vercel CLI command.** `vercel env pull` will write a new path into `.gitignore` for you, and the ordering constraint on `!.env.example` (which has to come AFTER the broad `.env*` rules to keep the template tracked) is easy to break silently if the CLI appends above it. After every `env pull` / `env add`, `git diff .gitignore` and confirm `!.env.example` is still in the ignore-negation block — if not, `git checkout HEAD -- .gitignore` and re-add the pull path manually below the negation.
+
 ## Development
 
 ```bash
