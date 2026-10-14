@@ -86,6 +86,15 @@ jobs:
     name: E2E (Playwright)
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
+    # Markdown-only pushes (docs, ops notes, spike writeups) don't touch
+    # the browser surface, so paying the full ~3m e2e run for them is
+    # wasted capacity on hosted runners. The filter is scoped to this
+    # job only: `fast-checks` is cheap and worth running on every push
+    # to catch lint/typecheck/test rot, and `release-guard` reads real
+    # git history, so a markdown-only change still needs to flow through
+    # branch protection. See issue #1104.
+    paths-ignore:
+      - '**.md'
     timeout-minutes: 30
     # Measured on a clean checkout with no env files (the closest thing to
     # this runner available locally): `npm ci` ~20s, then ~4min for the
