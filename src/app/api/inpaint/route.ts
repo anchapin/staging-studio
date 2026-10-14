@@ -7,13 +7,16 @@ import { logInpaintEvent } from "@/lib/logInpaintEvent";
 import { prisma } from "@/lib/prisma";
 import {
   inpaintSubmitSchema,
-  checkDailyQuota,
   classifyInpaintError,
   validateInpaintRoom,
   submitInpaintToActiveProvider,
-  recordInpaintQuotaWithRetry,
+  reserveInpaintQuota,
+  refundInpaintQuota,
   type InpaintSubmitOptions,
 } from "@/lib/inpaint-submit";
+import { dailyQuotaExceededPayload } from "@/lib/api-quota";
+import type { QuotaClaim } from "@/lib/api-quota";
+import { API_ERROR_RATE_LIMIT_EXCEEDED } from "@/lib/api-errors";
 
 // Issue #1262: the Alibaba DashScope inpaint submit is synchronous and
 // takes ~30s, which blows past Vercel's default Hobby-tier 10s Node
@@ -27,6 +30,12 @@ import {
 export const maxDuration = 60;
 
 async function postInpaint(request: NextRequest) {
+  // Issue #1111: track the atomic quota claim so the catch below can
+  // refund it when the InpaintRequest pre-write fails. Mirrors the
+  // `segmentClaim` / `segmentUserId` pair in
+  // `app/api/segment/furnishings/route.ts`.
+  let quotaUserId: string | undefined;
+  let inpaintClaim: QuotaClaim | null = null;
   try {
     const user = await getAuthedPrismaUser();
     if (!user) {
@@ -39,18 +48,37 @@ async function postInpaint(request: NextRequest) {
       );
     }
 
-    const quotaResult = await checkDailyQuota(user.id);
-    if (!quotaResult.allowed) {
+    quotaUserId = user.id;
+
+    // Issue #1111: atomically claim one inpaint unit BEFORE the paid
+    // provider call. The conditional increment in `claimDailyQuota`
+    // (`UPDATE ... WHERE count <= limit - N`) is serialized by
+    // Postgres, so a concurrent burst can no longer all read the same
+    // pre-spend count and all reach the provider; losers get 429 with
+    // the same payload shape as the other surfaces (`copy`, `export`,
+    // `label`, `segment` — see issue #1132). The unit is HELD until
+    // either:
+    //   (a) the provider call settles successfully → keep the unit
+    //       (a paid job ran; the #1131/#1262 fire-and-forget path's
+    //       pre-write failure is the only refund path); or
+    //   (b) the InpaintRequest pre-write fails → refund in the catch
+    //       below so a transient DB failure does not bill for work
+    //       that was never done.
+    inpaintClaim = await reserveInpaintQuota(user.id);
+    if (!inpaintClaim.claimed) {
       console.warn(
         JSON.stringify({
           event: "inpaint_daily_quota_exceeded",
           userId: user.id,
-          used: quotaResult.currentUsage,
-          limit: quotaResult.dailyLimit,
+          used: inpaintClaim.used,
+          limit: inpaintClaim.limit,
         })
       );
       return NextResponse.json(
-        { ...quotaResult.payload, message: "Please try again tomorrow." },
+        {
+          ...dailyQuotaExceededPayload(inpaintClaim, "Please try again tomorrow."),
+          code: API_ERROR_RATE_LIMIT_EXCEEDED,
+        },
         { status: 429 }
       );
     }
@@ -95,11 +123,11 @@ async function postInpaint(request: NextRequest) {
     // in status / providerJobId / resultUrl when the submit settles,
     // and the client's status poll reads that row.
     //
-    // Quota is charged in the request handler (after passing the cap
-    // check, before the background is allowed to bill — #1131/#1111:
-    // a concurrent overshoot on the synchronous path is acceptable
-    // here because we cannot atomically claim without a hold row, and
-    // the pre-write happens before the provider call).
+    // Issue #1111: the inpaint unit is already HELD by the atomic
+    // claim above; the background submit failing here does NOT refund
+    // it (a paid provider call ran for the synchronous Alibaba path
+    // and the async queue job is enqueued either way). The only
+    // remaining failure path that can refund is the pre-write below.
     //
     // The synchronous result is populated by Alibaba (#1240). When it
     // is, the background writes status="COMPLETED"+resultUrl so the
@@ -130,11 +158,18 @@ async function postInpaint(request: NextRequest) {
         },
       });
     } catch (createError) {
+      // Issue #1111: the unit is held from the atomic claim above but
+      // the provider call never ran (we never kicked off the
+      // background submit), so a pre-write failure must refund the
+      // claim. Without this, a transient DB blip on the row write
+      // would silently bill the user for work that was not done.
+      await refundInpaintQuota(user.id);
       console.error(
         JSON.stringify({
           event: "inpaint_record_precreate_failed",
           requestId,
           roomId: room.id,
+          quotaRefunded: true,
         }),
         createError
       );
@@ -147,24 +182,6 @@ async function postInpaint(request: NextRequest) {
         { status: 500 }
       );
     }
-
-    // Quota charge (#1131): the counter increments before the provider
-    // call. A failed write here is tolerated because the client's
-    // retry would queue a second billable job; the cap reader still
-    // sees the row and the next submit would see the cap enforced on
-    // its own charge.
-    recordInpaintQuotaWithRetry(user.id).catch((chargeError) => {
-      console.error(
-        JSON.stringify({
-          event: "inpaint_quota_charge_failed",
-          requestId,
-          roomId: room.id,
-          userId: user.id,
-          degraded: true,
-        }),
-        chargeError
-      );
-    });
 
     const submitOptions: InpaintSubmitOptions = {
       imageUrl: parsed.data.imageUrl,
@@ -259,6 +276,18 @@ async function postInpaint(request: NextRequest) {
     });
     return response;
   } catch (error) {
+    // Issue #1111: when the outer catch fires after a successful
+    // claim, the InpaintRequest pre-write has either not happened
+    // (schema/validation error) or succeeded without the background
+    // IIFE having been kicked off yet (the IIFE catches its own
+    // errors and the `void` invocation is the last synchronous step
+    // before this catch can fire, so the IIFE has not started). In
+    // both cases no provider call ran for this request — refund.
+    // The InpaintRequest pre-write failure path is handled
+    // separately by its own try/catch above, which also refunds.
+    if (quotaUserId && inpaintClaim?.claimed) {
+      await refundInpaintQuota(quotaUserId);
+    }
     const classified = classifyInpaintError(error);
     return NextResponse.json(
       { error: classified.error, message: classified.message, retryable: classified.retryable, code: classified.code },

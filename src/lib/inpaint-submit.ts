@@ -17,12 +17,15 @@ import {
 import {
   DEFAULT_DAILY_INPAINT_LIMIT,
   DAILY_LIMIT_ENV_VAR,
+  claimDailyQuota,
   dailyQuotaExceededPayload,
   evaluateDailyQuota,
   getDailyUsage,
   recordDailyUsage,
+  refundDailyQuota,
   resolveDailyLimit,
   type DailyQuotaExceededPayload,
+  type QuotaClaim,
 } from "@/lib/api-quota";
 import { API_ERROR_INPAINT_SUBMIT_FAILED } from "@/lib/api-errors";
 
@@ -218,6 +221,11 @@ const INPAINT_QUOTA_CHARGE_RETRY_DELAY_MS = 200;
  * log it; the caller must NOT convert that into a failed response, because
  * the client's retry would queue a SECOND billable job (#1111 tracks
  * closing the window between the submit and this write).
+ *
+ * Note: issue #1111 replaced the call site in `src/app/api/inpaint/route.ts`
+ * with `reserveInpaintQuota` (atomic pre-submit claim), so this helper is
+ * only exercised by the dead `submitInpaintRequest` orchestrator. Kept so
+ * the orchestrator and its tests still compile.
  */
 export async function recordInpaintQuotaWithRetry(userId: string): Promise<void> {
   for (let attempt = 1; attempt <= INPAINT_QUOTA_CHARGE_ATTEMPTS; attempt += 1) {
@@ -242,6 +250,46 @@ export async function recordInpaintQuotaWithRetry(userId: string): Promise<void>
       );
     }
   }
+}
+
+/**
+ * Atomically reserves one inpaint unit BEFORE the paid provider call
+ * (issue #1111). Mirrors the four other paid surfaces
+ * (`copy`/`export`/`segment`/`label`): the conditional increment in
+ * `claimDailyQuota` (`UPDATE ... WHERE count <= limit - N`) is serialized
+ * by Postgres, so a concurrent burst can no longer all read the same
+ * pre-spend count and all reach the provider; losers get 429. On success
+ * the caller is responsible for either keeping the unit (the billed
+ * provider call ran) or refunding it via `refundInpaintQuota` (the
+ * provider call did NOT run — e.g. the InpaintRequest pre-write failed).
+ *
+ * Wraps the surface-specific env lookup so the route does not have to
+ * reach into `lib/api-quota` for the inpaint defaults.
+ */
+export async function reserveInpaintQuota(
+  userId: string,
+  now: Date = new Date()
+): Promise<QuotaClaim> {
+  const limit =
+    resolveDailyLimit(process.env[DAILY_LIMIT_ENV_VAR.inpaint], DEFAULT_DAILY_INPAINT_LIMIT) ?? 0;
+  return claimDailyQuota("inpaint", userId, limit, 1, now);
+}
+
+/**
+ * Best-effort refund of one previously reserved inpaint unit
+ * (issue #1111). Called when the InpaintRequest pre-write (#1262) fails
+ * so the provider call never runs — without this, a transient DB failure
+ * on the row write would still bill the user for work that was not done.
+ * The background submit failure path does NOT call this: a paid provider
+ * call DID run, so the unit stays charged. The underlying
+ * `refundDailyQuota` never throws, so this is safe to call from a 500
+ * response path.
+ */
+export async function refundInpaintQuota(
+  userId: string,
+  now: Date = new Date()
+): Promise<void> {
+  await refundDailyQuota("inpaint", userId, 1, now);
 }
 
 // ─── Quality Gate ─────────────────────────────────────────────────────────────
