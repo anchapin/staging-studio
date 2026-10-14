@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs/config";
 
 import {
   buildLoopbackRemotePatterns,
@@ -57,4 +58,19 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// Issue #1107: @sentry/nextjs is installed but never initialized because
+// this config never called `withSentryConfig`. Wrapping the config makes
+// the SDK's webpack plugin pick up `sentry.client.config.ts` and
+// `sentry.server.config.ts` at build time, so `Sentry.init` actually
+// runs in dev/prod instead of being dead code. Options object is empty
+// on purpose: we have no org/project/authToken wired today, so source
+// map upload is intentionally not enabled. Production-only exception
+// reporting still works once `NEXT_PUBLIC_SENTRY_DSN` is set in the
+// hosting env. The SDK no-ops the init when DSN is unset, so leaving
+// the wrapper in place is safe in dev (see `sentry.server.config.ts`).
+export default withSentryConfig(nextConfig, {
+  // Suppress the SDK's "tunnel route not configured" log noise on dev
+  // builds; it is not a warning, and `silent: !process.env.CI` would
+  // silence every other build warning at the same time.
+  silent: true,
+});
