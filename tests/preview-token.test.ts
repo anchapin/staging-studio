@@ -56,8 +56,8 @@ describe("verifyPreviewToken positive anchor", () => {
     });
   });
 
-  it("uses a 5-minute default TTL", () => {
-    expect(PREVIEW_TOKEN_TTL_SECONDS).toBe(300);
+  it("uses a 30-minute default TTL (issue #1109: covers slow Browserless queueing)", () => {
+    expect(PREVIEW_TOKEN_TTL_SECONDS).toBe(30 * 60);
   });
 });
 

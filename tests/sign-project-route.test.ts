@@ -84,7 +84,7 @@ vi.mock("@/lib/preview-token", () => ({
   signPreviewToken: vi.fn(),
   verifyPreviewToken: vi.fn(),
   PREVIEW_TOKEN_QUERY_PARAM: "token",
-  PREVIEW_TOKEN_TTL_SECONDS: 300,
+  PREVIEW_TOKEN_TTL_SECONDS: 30 * 60,
 }));
 
 vi.mock("@/lib/retry", () => ({

@@ -128,6 +128,20 @@ function callExportRoute(projectId?: string): Promise<Response> {
   return POST(request as unknown as NextRequest);
 }
 
+/**
+ * Build a POST whose `body` is the raw string (not JSON.stringify'd) so the
+ * route exercises `req.json()` parse failures. Issue #1109: a malformed
+ * upload must answer 400, not 500.
+ */
+function callExportRouteWithRawBody(rawBody: string): Promise<Response> {
+  const request = new Request("http://localhost/api/v1/export-pdf", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: rawBody,
+  });
+  return POST(request as unknown as NextRequest);
+}
+
 describe("POST /api/v1/export-pdf — projectId validation", () => {
   it("returns 400 when projectId is missing", async () => {
     const response = await callExportRoute();
@@ -154,6 +168,35 @@ describe("POST /api/v1/export-pdf — projectId validation", () => {
     const response = await callExportRoute(PROJECT_ID);
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toBe("application/pdf");
+  });
+});
+
+/**
+ * Issue #1109: a malformed request body must answer 400 (client-side
+ * mistake), not 500 (server error). Pinned for `/api/v1/export-pdf` only
+ * — the unversioned route still throws to the catch-all by design, so
+ * don't mirror this block there.
+ */
+describe("POST /api/v1/export-pdf — payload validation (issue #1109)", () => {
+  it("returns 400 when the body is not valid JSON", async () => {
+    const response = await callExportRouteWithRawBody("{not json");
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.code).toBe("invalid-request");
+  });
+
+  it("returns 400 when the body is a JSON array, not an object", async () => {
+    const response = await callExportRouteWithRawBody(JSON.stringify([1, 2, 3]));
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.code).toBe("invalid-request");
+  });
+
+  it("returns 400 when the body is a JSON null", async () => {
+    const response = await callExportRouteWithRawBody("null");
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.code).toBe("invalid-request");
   });
 });
 
