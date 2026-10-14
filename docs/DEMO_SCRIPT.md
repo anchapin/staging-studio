@@ -1,7 +1,9 @@
-# PoC Demo Script — Lauren Chapin (Sep 26–27)
+# PoC Demo Script — Lauren Chapin
+
+> **Status (see #1175):** Demo date is **TBD** — to be re-dated when the schedule is confirmed. The original Sep 26–27 date is stale. Code blockers 2-5 on the demo gate are now closed (#1176, #1218 + related); remaining items on #1175 are external to this repo (demo date confirmation, fallback PDF regenerated from production on the demo laptop, and a rehearsal-runbook §7 re-run). This doc is the canonical beat-by-beat script; touch the date/URL only after #1175 is updated.
 
 Total planned content: **~12.5 minutes** (under the 15-minute cap). Driver: Alex. Lauren art-directs.
-URL: `https://staging-studio-kappa.vercel.app` (bookmarked; exact URL, no trailing slash).
+URL: **TBD — re-date when schedule is confirmed.** Check #1175 for the current production URL and demo date.
 
 ## Pre-flight (before she arrives — see T10)
 

@@ -1,12 +1,14 @@
 # develop Freeze Policy
 
+> **Status (see #1175):** The original Sep 26–27 demo date is stale. Code blockers 2-5 on the demo gate are now closed; remaining items on #1175 are external to this repo (demo date confirmation, fallback PDF regenerated from production on the demo laptop, and a rehearsal-runbook §7 re-run). The freeze will be re-imposed when the next demo date is fixed — until then, normal `develop` workflow applies. This doc is kept as the standing template.
+
 ## Overview
 
-**Status:** FROZEN
-**Effective:** Thu Sep 24 evening (after final push)
-**Until:** Post-demo (Sep 26–27)
+**Status:** NOT FROZEN — re-impose when next demo date is confirmed (see #1175)
+**Effective (next freeze):** TBD
+**Until (next demo):** TBD
 
-The `develop` branch is frozen and will remain untouched until after the demo is complete. All further work branches from `develop`, not directly to it.
+Until the next freeze takes effect, normal development workflow applies on `develop`. When the next freeze is announced, the rules below apply for the duration.
 
 ## What "Frozen" Means
 
@@ -32,4 +34,4 @@ This freeze ensures the `develop` branch remains in a clean, demo-ready state. T
 
 ## Lifting the Freeze
 
-The freeze will be lifted after the demo (Sep 26–27). After that, normal development workflow resumes on `develop`.
+The freeze lifts after each demo. Lift by PR or direct merge into `develop`, then resume normal workflow.
