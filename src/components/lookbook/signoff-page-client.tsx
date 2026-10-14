@@ -38,12 +38,35 @@ export function SignoffPageClient({ user, project, rooms, previewToken }: Signof
   const [generatedAt] = useState(() => new Date());
 
   const submitSignature = async (dataUrl: string) => {
+    // Issue #1113: the legally-worded approval checkbox MUST be ticked
+    // before the signature reaches the server. `SignatureCanvas`
+    // already disables its inner "Sign & Approve" button while
+    // `disabled` is true (we pass `disabled={!agreed}` below), so
+    // this is a defense-in-depth early-return — the server-side
+    // `signProjectRequestSchema` would refuse `consentAttested: false`
+    // anyway, but failing fast here keeps the user from a wasted
+    // network round-trip and a confusing 400 toast.
+    if (!agreed) {
+      setSaveState((prev) =>
+        nextSignatureSaveState(prev, {
+          kind: "fail",
+          error:
+            "Please confirm you have read and accept the staging-plan approval statement before signing.",
+        })
+      );
+      return;
+    }
     setSaveState((prev) => nextSignatureSaveState(prev, { kind: "save", dataUrl }));
     try {
       const res = await fetch("/api/sign-project", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: project.id, signatureDataUrl: dataUrl, token: previewToken }),
+        body: JSON.stringify({
+          projectId: project.id,
+          signatureDataUrl: dataUrl,
+          token: previewToken,
+          consentAttested: true,
+        }),
       });
       if (!res.ok) {
         const data = await res.json();
@@ -162,7 +185,12 @@ export function SignoffPageClient({ user, project, rooms, previewToken }: Signof
             </p>
           </div>
 
-          {/* Signature canvas */}
+          {/* Signature canvas — issue #1113: gated on the consent
+              checkbox. `SignatureCanvas` already disables its inner
+              "Sign & Approve" button when `disabled` is true, so passing
+              `disabled={!agreed}` here is what stops a client from
+              burning the record without ticking the box. The canvas
+              itself is #1114's domain and is intentionally left alone. */}
           <div>
             <p className="block font-jakarta text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
               Signature
@@ -170,11 +198,14 @@ export function SignoffPageClient({ user, project, rooms, previewToken }: Signof
             <SignatureCanvas
               onSave={handleSave}
               clientName={project.clientName}
-              disabled={false}
+              disabled={!agreed}
             />
           </div>
 
-          {/* Approval checkbox */}
+          {/* Approval checkbox — issue #1113: this state is finally
+              read. The checkbox is rendered AFTER the canvas so the
+              canvas stays locked until consent is given. aria-disabled
+              on the disabled canvas is provided by SignatureCanvas. */}
           <div className="space-y-2">
             <label className="flex items-start gap-3 cursor-pointer group">
               <input
@@ -187,6 +218,14 @@ export function SignoffPageClient({ user, project, rooms, previewToken }: Signof
                 {APPROVAL_TEXT}
               </span>
             </label>
+            {!agreed && (
+              <p
+                className="font-jakarta text-xs text-stone-500 pl-7"
+                aria-live="polite"
+              >
+                Tick the box above to enable signing.
+              </p>
+            )}
           </div>
 
           {saveState.kind === "failed" && (

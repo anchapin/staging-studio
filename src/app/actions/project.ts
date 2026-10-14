@@ -84,20 +84,29 @@ export async function saveProjectMetadata(
  * Prisma `where` filter (`id: projectId, userId: user.id`). The payload is
  * validated with `signProjectPayloadSchema` (issue #684) — the same
  * validator the session-less `/api/sign-project` route uses — so a
- * malformed projectId, non-PNG data URL, or oversized signature (over
- * ~1 MB) can never reach Prisma from either write path.
+ * malformed projectId, non-PNG data URL, oversized signature (over
+ * ~1 MB), or un-attested consent (issue #1113) can never reach Prisma
+ * from either write path.
  *
  * @param projectId ID of the project to sign off.
  * @param signatureDataUrl PNG data URL of the signature canvas.
+ * @param consentAttested Must be `true` — confirms the legally-worded
+ *   approval statement was shown and accepted. Recorded on the project
+ *   row alongside the signature so the attestation is auditable.
  * @returns `{ success: true }` on write, or
  * `{ success: false, error }` when unauthenticated, the payload is
  * invalid, or the save fails.
  */
 export async function saveProjectSignature(
   projectId: string,
-  signatureDataUrl: string
+  signatureDataUrl: string,
+  consentAttested: boolean
 ): Promise<{ success: boolean; error?: string }> {
-  const parsed = signProjectPayloadSchema.safeParse({ projectId, signatureDataUrl });
+  const parsed = signProjectPayloadSchema.safeParse({
+    projectId,
+    signatureDataUrl,
+    consentAttested,
+  });
   if (!parsed.success) {
     return {
       success: false,
@@ -112,7 +121,9 @@ export async function saveProjectSignature(
   }
 
   // Capture timestamp once so retries don't shift the recorded time
-  // (same concern as issue #1146 for the route handler).
+  // (same concern as issue #1146 for the route handler). Reused for
+  // the consent attestation timestamp (issue #1113) so the two fields
+  // agree on the persisted record.
   const signatureTimestamp = new Date();
 
   try {
@@ -134,6 +145,11 @@ export async function saveProjectSignature(
         clientSignature: parsed.data.signatureDataUrl,
         clientSignatureStatus: "Signed",
         clientSignatureTimestamp: signatureTimestamp,
+        // Issue #1113: persist the consent attestation alongside the
+        // signature. The schema (`literal(true)`) already guarantees we
+        // only reach this write when the client ticked the box.
+        clientConsentAttested: true,
+        clientConsentAttestedAt: signatureTimestamp,
       },
     });
 
