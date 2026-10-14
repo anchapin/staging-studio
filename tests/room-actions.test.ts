@@ -53,6 +53,10 @@ beforeEach(() => {
     recommendation: null,
     buyerPsychology: null,
     checklistItems: null,
+    // issue #1182 room-finish fields (always null in fixture)
+    materialFinishId: null,
+    materialFinishDirectives: null,
+    materialFinishConceptLabel: null,
     createdAt: new Date(),
   });
 });
@@ -93,6 +97,10 @@ describe("saveRoomMetadata", () => {
       recommendation: null,
       buyerPsychology: null,
       checklistItems: null,
+      // issue #1182 room-finish fields (always null in fixture)
+      materialFinishId: null,
+      materialFinishDirectives: null,
+      materialFinishConceptLabel: null,
       createdAt: new Date(),
     });
 

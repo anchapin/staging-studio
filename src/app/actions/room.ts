@@ -5,4 +5,5 @@ export {
   deleteVariantAfterImage,
 } from "./room-variants";
 export { saveRoomMetadata } from "./room-metadata";
+export { saveRoomFinish } from "./room-finish";
 export { reorderRooms } from "./room-delete";
