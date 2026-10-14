@@ -62,6 +62,10 @@ const mockProject = {
   clientSignature: null,
   clientSignatureStatus: "Pending",
   clientSignatureTimestamp: null,
+  // Issue #1113: consent attestation columns. Mirrors the Prisma
+  // schema defaults so the mock satisfies the strict update type.
+  clientConsentAttested: false,
+  clientConsentAttestedAt: null,
   // Issue #1186: default-on; the route reads this via the
   // `shouldRenderVirtuallyStagedBadge` helper.
   virtuallyStagedLabelEnabled: true,

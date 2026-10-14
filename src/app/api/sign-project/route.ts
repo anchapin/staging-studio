@@ -21,6 +21,7 @@ import {
   API_ERROR_ALREADY_SIGNED,
   API_ERROR_SAVE_FAILED,
   API_ERROR_INTERNAL_SERVER,
+  API_ERROR_INVALID_REQUEST,
 } from "@/lib/api-errors";
 
 const SIGN_ERROR_COPY = {
@@ -50,6 +51,12 @@ const SIGN_ERROR_COPY = {
     message: "Unable to save the signature. Please try again.",
     code: API_ERROR_SAVE_FAILED,
   },
+  consentRequired: {
+    error: "Consent required",
+    message:
+      "Please confirm you have read and accept the staging-plan approval statement before signing.",
+    code: API_ERROR_INVALID_REQUEST,
+  },
 } as const;
 
 /** Maps the first schema issue to the matching HTTP error response. */
@@ -60,6 +67,13 @@ function validationFailure(error: ZodError): NextResponse {
   }
   if (field === "signatureDataUrl") {
     return NextResponse.json(SIGN_ERROR_COPY.invalidSignature, { status: 400 });
+  }
+  if (field === "consentAttested") {
+    // Issue #1113: an un-ticked (or explicitly false) consent box
+    // must be a 400, not a generic 401 — the token is fine, the
+    // signature PNG is fine, the client just didn't confirm the
+    // attestation that the form prominently displays.
+    return NextResponse.json(SIGN_ERROR_COPY.consentRequired, { status: 400 });
   }
   return NextResponse.json(SIGN_ERROR_COPY.invalidToken, { status: 401 });
 }
@@ -133,7 +147,9 @@ export async function POST(req: NextRequest) {
       }
     }
     // Capture timestamp once before the retry loop so retries don't shift
-    // the recorded time (issue #1146).
+    // the recorded time (issue #1146). Reused for both the signature
+    // timestamp and the consent attestation timestamp (issue #1113) so
+    // they agree to the millisecond on the persisted record.
     const signatureTimestamp = new Date();
 
     try {
@@ -154,6 +170,11 @@ export async function POST(req: NextRequest) {
               clientSignature: signatureDataUrl,
               clientSignatureStatus: "Signed",
               clientSignatureTimestamp: signatureTimestamp,
+              // Issue #1113: persist the consent attestation alongside the
+              // signature so a `Signed` record without `clientConsentAttestedAt`
+              // exposes a missing consent on the legacy/import path.
+              clientConsentAttested: true,
+              clientConsentAttestedAt: signatureTimestamp,
             },
           }),
         3,
