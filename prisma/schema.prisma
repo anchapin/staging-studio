@@ -102,6 +102,18 @@ model Room {
   inpaintVersions InpaintVersion[]
   selectionLogs  SelectionLog[]
 
+  // Issue #1182: room-level finish reuse. When a room has multiple
+  // photos (different angles of the same kitchen, etc.) the user can
+  // save one chosen finish (MaterialSwatch + directives + concept
+  // label) on the room, then opt-in to seed it into the next photo's
+  // inpaint directives. Nullable + onDelete: SetNull so removing the
+  // referenced swatch clears the choice without cascade-deleting the
+  // room's directive text.
+  materialFinishId        String?
+  materialFinish          MaterialSwatch? @relation("RoomMaterialFinish", fields: [materialFinishId], references: [id], onDelete: SetNull)
+  materialFinishDirectives  String? // the staging directives captured with the finish
+  materialFinishConceptLabel String? // the SAM/GPT-4o-mini concept label captured with the finish
+
   @@index([projectId])
 }
 
@@ -204,6 +216,8 @@ model MaterialSwatch {
   vendor      String? // e.g. "Wayfair", "Sherwin-Williams"
   sku         String? // e.g. "WF-HW-1234"
   sortOrder   Int     @default(0)
+
+  roomsUsingFinish Room[] @relation("RoomMaterialFinish") // issue #1182 inverse
 
   @@index([projectId])
 }
