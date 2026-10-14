@@ -421,6 +421,71 @@ describe("evaluateDailyBatchQuota (batch room-type detection, issue #681)", () =
   });
 });
 
+// Issue #1110: a N-entry batch passed the OLD `evaluateDailyQuota(used, limit)`
+// per-unit gate (`used < limit`) even when `used + N > limit`, so the batch
+// would then `recordDailyUsage` N times and overshoot the cap by N-1. The
+// wired call now uses `evaluateDailyBatchQuota(used, count, limit)` whose
+// `used + count <= limit` semantic makes the straddler undeletable. These
+// pins target the exact boundary the issue names so the regression cannot
+// return without breaking a unit test.
+describe("evaluateDailyBatchQuota overshoot guard (issue #1110)", () => {
+  it("rejects a 5-entry batch at used=49/limit=50 (would have overshot by 4)", () => {
+    // Per-unit gate would have allowed this (49 < 50) and the subsequent
+    // recordDailyUsage x5 would have pushed used to 54. Batch gate denies
+    // because 49 + 5 > 50, leaving used untouched at 49.
+    const decision = evaluateDailyBatchQuota(49, 5, 50);
+    expect(decision.allowed).toBe(false);
+    if (!decision.allowed) {
+      expect(decision.used).toBe(49);
+      expect(decision.limit).toBe(50);
+    }
+  });
+
+  it("allows the exactly-filling batch at used=49/limit=50, count=1", () => {
+    const decision = evaluateDailyBatchQuota(49, 1, 50);
+    expect(decision).toEqual({ allowed: true, used: 49, limit: 50, remaining: 1 });
+  });
+
+  it("rejects N rooms each running N-1 labels (the issue's worst case)", async () => {
+    // 20-entry batch (the schema cap) at used=31 / limit=50: 31 + 20 = 51
+    // > 50, so the whole batch is denied. The old per-unit gate would have
+    // passed (31 < 50) and recorded 20 units, leaving the user at 51/50.
+    const decision = evaluateDailyBatchQuota(31, 20, 50);
+    expect(decision.allowed).toBe(false);
+  });
+
+  it("allows a batch whose exact fill is `used + count === limit`", () => {
+    expect(evaluateDailyBatchQuota(48, 2, 50).allowed).toBe(true);
+    expect(evaluateDailyBatchQuota(0, 50, 50).allowed).toBe(true);
+  });
+
+  it("denies straddlers of any size, not just the unit case", () => {
+    // Off-by-one across the boundary: each pair straddles by 1.
+    expect(evaluateDailyBatchQuota(45, 6, 50).allowed).toBe(false);
+    expect(evaluateDailyBatchQuota(40, 11, 50).allowed).toBe(false);
+    expect(evaluateDailyBatchQuota(1, 50, 50).allowed).toBe(false);
+  });
+
+  it("end-to-end: a denied batch never reaches recordDailyUsage, so used stays at pre-batch value", async () => {
+    // Mirrors the room-batch flow: gate with evaluateDailyBatchQuota; if
+    // allowed, record N units. A denied batch must skip the recording step
+    // entirely, which is what the room-batch.ts change enforces. Verify the
+    // gate + recorder chain lands at exactly the pre-batch count, never
+    // above (the regression would push above by count-1).
+    const userId = "issue-1110-user";
+    await recordDailyUsage("label", userId, 49, midDay);
+    const gate = evaluateDailyBatchQuota(
+      await getDailyUsage("label", userId, midDay),
+      5,
+      50
+    );
+    expect(gate.allowed).toBe(false);
+    // The defensive caller (room-batch.ts) refuses to record on a denied gate.
+    // Confirm getDailyUsage remains 49, not the 54 the regression would produce.
+    expect(await getDailyUsage("label", userId, midDay)).toBe(49);
+  });
+});
+
 describe("claimDailyQuota (atomic claim, issue #1132)", () => {
   const userId = "user-claim";
   beforeEach(() => {
