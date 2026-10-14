@@ -18,6 +18,8 @@ const mockDetectRoomType = vi.fn();
 
 const mockEvaluateDailyQuota = vi.fn();
 
+const mockEvaluateDailyBatchQuota = vi.fn();
+
 const mockRecordDailyUsage = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
@@ -39,6 +41,7 @@ vi.mock("@/lib/api-quota", async (importOriginal) => {
     ...actual,
     getDailyUsage: mockGetDailyUsage,
     evaluateDailyQuota: mockEvaluateDailyQuota,
+    evaluateDailyBatchQuota: mockEvaluateDailyBatchQuota,
     recordDailyUsage: mockRecordDailyUsage,
   };
 });
@@ -104,7 +107,7 @@ describe("detectBatchRoomTypes", () => {
     ];
 
     // Simulate quota exceeded - used (20) >= limit (20)
-    mockEvaluateDailyQuota.mockReturnValue({
+    mockEvaluateDailyBatchQuota.mockReturnValue({
       allowed: false,
       used: 20,
       limit: 20,
@@ -130,7 +133,7 @@ describe("detectBatchRoomTypes", () => {
     ];
 
     // used (5) < limit (20) so allowed
-    mockEvaluateDailyQuota.mockReturnValue({
+    mockEvaluateDailyBatchQuota.mockReturnValue({
       allowed: true,
       used: 5,
       limit: 20,
