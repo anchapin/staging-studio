@@ -207,6 +207,19 @@ vi.mock("@/lib/api-quota", () => ({
   })),
   getDailyUsage: vi.fn(async () => 0),
   recordDailyUsage: vi.fn(async () => 1),
+  // Issue #1111: the route now atomically CLAIMS via `claimDailyQuota`
+  // (and refunds via `refundDailyQuota` on the pre-write failure path)
+  // instead of using the post-submit `recordDailyUsage` upsert. Default
+  // both to "claim succeeded" so existing happy-path tests stay green
+  // without each one needing to set them up.
+  claimDailyQuota: vi.fn(async () => ({
+    claimed: true,
+    allowed: true,
+    used: 0,
+    limit: 20,
+    remaining: 20,
+  })),
+  refundDailyQuota: vi.fn(async () => {}),
 }));
 
 vi.mock("@/lib/error-classify", () => ({
@@ -286,19 +299,29 @@ describe("POST /api/inpaint", () => {
   // -------------------------------------------------------------------------
 
   it("returns 429 when daily inpaint quota is exceeded", async () => {
-    vi.mocked(getDailyUsage).mockResolvedValue(10);
-    vi.mocked(evaluateDailyQuota).mockImplementation(() => ({
+    // Issue #1111: the route now atomically CLAIMS via claimDailyQuota
+    // before the paid provider call; the prior
+    // getDailyUsage+evaluateDailyQuota read-only check is gone. Make
+    // the claim return denied so the route takes the 429 path.
+    const { claimDailyQuota } = await import("@/lib/api-quota");
+    vi.mocked(claimDailyQuota).mockResolvedValueOnce({
+      claimed: false,
       allowed: false,
       used: 10,
       limit: 10,
       resetsAt: new Date(Date.now() + 86400000).toISOString(),
-    }));
+    });
 
     const res = await POST(makeRequest({ roomId: MOCK_ROOM_ID, sourceSlot: 0, variantSlot: 0 }));
 
     expect(res.status).toBe(429);
     const json = await res.json();
-    expect(json.code).toBe("DAILY_LIMIT_EXCEEDED");
+    // The 429 body carries `code: API_ERROR_RATE_LIMIT_EXCEEDED`
+    // ("rate-limit-exceeded"), the same code the other paid surfaces
+    // set on their 429s — issue #1132. The mock's
+    // `dailyQuotaExceededPayload` is also spread in first, so the
+    // spread's `code` is overridden by the route's explicit override.
+    expect(json.code).toBe("rate-limit-exceeded");
   });
 
   // -------------------------------------------------------------------------
@@ -484,18 +507,31 @@ describe("POST /api/inpaint", () => {
     const res = await POST(makeRequest({ roomId: MOCK_ROOM_ID, sourceSlot: 0, variantSlot: 0 }));
 
     expect(res.status).toBe(200);
-    // The cap is read from the counter row...
-    expect(getDailyUsage).toHaveBeenCalledWith("inpaint", MOCK_USER_ID);
-    // ...and a billed fal job writes a counter row, so deleting the room
-    // (which cascades its InpaintRequest rows away) cannot refund it.
-    expect(recordDailyUsage).toHaveBeenCalledWith("inpaint", MOCK_USER_ID);
+    // Issue #1111: the route now atomically CLAIMS via claimDailyQuota
+    // before the paid provider call (mirrors the other four paid
+    // surfaces — issue #1132). The post-submit recordDailyUsage upsert
+    // is gone; the claim IS the charge.
+    const { claimDailyQuota } = await import("@/lib/api-quota");
+    expect(claimDailyQuota).toHaveBeenCalledWith(
+      "inpaint",
+      MOCK_USER_ID,
+      20,
+      1,
+      expect.any(Date)
+    );
     // The old derivation: usage counted from rows that cascade-delete.
     expect(prisma.inpaintRequest.count).not.toHaveBeenCalled();
   });
 
   it("does not charge the ledger when the quota gate blocks the request", async () => {
-    vi.mocked(getDailyUsage).mockResolvedValue(20);
-    vi.mocked(evaluateDailyQuota).mockReturnValue({
+    // Issue #1111: the route now atomically CLAIMS via claimDailyQuota
+    // before the paid provider call; the prior
+    // getDailyUsage+evaluateDailyQuota read-only check is gone. Make
+    // the claim return denied so the route takes the 429 path and
+    // does not fire the provider call.
+    const { claimDailyQuota } = await import("@/lib/api-quota");
+    vi.mocked(claimDailyQuota).mockResolvedValueOnce({
+      claimed: false,
       allowed: false,
       used: 20,
       limit: 20,
@@ -506,7 +542,6 @@ describe("POST /api/inpaint", () => {
 
     expect(res.status).toBe(429);
     expect(falQueueSubmitWithCircuitBreaker).not.toHaveBeenCalled();
-    expect(recordDailyUsage).not.toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------

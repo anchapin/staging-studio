@@ -64,10 +64,12 @@ export const FAL_SPEND_CALL =
  * Every real entry point into the daily-cap machinery in `lib/api-quota`.
  * The trailing paren is required: an import that is never *called* is not
  * enforcement, and matching the bare name let an unused import satisfy this
- * guard.
+ * guard. `reserveInpaintQuota` is the inpaint-specific wrapper that calls
+ * `claimDailyQuota` internally (#1111) — matching it here lets the route
+ * layer keep its surface-specific helper without losing the cap proof.
  */
 export const QUOTA_ENFORCEMENT =
-  /checkDailyQuota\s*\(|evaluateDailyQuota\s*\(|evaluateDailyBatchQuota\s*\(|claimDailyQuota\s*\(/;
+  /checkDailyQuota\s*\(|evaluateDailyQuota\s*\(|evaluateDailyBatchQuota\s*\(|claimDailyQuota\s*\(|reserveInpaintQuota\s*\(/;
 
 /**
  * The legacy model id, matched exactly. The current SAM 3.1 endpoint
