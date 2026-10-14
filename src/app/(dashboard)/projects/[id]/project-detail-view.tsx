@@ -24,6 +24,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { createClient } from "@/lib/supabase";
 import { resolveFocusedRoom, resolveRoomLayoutMode } from "@/lib/focus-mode";
 import { confirmLeaveEditorInBrowser } from "@/lib/editor-leave";
+import { reorderRoomsById } from "@/lib/room-reorder";
 import {
   isCompleteVariantPair,
   resolveStagedResultDisplay,
@@ -403,19 +404,24 @@ export default function ProjectDetailView({
     })
   );
 
-  // Issue #493: handle room reordering via drag-and-drop
+  // Issue #493: handle room reordering via drag-and-drop.
+  // Reorder math lives in src/lib/room-reorder.ts so the contract is
+  // vitest-pinnable for the future @dnd-kit/react migration (issue #1327).
   const handleDragEnd = useCallback(
     async (event: DragEndEvent) => {
       const { active, over } = event;
       if (!over || active.id === over.id || !project) return;
 
-      const oldIndex = project.rooms.findIndex((r) => r.id === active.id);
-      const newIndex = project.rooms.findIndex((r) => r.id === over.id);
-      if (oldIndex === -1 || newIndex === -1) return;
-
-      const reorderedRooms = [...project.rooms];
-      const [movedRoom] = reorderedRooms.splice(oldIndex, 1);
-      reorderedRooms.splice(newIndex, 0, movedRoom);
+      const reorderedRooms = reorderRoomsById(
+        project.rooms,
+        String(active.id),
+        String(over.id),
+      );
+      // reorderRoomsById returns the same array reference on no-op
+      // (activeId === overId is already filtered above, but the helper
+      // also bails on missing ids — same array reference means the
+      // optimistic update is a no-op too).
+      if (reorderedRooms === project.rooms) return;
 
       // Optimistic update
       setProject((prev) =>
