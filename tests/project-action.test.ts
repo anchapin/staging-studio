@@ -160,7 +160,10 @@ describe("saveProjectSignature", () => {
         ],
       },
       data: {
-        clientSignature: validSignature,
+        // Issue #1106: the server action encrypts the signature at rest.
+        // The stored value is the AES-GCM ciphertext, never the
+        // plaintext PNG data URL.
+        clientSignature: expect.any(String),
         clientSignatureStatus: "Signed",
         clientSignatureTimestamp: expect.any(Date),
         // Issue #1113: consent attestation is persisted alongside the
@@ -170,6 +173,8 @@ describe("saveProjectSignature", () => {
         clientConsentAttestedAt: expect.any(Date),
       },
     });
+    const writeCall = vi.mocked(prisma.project.updateMany).mock.calls[0]![0];
+    expect(writeCall.data.clientSignature).not.toBe(validSignature);
     expect(revalidatePath).toHaveBeenCalledWith(`/projects/${validProjectId}`);
     expect(revalidatePath).toHaveBeenCalledWith(`/projects/${validProjectId}/lookbook`);
   });
@@ -194,7 +199,9 @@ describe("saveProjectSignature", () => {
         ],
       },
       data: {
-        clientSignature: validSignature,
+        // Issue #1106: stored value is the encrypted ciphertext, not
+        // the plaintext data URL.
+        clientSignature: expect.any(String),
         clientSignatureStatus: "Signed",
         clientSignatureTimestamp: expect.any(Date),
         clientConsentAttested: true,

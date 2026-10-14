@@ -170,7 +170,10 @@ describe("POST /api/sign-project — issue #1078 token-first gate order", () => 
         ],
       },
       data: {
-        clientSignature: TINY_PNG_DATA_URL,
+        // Issue #1106: the route encrypts the signature before writing.
+        // The stored value is the AES-GCM ciphertext (a non-empty
+        // base64 string), never the plaintext PNG data URL.
+        clientSignature: expect.any(String),
         clientSignatureStatus: "Signed",
         clientSignatureTimestamp: expect.any(Date),
         // Issue #1113: consent attestation is persisted alongside the
@@ -179,9 +182,13 @@ describe("POST /api/sign-project — issue #1078 token-first gate order", () => 
         clientConsentAttestedAt: expect.any(Date),
       },
     });
+    const writeCall = vi.mocked(prisma.project.updateMany).mock.calls[0]![0];
+    // Issue #1106: the route encrypts the signature before writing, so
+    // the stored value is the AES-GCM ciphertext rather than the raw
+    // PNG data URL.
+    expect(writeCall.data.clientSignature).not.toBe(TINY_PNG_DATA_URL);
     // The consent timestamp shares the same instance as the signature
     // timestamp so the two fields agree to the millisecond on disk.
-    const writeCall = vi.mocked(prisma.project.updateMany).mock.calls[0]![0];
     expect(writeCall.data.clientConsentAttestedAt).toBe(
       writeCall.data.clientSignatureTimestamp
     );
