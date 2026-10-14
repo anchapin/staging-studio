@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { decryptSignature } from "@/lib/signature-encryption";
 import type { PreviewProject } from "@/app/(print)/preview/[id]/lookbook-preview-view";
 
 import { LookbookEditor } from "./lookbook-editor";
@@ -85,6 +86,16 @@ export default async function LookbookPage({ params }: LookbookPageProps) {
     notFound();
   }
 
+  // Issue #1106: `clientSignature` is stored encrypted at rest. Decrypt
+  // here so the dashboard's lookbook view (which reuses the same
+  // LookbookPreviewView as /preview/[id]) shows the signature image
+  // rather than the ciphertext blob. A missing or empty stored value
+  // is allowed (unsigned project) and is passed through as null.
+  const decryptedSignature =
+    project.clientSignature && project.clientSignature.length > 0
+      ? await decryptSignature(project.clientSignature)
+      : null;
+
   const previewProject: PreviewProject = {
     id: project.id,
     propertyAddress: project.propertyAddress,
@@ -94,7 +105,7 @@ export default async function LookbookPage({ params }: LookbookPageProps) {
     // Issue #1186: disclosure toggle, threaded into the preview render.
     virtuallyStagedLabelEnabled: project.virtuallyStagedLabelEnabled,
     roiMetrics: buildROIMetrics(project),
-    clientSignature: project.clientSignature,
+    clientSignature: decryptedSignature,
     clientSignatureStatus: project.clientSignatureStatus,
     clientSignatureTimestamp: project.clientSignatureTimestamp
       ? project.clientSignatureTimestamp.toISOString()

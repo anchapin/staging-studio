@@ -7,6 +7,7 @@ import {
   type ProjectMetadataInput,
 } from "@/lib/metadata-schemas";
 import { signProjectPayloadSchema } from "@/lib/sign-project-schema";
+import { encryptSignature } from "@/lib/signature-encryption";
 import { virtuallyStagedLabelEnabledSchema } from "@/lib/metadata-schemas";
 import { revalidatePath } from "next/cache";
 
@@ -126,6 +127,10 @@ export async function saveProjectSignature(
   // agree on the persisted record.
   const signatureTimestamp = new Date();
 
+  // Issue #1106: encrypt the signature at rest with AES-GCM-256. The
+  // PNG data URL never reaches Postgres; consumers decrypt it on read.
+  const encryptedSignature = await encryptSignature(parsed.data.signatureDataUrl);
+
   try {
     // Use updateMany with a conditional guard so a second signer cannot
     // overwrite an existing signature (issue #1146).
@@ -142,7 +147,7 @@ export async function saveProjectSignature(
         ],
       },
       data: {
-        clientSignature: parsed.data.signatureDataUrl,
+        clientSignature: encryptedSignature,
         clientSignatureStatus: "Signed",
         clientSignatureTimestamp: signatureTimestamp,
         // Issue #1113: persist the consent attestation alongside the

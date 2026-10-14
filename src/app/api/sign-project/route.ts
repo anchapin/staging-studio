@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-auth";
 import { verifyPreviewToken } from "@/lib/preview-token";
 import { withRetry } from "@/lib/retry";
+import { encryptSignature } from "@/lib/signature-encryption";
 import {
   signProjectRequestSchema,
   tokenMatchesProject,
@@ -152,6 +153,14 @@ export async function POST(req: NextRequest) {
     // they agree to the millisecond on the persisted record.
     const signatureTimestamp = new Date();
 
+    // Issue #1106: encrypt the signature at rest with AES-GCM-256.
+    // The PNG data URL never reaches Postgres; consumers decrypt it on
+    // read. The encryption is moved OUT of the retry loop because (a)
+    // each retry would produce a fresh ciphertext under a fresh IV,
+    // making the persisted value depend on which attempt won, and
+    // (b) encryption is not the failure mode withRetry was added for.
+    const encryptedSignature = await encryptSignature(signatureDataUrl);
+
     try {
       const { count } = await withRetry(
         async () =>
@@ -167,7 +176,7 @@ export async function POST(req: NextRequest) {
               ],
             },
             data: {
-              clientSignature: signatureDataUrl,
+              clientSignature: encryptedSignature,
               clientSignatureStatus: "Signed",
               clientSignatureTimestamp: signatureTimestamp,
               // Issue #1113: persist the consent attestation alongside the

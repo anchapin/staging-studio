@@ -127,7 +127,10 @@ describe("POST /api/sign-project", () => {
         ],
       },
       data: {
-        clientSignature: MOCK_SIGNATURE,
+        // Issue #1106: the route encrypts the signature at rest. The
+        // stored value is the AES-GCM ciphertext, never the plaintext
+        // PNG data URL.
+        clientSignature: expect.any(String),
         clientSignatureStatus: "Signed",
         clientSignatureTimestamp: expect.any(Date),
         // Issue #1113: consent attestation is written alongside the
@@ -161,13 +164,17 @@ describe("POST /api/sign-project", () => {
         ],
       },
       data: {
-        clientSignature: MOCK_SIGNATURE,
+        // Issue #1106: the stored value is the AES-GCM ciphertext
+        // (a non-empty base64 string), not the plaintext PNG data URL.
+        clientSignature: expect.any(String),
         clientSignatureStatus: "Signed",
         clientSignatureTimestamp: expect.any(Date),
         clientConsentAttested: true,
         clientConsentAttestedAt: expect.any(Date),
       },
     });
+    const writeCall = vi.mocked(prisma.project.updateMany).mock.calls[0]![0];
+    expect(writeCall.data.clientSignature).not.toBe(MOCK_SIGNATURE);
   });
 
   it("captures timestamp once before retry loop (issue #1146)", async () => {
