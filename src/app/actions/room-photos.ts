@@ -10,6 +10,11 @@ import {
   ROOM_PHOTOS_BUCKET,
   readUploadedObjectSize,
 } from "@/lib/storage-cleanup";
+import { detectRoomType } from "@/lib/room-type-detection";
+import {
+  isUsableRoomTypeLabel,
+  shouldAutoClassifyRoomName,
+} from "@/lib/auto-classify-room";
 
 const ALLOWED_IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp"];
 
@@ -180,6 +185,16 @@ export async function getSignedUploadUrl(
  * `revalidatePath(/projects/{projectId})` so the new image renders on
  * the next request.
  *
+ * Issue #1180 — auto-classify (single-room path): after the photo link
+ * succeeds, if the room's current `name` is blank or the explicit
+ * `"Other"` placeholder, the action fires `detectRoomType` (gpt-4o-mini
+ * vision) against the just-uploaded public URL and writes the detected
+ * label back as the room name. A non-blank user-typed name is never
+ * overwritten, a low-confidence `"Other"` result is dropped (leaves
+ * the current blank/manual behaviour), and every classifier error
+ * (timeout, quota, provider failure) is caught and logged — the
+ * upload itself already succeeded and is never undone.
+ *
  * @param roomId ID of the room whose slot is being updated.
  * @param projectId Project page path to revalidate after the write.
  * @param storagePath Verbatim `storagePath` from `getSignedUploadUrl`.
@@ -238,6 +253,16 @@ export async function confirmRoomPhotoUpload(
     data: { publicUrl },
   } = supabase.storage.from("room-photos").getPublicUrl(storagePath);
 
+  // Issue #1180: capture the room's current name BEFORE the photo link,
+  // so the post-link auto-classify step can decide whether to pre-fill
+  // (`shouldAutoClassifyRoomName`). A user-typed name is never
+  // overwritten — the classifier only fills the blank, mirroring the
+  // batch path's `roomNames?.[index] ?? entry.roomType` precedence.
+  const currentRoom = await prisma.room.findFirst({
+    where: { id: roomId, project: { userId: user.id } },
+    select: { id: true, name: true },
+  });
+
   try {
     await prisma.room.update({
       where: { id: roomId, project: { userId: user.id } },
@@ -248,6 +273,34 @@ export async function confirmRoomPhotoUpload(
     return failure(
       error instanceof Error ? error.message : "Failed to link uploaded photo to room"
     );
+  }
+
+  // Issue #1180: auto-classify the room name from the uploaded photo
+  // when the current label is blank or the explicit "Other" placeholder.
+  // Everything — quota check, AI call, name update — is wrapped in a
+  // try/catch: a classifier timeout or quota denial MUST NOT fail the
+  // upload. Acceptance: "a classifier timeout must not fail an upload".
+  // The upload has already succeeded at this point; nothing here can
+  // undo that.
+  if (currentRoom && shouldAutoClassifyRoomName(currentRoom.name)) {
+    try {
+      const detectedType = await detectRoomType(publicUrl);
+      if (isUsableRoomTypeLabel(detectedType)) {
+        await prisma.room.update({
+          where: { id: roomId, project: { userId: user.id } },
+          data: { name: detectedType.trim() },
+        });
+      }
+    } catch (error) {
+      console.warn(
+        JSON.stringify({
+          event: "room_photo_auto_classify_failed",
+          roomId,
+          projectId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      );
+    }
   }
 
   revalidatePath(`/projects/${projectId}`);
