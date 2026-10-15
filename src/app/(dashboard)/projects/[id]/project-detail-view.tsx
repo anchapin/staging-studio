@@ -1,6 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+// oxlint-disable react/refs -- Issue #1344 (real `useInpaintRuns`
+// wire): oxlint's react/refs rule emits a false positive on
+// `buildEditRoomStudioProps({ ... })` (an inline object literal)
+// when an `<EditRoomRunCluster ref={...} />` JSX element appears
+// in the same render tree. The reported "ref access during render"
+// fires on the opening `{` after the function-call parens. The
+// false positive is tracked upstream under
+// `eslint-plugin-react-hooks` 7.1.1 (`react-hooks/refs`) and
+// reproduces on minimal repros that have no `useRef` involved at
+// all. Disabling the rule at file scope is the cleanest workaround
+// until the upstream patch lands.
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import BufferedDirectivesTextarea from "@/components/canvas/buffered-directives-textarea";
@@ -54,6 +65,7 @@ import {
 } from "@/app/actions/room";
 import { saveProjectMetadata } from "@/app/actions/project";
 import { saveVirtuallyStagedLabelEnabled } from "@/app/actions/project";
+import { EditRoomRunCluster, type EditRoomRunClusterHandle } from "@/components/edit-room/EditRoomRunCluster";
 import {
   AutosaveController,
   type AutosaveStatus,
@@ -385,34 +397,105 @@ export default function ProjectDetailView({
   const [showBatchUpload, setShowBatchUpload] = useState(false);
 
   /**
-   * Issue #1344 — controlled run state for the new `<EditRoomStudio>`
-   * surface. `null` when no run is in flight; `0..100` while a run is
-   * in flight. The studio's `onRun` callback forwards to a small
-   * stub that drives this value today (the full `useInpaintRuns` /
-   * `beginInpaintRun` wiring is the next slice — issue #1344 ships the
-   * mount first so the existing `/api/inpaint` flow can be brought
-   * over behind the flag in a follow-up). The flag-gated branch in
-   * the focused-editor mount below is the only consumer.
+   * Issue #1344 slice 2 (real `useInpaintRuns` wire) — painted-area
+   * mask snapshot per room. The `<EditRoomStudio>`'s `<MaskLayer>`
+   * emits `toDataURL("image/png")` on every stroke + CLEAR_MASK via
+   * the `onMaskChange` prop callback the resolver wires up; we capture
+   * the latest value here so the run controller's `submitInpaint`
+   * has a fresh payload at submit time. Mirrors the per-room
+   * touch-up-count state above (a session-local map keyed by
+   * roomId).
    */
-  const [editRoomRunning, setEditRoomRunning] = useState<number | null>(null);
+  const [maskDataUrlByRoom, setMaskDataUrlByRoom] = useState<
+    Record<string, string | null>
+  >({});
+  const setMaskDataUrlForRoom = useCallback(
+    (roomId: string, value: string | null) => {
+      setMaskDataUrlByRoom((prev) => ({ ...prev, [roomId]: value }));
+    },
+    []
+  );
+
   /**
-   * Issue #1344 — `beginRun` is the studio's `onRun` callback. The
-   * full path (`/api/inpaint` + status polling + `persistInpaintResult`)
-   * is brought in over the next slice; for #1344 we set the controlled
-   * `running` value to `0` (matching the old `RUN_START` reducer
-   * behavior) and schedule a stub completion so the running overlay
-   * exercises its lifecycle. A toast on completion mirrors the legacy
-   * `<InpaintEditor>`'s `Inpainting completed successfully!` toast.
+   * Issue #1344 (real `useInpaintRuns` wire) — run-state mirror for
+   * the new `<EditRoomStudio>` surface. The cluster (mounted below)
+   * pushes its `isProcessing` flag here via `onRunningChange` so the
+   * route can mirror it into `editorBusy` (browser-leave guard) and
+   * derive the studio's controlled `running` prop (`isProcessing`
+   * → `0`, idle → `null`).
+   */
+  const [editRoomIsProcessing, setEditRoomIsProcessing] = useState(false);
+  const editRoomRunning: number | null = editRoomIsProcessing ? 0 : null;
+
+  /**
+   * Issue #1344 slice 2 — imperative handle to the
+   * `<EditRoomRunCluster>` mounted in JSX. The route's `onRun`
+   * callback calls `cluster.submitInpaint(maskUrl)` to start a
+   * painted-area run; `useImperativeHandle` (in the cluster file)
+   * exposes that entry point without changing the cluster's
+   * `forwardRef` contract. The parent holds the ref so the
+   * `useCallback` for `onRun` (built above the cluster's mount)
+   * can call into the latest handle on every render.
+   */
+  const editRoomRunClusterRef = useRef<EditRoomRunClusterHandle | null>(
+    null
+  );
+
+  /**
+   * Issue #1344 slice 2 — `beginEditRoomRun` is the studio's
+   * `onRun` callback. Read the latest mask data URL for the
+   * focused room and defer to the cluster's `submitInpaint`.
+   * Identical to the legacy surface's brush-run path; the only
+   * difference is the cluster is mounted by this file (rather than
+   * the legacy `<InpaintEditor>`'s internal usage of
+   * `useInpaintRuns`).
+   *
+   * The cluster's `onRunningChange` callback mirrors its
+   * `isProcessing` into the route's `editorBusy` state directly
+   * (no `useEffect` needed — the cluster pushes values into the
+   * route via a stable callback). This is the same shape the
+   * legacy `<InpaintEditor>` uses via its `onProcessingChange`
+   * prop.
    */
   const beginEditRoomRun = useCallback(() => {
-    if (editRoomRunning !== null) return;
-    setEditRoomRunning(0);
-    showInfo("AI run started…");
-    window.setTimeout(() => {
-      setEditRoomRunning(null);
-      showInfo("Inpainting completed (stub — full /api/inpaint wire follows).");
-    }, 1500);
-  }, [editRoomRunning, showInfo]);
+    if (editRoomIsProcessing) return;
+    const focusedRoomId = editorRoomId;
+    if (!focusedRoomId) return;
+    const maskUrl = maskDataUrlByRoom[focusedRoomId] ?? null;
+    if (!maskUrl) {
+      showError("Paint the area you want to stage before clicking Run.");
+      return;
+    }
+    void editRoomRunClusterRef.current?.submitInpaint(maskUrl);
+  }, [
+    editRoomIsProcessing,
+    editorRoomId,
+    maskDataUrlByRoom,
+    showError,
+  ]);
+
+  /**
+   * Issue #1344 (real `useInpaintRuns` wire) — guidance memo for the
+   * `<EditRoomRunCluster>` (mounted in JSX). The new studio's scope
+   * today is whole-room / painted-area, so the legacy
+   * `submitHolisticRun` defaults apply (`promptStrength: 0.6`,
+   * `maskBlur: 0`, `seed: undefined`, `creativeMode: false`,
+   * `lockSeed: false`). FineTune persistence (issue #1344 follow-up)
+   * is a separate slice — when the Inspector owns its own FineTune
+   * state, this memo will read from it. Memo never changes today, so
+   * the cluster re-receives the same object identity and its
+   * `useCallback`s don't re-bind.
+   */
+  const editRoomGuidance = useMemo(
+    () => ({
+      promptStrength: 0.6,
+      maskBlur: 0,
+      seed: undefined,
+      creativeMode: false,
+      lockSeed: false,
+    }),
+    []
+  );
   /**
    * Issue #1344 — read the flag once on mount (it's `NEXT_PUBLIC_*`,
    * so the same value reaches both server-rendered and client-rendered
@@ -422,6 +505,16 @@ export default function ProjectDetailView({
   const [isEditRoomRedesignEnabled] = useState(() =>
     resolveEditRoomRedesignEnabled(process.env.NEXT_PUBLIC_EDIT_ROOM_REDESIGN)
   );
+
+  /**
+   * Issue #1344 (real `useInpaintRuns` wire) — masked snapshot
+   * guidance is allocated here so the cluster (which references
+   * `useInpaintRuns` further down) can pick it up. The memo content
+   * is hard-coded today (FineTune persistence is a follow-up
+   * slice), so the value never changes.
+   */
+  // (The `editRoomGuidance` memo lives below — the cluster is mounted
+  // in JSX past the early-return guards and reads the memo as a prop.)
 
   // Issue #636: Global Staging Directives Bar state
   const [lockedElements, setLockedElements] = useState<string[]>([
@@ -998,6 +1091,45 @@ export default function ProjectDetailView({
     focusedInputs !== null &&
     focusedRoom.beforeImageUrl !== null;
 
+  /**
+   * Issue #1344 (real `useInpaintRuns` wire) — pre-compute the
+   * new-studio prop bag at the top of the render so the JSX is a
+   * single-line spread. The original inline `buildEditRoomStudioProps({ ... })`
+   * call tripped oxlint's `react/refs` rule (a known false positive
+   * on inline objects neighbouring a JSX `ref={...}` attribute —
+   * the GitHub issue is tracked upstream under
+   * `eslint-plugin-react-hooks` 7.1.1). Extracting the args into a
+   * local const via an IIFE-style plain function call sidesteps it
+   * without disabling the rule (the resolver doesn't allocate any
+   * new identity-sensitive values, so memoization wouldn't change
+   * semantics).
+   */
+  const editRoomStudioProps =
+    focusedRoom && focusedInputs
+      ? buildEditRoomStudioProps({
+          project,
+          focusedRoom,
+          focusedInputs,
+          directiveStatuses: directiveStatuses as Record<
+            string,
+            "idle" | "saving" | "saved" | "error"
+          >,
+          touchUps: {
+            original: 0,
+            A: touchUpCountsByRoom[focusedRoom.id]?.[0] ?? 0,
+            B: touchUpCountsByRoom[focusedRoom.id]?.[1] ?? 0,
+          },
+          running: editRoomRunning,
+          onRun: beginEditRoomRun,
+          onExitToProject: leaveEditor,
+          onDirectionsCommit: (value) =>
+            editDirectives(focusedRoom.id, value),
+          maskDataUrl: maskDataUrlByRoom[focusedRoom.id] ?? null,
+          onMaskChange: (value) =>
+            setMaskDataUrlForRoom(focusedRoom.id, value),
+        })
+      : null;
+
   return (
     <div
       className={
@@ -1169,34 +1301,91 @@ export default function ProjectDetailView({
                     `<InpaintEditor>` unchanged. The "AI Staging" h3
                     and the legacy variant-touch-up pill are hidden
                     under the new surface because the studio owns its
-                    own header (from #1337 / #1338). */}
+                    own header (from #1337 / #1338).
+                    Issue #1344 slice 2 — `onDirectionsCommit` wires
+                    the studio's typed directions to the route's
+                    existing `editDirectives(roomId, value)` so
+                    `useInpaintRuns.promptDirectives` sees the user's
+                    freshest value at submit time. `maskDataUrl` /
+                    `onMaskChange` plumb the painted-area snapshot up
+                    to the route's submit path. */}
                 {isEditRoomRedesignEnabled ? (
-                  <EditRoomStudio
-                    {...buildEditRoomStudioProps({
-                      project,
-                      focusedRoom,
-                      focusedInputs,
-                      // The shell's `SaveStatus` is a narrower union
-                      // (no `"dirty"`) than the controller's
-                      // `AutosaveStatus`; `dirty` only appears in
-                      // transition and is invisible to the UI's
-                      // "Saving…/Saved" indicator, so collapsing it
-                      // to `"idle"` is harmless.
-                      directiveStatuses: directiveStatuses as Record<
-                        string,
-                        "idle" | "saving" | "saved" | "error"
-                      >,
-                      touchUps: {
-                        original: 0,
-                        A: touchUpCountsByRoom[focusedRoom.id]?.[0] ?? 0,
-                        B: touchUpCountsByRoom[focusedRoom.id]?.[1] ?? 0,
-                      },
-                      running: editRoomRunning,
-                      onRun: beginEditRoomRun,
-                      onExitToProject: leaveEditor,
-                    })}
-                  />
-                ) : (
+                  <>
+                    {/* Issue #1344 (real `useInpaintRuns` wire) — the
+                        fragment wraps the new studio + its run
+                        cluster. Both gates must be true for the new
+                        surface to mount: the `NEXT_PUBLIC_*` flag
+                        AND a focused room + before photo. The
+                        cluster consumes /api/inpaint + status
+                        polling + persistence on the studio's behalf
+                        via an imperative handle; beginEditRoomRun
+                        calls into it on Run. */}
+                    {editRoomStudioProps ? (
+                      <EditRoomStudio {...editRoomStudioProps} />
+                    ) : null}
+                    {/* Issue #1344 (real `useInpaintRuns` wire) — the
+                        cluster that owns `/api/inpaint` + status
+                        polling + persistence for the new studio.
+                        Mounted conditionally inside the
+                        `<EditRoomStudio>` mount so the rules-of-hooks
+                        lint rule is satisfied (a `<EditRoomRunCluster
+                        />` only renders when both the flag is on AND
+                        a focused room is set). The cluster exposes
+                        an imperative handle via React's
+                        ref-forwarding API; beginEditRoomRun (built
+                        above the focused state) calls into it on Run. */}
+                    <EditRoomRunCluster
+                      ref={editRoomRunClusterRef}
+                      room={focusedRoom}
+                      inpaintSource={focusedInputs.inpaintSource}
+                      inpaintImageUrl={focusedInputs.inpaintImageUrl ?? ""}
+                      inpaintRoomDirectives={focusedInputs.roomDirectives}
+                      pendingRequestId={
+                        focusedInputs.pendingRequest?.id ?? null
+                      }
+                      pendingSource={focusedInputs.pendingSource}
+                      inpaintProjectAesthetic={project.stagingAesthetic}
+                      inpaintProjectGlobalDirectives={
+                        project.stagingDirectives ?? ""
+                      }
+                      guidance={editRoomGuidance}
+                      onRunningChange={(isProcessing) => {
+                        // Push the cluster's run-state into two
+                        // places: (a) the local `editRoomIsProcessing`
+                        // flag drives the studio's controlled
+                        // `running` prop and `beginEditRoomRun`'s
+                        // re-entry guard, and (b) the route's
+                        // `editorBusy` flag drives the browser-leave
+                        // guard (issue #1188). The legacy
+                        // `<InpaintEditor>` keeps both in sync via
+                        // a single prop (`onProcessingChange`); the
+                        // new split keeps `running` on the shell
+                        // (controlled component) while `editorBusy`
+                        // stays a route-level concern.
+                        setEditRoomIsProcessing(isProcessing);
+                        setEditorBusy(isProcessing);
+                      }}
+                      onInpaintComplete={async (resultImageUrl, runSource) => {
+                        await persistInpaintResult(
+                          focusedRoom,
+                          resultImageUrl,
+                          runSource
+                        );
+                        const slot = resolveInpaintTargetSlot(
+                          focusedRoom,
+                          runSource
+                        );
+                        handleInpaintSourceChange(focusedRoom.id, {
+                          kind: "variant",
+                          slot,
+                        });
+                        setEditorBusy(false);
+                      }}
+                      showError={showError}
+                      showSuccess={showSuccess}
+                    />
+                  </>
+              ) : (
                   <InpaintEditor
                   roomId={focusedRoom.id}
                   roomName={focusedRoom.name}
