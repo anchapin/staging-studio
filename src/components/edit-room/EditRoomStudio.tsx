@@ -2,16 +2,16 @@
 
 /**
  * Issue #1337 — `<EditRoomStudio>` shell + scope/view state machine.
+ * Issue #1339 — Mounts `<CanvasStage>` in the canvas slot.
  *
  * Top-level shell for the Edit Room UX redesign (Magic Patterns OS
  * `hVPYX2rJ2yawc1XTY2LTRJ`, design file `dVy8jC2kXpi1ca8b4A1hcS`).
  * This slice lands the shell + the state machine only — it does NOT
- * wire to a route (children #1338..#1342 fill in TopBar, CanvasStage,
- * VersionStrip, Inspector, StagePanel, FineTune, CopyPanel; #1344/#1345
- * wire to the per-room view and the `/refine` route). The shell owns
- * its state via `useReducer` against `editRoomReducer` so the same
- * transitions are reachable from tests (see
- * `tests/edit-room-reducer.test.ts`).
+ * wire to a route (children #1340..#1342 fill in VersionStrip,
+ * Inspector, StagePanel, FineTune, CopyPanel; #1344/#1345 wire to the
+ * per-room view and the `/refine` route). The shell owns its state via
+ * `useReducer` against `editRoomReducer` so the same transitions are
+ * reachable from tests (see `tests/edit-room-reducer.test.ts`).
  *
  * NOT WIRED — the parent route is intentionally still the legacy
  * `InpaintEditor` until #1344 lands. This file is imported only by
@@ -23,6 +23,7 @@ import { useEffect, useMemo, useReducer, useRef } from "react";
 import { resolveStageBlockedReason } from "@/lib/edit-room-blocked";
 import { resolveTargetSlot, type SlotId } from "@/lib/edit-room-scope";
 
+import { CanvasStage } from "@/components/edit-room/CanvasStage";
 import { TopBar } from "@/components/edit-room/TopBar";
 import { Toast } from "@/components/edit-room/Toast";
 import {
@@ -158,10 +159,44 @@ export function EditRoomStudio({
           {/* #1339 — CanvasStage + MaskLayer + CompareLayer + object boxes */}
           <section
             data-testid="edit-room-canvas"
-            className="flex-1"
+            className="flex min-h-0 flex-1 flex-col"
             aria-label="Editing canvas"
           >
-            {/* Filled in by #1339 */}
+            <CanvasStage
+              imageUrl={
+                state.viewing === "original"
+                  ? "/edit-room/original.jpg"
+                  : state.viewing === "A"
+                    ? "/edit-room/variant-a.jpg"
+                    : "/edit-room/variant-b.jpg"
+              }
+              originalUrl="/edit-room/original.jpg"
+              viewing={state.viewing}
+              scope={state.scope}
+              compare={state.compare}
+              onToggleCompare={() => dispatch({ type: "TOGGLE_COMPARE" })}
+              concept={state.concept}
+              selected={state.selected}
+              onToggleObject={(id) => dispatch({ type: "TOGGLE_OBJECT", objectId: id })}
+              detections={
+                state.concept === null
+                  ? []
+                  : [
+                      { id: "obj-1", concept: state.concept, label: state.concept, box: { x: 49, y: 57, w: 31, h: 42 } },
+                      { id: "obj-2", concept: state.concept, label: `${state.concept} 2`, box: { x: 8, y: 58, w: 23, h: 27 } },
+                    ]
+              }
+              maskVersion={state.maskVersion}
+              onMaskPainted={() => dispatch({ type: "MARK_MASK_PAINTED" })}
+              onClearMask={() => dispatch({ type: "CLEAR_MASK" })}
+              hasMask={state.hasMask}
+              brushSize={state.brushSize}
+              onBrushSizeChange={(n) => dispatch({ type: "SET_BRUSH_SIZE", size: n })}
+              brushMode={state.brushMode}
+              onBrushModeChange={(m) => dispatch({ type: "SET_BRUSH_MODE", mode: m })}
+              running={state.running}
+              targetSlot={targetSlot}
+            />
           </section>
 
           {/* #1340 — VersionStrip + Lookbook slot */}
