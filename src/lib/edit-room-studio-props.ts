@@ -4,11 +4,12 @@
  *
  * The route mount (`project-detail-view.tsx`) already owns the
  * `project`, `focusedRoom`, `focusedInputs`, `directiveStatuses`,
- * `touchUps`, and in-flight run state. Wiring those into the studio
- * is a pure shape transformation — this module pins it 1:1 so the
- * route file stays thin (just spreads the resolver's return) and a
- * future prop addition only requires a fixture + test edit here, not
- * a 300-line route-file review.
+ * `touchUps`, the in-flight run state, and (slice 2) the
+ * `maskDataUrlByRoom` state used by the real `/api/inpaint` submit.
+ * Wiring those into the studio is a pure shape transformation —
+ * this module pins it 1:1 so the route file stays thin (just spreads
+ * the resolver's return) and a future prop addition only requires a
+ * fixture + test edit here, not a 300-line route-file review.
  *
  * The map is intentionally narrow:
  * - `address` ← `project.propertyAddress`
@@ -31,6 +32,19 @@
  *   `<input>` / `<textarea>` values, see #1343).
  * - `running` / `onRun` / `onExitToProject` / `touchUps` ← passed
  *   through verbatim from the route's run controller.
+ * - `onDirectionsCommit` ← the route's `editDirectives(roomId, value)`
+ *   (issue #1344 slice 2: the studio's debounce effect calls this so
+ *   typed directions actually land in the route's
+ *   `directives[roomId]` map and feed `useInpaintRuns.promptDirectives`
+ *   on submit; without the wire, clicking Run with the studio's typed
+ *   value sees an empty parent string and fails the
+ *   "No staging directives available." check).
+ * - `maskDataUrl` ← `maskDataUrlByRoom[focusedRoom.id]` (issue #1344
+ *   slice 2: the painted-area snapshot the submit path forwards to
+ *   `/api/inpaint` as `maskUrl`).
+ * - `onMaskChange` ← closure that writes
+ *   `setMaskDataUrlByRoom(prev => ({...prev, [focusedRoom.id]: value}))`
+ *   so the shell stays the source of truth.
  */
 
 import type { EditRoomStudioProps, SlotId } from "@/components/edit-room/types";
@@ -77,6 +91,28 @@ export interface BuildEditRoomStudioPropsArgs {
   running: number | null;
   onRun: () => void;
   onExitToProject: () => void;
+  /**
+   * Issue #1344 slice 2 — the route's `editDirectives(roomId, value)`
+   * forwarded verbatim. The shell calls this 900ms after the user
+   * stops typing in the directions textarea, so the typed value lands
+   * in `directives[roomId]` and feeds the submit path's
+   * `useInpaintRuns.promptDirectives`.
+   */
+  onDirectionsCommit: (value: string) => void;
+  /**
+   * Issue #1344 slice 2 — the painted-area snapshot the submit path
+   * forwards to `/api/inpaint` as `maskUrl`. Source of truth is the
+   * route's `maskDataUrlByRoom` map (managed by `onMaskChange`); the
+   * studio holds a mirror.
+   */
+  maskDataUrl: string | null;
+  /**
+   * Issue #1344 slice 2 — closure that updates
+   * `maskDataUrlByRoom[focusedRoom.id]` when the MaskLayer emits a
+   * new buffer snapshot. The shell calls it on every stroke and
+   * CLEAR_MASK.
+   */
+  onMaskChange: (value: string | null) => void;
 }
 
 /**
@@ -109,14 +145,13 @@ export function buildEditRoomStudioProps(
     running,
     onRun,
     onExitToProject,
+    onDirectionsCommit,
+    maskDataUrl,
+    onMaskChange,
   } = args;
   return {
     saveStatus: directiveStatuses[focusedRoom.id] ?? "idle",
-    onDirectionsCommit: () => {
-      // #1344 — wired by the next slice (#1344 wires the parent's
-      // existing AutosaveController); for now the prop is filled
-      // with a no-op so the prop shape is reviewable end-to-end.
-    },
+    onDirectionsCommit,
     projectId: project.id,
     roomId: focusedRoom.id,
     roomName: focusedRoom.name,
@@ -137,5 +172,7 @@ export function buildEditRoomStudioProps(
     running,
     onRun,
     onExitToProject,
+    maskDataUrl,
+    onMaskChange,
   };
 }

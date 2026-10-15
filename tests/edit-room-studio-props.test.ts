@@ -63,9 +63,30 @@ const baseFocusedInputs: FocusedRoomInputs = {
   inpaintImageUrl: "https://example.test/source.jpg",
 };
 
+/**
+ * Issue #1344 slice 2 — three new args landed in the resolver
+ * (`onDirectionsCommit`, `maskDataUrl`, `onMaskChange`). Every test
+ * supplies them via `withRunArgs(...)` so we can also pin what the
+ * resolver does with them (slice 2 additions). The return type is
+ * `Partial<BuildEditRoomStudioPropsArgs>` so a per-test spread that
+ * omits the slice-1 required fields (e.g. `onRun`, `onExitToProject`)
+ * still satisfies the resolver's signature when the test only cares
+ * about the slice-2 wiring.
+ */
+function withRunArgs(
+  args: Partial<Parameters<typeof buildEditRoomStudioProps>[0]>
+): Parameters<typeof buildEditRoomStudioProps>[0] {
+  return {
+    onDirectionsCommit: () => {},
+    maskDataUrl: null,
+    onMaskChange: () => {},
+    ...args,
+  } as Parameters<typeof buildEditRoomStudioProps>[0];
+}
+
 describe("buildEditRoomStudioProps (issue #1344)", () => {
   it("forwards the property address to the studio", () => {
-    const props = buildEditRoomStudioProps({
+    const props = buildEditRoomStudioProps(withRunArgs({
       project: baseProject,
       focusedRoom: baseFocusedRoom,
       focusedInputs: baseFocusedInputs,
@@ -74,12 +95,12 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
       running: null,
       onRun: () => {},
       onExitToProject: () => {},
-    });
+    }));
     expect(props.address).toBe("500 Maple Street");
   });
 
   it("forwards the room id + name", () => {
-    const props = buildEditRoomStudioProps({
+    const props = buildEditRoomStudioProps(withRunArgs({
       project: baseProject,
       focusedRoom: baseFocusedRoom,
       focusedInputs: baseFocusedInputs,
@@ -88,7 +109,7 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
       running: null,
       onRun: () => {},
       onExitToProject: () => {},
-    });
+    }));
     expect(props.roomId).toBe("room-1");
     expect(props.roomName).toBe("Living Room");
   });
@@ -98,7 +119,7 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
     // the parent route's healInpaintSource + listInpaintSources machinery
     // already chose this URL, so the studio gets the user's actual
     // selected source, never a 404 against `beforeImageUrl`.
-    const props = buildEditRoomStudioProps({
+    const props = buildEditRoomStudioProps(withRunArgs({
       project: baseProject,
       focusedRoom: baseFocusedRoom,
       focusedInputs: {
@@ -109,12 +130,12 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
       running: null,
       onRun: () => {},
       onExitToProject: () => {},
-    });
+    }));
     expect(props.imageUrl).toBe("https://example.test/variant-a-as-source.jpg");
   });
 
   it("maps Room.afterImageUrl → lookbookVariantUrls.A", () => {
-    const props = buildEditRoomStudioProps({
+    const props = buildEditRoomStudioProps(withRunArgs({
       project: baseProject,
       focusedRoom: baseFocusedRoom,
       focusedInputs: baseFocusedInputs,
@@ -123,12 +144,12 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
       running: null,
       onRun: () => {},
       onExitToProject: () => {},
-    });
+    }));
     expect(props.lookbookVariantUrls.A).toBe("https://example.test/variant-a.jpg");
   });
 
   it("maps Room.afterImageUrl2 → lookbookVariantUrls.B", () => {
-    const props = buildEditRoomStudioProps({
+    const props = buildEditRoomStudioProps(withRunArgs({
       project: baseProject,
       focusedRoom: {
         ...baseFocusedRoom,
@@ -140,12 +161,12 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
       running: null,
       onRun: () => {},
       onExitToProject: () => {},
-    });
+    }));
     expect(props.lookbookVariantUrls.B).toBe("https://example.test/variant-b.jpg");
   });
 
   it("defaults lookbookVariantUrls to null when the room has no completed variant", () => {
-    const props = buildEditRoomStudioProps({
+    const props = buildEditRoomStudioProps(withRunArgs({
       project: baseProject,
       focusedRoom: { ...baseFocusedRoom, afterImageUrl: null, afterImageUrl2: null },
       focusedInputs: baseFocusedInputs,
@@ -154,12 +175,12 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
       running: null,
       onRun: () => {},
       onExitToProject: () => {},
-    });
+    }));
     expect(props.lookbookVariantUrls).toEqual({ A: null, B: null });
   });
 
   it("maps selectedVariantIndex=0 → initialLookbookSlot='A'", () => {
-    const props = buildEditRoomStudioProps({
+    const props = buildEditRoomStudioProps(withRunArgs({
       project: baseProject,
       focusedRoom: baseFocusedRoom,
       focusedInputs: baseFocusedInputs,
@@ -168,12 +189,12 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
       running: null,
       onRun: () => {},
       onExitToProject: () => {},
-    });
+    }));
     expect(props.initialLookbookSlot).toBe("A");
   });
 
   it("maps selectedVariantIndex=1 → initialLookbookSlot='B'", () => {
-    const props = buildEditRoomStudioProps({
+    const props = buildEditRoomStudioProps(withRunArgs({
       project: baseProject,
       focusedRoom: { ...baseFocusedRoom, selectedVariantIndex: 1 },
       focusedInputs: baseFocusedInputs,
@@ -182,7 +203,7 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
       running: null,
       onRun: () => {},
       onExitToProject: () => {},
-    });
+    }));
     expect(props.initialLookbookSlot).toBe("B");
   });
 
@@ -192,7 +213,7 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
     // studio's initial state (the badge lands on A unless the user
     // actively picks B). Mirrors the legacy `resolveStripSelection`
     // fallback (issue #169).
-    const props = buildEditRoomStudioProps({
+    const props = buildEditRoomStudioProps(withRunArgs({
       project: baseProject,
       focusedRoom: { ...baseFocusedRoom, selectedVariantIndex: null },
       focusedInputs: baseFocusedInputs,
@@ -201,12 +222,12 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
       running: null,
       onRun: () => {},
       onExitToProject: () => {},
-    });
+    }));
     expect(props.initialLookbookSlot).toBe("A");
   });
 
   it("forwards the project aesthetic + global directives", () => {
-    const props = buildEditRoomStudioProps({
+    const props = buildEditRoomStudioProps(withRunArgs({
       project: baseProject,
       focusedRoom: baseFocusedRoom,
       focusedInputs: baseFocusedInputs,
@@ -215,13 +236,13 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
       running: null,
       onRun: () => {},
       onExitToProject: () => {},
-    });
+    }));
     expect(props.aesthetic).toBe("Warm Transitional");
     expect(props.globalDirectives).toBe("Preserve the original brick fireplace.");
   });
 
   it("defaults saveStatus to 'idle' when the room hasn't typed yet", () => {
-    const props = buildEditRoomStudioProps({
+    const props = buildEditRoomStudioProps(withRunArgs({
       project: baseProject,
       focusedRoom: baseFocusedRoom,
       focusedInputs: baseFocusedInputs,
@@ -230,12 +251,12 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
       running: null,
       onRun: () => {},
       onExitToProject: () => {},
-    });
+    }));
     expect(props.saveStatus).toBe("idle");
   });
 
   it("mirrors the room's directive save status", () => {
-    const props = buildEditRoomStudioProps({
+    const props = buildEditRoomStudioProps(withRunArgs({
       project: baseProject,
       focusedRoom: baseFocusedRoom,
       focusedInputs: baseFocusedInputs,
@@ -244,12 +265,12 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
       running: null,
       onRun: () => {},
       onExitToProject: () => {},
-    });
+    }));
     expect(props.saveStatus).toBe("saving");
   });
 
   it("forwards the listing-copy headline + body, coercing null → empty string", () => {
-    const props = buildEditRoomStudioProps({
+    const props = buildEditRoomStudioProps(withRunArgs({
       project: baseProject,
       focusedRoom: { ...baseFocusedRoom, lookbookHeadline: null, lookbookBody: null },
       focusedInputs: baseFocusedInputs,
@@ -258,13 +279,13 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
       running: null,
       onRun: () => {},
       onExitToProject: () => {},
-    });
+    }));
     expect(props.initialCopyHeadline).toBe("");
     expect(props.initialCopyBody).toBe("");
   });
 
   it("forwards non-null listing-copy verbatim", () => {
-    const props = buildEditRoomStudioProps({
+    const props = buildEditRoomStudioProps(withRunArgs({
       project: baseProject,
       focusedRoom: baseFocusedRoom,
       focusedInputs: baseFocusedInputs,
@@ -273,7 +294,7 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
       running: null,
       onRun: () => {},
       onExitToProject: () => {},
-    });
+    }));
     expect(props.initialCopyHeadline).toBe("A bright, airy retreat");
     expect(props.initialCopyBody).toBe("Refreshed textiles lift the space.");
   });
@@ -281,7 +302,7 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
   it("forwards touch-ups count + running + onRun + onExitToProject verbatim", () => {
     const onRun = () => {};
     const onExitToProject = () => {};
-    const props = buildEditRoomStudioProps({
+    const props = buildEditRoomStudioProps(withRunArgs({
       project: baseProject,
       focusedRoom: baseFocusedRoom,
       focusedInputs: baseFocusedInputs,
@@ -290,10 +311,70 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
       running: 42,
       onRun,
       onExitToProject,
-    });
+    }));
     expect(props.touchUps).toEqual({ original: 0, A: 3, B: 1 });
     expect(props.running).toBe(42);
     expect(props.onRun).toBe(onRun);
     expect(props.onExitToProject).toBe(onExitToProject);
+  });
+
+  // Issue #1344 (real `useInpaintRuns` wire) — three new fields.
+  // The resolver used to fill `onDirectionsCommit` with a no-op;
+  // the slice-2 wire-up forwards the route's `editDirectives`
+  // closure so typed directions land in `directives[roomId]` before
+  // the next submit. The `maskDataUrl`/`onMaskChange` pair plumbs
+  // the painted-area snapshot up to the submit path.
+  it("forwards `onDirectionsCommit` through verbatim (slice 2 wires the real editDirectives closure)", () => {
+    const onDirectionsCommit = () => {};
+    const props = buildEditRoomStudioProps(withRunArgs({
+      project: baseProject,
+      focusedRoom: baseFocusedRoom,
+      focusedInputs: baseFocusedInputs,
+      directiveStatuses: {},
+      touchUps: { original: 0, A: 0, B: 0 },
+      running: null,
+      onRun: () => {},
+      onExitToProject: () => {},
+      onDirectionsCommit,
+      maskDataUrl: null,
+      onMaskChange: () => {},
+    }));
+    expect(props.onDirectionsCommit).toBe(onDirectionsCommit);
+  });
+
+  it("forwards `maskDataUrl` through verbatim (slice 2 wires the painted-area snapshot)", () => {
+    const maskDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg";
+    const props = buildEditRoomStudioProps(withRunArgs({
+      project: baseProject,
+      focusedRoom: baseFocusedRoom,
+      focusedInputs: baseFocusedInputs,
+      directiveStatuses: {},
+      touchUps: { original: 0, A: 0, B: 0 },
+      running: null,
+      onRun: () => {},
+      onExitToProject: () => {},
+      onDirectionsCommit: () => {},
+      maskDataUrl,
+      onMaskChange: () => {},
+    }));
+    expect(props.maskDataUrl).toBe(maskDataUrl);
+  });
+
+  it("forwards `onMaskChange` through verbatim (slice 2 wires the snapshot-capture closure)", () => {
+    const onMaskChange = () => {};
+    const props = buildEditRoomStudioProps(withRunArgs({
+      project: baseProject,
+      focusedRoom: baseFocusedRoom,
+      focusedInputs: baseFocusedInputs,
+      directiveStatuses: {},
+      touchUps: { original: 0, A: 0, B: 0 },
+      running: null,
+      onRun: () => {},
+      onExitToProject: () => {},
+      onDirectionsCommit: () => {},
+      maskDataUrl: null,
+      onMaskChange,
+    }));
+    expect(props.onMaskChange).toBe(onMaskChange);
   });
 });
