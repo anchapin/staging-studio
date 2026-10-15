@@ -1,0 +1,171 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  editRoomReducer,
+  initialEditRoomState,
+  type EditRoomAction,
+} from "@/components/edit-room/edit-room-reducer";
+
+// Issue #1337 acceptance criterion: a vitest test exercises the
+// EditRoomStudio reducer-equivalent (state transitions on
+// scope/viewing/clear) WITHOUT mounting React.
+//
+// The shell owns the state in §"State machine" of #1337. This test pins
+// the pure transitions (reducer) the hook delegates to, so future slices
+// (#1338..#1346) can rely on the same transitions without re-deriving them.
+describe("editRoomReducer", () => {
+  const started = { ...initialEditRoomState };
+
+  it("starts with the documented initial state", () => {
+    expect(started).toMatchObject({
+      scope: "whole-room",
+      viewing: "original",
+      lookbookSlot: "A",
+      concept: null,
+      selected: [],
+      maskVersion: 0,
+      hasMask: false,
+      brushSize: 48,
+      brushMode: "paint",
+      compare: false,
+      running: null,
+      toast: null,
+      directions: "",
+    });
+  });
+
+  it("SET_SCOPE updates scope; turns compare off (design's scope-change contract)", () => {
+    const after = editRoomReducer(started, {
+      type: "SET_SCOPE",
+      scope: "objects",
+    } satisfies EditRoomAction);
+    expect(after.scope).toBe("objects");
+    expect(after.compare).toBe(false);
+  });
+
+  it("SET_VIEWING updates viewing; clears the mask + selection (per the design's switch-version contract)", () => {
+    const after = editRoomReducer(started, {
+      type: "SET_VIEWING",
+      viewing: "A",
+    } satisfies EditRoomAction);
+    expect(after.viewing).toBe("A");
+    expect(after.compare).toBe(false);
+    expect(after.selected).toEqual([]);
+    expect(after.maskVersion).toBe(1); // CLEAR_MASK bumps maskVersion
+    expect(after.hasMask).toBe(false);
+  });
+
+  it("CLEAR_MASK bumps maskVersion and forces hasMask=false", () => {
+    const seeded = {
+      ...started,
+      hasMask: true,
+      maskVersion: 3,
+    };
+    const after = editRoomReducer(seeded, { type: "CLEAR_MASK" });
+    expect(after.hasMask).toBe(false);
+    expect(after.maskVersion).toBe(4);
+  });
+
+  it("MARK_MASK_PAINTED sets hasMask=true (first-stroke dispatch from MaskLayer)", () => {
+    const after = editRoomReducer(started, { type: "MARK_MASK_PAINTED" });
+    expect(after.hasMask).toBe(true);
+    // maskVersion is NOT bumped here — paint adds to the buffer, doesn't reset it
+    expect(after.maskVersion).toBe(0);
+  });
+
+  it("TOGGLE_OBJECT adds and removes objects idempotently", () => {
+    const added = editRoomReducer(started, {
+      type: "TOGGLE_OBJECT",
+      objectId: "sofa",
+    });
+    expect(added.selected).toEqual(["sofa"]);
+    const removed = editRoomReducer(added, {
+      type: "TOGGLE_OBJECT",
+      objectId: "sofa",
+    });
+    expect(removed.selected).toEqual([]);
+  });
+
+  it("SET_COMPARE toggles the boolean compare flag", () => {
+    expect(editRoomReducer(started, { type: "SET_COMPARE", compare: true }).compare).toBe(true);
+    expect(editRoomReducer(started, { type: "SET_COMPARE", compare: false }).compare).toBe(false);
+  });
+
+  it("TOGGLE_COMPARE flips the compare flag", () => {
+    expect(editRoomReducer(started, { type: "TOGGLE_COMPARE" }).compare).toBe(true);
+    const on = editRoomReducer(started, { type: "TOGGLE_COMPARE" });
+    expect(editRoomReducer(on, { type: "TOGGLE_COMPARE" }).compare).toBe(false);
+  });
+
+  it("SET_LOOKBOOK_SLOT pins the variant for the lookbook", () => {
+    expect(
+      editRoomReducer(started, { type: "SET_LOOKBOOK_SLOT", slot: "B" }).lookbookSlot
+    ).toBe("B");
+  });
+
+  it("SET_BRUSH_SIZE and SET_BRUSH_MODE update the brush controls", () => {
+    const sized = editRoomReducer(started, { type: "SET_BRUSH_SIZE", size: 72 });
+    expect(sized.brushSize).toBe(72);
+    const erased = editRoomReducer(sized, { type: "SET_BRUSH_MODE", mode: "erase" });
+    expect(erased.brushMode).toBe("erase");
+  });
+
+  it("SET_CONCEPT clears the prior selection (design's reset-on-concept-change contract)", () => {
+    const withSelection = {
+      ...started,
+      concept: "Sofa" as string | null,
+      selected: ["sofa"],
+    };
+    const after = editRoomReducer(withSelection, {
+      type: "SET_CONCEPT",
+      concept: "Chair",
+    });
+    expect(after.concept).toBe("Chair");
+    expect(after.selected).toEqual([]);
+  });
+
+  it("CLEAR_SELECTION empties selected without touching maskVersion", () => {
+    const seeded = {
+      ...started,
+      selected: ["a", "b"],
+      maskVersion: 5,
+    };
+    const after = editRoomReducer(seeded, { type: "CLEAR_SELECTION" });
+    expect(after.selected).toEqual([]);
+    expect(after.maskVersion).toBe(5); // NOT bumped — selection clear is independent of mask clear
+  });
+
+  it("RUN_START stores a running progress (number); RUN_DONE clears it", () => {
+    const running = editRoomReducer(started, { type: "RUN_START" });
+    expect(running.running).toBe(0);
+    const done = editRoomReducer(running, { type: "RUN_DONE" });
+    expect(done.running).toBeNull();
+  });
+
+  it("RUN_PROGRESS updates the progress percentage without changing other state", () => {
+    const seeded = editRoomReducer(started, { type: "RUN_START" });
+    const halfway = editRoomReducer(seeded, { type: "RUN_PROGRESS", progress: 42 });
+    expect(halfway.running).toBe(42);
+    // Other fields untouched
+    expect(halfway.scope).toBe(started.scope);
+    expect(halfway.viewing).toBe(started.viewing);
+  });
+
+  it("SHOW_TOAST/DISMISS_TOAST round-trip the toast message", () => {
+    const shown = editRoomReducer(started, {
+      type: "SHOW_TOAST",
+      message: "Staged result saved as Variant A",
+    });
+    expect(shown.toast).toBe("Staged result saved as Variant A");
+    const dismissed = editRoomReducer(shown, { type: "DISMISS_TOAST" });
+    expect(dismissed.toast).toBeNull();
+  });
+
+  it("SET_DIRECTIONS stores the value verbatim (debouncing lives in the hook, not the reducer)", () => {
+    const after = editRoomReducer(started, {
+      type: "SET_DIRECTIONS",
+      value: "  warm walnut  ",
+    });
+    expect(after.directions).toBe("  warm walnut  ");
+  });
+});
