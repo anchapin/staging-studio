@@ -24,6 +24,13 @@ export interface PreviewRoom {
   recommendation: string | null;
   buyerPsychology: string | null;
   checklistItems: { item: string; category: string; priority: string }[] | null;
+  /** Issue #1343 — listing-copy columns. May be null on rooms that
+   *  pre-date the redesigned CopyPanel; the render falls back to the
+   *  legacy `recommendation` column (see `resolveListingCopy`). */
+  lookbookHeadline: string | null;
+  /** Issue #1343 — listing-copy body column. Falls back to
+   *  `recommendation` when null/empty. */
+  lookbookBody: string | null;
 }
 
 export interface PreviewProject {
@@ -174,6 +181,11 @@ export function LookbookPreviewView({ project, previewToken }: LookbookPreviewVi
               observedChallenge: room.observedChallenge,
               recommendation: room.recommendation,
               buyerPsychology: room.buyerPsychology,
+              // Issue #1343 — new columns thread through to the
+              // RoomSpread so the render can use `resolveListingCopy`
+              // for the new→legacy fallback.
+              lookbookHeadline: room.lookbookHeadline,
+              lookbookBody: room.lookbookBody,
               checklistItems: parseChecklistItems(room.checklistItems, {
                 roomId: room.id,
               }),

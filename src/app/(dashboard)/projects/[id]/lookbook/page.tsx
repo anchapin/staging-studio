@@ -51,7 +51,25 @@ const getOwnedLookbookProject = cache(async (projectId: string) => {
           signoffContent: true,
         },
       },
-      rooms: true,
+      rooms: {
+        select: {
+          id: true,
+          name: true,
+          beforeImageUrl: true,
+          afterImageUrl: true,
+          beforeImageUrl2: true,
+          afterImageUrl2: true,
+          selectedVariantIndex: true,
+          observedChallenge: true,
+          recommendation: true,
+          buyerPsychology: true,
+          checklistItems: true,
+          // Issue #1343 — listing-copy columns (CopyPanel). Pinned by
+          // the new e2e branch in `tests/e2e/specs/lookbook-edit.spec.ts`.
+          lookbookHeadline: true,
+          lookbookBody: true,
+        },
+      },
       materialSwatches: true,
       procurementItems: true,
     },
@@ -128,6 +146,12 @@ export default async function LookbookPage({ params }: LookbookPageProps) {
       observedChallenge: room.observedChallenge,
       recommendation: room.recommendation,
       buyerPsychology: room.buyerPsychology,
+      // Issue #1343 — listing-copy columns (CopyPanel). Null on rooms
+      // that pre-date the redesigned panel; the spread's
+      // `resolveListingCopy` falls back to `recommendation` for the
+      // body slot when both columns are unset.
+      lookbookHeadline: room.lookbookHeadline,
+      lookbookBody: room.lookbookBody,
       // Parsed/validated by parseChecklistItems inside the view.
       checklistItems:
         room.checklistItems as PreviewProject["rooms"][number]["checklistItems"],

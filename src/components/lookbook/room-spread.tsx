@@ -1,6 +1,7 @@
 import Image from "next/image";
 import { parseChecklistItems } from "@/lib/checklist-schema";
 import { extractPillars } from "@/lib/lookbook-pillars";
+import { resolveListingCopy } from "@/lib/listing-copy";
 import { ProposalFooter } from "./proposal-footer";
 import { VirtuallyStagedBadge } from "./virtually-staged-badge";
 import {
@@ -74,6 +75,42 @@ export function RoomSpread({ room, project }: RoomSpreadProps) {
             {project.stagingAesthetic}
           </p>
         </div>
+        {/* Issue #1343 — listing-copy strip. The Magic Patterns
+            CopyPanel writes a Headline + Description pair onto
+            `Room.lookbookHeadline` / `Room.lookbookBody`; the
+            fallback resolver (`resolveListingCopy`) prefers those
+            and falls back to `room.recommendation` (the consultation
+            prose) for unpinned rooms. Rendered between the title and
+            the photo so a buyer reads the room's name, then its
+            narrative, then sees the staging. `data-testid` on the
+            wrapper lets the e2e spec pin the new-vs-legacy behaviour
+            (see `tests/e2e/specs/lookbook-edit.spec.ts`). */}
+        {(() => {
+          const listingCopy = resolveListingCopy({
+            lookbookHeadline: room.lookbookHeadline ?? null,
+            lookbookBody: room.lookbookBody ?? null,
+            recommendation: room.recommendation ?? null,
+          });
+          if (!listingCopy.headline && !listingCopy.body) return null;
+          return (
+            <div
+              data-testid="room-listing-copy"
+              data-source={room.lookbookHeadline || room.lookbookBody ? "new" : "legacy"}
+              className="avoid-break mt-6 border-l-2 border-primary pl-4"
+            >
+              {listingCopy.headline && (
+                <h3 className="font-playfair text-xl font-semibold text-foreground leading-tight">
+                  {listingCopy.headline}
+                </h3>
+              )}
+              {listingCopy.body && (
+                <p className="mt-2 font-jakarta text-sm leading-relaxed text-muted-foreground">
+                  {listingCopy.body}
+                </p>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       <div className="avoid-break flex-1">

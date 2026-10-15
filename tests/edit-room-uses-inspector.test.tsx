@@ -38,6 +38,8 @@ describe("EditRoomStudio mounts <Inspector> (issue #1342)", () => {
         roomId="room-1"
         initialLookbookSlot="A"
         touchUps={{ original: 0, A: 0, B: 0 }}
+        initialCopyHeadline=""
+        initialCopyBody=""
       />
     );
     expect(html).toContain('data-testid="edit-room-inspector"');
@@ -54,6 +56,8 @@ describe("EditRoomStudio mounts <Inspector> (issue #1342)", () => {
         roomId="room-1"
         initialLookbookSlot="A"
         touchUps={{ original: 0, A: 0, B: 0 }}
+        initialCopyHeadline=""
+        initialCopyBody=""
       />
     );
     expect(html).toContain("Staging");
@@ -80,6 +84,8 @@ describe("EditRoomStudio mounts <Inspector> (issue #1342)", () => {
         roomId="room-1"
         initialLookbookSlot="A"
         touchUps={{ original: 0, A: 0, B: 0 }}
+        initialCopyHeadline=""
+        initialCopyBody=""
       />
     );
     expect(html).toContain('data-testid="run-button"');
@@ -98,6 +104,8 @@ describe("EditRoomStudio mounts <Inspector> (issue #1342)", () => {
         roomId="room-1"
         initialLookbookSlot="A"
         touchUps={{ original: 0, A: 0, B: 0 }}
+        initialCopyHeadline=""
+        initialCopyBody=""
       />
     );
     const buttonMatch = html.match(/<button[^>]*data-testid="run-button"[^>]*>/);
@@ -114,6 +122,8 @@ describe("EditRoomStudio mounts <Inspector> (issue #1342)", () => {
         roomId="room-1"
         initialLookbookSlot="A"
         touchUps={{ original: 0, A: 0, B: 0 }}
+        initialCopyHeadline=""
+        initialCopyBody=""
       />
     );
     expect(html).toContain('data-testid="run-helper-text"');
@@ -130,6 +140,8 @@ describe("EditRoomStudio mounts <Inspector> (issue #1342)", () => {
         roomId="room-1"
         initialLookbookSlot="A"
         touchUps={{ original: 0, A: 0, B: 0 }}
+        initialCopyHeadline=""
+        initialCopyBody=""
       />
     );
     expect(html).toContain("What should change?");
@@ -150,6 +162,8 @@ describe("EditRoomStudio mounts <Inspector> (issue #1342)", () => {
         roomId="room-1"
         initialLookbookSlot="A"
         touchUps={{ original: 0, A: 0, B: 0 }}
+        initialCopyHeadline=""
+        initialCopyBody=""
       />
     );
     expect(html).not.toContain("detect-tab-panel");

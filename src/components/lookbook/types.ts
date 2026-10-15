@@ -27,6 +27,16 @@ export interface RoomData {
   recommendation?: string | null;
   buyerPsychology?: string | null;
   checklistItems?: ChecklistItem[] | null;
+  /**
+   * Issue #1343 — listing-copy headline (Magic Patterns CopyPanel).
+   * Rendered above the room pillars when present; null hides the
+   * headline strip. Resolution (new column vs. legacy fallback) is
+   * `resolveListingCopy` in `src/lib/listing-copy.ts`.
+   */
+  lookbookHeadline?: string | null;
+  /** Issue #1343 — listing-copy body. Rendered between the headline
+   * and the pillars when present; falls back to `recommendation`. */
+  lookbookBody?: string | null;
 }
 
 export interface UserData {

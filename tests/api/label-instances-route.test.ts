@@ -46,6 +46,9 @@ const mockRoom = {
   materialFinishId: null,
   materialFinishDirectives: null,
   materialFinishConceptLabel: null,
+  // Issue #1343 — listing-copy columns.
+  lookbookHeadline: null,
+  lookbookBody: null,
   createdAt: new Date(),
 };
 

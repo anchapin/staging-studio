@@ -75,7 +75,24 @@ const getPreviewProject = cache(async (id: string) =>
           signoffContent: true,
         },
       },
-      rooms: true,
+      rooms: {
+        select: {
+          id: true,
+          name: true,
+          beforeImageUrl: true,
+          afterImageUrl: true,
+          beforeImageUrl2: true,
+          afterImageUrl2: true,
+          selectedVariantIndex: true,
+          observedChallenge: true,
+          recommendation: true,
+          buyerPsychology: true,
+          checklistItems: true,
+          // Issue #1343 — listing-copy columns (CopyPanel).
+          lookbookHeadline: true,
+          lookbookBody: true,
+        },
+      },
       materialSwatches: {
         orderBy: { sortOrder: "asc" },
       },
@@ -252,6 +269,12 @@ export default async function LookbookPreviewPage({
       observedChallenge: room.observedChallenge,
       recommendation: room.recommendation,
       buyerPsychology: room.buyerPsychology,
+      // Issue #1343 — listing-copy columns. Null on rooms that
+      // pre-date the redesigned CopyPanel; `resolveListingCopy` in
+      // `RoomSpread` falls back to `recommendation` for the body
+      // slot when both columns are unset.
+      lookbookHeadline: room.lookbookHeadline,
+      lookbookBody: room.lookbookBody,
       // Already parsed/validated by parseChecklistItems in the view.
       checklistItems: room.checklistItems as PreviewProject["rooms"][number]["checklistItems"],
     })),

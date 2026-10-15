@@ -59,6 +59,13 @@ const baseProps = (overrides: Partial<Parameters<typeof Inspector>[0]> = {}) => 
   activeTab: "stage" as const,
   onTabChange: vi.fn(),
   onRun: vi.fn(),
+  // #1343 — CopyPanel (Listing copy tab) inputs.
+  copyHeadline: "",
+  copyBody: "",
+  isCopyRewriting: false,
+  onCopyHeadlineChange: vi.fn(),
+  onCopyBodyChange: vi.fn(),
+  onCopyRewrite: vi.fn(),
   ...overrides,
 });
 
@@ -102,15 +109,20 @@ describe("Inspector (issue #1342)", () => {
     expect(html).not.toContain("What should change?");
   });
 
-  it("renders a CopyPanel stub when activeTab='copy' (carries a 'coming soon' / 'CopyPanel' marker)", () => {
+  it("renders the CopyPanel (Listing copy tab) when activeTab='copy'", () => {
+    // #1343 replaced the stub: the panel now renders the Headline
+    // input + Description textarea + Rewrite CTA. Pinned by string
+    // match against the panel's own header (`Listing copy`) and
+    // the Rewrite CTA label — the absence of any "coming soon"
+    // marker proves the stub is gone.
     const html = renderToStaticMarkup(
       <Inspector {...baseProps({ activeTab: "copy" })} />
     );
-    // The stub is a single sentence — pinned by string match so the
-    // #1343 CopyPanel slice can replace the body without breaking the
-    // tab-switch wiring.
-    expect(html).toContain("Listing copy");
-    expect(html).toContain("coming soon");
+    expect(html).toContain('data-testid="copy-panel"');
+    expect(html).toContain('id="copy-headline"');
+    expect(html).toContain('id="copy-body"');
+    expect(html).toContain("Rewrite from directions");
+    expect(html).not.toContain("coming soon");
   });
 
   it("renders the Run button (data-testid=run-button) below the tab panel", () => {

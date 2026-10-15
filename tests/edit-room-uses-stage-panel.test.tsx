@@ -36,6 +36,8 @@ describe("EditRoomStudio mounts <StagePanel> (issue #1341)", () => {
         roomId="room-1"
         initialLookbookSlot="A"
         touchUps={{ original: 0, A: 0, B: 0 }}
+        initialCopyHeadline=""
+        initialCopyBody=""
       />
     );
     // The StagePanel renders a heading "What should change?" that is
@@ -53,6 +55,8 @@ describe("EditRoomStudio mounts <StagePanel> (issue #1341)", () => {
         roomId="room-1"
         initialLookbookSlot="A"
         touchUps={{ original: 0, A: 0, B: 0 }}
+        initialCopyHeadline=""
+        initialCopyBody=""
       />
     );
     // The whole-room scope option is the one with `aria-checked="true"`
@@ -74,6 +78,8 @@ describe("EditRoomStudio mounts <StagePanel> (issue #1341)", () => {
         roomId="room-1"
         initialLookbookSlot="A"
         touchUps={{ original: 0, A: 0, B: 0 }}
+        initialCopyHeadline=""
+        initialCopyBody=""
       />
     );
     const textareaCount = (html.match(/<textarea/g) || []).length;
@@ -89,6 +95,8 @@ describe("EditRoomStudio mounts <StagePanel> (issue #1341)", () => {
         roomId="room-1"
         initialLookbookSlot="A"
         touchUps={{ original: 0, A: 0, B: 0 }}
+        initialCopyHeadline=""
+        initialCopyBody=""
       />
     );
     // Strip carries its own aria-label — both surfaces coexist.
@@ -105,6 +113,8 @@ describe("EditRoomStudio mounts <StagePanel> (issue #1341)", () => {
         roomId="room-1"
         initialLookbookSlot="A"
         touchUps={{ original: 0, A: 0, B: 0 }}
+        initialCopyHeadline=""
+        initialCopyBody=""
       />
     );
     // Fine-tune is collapsed by default but its header always renders.
@@ -124,6 +134,8 @@ describe("EditRoomStudio mounts <StagePanel> (issue #1341)", () => {
         roomId="room-1"
         initialLookbookSlot="A"
         touchUps={{ original: 0, A: 0, B: 0 }}
+        initialCopyHeadline=""
+        initialCopyBody=""
       />
     );
     // The legacy surface carries class names like `detect-tab-panel` and
