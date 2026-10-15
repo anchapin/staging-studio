@@ -24,6 +24,7 @@ import { resolveStageBlockedReason } from "@/lib/edit-room-blocked";
 import { resolveTargetSlot, type SlotId } from "@/lib/edit-room-scope";
 
 import { CanvasStage } from "@/components/edit-room/CanvasStage";
+import { StagePanel } from "@/components/edit-room/StagePanel";
 import { TopBar } from "@/components/edit-room/TopBar";
 import { Toast } from "@/components/edit-room/Toast";
 import { VersionStrip } from "@/components/edit-room/VersionStrip";
@@ -323,13 +324,47 @@ export function EditRoomStudio({
           </footer>
         </main>
 
-        {/* #1341 / #1342 — StagePanel + Inspector + primary Run button */}
+        {/* #1341 — StagePanel mounted in the inspector <aside>.
+            #1342 fills in the primary Run button + helper text below. */}
         <aside
           data-testid="edit-room-inspector"
-          className="w-[380px] shrink-0 border-l border-outline/15 bg-surface-container"
+          className="flex w-[380px] shrink-0 flex-col border-l border-outline/15 bg-surface-container"
           aria-label="Staging inspector"
         >
-          {/* Filled in by #1341 / #1342 */}
+          <StagePanel
+            scope={state.scope}
+            onScopeChange={(s) => dispatch({ type: "SET_SCOPE", scope: s })}
+            viewing={state.viewing}
+            onViewOriginal={() => dispatch({ type: "SET_VIEWING", viewing: "original" })}
+            targetSlot={targetSlot}
+            directions={state.directions}
+            onDirectionsChange={(v) => dispatch({ type: "SET_DIRECTIONS", value: v })}
+            concept={state.concept}
+            onConceptChange={(c) => dispatch({ type: "SET_CONCEPT", concept: c })}
+            onConceptSubmit={(c) => {
+              // #1344 wires the real /api/segment/furnishings call;
+              // for now we set the concept so the chips reflect the
+              // typed value and the user sees the round-trip work.
+              dispatch({ type: "SET_CONCEPT", concept: c });
+            }}
+            selected={state.selected}
+            onToggleObject={(id) =>
+              dispatch({ type: "TOGGLE_OBJECT", objectId: id })
+            }
+            onClearSelection={() => dispatch({ type: "CLEAR_SELECTION" })}
+            detections={
+              state.concept === null
+                ? []
+                : [
+                    { id: "obj-1", concept: state.concept, label: state.concept, box: { x: 49, y: 57, w: 31, h: 42 } },
+                    { id: "obj-2", concept: state.concept, label: `${state.concept} 2`, box: { x: 8, y: 58, w: 23, h: 27 } },
+                  ]
+            }
+            hasMask={state.hasMask}
+            onClearMask={() => dispatch({ type: "CLEAR_MASK" })}
+            projectAesthetic="Warm Craftsman Modern"
+            projectGlobalDirectives="Keep original molding, hardwood floors and brick visible."
+          />
         </aside>
       </div>
 
