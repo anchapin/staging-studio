@@ -85,4 +85,41 @@ describe("MaskLayer (issue #1339)", () => {
     // this component).
     expect(html).toMatch(/<canvas/);
   });
+
+  it("renders unchanged when the optional `onChange` is omitted (back-compat with #1339)", () => {
+    // Issue #1344 (real `useInpaintRuns` wire) added `onChange` as
+    // an OPTIONAL prop (the e2e suites for the legacy `<InpaintEditor>`
+    // surface don't supply it). The static markup must not regress.
+    // Dynamic behavior — `onChange` fires after every stroke and on
+    // the `resetKey` effect — is pinned by the e2e spec
+    // `tests/e2e/specs/edit-room-redesign-mask-paint.spec.ts`
+    // (still `test.describe.skip`-gated per the handoff; see issue
+    // #1344 strand 2). Pointer-driven paint cannot run under vitest's
+    // `node` environment — jsdom / happy-dom isn't installed in this
+    // repo.
+    const withoutOnChange = renderToStaticMarkup(
+      <MaskLayer
+        width={300}
+        height={200}
+        brushSize={48}
+        mode="paint"
+        onPainted={() => {}}
+        resetKey={0}
+      />
+    );
+    const withOnChange = renderToStaticMarkup(
+      <MaskLayer
+        width={300}
+        height={200}
+        brushSize={48}
+        mode="paint"
+        onPainted={() => {}}
+        resetKey={0}
+        onChange={() => {}}
+      />
+    );
+    // Back-compat invariant: the prop is additive only, so the
+    // rendered HTML is identical whether it's supplied or not.
+    expect(withOnChange).toBe(withoutOnChange);
+  });
 });

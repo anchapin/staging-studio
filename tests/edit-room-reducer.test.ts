@@ -151,6 +151,53 @@ describe("editRoomReducer", () => {
     expect(halfway.viewing).toBe(started.viewing);
   });
 
+  it("SET_MASK_DATA_URL stores the data URL verbatim without touching hasMask", () => {
+    // Issue #1344 (real `useInpaintRuns` wire) — MaskLayer emits
+    // `toDataURL("image/png")` after every stroke; the shell
+    // mirrors it locally so the canvas subtree can react. The
+    // submit path reads the most recent value at submit time.
+    const next = editRoomReducer(started, {
+      type: "SET_MASK_DATA_URL",
+      value: "data:image/png;base64,iVBORw0KGgo",
+    });
+    expect(next.maskDataUrl).toBe("data:image/png;base64,iVBORw0KGgo");
+    // Sanity: hasMask unchanged — the snapshot is independent of
+    // the painted-state flag (erase-mode strokes emit non-null
+    // data URLs even when hasMask flips to false).
+    expect(next.hasMask).toBe(started.hasMask);
+  });
+
+  it("CLEAR_MASK bumps maskVersion AND nulls maskDataUrl (no stale snapshot to submit)", () => {
+    // Issue #1344 — CLEAR_MASK means the buffer just became
+    // empty; dropping the data URL alongside hasMask=false means
+    // a Run click after clear cannot submit a stale snapshot.
+    const seeded = editRoomReducer(started, {
+      type: "SET_MASK_DATA_URL",
+      value: "data:image/png;base64,stale",
+    });
+    const cleared = editRoomReducer(seeded, { type: "CLEAR_MASK" });
+    expect(cleared.hasMask).toBe(false);
+    expect(cleared.maskDataUrl).toBeNull();
+    // maskVersion bumped (existing CLEAR_MASK behavior).
+    expect(cleared.maskVersion).toBe(started.maskVersion + 1);
+  });
+
+  it("SET_VIEWING resets maskDataUrl (switching versions starts blank)", () => {
+    // Issue #1344 — when the user switches to a different variant
+    // (Original / A / B), the canvas clears and the prior
+    // data URL would be stale.
+    const seeded = editRoomReducer(started, {
+      type: "SET_MASK_DATA_URL",
+      value: "data:image/png;base64,stale",
+    });
+    const switched = editRoomReducer(seeded, {
+      type: "SET_VIEWING",
+      viewing: "A",
+    });
+    expect(switched.maskDataUrl).toBeNull();
+    expect(switched.viewing).toBe("A");
+  });
+
   it("SHOW_TOAST/DISMISS_TOAST round-trip the toast message", () => {
     const shown = editRoomReducer(started, {
       type: "SHOW_TOAST",
