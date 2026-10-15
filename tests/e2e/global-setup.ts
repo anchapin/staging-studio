@@ -288,6 +288,14 @@ async function seed(): Promise<void> {
                       "Layer warm lamps and lighten textiles to lift the space.",
                     buyerPsychology:
                       "Empty nesters read brightness as low-maintenance comfort.",
+                    // Issue #1343 — listing-copy columns (CopyPanel).
+                    // Headline + body intentionally distinct from the
+                    // consultation prose above so the e2e can assert
+                    // the new→legacy resolution independently.
+                    lookbookHeadline:
+                      "A brighter, lighter showpiece for empty-nester buyers",
+                    lookbookBody:
+                      "Refreshed lighting and softened textiles turn a north-facing room into a warm, low-maintenance retreat.",
                     checklistItems: [
                       {
                         item: "Replace burnt-out bulbs with warm white",

@@ -93,6 +93,22 @@ export interface InspectorProps {
   activeTab: InspectorTab;
   onTabChange: (tab: InspectorTab) => void;
 
+  // ─── #1343 — CopyPanel (Listing copy tab) inputs ──────────────────
+  /** Controlled Headline value (the shell mirrors the persisted Room row). */
+  copyHeadline: string;
+  /** Controlled Description body value (the shell mirrors the persisted Room row). */
+  copyBody: string;
+  /** True while the AI rewrite is in flight; the CTA shows "Writing…". */
+  isCopyRewriting: boolean;
+  /** Max body chars (default 600 — matches the panel's maxLength attribute). */
+  copyBodyMaxLength?: number;
+  /** Headline edit callback (the shell wires the autosave controller). */
+  onCopyHeadlineChange: (value: string) => void;
+  /** Body edit callback (the shell wires the autosave controller). */
+  onCopyBodyChange: (value: string) => void;
+  /** "Rewrite from directions" CTA click handler. */
+  onCopyRewrite: () => void;
+
   // ─── Run button inputs (resolver-owned; the Inspector is dumb) ────
   /**
    * The blocked-resolver's return for the current (scope, viewing,
@@ -117,6 +133,14 @@ export function Inspector(props: InspectorProps): ReactNode {
     isRunning,
     progress,
     onRun,
+    // #1343 — CopyPanel inputs
+    copyHeadline,
+    copyBody,
+    isCopyRewriting,
+    copyBodyMaxLength,
+    onCopyHeadlineChange,
+    onCopyBodyChange,
+    onCopyRewrite,
     // StagePanel-forwarded
     scope,
     onScopeChange,
@@ -266,20 +290,26 @@ export function Inspector(props: InspectorProps): ReactNode {
         </>
       ) : (
         <>
-          <CopyPanel directions={directions} />
+          <CopyPanel
+            directions={directions}
+            headline={copyHeadline}
+            body={copyBody}
+            isRewriting={isCopyRewriting}
+            bodyMaxLength={copyBodyMaxLength}
+            onHeadlineChange={onCopyHeadlineChange}
+            onBodyChange={onCopyBodyChange}
+            onRewrite={onCopyRewrite}
+          />
+          {/* The Inspector's Listing copy footer is reserved for any
+              aux copy actions beyond the panel's own CTA (#1344 may
+              wire an "Insert into lookbook preview" affordance). The
+              panel already owns its Rewrite CTA, so the footer slot
+              stays empty — but the data-testid is preserved so the
+              e2e selector still resolves. */}
           <footer
             data-testid="inspector-copy-footer"
             className="shrink-0 border-t border-line-soft px-5 py-4"
-          >
-            {/* #1343 replaces this footer with the CopyPanel's own
-                Rewrite-from-directions CTA. For now, a one-line
-                "coming soon" placeholder so the layout matches the
-                Staging tab's height (the Inspector is `flex flex-col`,
-                so without a footer the CopyPanel stretches to fill). */}
-            <p className="text-center text-xs text-ink-subtle">
-              Listing copy rewrite is coming soon in #1343.
-            </p>
-          </footer>
+          />
         </>
       )}
     </aside>

@@ -38,6 +38,8 @@ import {
 } from "@/lib/lookbook-variant";
 import type { EditRoomStudioProps, Version } from "@/components/edit-room/types";
 import { setLookbookVariant } from "@/app/actions/lookbook-variant";
+import { AutosaveController } from "@/lib/autosave-controller";
+import { saveListingCopy } from "@/app/actions/room-copy";
 
 const TOAST_AUTO_DISMISS_MS = 3200;
 const DIRECTIONS_DEBOUNCE_MS = 900;
@@ -63,6 +65,8 @@ export function EditRoomStudio({
   roomId,
   initialLookbookSlot,
   touchUps,
+  initialCopyHeadline,
+  initialCopyBody,
 }: EditRoomStudioProps) {
   const [state, dispatch] = useReducer(editRoomReducer, initialEditRoomState);
   const router = useRouter();
@@ -154,6 +158,103 @@ export function EditRoomStudio({
   const [expand, setExpand] = useState(12);
   const [shadows, setShadows] = useState(true);
   const [seed, setSeed] = useState("");
+
+  // ─── #1343 — CopyPanel state (Listing copy tab) ──────────────────
+  // The CopyPanel mirrors the Room's persisted `lookbookHeadline` /
+  // `lookbookBody` columns. The shell seeds from the parent route's
+  // initial values (passed via EditRoomStudioProps), then mutates
+  // locally on every keystroke — the debounced autosave then
+  // persists back. The "Rewrite from directions" CTA dispatches a
+  // local setTimeout that fills the inputs with placeholder rewrite
+  // text; #1344 wires the real gpt-4o-mini call (or a parallel
+  // /api/v1/listing-copy route once the schema lands).
+  const [copyHeadline, setCopyHeadline] = useState(
+    initialCopyHeadline
+  );
+  const [copyBody, setCopyBody] = useState(initialCopyBody);
+  const [isCopyRewriting, setIsCopyRewriting] = useState(false);
+
+  // Autosave controller for the two listing-copy columns. 600ms
+  // idle window (per the issue's contract: "batches 600ms of
+  // typing into one Prisma update"). The controller's `save`
+  // callback calls `saveListingCopy`, which performs the
+  // session + ownership + Zod validation server-side. A failed save
+  // surfaces as the controller's `"error"` status; `flush()` would
+  // resolve false so the future Export-PDF button can decide not to
+  // ship over lost edits — same pattern as the directives
+  // autosave controller in project-detail-view.tsx (#496).
+  const copyAutosaveRef = useRef(
+    new AutosaveController<{
+      lookbookHeadline: string;
+      lookbookBody: string;
+    }>({
+      save: async (payload) => {
+        const result = await saveListingCopy(roomId, payload);
+        return result.success;
+      },
+      idleMs: 600,
+    })
+  );
+  // Keep the controller's status observable so the parent route's
+  // save indicator (TopBar's "Saving…/Saved" pill) can reflect the
+  // copy panel too. Today the indicator only reads directive status;
+  // #1344 unifies both into one badge.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _copyAutosave = copyAutosaveRef.current;
+
+  // The CopyPanel's two edit handlers both feed the same controller
+  // so a headline edit + body edit within the 600ms window collapse
+  // into one Prisma update (the controller's trailing-edge debounce
+  // is typed-key agnostic). Each handler also bumps the panel's
+  // local value so the textarea re-renders.
+  const handleCopyHeadlineChange = useCallback((value: string) => {
+    setCopyHeadline(value);
+    copyAutosaveRef.current.edit({
+      lookbookHeadline: value,
+      lookbookBody: copyBodyRef.current,
+    });
+  }, []);
+  const handleCopyBodyChange = useCallback((value: string) => {
+    setCopyBody(value);
+    copyAutosaveRef.current.edit({
+      lookbookHeadline: copyHeadlineRef.current,
+      lookbookBody: value,
+    });
+  }, []);
+
+  // Refs-as-latest-state pattern (per #1342's rationale): the
+  // captured callbacks above read the *latest* headline/body values
+  // without depending on them in their deps arrays, so a keystroke
+  // does not re-create the callback (which would force the panel's
+  // input re-mount and reset the cursor).
+  const copyHeadlineRef = useRef(copyHeadline);
+  const copyBodyRef = useRef(copyBody);
+  useEffect(() => {
+    copyHeadlineRef.current = copyHeadline;
+  });
+  useEffect(() => {
+    copyBodyRef.current = copyBody;
+  });
+
+  // The Rewrite-from-directions CTA stub (#1343 stub; #1344 wires
+  // the real gpt-4o-mini call to a route returning {headline, body}).
+  // The Magic Patterns design uses a 1.2s "Writing…" affordance
+  // before the inputs animate to the new values — same shape as
+  // the design, same interaction shape that the real call would
+  // produce. The handler is mounted in a useCallback so the
+  // Rewrite button's onClick ref is stable across renders.
+  const handleCopyRewrite = useCallback(() => {
+    if (isCopyRewriting) return;
+    if (state.directions.trim().length === 0) return;
+    setIsCopyRewriting(true);
+    window.setTimeout(() => {
+      setCopyHeadline(`Rewritten from your ${state.directions.length}-char brief`);
+      setCopyBody(
+        "Auto-generated placeholder: the AI rewrite of the listing copy lands in #1344."
+      );
+      setIsCopyRewriting(false);
+    }, 1200);
+  }, [isCopyRewriting, state.directions]);
 
   // The Run button's click handler — the inspector is dumb, the shell
   // owns the run-side-effect chain. For #1342 we only dispatch
@@ -399,6 +500,13 @@ export function EditRoomStudio({
           isRunning={state.running !== null}
           progress={state.running ?? 0}
           onRun={handleRun}
+          // #1343 — CopyPanel wiring
+          copyHeadline={copyHeadline}
+          copyBody={copyBody}
+          isCopyRewriting={isCopyRewriting}
+          onCopyHeadlineChange={handleCopyHeadlineChange}
+          onCopyBodyChange={handleCopyBodyChange}
+          onCopyRewrite={handleCopyRewrite}
         />
       </div>
 

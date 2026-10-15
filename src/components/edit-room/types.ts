@@ -64,6 +64,22 @@ export interface EditRoomStudioProps {
    * parent route's autosave controller handles the refresh cadence.
    */
   touchUps: { original: number; A: number; B: number };
+  /**
+   * Issue #1343 — Initial persisted Headline value from
+   * `Room.lookbookHeadline`. Pre-populates the CopyPanel's Headline
+   * input on first render; subsequent edits are shell-owned state.
+   * Empty string (not `null` — the CopyPanel's `<input>` uses a
+   * controlled string value) when the column is null in the DB.
+   */
+  initialCopyHeadline: string;
+  /**
+   * Issue #1343 — Initial persisted Description value from
+   * `Room.lookbookBody`. Pre-populates the CopyPanel's textarea on
+   * first render; subsequent edits are shell-owned state. The
+   * lookbook render — via `resolveListingCopy` — falls back to the
+   * legacy `recommendation` column when this is null.
+   */
+  initialCopyBody: string;
 }
 
 /**

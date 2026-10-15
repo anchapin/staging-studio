@@ -3,6 +3,33 @@ import { z } from "zod";
 import { checklistItemSchema } from "@/lib/checklist-schema";
 
 /**
+ * Zod schema for the listing-copy payload persisted by the
+ * `saveListingCopy` server action (issue #1343).
+ *
+ * Contract: both `lookbookHeadline` and `lookbookBody` are required
+ * strings (the autosave always carries both — the panel never
+ * sends a partial). Both allow empty strings because an explicit
+ * clear is distinct from "never touched" in the lookbook render
+ * (a cleared column falls back to the legacy `recommendation` body
+ * for body, or hides the headline strip entirely). The 600-char
+ * cap on the body matches the CopyPanel's `maxLength={600}` HTML
+ * attribute; the server enforces the same cap so a non-browser
+ * caller (a curl request, a future native client) cannot bypass it.
+ * `.strict()` rejects unknown keys outright so client-controlled
+ * extras can never ride this write path.
+ *
+ * Side effects: none — pure validation.
+ */
+export const listingCopySchema = z
+  .object({
+    lookbookHeadline: z.string().max(200),
+    lookbookBody: z.string().max(600),
+  })
+  .strict();
+
+export type ListingCopyInput = z.infer<typeof listingCopySchema>;
+
+/**
  * Zod schema for partial room-copy edits persisted by the `saveRoomCopyEdits`
  * server action (issue #250).
  *

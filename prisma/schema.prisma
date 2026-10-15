@@ -101,6 +101,17 @@ model Room {
   buyerPsychology      String?
   checklistItems       Json?    // Array of { item, category, priority }
 
+  // Issue #1343: Listing copy columns for the redesigned CopyPanel.
+  // Both nullable strings so an existing room can ship without any
+  // listing copy and the lookbook render falls back to the legacy
+  // `recommendation` field (see `resolveListingCopy` in
+  // `src/lib/listing-copy.ts`). Distinct from the consultation-copy
+  // fields above: this is the headline + body the lookbook shows
+  // next to the room's photo spread — the "what an agent writes
+  // about this room" snippet, not the staged-priority prose.
+  lookbookHeadline     String?
+  lookbookBody         String?
+
   sortOrder           Int      @default(0) // for manual room reordering
 
   createdAt            DateTime @default(now())

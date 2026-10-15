@@ -36,6 +36,8 @@ describe("EditRoomStudio mounts <VersionStrip> (issue #1340)", () => {
         projectId="project-1"
         roomId="room-1"
         initialLookbookSlot="A"
+        initialCopyHeadline=""
+        initialCopyBody=""
         touchUps={{ original: 0, A: 2, B: 0 }}
       />
     );
@@ -51,6 +53,8 @@ describe("EditRoomStudio mounts <VersionStrip> (issue #1340)", () => {
         projectId="project-1"
         roomId="room-1"
         initialLookbookSlot="A"
+        initialCopyHeadline=""
+        initialCopyBody=""
         touchUps={{ original: 0, A: 0, B: 0 }}
       />
     );
@@ -72,6 +76,8 @@ describe("EditRoomStudio mounts <VersionStrip> (issue #1340)", () => {
         roomId="room-1"
         initialLookbookSlot="B"
         touchUps={{ original: 0, A: 2, B: 0 }}
+        initialCopyHeadline=""
+        initialCopyBody=""
       />
     );
     expect(html).toContain("Variant A");
@@ -89,6 +95,8 @@ describe("EditRoomStudio mounts <VersionStrip> (issue #1340)", () => {
         projectId="project-1"
         roomId="room-1"
         initialLookbookSlot="A"
+        initialCopyHeadline=""
+        initialCopyBody=""
         touchUps={{ original: 0, A: 0, B: 0 }}
       />
     );
