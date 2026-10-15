@@ -4,27 +4,28 @@
  * Issue #1337 — `<EditRoomStudio>` shell + scope/view state machine.
  * Issue #1339 — Mounts `<CanvasStage>` in the canvas slot.
  * Issue #1340 — Mounts `<VersionStrip>` + lookbook slot CTA beneath the canvas.
+ * Issue #1342 — Mounts `<Inspector>` (two-tab Staging/Listing copy shell +
+ *               primary Run button + helper text) in place of the bare
+ *               StagePanel mount.
  *
  * Top-level shell for the Edit Room UX redesign (Magic Patterns OS
  * `hVPYX2rJ2yawc1XTY2LTRJ`, design file `dVy8jC2kXpi1ca8b4A1hcS`).
- * This slice lands the shell + the state machine + the version strip +
- * the lookbook CTA; remaining children #1341..#1342 fill in
- * Inspector, StagePanel, FineTune, CopyPanel; #1344/#1345 wire to
- * the per-room view and the `/refine` route.
- *
- * The shell owns its state via `useReducer` against
- * `editRoomReducer` so the same transitions are reachable from tests
- * (see `tests/edit-room-reducer.test.ts`).
+ * The shell owns its state via `useReducer` against `editRoomReducer`
+ * so the same transitions are reachable from tests (see
+ * `tests/edit-room-reducer.test.ts`). The Inspector's `activeTab` and
+ * the FineTune five-control state are local `useState` because they
+ * are not surfaced outside the studio yet (#1344 wires the FineTune
+ * persistence to the autosave controller).
  */
 
-import { useEffect, useMemo, useReducer, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 import { resolveStageBlockedReason } from "@/lib/edit-room-blocked";
 import { resolveTargetSlot, type SlotId } from "@/lib/edit-room-scope";
 
 import { CanvasStage } from "@/components/edit-room/CanvasStage";
-import { StagePanel } from "@/components/edit-room/StagePanel";
+import { Inspector, type InspectorTab } from "@/components/edit-room/Inspector";
 import { TopBar } from "@/components/edit-room/TopBar";
 import { Toast } from "@/components/edit-room/Toast";
 import { VersionStrip } from "@/components/edit-room/VersionStrip";
@@ -141,6 +142,27 @@ export function EditRoomStudio({
       state.directions,
     ]
   );
+
+  // ─── #1342 — Inspector state ──────────────────────────────────────
+  // The Inspector is controlled: the shell owns `activeTab` and the
+  // FineTune five values (local useState — they are not surfaced
+  // outside the studio yet, so they don't need reducer discipline).
+  // #1344 wires FineTune persistence to the autosave controller.
+  const [activeTab, setActiveTab] = useState<InspectorTab>("stage");
+  const [strength, setStrength] = useState(80);
+  const [adherence, setAdherence] = useState(75);
+  const [expand, setExpand] = useState(12);
+  const [shadows, setShadows] = useState(true);
+  const [seed, setSeed] = useState("");
+
+  // The Run button's click handler — the inspector is dumb, the shell
+  // owns the run-side-effect chain. For #1342 we only dispatch
+  // RUN_START so the button's loading state engages; #1344 wires the
+  // real inpaint submission (`/api/inpaint` + `useInpaintRuns`).
+  const handleRun = useCallback(() => {
+    if (blockedReason !== null || state.running !== null) return;
+    dispatch({ type: "RUN_START" });
+  }, [blockedReason, state.running]);
 
   // ─── Side effects ──────────────────────────────────────────────────
   // 1. Toast auto-dismiss — mirrors App.tsx's `useEffect`. The timer
@@ -324,48 +346,60 @@ export function EditRoomStudio({
           </footer>
         </main>
 
-        {/* #1341 — StagePanel mounted in the inspector <aside>.
-            #1342 fills in the primary Run button + helper text below. */}
-        <aside
-          data-testid="edit-room-inspector"
-          className="flex w-[380px] shrink-0 flex-col border-l border-outline/15 bg-surface-container"
-          aria-label="Staging inspector"
-        >
-          <StagePanel
-            scope={state.scope}
-            onScopeChange={(s) => dispatch({ type: "SET_SCOPE", scope: s })}
-            viewing={state.viewing}
-            onViewOriginal={() => dispatch({ type: "SET_VIEWING", viewing: "original" })}
-            targetSlot={targetSlot}
-            directions={state.directions}
-            onDirectionsChange={(v) => dispatch({ type: "SET_DIRECTIONS", value: v })}
-            concept={state.concept}
-            onConceptChange={(c) => dispatch({ type: "SET_CONCEPT", concept: c })}
-            onConceptSubmit={(c) => {
-              // #1344 wires the real /api/segment/furnishings call;
-              // for now we set the concept so the chips reflect the
-              // typed value and the user sees the round-trip work.
-              dispatch({ type: "SET_CONCEPT", concept: c });
-            }}
-            selected={state.selected}
-            onToggleObject={(id) =>
-              dispatch({ type: "TOGGLE_OBJECT", objectId: id })
-            }
-            onClearSelection={() => dispatch({ type: "CLEAR_SELECTION" })}
-            detections={
-              state.concept === null
-                ? []
-                : [
-                    { id: "obj-1", concept: state.concept, label: state.concept, box: { x: 49, y: 57, w: 31, h: 42 } },
-                    { id: "obj-2", concept: state.concept, label: `${state.concept} 2`, box: { x: 8, y: 58, w: 23, h: 27 } },
-                  ]
-            }
-            hasMask={state.hasMask}
-            onClearMask={() => dispatch({ type: "CLEAR_MASK" })}
-            projectAesthetic="Warm Craftsman Modern"
-            projectGlobalDirectives="Keep original molding, hardwood floors and brick visible."
-          />
-        </aside>
+        {/* #1342 — Inspector shell (two-tab Staging/Listing copy +
+            primary Run button + helper text). The Inspector owns the
+            tab UI; the shell owns the data + the run-side-effect
+            chain (handleRun → /api/inpaint in #1344). */}
+        <Inspector
+          scope={state.scope}
+          onScopeChange={(s) => dispatch({ type: "SET_SCOPE", scope: s })}
+          viewing={state.viewing}
+          onViewOriginal={() => dispatch({ type: "SET_VIEWING", viewing: "original" })}
+          targetSlot={targetSlot}
+          directions={state.directions}
+          onDirectionsChange={(v) => dispatch({ type: "SET_DIRECTIONS", value: v })}
+          concept={state.concept}
+          onConceptChange={(c) => dispatch({ type: "SET_CONCEPT", concept: c })}
+          onConceptSubmit={(c) => {
+            // #1344 wires the real /api/segment/furnishings call;
+            // for now we set the concept so the chips reflect the
+            // typed value and the user sees the round-trip work.
+            dispatch({ type: "SET_CONCEPT", concept: c });
+          }}
+          selected={state.selected}
+          onToggleObject={(id) =>
+            dispatch({ type: "TOGGLE_OBJECT", objectId: id })
+          }
+          onClearSelection={() => dispatch({ type: "CLEAR_SELECTION" })}
+          detections={
+            state.concept === null
+              ? []
+              : [
+                  { id: "obj-1", concept: state.concept, label: state.concept, box: { x: 49, y: 57, w: 31, h: 42 } },
+                  { id: "obj-2", concept: state.concept, label: `${state.concept} 2`, box: { x: 8, y: 58, w: 23, h: 27 } },
+                ]
+          }
+          hasMask={state.hasMask}
+          onClearMask={() => dispatch({ type: "CLEAR_MASK" })}
+          projectAesthetic="Warm Craftsman Modern"
+          projectGlobalDirectives="Keep original molding, hardwood floors and brick visible."
+          strength={strength}
+          onStrengthChange={setStrength}
+          adherence={adherence}
+          onAdherenceChange={setAdherence}
+          expand={expand}
+          onExpandChange={setExpand}
+          shadows={shadows}
+          onShadowsChange={setShadows}
+          seed={seed}
+          onSeedChange={setSeed}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          blockedReason={blockedReason}
+          isRunning={state.running !== null}
+          progress={state.running ?? 0}
+          onRun={handleRun}
+        />
       </div>
 
       <Toast

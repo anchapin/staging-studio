@@ -88,6 +88,24 @@ export interface StagePanelProps {
   // ─── Project context (parent route) ────────────────────────────────
   projectAesthetic: string;
   projectGlobalDirectives: string;
+
+  // ─── #1342 — Fine-tune controls (shell-owned) ─────────────────────
+  // The StagePanel renders `<FineTune>` with the shell's values. The
+  // component is a pure render of these — every change handler is a
+  // no-op until the shell wires them to the autosave controller
+  // (#1344). Defaults match the #1341 design's literal defaults so
+  // existing tests (and storybook previews without these props) keep
+  // rendering the same controls.
+  strength?: number;
+  onStrengthChange?: (n: number) => void;
+  adherence?: number;
+  onAdherenceChange?: (n: number) => void;
+  expand?: number;
+  onExpandChange?: (n: number) => void;
+  shadows?: boolean;
+  onShadowsChange?: (b: boolean) => void;
+  seed?: string;
+  onSeedChange?: (s: string) => void;
 }
 
 /** The three scope segmented-control options. */
@@ -116,6 +134,16 @@ export function StagePanel({
   onClearMask,
   projectAesthetic,
   projectGlobalDirectives,
+  strength = 80,
+  onStrengthChange = () => {},
+  adherence = 75,
+  onAdherenceChange = () => {},
+  expand = 12,
+  onExpandChange = () => {},
+  shadows = true,
+  onShadowsChange = () => {},
+  seed = "",
+  onSeedChange = () => {},
 }: StagePanelProps): ReactNode {
   const [contextOpen, setContextOpen] = useState(false);
   const onOriginal = viewing === "original";
@@ -292,26 +320,16 @@ export function StagePanel({
       {/* ─── 3. Fine-tune, out of the way until wanted ──────────────── */}
       <FineTune
         scope={scope}
-        strength={80}
-        onStrengthChange={() => {
-          /* #1342 wires real persistence */
-        }}
-        adherence={75}
-        onAdherenceChange={() => {
-          /* #1342 wires real persistence */
-        }}
-        expand={12}
-        onExpandChange={() => {
-          /* #1342 wires real persistence */
-        }}
-        shadows={true}
-        onShadowsChange={() => {
-          /* #1342 wires real persistence */
-        }}
-        seed=""
-        onSeedChange={() => {
-          /* #1342 wires real persistence */
-        }}
+        strength={strength}
+        onStrengthChange={onStrengthChange}
+        adherence={adherence}
+        onAdherenceChange={onAdherenceChange}
+        expand={expand}
+        onExpandChange={onExpandChange}
+        shadows={shadows}
+        onShadowsChange={onShadowsChange}
+        seed={seed}
+        onSeedChange={onSeedChange}
       />
     </div>
   );
