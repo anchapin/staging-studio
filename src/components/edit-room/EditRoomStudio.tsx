@@ -23,6 +23,7 @@ import { useEffect, useMemo, useReducer, useRef } from "react";
 import { resolveStageBlockedReason } from "@/lib/edit-room-blocked";
 import { resolveTargetSlot, type SlotId } from "@/lib/edit-room-scope";
 
+import { TopBar } from "@/components/edit-room/TopBar";
 import { Toast } from "@/components/edit-room/Toast";
 import {
   editRoomReducer,
@@ -138,13 +139,19 @@ export function EditRoomStudio({
       className="flex h-screen flex-col overflow-hidden bg-surface text-ink"
     >
       {/* #1338 — TopBar (breadcrumb + room picker + save status) */}
-      <header
-        data-testid="edit-room-topbar"
-        data-save-status={_saveStatus}
-        className="border-b border-outline/15 bg-surface-container-low"
-      >
-        {/* Filled in by #1338 */}
-      </header>
+      <TopBar
+        address="418 Linden Ave"
+        roomName="Living Room"
+        projectId="proj-1"
+        roomId="living"
+        saveStatus={_saveStatus}
+        onRoomChange={() => {
+          /* #1340/#1344 wires the real room switcher */
+        }}
+        onExitToProject={() => {
+          /* #1344 wires the project view's exit */
+        }}
+      />
 
       <div className="flex min-h-0 flex-1">
         <main className="flex min-w-0 flex-1 flex-col bg-surface-mid">
