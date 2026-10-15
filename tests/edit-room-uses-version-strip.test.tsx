@@ -26,58 +26,33 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { EditRoomStudio } from "@/components/edit-room/EditRoomStudio";
+import { baseProps } from "./edit-room-studio-fixture";
 
 describe("EditRoomStudio mounts <VersionStrip> (issue #1340)", () => {
   it("renders the VersionStrip in the footer slot", () => {
     const html = renderToStaticMarkup(
-      <EditRoomStudio
-        saveStatus="saved"
-        onDirectionsCommit={() => {}}
-        projectId="project-1"
-        roomId="room-1"
-        initialLookbookSlot="A"
-        initialCopyHeadline=""
-        initialCopyBody=""
-        touchUps={{ original: 0, A: 2, B: 0 }}
-      />
+      <EditRoomStudio {...baseProps({ touchUps: { original: 0, A: 2, B: 0 } })} />
     );
     // The strip carries aria-label="Versions" per VersionStrip.tsx.
     expect(html).toContain('aria-label="Versions"');
   });
 
   it('seeds the data-lookbook-slot attribute from initialLookbookSlot="A"', () => {
-    const html = renderToStaticMarkup(
-      <EditRoomStudio
-        saveStatus="saved"
-        onDirectionsCommit={() => {}}
-        projectId="project-1"
-        roomId="room-1"
-        initialLookbookSlot="A"
-        initialCopyHeadline=""
-        initialCopyBody=""
-        touchUps={{ original: 0, A: 0, B: 0 }}
-      />
-    );
+    const html = renderToStaticMarkup(<EditRoomStudio {...baseProps()} />);
     expect(html).toContain('data-lookbook-slot="A"');
   });
 
   it("renders empty + populated slot labels the strip understands", () => {
-    // The shell pre-fills `original` with a placeholder URL (kept for
-    // the `#1339` canvas test that needs a non-null image to render);
-    // A and B start as `url: null` → "Empty" placeholder. The strip's
-    // populated-slot "N touch-ups" copy only shows when a real image
-    // URL exists, which #1340 ships as a placeholder until #1344
-    // wires the actual `Room` rows.
+    // The shell pre-fills `original` with the parent route's `imageUrl`
+    // (the resolved inpaint source URL); A and B default to `url: null`
+    // → "Empty" placeholder. The populated-slot "N touch-ups" copy
+    // only shows when a real image URL exists in `lookbookVariantUrls`.
     const html = renderToStaticMarkup(
       <EditRoomStudio
-        saveStatus="saved"
-        onDirectionsCommit={() => {}}
-        projectId="project-1"
-        roomId="room-1"
-        initialLookbookSlot="B"
-        touchUps={{ original: 0, A: 2, B: 0 }}
-        initialCopyHeadline=""
-        initialCopyBody=""
+        {...baseProps({
+          initialLookbookSlot: "B",
+          touchUps: { original: 0, A: 2, B: 0 },
+        })}
       />
     );
     expect(html).toContain("Variant A");
@@ -88,18 +63,7 @@ describe("EditRoomStudio mounts <VersionStrip> (issue #1340)", () => {
   });
 
   it("uses Atelier palette tokens (no raw hex literals)", () => {
-    const html = renderToStaticMarkup(
-      <EditRoomStudio
-        saveStatus="saved"
-        onDirectionsCommit={() => {}}
-        projectId="project-1"
-        roomId="room-1"
-        initialLookbookSlot="A"
-        initialCopyHeadline=""
-        initialCopyBody=""
-        touchUps={{ original: 0, A: 0, B: 0 }}
-      />
-    );
+    const html = renderToStaticMarkup(<EditRoomStudio {...baseProps()} />);
     expect(html).not.toMatch(/#[0-9a-f]{6}/i);
   });
 });
