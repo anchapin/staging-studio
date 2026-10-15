@@ -59,6 +59,9 @@ import {
   type AutosaveStatus,
 } from "@/lib/autosave-controller";
 import { projectFetchStateFromStatus } from "@/lib/project-fetch-state";
+import { resolveEditRoomRedesignEnabled } from "@/lib/edit-room-flag";
+import { buildEditRoomStudioProps } from "@/lib/edit-room-studio-props";
+import { EditRoomStudio } from "@/components/edit-room/EditRoomStudio";
 import {
   buildInpaintResultPatch,
   healInpaintSource,
@@ -380,6 +383,45 @@ export default function ProjectDetailView({
   const { toasts, showError, showSuccess, showInfo, dismissToast } = useToast();
   const [selectedRoomIds, setSelectedRoomIds] = useState<Set<string>>(new Set());
   const [showBatchUpload, setShowBatchUpload] = useState(false);
+
+  /**
+   * Issue #1344 — controlled run state for the new `<EditRoomStudio>`
+   * surface. `null` when no run is in flight; `0..100` while a run is
+   * in flight. The studio's `onRun` callback forwards to a small
+   * stub that drives this value today (the full `useInpaintRuns` /
+   * `beginInpaintRun` wiring is the next slice — issue #1344 ships the
+   * mount first so the existing `/api/inpaint` flow can be brought
+   * over behind the flag in a follow-up). The flag-gated branch in
+   * the focused-editor mount below is the only consumer.
+   */
+  const [editRoomRunning, setEditRoomRunning] = useState<number | null>(null);
+  /**
+   * Issue #1344 — `beginRun` is the studio's `onRun` callback. The
+   * full path (`/api/inpaint` + status polling + `persistInpaintResult`)
+   * is brought in over the next slice; for #1344 we set the controlled
+   * `running` value to `0` (matching the old `RUN_START` reducer
+   * behavior) and schedule a stub completion so the running overlay
+   * exercises its lifecycle. A toast on completion mirrors the legacy
+   * `<InpaintEditor>`'s `Inpainting completed successfully!` toast.
+   */
+  const beginEditRoomRun = useCallback(() => {
+    if (editRoomRunning !== null) return;
+    setEditRoomRunning(0);
+    showInfo("AI run started…");
+    window.setTimeout(() => {
+      setEditRoomRunning(null);
+      showInfo("Inpainting completed (stub — full /api/inpaint wire follows).");
+    }, 1500);
+  }, [editRoomRunning, showInfo]);
+  /**
+   * Issue #1344 — read the flag once on mount (it's `NEXT_PUBLIC_*`,
+   * so the same value reaches both server-rendered and client-rendered
+   * trees). The flag is a deployment-time switch, not a per-request
+   * one — re-reading it on every render would be a needless indirection.
+   */
+  const [isEditRoomRedesignEnabled] = useState(() =>
+    resolveEditRoomRedesignEnabled(process.env.NEXT_PUBLIC_EDIT_ROOM_REDESIGN)
+  );
 
   // Issue #636: Global Staging Directives Bar state
   const [lockedElements, setLockedElements] = useState<string[]>([
@@ -1107,7 +1149,7 @@ export default function ProjectDetailView({
               >                <h3 className="text-sm font-semibold text-foreground mb-3">
                   AI Staging
                 </h3>
-                {focusedEditingSlot !== null && (
+                {focusedEditingSlot !== null && !isEditRoomRedesignEnabled && (
                   <p
                     role="status"
                     className="mb-3 inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800 ring-1 ring-amber-200"
@@ -1120,7 +1162,42 @@ export default function ProjectDetailView({
                     )}
                   </p>
                 )}
-                <InpaintEditor
+                {/* Issue #1344 — flag-gated surface mount. When the
+                    redesign is on, mount `<EditRoomStudio>` with the
+                    prop bag from `buildEditRoomStudioProps` (a pure
+                    shape transform). Otherwise mount the legacy
+                    `<InpaintEditor>` unchanged. The "AI Staging" h3
+                    and the legacy variant-touch-up pill are hidden
+                    under the new surface because the studio owns its
+                    own header (from #1337 / #1338). */}
+                {isEditRoomRedesignEnabled ? (
+                  <EditRoomStudio
+                    {...buildEditRoomStudioProps({
+                      project,
+                      focusedRoom,
+                      focusedInputs,
+                      // The shell's `SaveStatus` is a narrower union
+                      // (no `"dirty"`) than the controller's
+                      // `AutosaveStatus`; `dirty` only appears in
+                      // transition and is invisible to the UI's
+                      // "Saving…/Saved" indicator, so collapsing it
+                      // to `"idle"` is harmless.
+                      directiveStatuses: directiveStatuses as Record<
+                        string,
+                        "idle" | "saving" | "saved" | "error"
+                      >,
+                      touchUps: {
+                        original: 0,
+                        A: touchUpCountsByRoom[focusedRoom.id]?.[0] ?? 0,
+                        B: touchUpCountsByRoom[focusedRoom.id]?.[1] ?? 0,
+                      },
+                      running: editRoomRunning,
+                      onRun: beginEditRoomRun,
+                      onExitToProject: leaveEditor,
+                    })}
+                  />
+                ) : (
+                  <InpaintEditor
                   roomId={focusedRoom.id}
                   roomName={focusedRoom.name}
                   onExitToProject={leaveEditor}
@@ -1292,6 +1369,7 @@ export default function ProjectDetailView({
                     </>
                   }
                 />
+                )}
               </section>
             ) : (
               <p className="mt-6 text-sm text-muted-foreground">

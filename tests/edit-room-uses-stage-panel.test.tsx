@@ -25,21 +25,11 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { EditRoomStudio } from "@/components/edit-room/EditRoomStudio";
+import { baseProps } from "./edit-room-studio-fixture";
 
 describe("EditRoomStudio mounts <StagePanel> (issue #1341)", () => {
   it("renders the StagePanel inside the inspector <aside> slot", () => {
-    const html = renderToStaticMarkup(
-      <EditRoomStudio
-        saveStatus="saved"
-        onDirectionsCommit={() => {}}
-        projectId="project-1"
-        roomId="room-1"
-        initialLookbookSlot="A"
-        touchUps={{ original: 0, A: 0, B: 0 }}
-        initialCopyHeadline=""
-        initialCopyBody=""
-      />
-    );
+    const html = renderToStaticMarkup(<EditRoomStudio {...baseProps()} />);
     // The StagePanel renders a heading "What should change?" that is
     // unique to the panel. The inspector <aside> is its home.
     expect(html).toContain("What should change?");
@@ -47,18 +37,7 @@ describe("EditRoomStudio mounts <StagePanel> (issue #1341)", () => {
   });
 
   it("seeds the segmented control with scope='whole-room' on initial render", () => {
-    const html = renderToStaticMarkup(
-      <EditRoomStudio
-        saveStatus="saved"
-        onDirectionsCommit={() => {}}
-        projectId="project-1"
-        roomId="room-1"
-        initialLookbookSlot="A"
-        touchUps={{ original: 0, A: 0, B: 0 }}
-        initialCopyHeadline=""
-        initialCopyBody=""
-      />
-    );
+    const html = renderToStaticMarkup(<EditRoomStudio {...baseProps()} />);
     // The whole-room scope option is the one with `aria-checked="true"`
     // on initial render — the reducer's `initialEditRoomState.scope`
     // is "whole-room". Verify by checking that exactly one of the three
@@ -70,53 +49,20 @@ describe("EditRoomStudio mounts <StagePanel> (issue #1341)", () => {
   });
 
   it("renders the StagePanel's textarea as the page's only <textarea>", () => {
-    const html = renderToStaticMarkup(
-      <EditRoomStudio
-        saveStatus="saved"
-        onDirectionsCommit={() => {}}
-        projectId="project-1"
-        roomId="room-1"
-        initialLookbookSlot="A"
-        touchUps={{ original: 0, A: 0, B: 0 }}
-        initialCopyHeadline=""
-        initialCopyBody=""
-      />
-    );
+    const html = renderToStaticMarkup(<EditRoomStudio {...baseProps()} />);
     const textareaCount = (html.match(/<textarea/g) || []).length;
     expect(textareaCount).toBe(1);
   });
 
   it("renders the StagePanel without breaking the VersionStrip mount", () => {
-    const html = renderToStaticMarkup(
-      <EditRoomStudio
-        saveStatus="saved"
-        onDirectionsCommit={() => {}}
-        projectId="project-1"
-        roomId="room-1"
-        initialLookbookSlot="A"
-        touchUps={{ original: 0, A: 0, B: 0 }}
-        initialCopyHeadline=""
-        initialCopyBody=""
-      />
-    );
+    const html = renderToStaticMarkup(<EditRoomStudio {...baseProps()} />);
     // Strip carries its own aria-label — both surfaces coexist.
     expect(html).toContain('aria-label="Versions"');
     expect(html).toContain("What should change?");
   });
 
   it("renders the Fine-tune panel inside the inspector when the shell mounts", () => {
-    const html = renderToStaticMarkup(
-      <EditRoomStudio
-        saveStatus="saved"
-        onDirectionsCommit={() => {}}
-        projectId="project-1"
-        roomId="room-1"
-        initialLookbookSlot="A"
-        touchUps={{ original: 0, A: 0, B: 0 }}
-        initialCopyHeadline=""
-        initialCopyBody=""
-      />
-    );
+    const html = renderToStaticMarkup(<EditRoomStudio {...baseProps()} />);
     // Fine-tune is collapsed by default but its header always renders.
     expect(html).toContain("Fine-tune");
   });
@@ -126,18 +72,7 @@ describe("EditRoomStudio mounts <StagePanel> (issue #1341)", () => {
     // legacy canvas surface until #1346 deletes the legacy tab triple.
     // This static check confirms the integration test would notice any
     // future regression.
-    const html = renderToStaticMarkup(
-      <EditRoomStudio
-        saveStatus="saved"
-        onDirectionsCommit={() => {}}
-        projectId="project-1"
-        roomId="room-1"
-        initialLookbookSlot="A"
-        touchUps={{ original: 0, A: 0, B: 0 }}
-        initialCopyHeadline=""
-        initialCopyBody=""
-      />
-    );
+    const html = renderToStaticMarkup(<EditRoomStudio {...baseProps()} />);
     // The legacy surface carries class names like `detect-tab-panel` and
     // `editor-tab-bar`; the redesign subtree does not. A direct grep
     // of the source tree is the real pin (see handoff doc §8).

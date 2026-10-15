@@ -7,6 +7,13 @@
  * Issue #1342 — Mounts `<Inspector>` (two-tab Staging/Listing copy shell +
  *               primary Run button + helper text) in place of the bare
  *               StagePanel mount.
+ * Issue #1344 — Route mount: the shell becomes a controlled component
+ *               for run state (the parent route owns the submit +
+ *               status-polling machinery via its existing
+ *               `useInpaintRuns` integration). The shell no longer
+ *               dispatches `RUN_START`; it forwards the parent's
+ *               `running` + `onRun` to the canvas overlay / Run button
+ *               / version strip.
  *
  * Top-level shell for the Edit Room UX redesign (Magic Patterns OS
  * `hVPYX2rJ2yawc1XTY2LTRJ`, design file `dVy8jC2kXpi1ca8b4A1hcS`).
@@ -51,22 +58,24 @@ const SLOT_LABELS: Record<SlotId, string> = {
   B: "Variant B",
 };
 
-/** Placeholder image URLs the canvas reads (#1344 wires real `Room` rows). */
-const PLACEHOLDER_URLS: Record<SlotId, string> = {
-  original: "/edit-room/original.jpg",
-  A: "/edit-room/variant-a.jpg",
-  B: "/edit-room/variant-b.jpg",
-};
-
 export function EditRoomStudio({
   saveStatus: _saveStatus,
   onDirectionsCommit,
-  projectId: _projectId,
+  projectId,
   roomId,
+  roomName,
   initialLookbookSlot,
   touchUps,
   initialCopyHeadline,
   initialCopyBody,
+  address,
+  imageUrl,
+  lookbookVariantUrls,
+  aesthetic,
+  globalDirectives,
+  running,
+  onRun,
+  onExitToProject,
 }: EditRoomStudioProps) {
   const [state, dispatch] = useReducer(editRoomReducer, initialEditRoomState);
   const router = useRouter();
@@ -82,25 +91,23 @@ export function EditRoomStudio({
       {
         id: "original" as const,
         label: SLOT_LABELS.original,
-        url: PLACEHOLDER_URLS.original,
+        url: imageUrl,
         touchUps: touchUps.original,
       },
       {
         id: "A" as const,
         label: SLOT_LABELS.A,
-        // Placeholder until #1340's real Room read lands — the strip
-        // marks empty slots with a "+" + "Empty" label.
-        url: null,
+        url: lookbookVariantUrls.A,
         touchUps: touchUps.A,
       },
       {
         id: "B" as const,
         label: SLOT_LABELS.B,
-        url: null,
+        url: lookbookVariantUrls.B,
         touchUps: touchUps.B,
       },
     ],
-    [touchUps.original, touchUps.A, touchUps.B]
+    [imageUrl, lookbookVariantUrls.A, lookbookVariantUrls.B, touchUps.original, touchUps.A, touchUps.B]
   );
   const targetSlot = useMemo(
     () => resolveTargetSlot({ viewing: state.viewing, versions }),
@@ -256,14 +263,19 @@ export function EditRoomStudio({
     }, 1200);
   }, [isCopyRewriting, state.directions]);
 
-  // The Run button's click handler — the inspector is dumb, the shell
-  // owns the run-side-effect chain. For #1342 we only dispatch
-  // RUN_START so the button's loading state engages; #1344 wires the
-  // real inpaint submission (`/api/inpaint` + `useInpaintRuns`).
+  // #1344 — Run button: the inspector is dumb, the SHELL owns the
+  // button's loading state (it just forwards the parent's `running`
+  // value to the Inspector), and the PARENT owns the submit path
+  // (so the route can attribute the run to a real provider request
+  // id, not a stub). The shell's `handleRun` is a thin pass-through:
+  // gate on the blocked reason + the parent's `running` flag, then
+  // call `onRun`. Dispatching `RUN_START` here was removed because
+  // it created two run-state-of-truth — the shell's reducer value
+  // and the parent route's `useInpaintRuns` value could disagree.
   const handleRun = useCallback(() => {
-    if (blockedReason !== null || state.running !== null) return;
-    dispatch({ type: "RUN_START" });
-  }, [blockedReason, state.running]);
+    if (blockedReason !== null || running !== null) return;
+    onRun();
+  }, [blockedReason, running, onRun]);
 
   // ─── Side effects ──────────────────────────────────────────────────
   // 1. Toast auto-dismiss — mirrors App.tsx's `useEffect`. The timer
@@ -365,43 +377,41 @@ export function EditRoomStudio({
       data-viewing={state.viewing}
       data-target-slot={targetSlot}
       data-compare={state.compare ? "true" : "false"}
-      data-running={state.running === null ? "" : String(state.running)}
+      data-running={running === null ? "" : String(running)}
       data-lookbook-slot={lookbookSlot}
       data-lookbook-pending={isLookbookPending ? "true" : "false"}
       className="flex h-screen flex-col overflow-hidden bg-surface text-ink"
     >
-      {/* #1338 — TopBar (breadcrumb + room picker + save status) */}
+      {/* #1338 — TopBar (breadcrumb + room picker + save status).
+          #1344 — All five surface props are wired from the parent
+          route (no more hardcoded literals). */}
       <TopBar
-        address="418 Linden Ave"
-        roomName="Living Room"
-        projectId="proj-1"
-        roomId="living"
+        address={address}
+        roomName={roomName}
+        projectId={projectId}
+        roomId={roomId}
         saveStatus={_saveStatus}
         onRoomChange={() => {
           /* #1340/#1344 wires the real room switcher */
         }}
-        onExitToProject={() => {
-          /* #1344 wires the project view's exit */
-        }}
+        onExitToProject={onExitToProject}
       />
 
       <div className="flex min-h-0 flex-1">
         <main className="flex min-w-0 flex-1 flex-col bg-surface-mid">
-          {/* #1339 — CanvasStage + MaskLayer + CompareLayer + object boxes */}
+          {/* #1339 — CanvasStage + MaskLayer + CompareLayer + object boxes.
+              #1344 — `imageUrl` is the parent route's resolved inpaint
+              source URL (was a placeholder string pre-#1344);
+              `running` is the parent route's controlled value
+              (was the reducer's `state.running`). */}
           <section
             data-testid="edit-room-canvas"
             className="flex min-h-0 flex-1 flex-col"
             aria-label="Editing canvas"
           >
             <CanvasStage
-              imageUrl={
-                state.viewing === "original"
-                  ? "/edit-room/original.jpg"
-                  : state.viewing === "A"
-                    ? "/edit-room/variant-a.jpg"
-                    : "/edit-room/variant-b.jpg"
-              }
-              originalUrl="/edit-room/original.jpg"
+              imageUrl={imageUrl}
+              originalUrl={imageUrl}
               viewing={state.viewing}
               scope={state.scope}
               compare={state.compare}
@@ -425,12 +435,14 @@ export function EditRoomStudio({
               onBrushSizeChange={(n) => dispatch({ type: "SET_BRUSH_SIZE", size: n })}
               brushMode={state.brushMode}
               onBrushModeChange={(m) => dispatch({ type: "SET_BRUSH_MODE", mode: m })}
-              running={state.running}
+              running={running}
               targetSlot={targetSlot}
             />
           </section>
 
-          {/* #1340 — VersionStrip + Lookbook slot */}
+          {/* #1340 — VersionStrip + Lookbook slot. `running` is the
+              parent route's controlled value (was `state.running !==
+              null || isLookbookPending`). */}
           <footer
             data-testid="edit-room-version-strip"
             className="border-t border-outline/15 bg-surface-container-low"
@@ -440,7 +452,7 @@ export function EditRoomStudio({
               viewing={state.viewing}
               lookbookSlot={lookbookSlot}
               targetSlot={targetSlot}
-              running={state.running !== null || isLookbookPending}
+              running={running !== null || isLookbookPending}
               onSelect={handleSelectSlot}
               onUseInLookbook={handleUseInLookbook}
             />
@@ -450,7 +462,10 @@ export function EditRoomStudio({
         {/* #1342 — Inspector shell (two-tab Staging/Listing copy +
             primary Run button + helper text). The Inspector owns the
             tab UI; the shell owns the data + the run-side-effect
-            chain (handleRun → /api/inpaint in #1344). */}
+            chain. #1344 — `projectAesthetic` + `projectGlobalDirectives`
+            are forwarded from the parent route (were hardcoded
+            literals); `isRunning` + `progress` reflect the parent's
+            controlled `running` (was the reducer's `state.running`). */}
         <Inspector
           scope={state.scope}
           onScopeChange={(s) => dispatch({ type: "SET_SCOPE", scope: s })}
@@ -482,8 +497,8 @@ export function EditRoomStudio({
           }
           hasMask={state.hasMask}
           onClearMask={() => dispatch({ type: "CLEAR_MASK" })}
-          projectAesthetic="Warm Craftsman Modern"
-          projectGlobalDirectives="Keep original molding, hardwood floors and brick visible."
+          projectAesthetic={aesthetic}
+          projectGlobalDirectives={globalDirectives}
           strength={strength}
           onStrengthChange={setStrength}
           adherence={adherence}
@@ -497,8 +512,8 @@ export function EditRoomStudio({
           activeTab={activeTab}
           onTabChange={setActiveTab}
           blockedReason={blockedReason}
-          isRunning={state.running !== null}
-          progress={state.running ?? 0}
+          isRunning={running !== null}
+          progress={running ?? 0}
           onRun={handleRun}
           // #1343 — CopyPanel wiring
           copyHeadline={copyHeadline}

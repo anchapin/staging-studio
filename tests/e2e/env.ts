@@ -238,5 +238,14 @@ export function nextEnv(): Record<string, string> {
     E2E_BROWSERLESS_PDF_URL: MOCK_BROWSERLESS_URL,
     NEXT_PUBLIC_APP_URL: APP_URL,
     PREVIEW_TOKEN_SECRET: "e2e-preview-token-secret",
+    // Issue #1344: `NEXT_PUBLIC_*` is build-time inlined, so the
+    // harness can carry only ONE flag value per build. We default to
+    // `"0"` (legacy surface live) so the existing mask-paint /
+    // concept-flow / version-history specs continue to pass — they
+    // target the legacy `<InpaintEditor>` selectors verbatim. The
+    // four `edit-room-redesign-*` specs are written but `test.skip`
+    // gated with a TODO; light them up by flipping this to `"1"` and
+    // updating the legacy specs' selectors in a follow-up slice.
+    NEXT_PUBLIC_EDIT_ROOM_REDESIGN: "0",
   };
 }

@@ -35,6 +35,13 @@ export interface Version {
  * rest of the state via `useReducer` (see
  * `edit-room-reducer.ts`); `saveStatus` is the one exception (the
  * AutosaveController lives at the route level, not inside the shell).
+ *
+ * Issue #1344 (`route mount` slice) — the shell becomes a controlled
+ * component for run state. The parent route owns the submit +
+ * status-polling machinery via its existing `useInpaintRuns`
+ * integration; the shell renders the parent's `running` value
+ * verbatim on the canvas overlay, the Run button, and the version
+ * strip. `onRun` is the shell's pass-through to the parent.
  */
 export interface EditRoomStudioProps {
   /** Auto-save status mirrored from the parent route's AutosaveController. */
@@ -80,6 +87,72 @@ export interface EditRoomStudioProps {
    * legacy `recommendation` column when this is null.
    */
   initialCopyBody: string;
+  /**
+   * Issue #1344 — Property address shown in the TopBar's breadcrumb.
+   * Surfaced from `Project.propertyAddress` by the parent route.
+   * Drives the breadcrumb `<span>` between "All rooms" and the
+   * room-name listbox trigger.
+   */
+  address: string;
+  /**
+   * Issue #1344 — Display name shown in the TopBar's room-name
+   * listbox trigger (the current room) and the listbox option.
+   * Surfaced from `Room.name` by the parent route.
+   */
+  roomName: string;
+  /**
+   * Issue #1344 — Resolved inpaint-source URL for the canvas.
+   * Surfaced from `resolveInpaintSourceUrl` by the parent route so
+   * the canvas image is always the chosen source, never a stub. The
+   * shell's earlier `PLACEHOLDER_URLS` lookup is removed entirely
+   * (`/edit-room/*.jpg` was never a real route).
+   */
+  imageUrl: string;
+  /**
+   * Issue #1344 — Per-variant-lookbook URL map for the version strip's
+   * thumbnail strip. Surfaced from `Room.afterImageUrl` (slot 0 → A)
+   * and `Room.afterImageUrl2` (slot 1 → B) by the parent route.
+   * `null` when the slot has no staged variant yet.
+   */
+  lookbookVariantUrls: { A: string | null; B: string | null };
+  /**
+   * Issue #1344 — Project-wide aesthetic forwarded to the Inspector's
+   * `projectAesthetic` slot (which renders the "Also applied from the
+   * project: <aesthetic>" disclosure). Surfaced from
+   * `Project.stagingAesthetic` by the parent route.
+   */
+  aesthetic: string;
+  /**
+   * Issue #1344 — Project-wide staging directives ("keep original
+   * molding visible", etc.) forwarded to the Inspector's
+   * `projectGlobalDirectives` slot (which renders the collapsible's
+   * "Rules for every room" disclosure). Surfaced from
+   * `Project.stagingDirectives` by the parent route.
+   */
+  globalDirectives: string;
+  /**
+   * Issue #1344 — Controlled run state. `null` when no run is in
+   * flight; `0..100` while a run is in flight (the parent route's
+   * `useInpaintRuns` reports the provider's progress percent).
+   * Drives the canvas overlay, the Run button's label + spinner,
+   * and the version strip's `running` flag.
+   */
+  running: number | null;
+  /**
+   * Issue #1344 — Pass-through to the parent route's submit path
+   * (`/api/inpaint` + `useInpaintRuns`). The shell no longer
+   * dispatches `RUN_START` itself — that decision is made by the
+   * parent so the route can attribute the run to a real provider
+   * request id, not a stub.
+   */
+  onRun: () => void;
+  /**
+   * Issue #1344 — TopBar's "All rooms" button callback. Wired to the
+   * project view's `leaveEditor` (issue #1188) so the same
+   * `confirmLeaveEditorInBrowser` guard still protects an in-flight
+   * run from being silently dropped.
+   */
+  onExitToProject: () => void;
 }
 
 /**

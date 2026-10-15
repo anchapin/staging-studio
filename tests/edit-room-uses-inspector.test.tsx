@@ -27,39 +27,18 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { EditRoomStudio } from "@/components/edit-room/EditRoomStudio";
+import { baseProps } from "./edit-room-studio-fixture";
 
 describe("EditRoomStudio mounts <Inspector> (issue #1342)", () => {
   it("renders the Inspector (data-testid=edit-room-inspector) in the right column", () => {
-    const html = renderToStaticMarkup(
-      <EditRoomStudio
-        saveStatus="saved"
-        onDirectionsCommit={() => {}}
-        projectId="project-1"
-        roomId="room-1"
-        initialLookbookSlot="A"
-        touchUps={{ original: 0, A: 0, B: 0 }}
-        initialCopyHeadline=""
-        initialCopyBody=""
-      />
-    );
+    const html = renderToStaticMarkup(<EditRoomStudio {...baseProps()} />);
     expect(html).toContain('data-testid="edit-room-inspector"');
     // The Inspector's tab strip lives inside.
     expect(html).toContain('role="tablist"');
   });
 
   it("renders the Staging tab as the active tab on initial render", () => {
-    const html = renderToStaticMarkup(
-      <EditRoomStudio
-        saveStatus="saved"
-        onDirectionsCommit={() => {}}
-        projectId="project-1"
-        roomId="room-1"
-        initialLookbookSlot="A"
-        touchUps={{ original: 0, A: 0, B: 0 }}
-        initialCopyHeadline=""
-        initialCopyBody=""
-      />
-    );
+    const html = renderToStaticMarkup(<EditRoomStudio {...baseProps()} />);
     expect(html).toContain("Staging");
     expect(html).toContain("Listing copy");
     // The Staging tab carries `aria-selected="true"` on initial
@@ -76,18 +55,7 @@ describe("EditRoomStudio mounts <Inspector> (issue #1342)", () => {
   });
 
   it("renders the Run button (data-testid=run-button) below the StagePanel", () => {
-    const html = renderToStaticMarkup(
-      <EditRoomStudio
-        saveStatus="saved"
-        onDirectionsCommit={() => {}}
-        projectId="project-1"
-        roomId="room-1"
-        initialLookbookSlot="A"
-        touchUps={{ original: 0, A: 0, B: 0 }}
-        initialCopyHeadline=""
-        initialCopyBody=""
-      />
-    );
+    const html = renderToStaticMarkup(<EditRoomStudio {...baseProps()} />);
     expect(html).toContain('data-testid="run-button"');
   });
 
@@ -96,54 +64,21 @@ describe("EditRoomStudio mounts <Inspector> (issue #1342)", () => {
     // to stage." when hasDirections is false. The shell wires that
     // through to the Inspector as `blockedReason`, which forwards it
     // to the Run button's `disabled` flag.
-    const html = renderToStaticMarkup(
-      <EditRoomStudio
-        saveStatus="saved"
-        onDirectionsCommit={() => {}}
-        projectId="project-1"
-        roomId="room-1"
-        initialLookbookSlot="A"
-        touchUps={{ original: 0, A: 0, B: 0 }}
-        initialCopyHeadline=""
-        initialCopyBody=""
-      />
-    );
+    const html = renderToStaticMarkup(<EditRoomStudio {...baseProps()} />);
     const buttonMatch = html.match(/<button[^>]*data-testid="run-button"[^>]*>/);
     expect(buttonMatch).not.toBeNull();
     expect(buttonMatch![0]).toMatch(/\sdisabled(=|>)/);
   });
 
   it("renders the helper text under the Run button", () => {
-    const html = renderToStaticMarkup(
-      <EditRoomStudio
-        saveStatus="saved"
-        onDirectionsCommit={() => {}}
-        projectId="project-1"
-        roomId="room-1"
-        initialLookbookSlot="A"
-        touchUps={{ original: 0, A: 0, B: 0 }}
-        initialCopyHeadline=""
-        initialCopyBody=""
-      />
-    );
+    const html = renderToStaticMarkup(<EditRoomStudio {...baseProps()} />);
     expect(html).toContain('data-testid="run-helper-text"');
     // Initial state: blocked=Add directions…
     expect(html).toContain("Add directions");
   });
 
   it("renders the StagePanel inside the Inspector when Staging tab is active", () => {
-    const html = renderToStaticMarkup(
-      <EditRoomStudio
-        saveStatus="saved"
-        onDirectionsCommit={() => {}}
-        projectId="project-1"
-        roomId="room-1"
-        initialLookbookSlot="A"
-        touchUps={{ original: 0, A: 0, B: 0 }}
-        initialCopyHeadline=""
-        initialCopyBody=""
-      />
-    );
+    const html = renderToStaticMarkup(<EditRoomStudio {...baseProps()} />);
     expect(html).toContain("What should change?");
     // The Fine-tune panel is part of the StagePanel subtree.
     expect(html).toContain("Fine-tune");
@@ -154,18 +89,7 @@ describe("EditRoomStudio mounts <Inspector> (issue #1342)", () => {
     // independent of the legacy canvas surface until #1346 deletes the
     // legacy tab triple. This static check confirms the integration
     // test would notice any future regression.
-    const html = renderToStaticMarkup(
-      <EditRoomStudio
-        saveStatus="saved"
-        onDirectionsCommit={() => {}}
-        projectId="project-1"
-        roomId="room-1"
-        initialLookbookSlot="A"
-        touchUps={{ original: 0, A: 0, B: 0 }}
-        initialCopyHeadline=""
-        initialCopyBody=""
-      />
-    );
+    const html = renderToStaticMarkup(<EditRoomStudio {...baseProps()} />);
     expect(html).not.toContain("detect-tab-panel");
     expect(html).not.toContain("editor-tab-bar");
   });
