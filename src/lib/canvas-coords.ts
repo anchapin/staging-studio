@@ -147,3 +147,54 @@ export function canvasPointToNatural(
     y: clamp(Math.round(point.y * scaleY), 0, Math.max(0, naturalHeight)),
   };
 }
+
+/**
+ * Percent-based detection box, the shape the segmentation / detection
+ * surfaces emit (issue #228/#1339). Values are 0–100; the provider
+ * (SAM, the inpaint provider's detection API, etc) is responsible for
+ * keeping them in range, but this helper clamps defensively because
+ * a hostile / future-type value must never produce a NaN string in the
+ * inline CSS positioning (which would hide the on-canvas button).
+ */
+export interface ObjectBoundingBox {
+  /** Top-left X as % of the image (0..100). */
+  x: number;
+  /** Top-left Y as % of the image (0..100). */
+  y: number;
+  /** Width as % of the image (0..100). */
+  w: number;
+  /** Height as % of the image (0..100). */
+  h: number;
+}
+
+/** CSSProperties-style positioning for an on-canvas `<button>` overlay. */
+export interface ObjectBoxStyle {
+  left: string;
+  top: string;
+  width: string;
+  height: string;
+}
+
+/**
+ * Maps a percent-based detection box (`ObjectBoundingBox`) to the CSS
+ * positioning the on-canvas `<button>` overlay uses (issue #1339).
+ * Values are clamped so a defensive `-5` or `NaN` from a malformed
+ * provider response collapses to `0%` instead of producing `"NaN%"`.
+ *
+ * Width/height are clamped to `[0, 100]` so a hostile value can never
+ * paint a button larger than the canvas. X/Y are clamped to `[0, 100]`
+ * for the same reason — a button whose top-left sits outside the photo
+ * (e.g. x = -30%) would be unreachable on touch.
+ */
+export function objectBoxToStyle(box: ObjectBoundingBox): ObjectBoxStyle {
+  const clamp100 = (n: number) =>
+    Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0;
+  const clampNonNegative = (n: number) =>
+    Number.isFinite(n) ? Math.max(0, n) : 0;
+  return {
+    left: `${clamp100(box.x)}%`,
+    top: `${clamp100(box.y)}%`,
+    width: `${clampNonNegative(box.w)}%`,
+    height: `${clampNonNegative(box.h)}%`,
+  };
+}
