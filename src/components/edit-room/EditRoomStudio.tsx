@@ -3,22 +3,22 @@
 /**
  * Issue #1337 — `<EditRoomStudio>` shell + scope/view state machine.
  * Issue #1339 — Mounts `<CanvasStage>` in the canvas slot.
+ * Issue #1340 — Mounts `<VersionStrip>` + lookbook slot CTA beneath the canvas.
  *
  * Top-level shell for the Edit Room UX redesign (Magic Patterns OS
  * `hVPYX2rJ2yawc1XTY2LTRJ`, design file `dVy8jC2kXpi1ca8b4A1hcS`).
- * This slice lands the shell + the state machine only — it does NOT
- * wire to a route (children #1340..#1342 fill in VersionStrip,
- * Inspector, StagePanel, FineTune, CopyPanel; #1344/#1345 wire to the
- * per-room view and the `/refine` route). The shell owns its state via
- * `useReducer` against `editRoomReducer` so the same transitions are
- * reachable from tests (see `tests/edit-room-reducer.test.ts`).
+ * This slice lands the shell + the state machine + the version strip +
+ * the lookbook CTA; remaining children #1341..#1342 fill in
+ * Inspector, StagePanel, FineTune, CopyPanel; #1344/#1345 wire to
+ * the per-room view and the `/refine` route.
  *
- * NOT WIRED — the parent route is intentionally still the legacy
- * `InpaintEditor` until #1344 lands. This file is imported only by
- * tests + future slices; no production route uses it yet.
+ * The shell owns its state via `useReducer` against
+ * `editRoomReducer` so the same transitions are reachable from tests
+ * (see `tests/edit-room-reducer.test.ts`).
  */
 
-import { useEffect, useMemo, useReducer, useRef } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 
 import { resolveStageBlockedReason } from "@/lib/edit-room-blocked";
 import { resolveTargetSlot, type SlotId } from "@/lib/edit-room-scope";
@@ -26,38 +26,99 @@ import { resolveTargetSlot, type SlotId } from "@/lib/edit-room-scope";
 import { CanvasStage } from "@/components/edit-room/CanvasStage";
 import { TopBar } from "@/components/edit-room/TopBar";
 import { Toast } from "@/components/edit-room/Toast";
+import { VersionStrip } from "@/components/edit-room/VersionStrip";
 import {
   editRoomReducer,
   initialEditRoomState,
 } from "@/components/edit-room/edit-room-reducer";
-import type { EditRoomStudioProps } from "@/components/edit-room/types";
+import {
+  assertLookbookPinnable,
+} from "@/lib/lookbook-variant";
+import type { EditRoomStudioProps, Version } from "@/components/edit-room/types";
+import { setLookbookVariant } from "@/app/actions/lookbook-variant";
 
 const TOAST_AUTO_DISMISS_MS = 3200;
 const DIRECTIONS_DEBOUNCE_MS = 900;
 
+/** Fixed labels per the Magic Patterns design (Original photo / Variant A / Variant B). */
+const SLOT_LABELS: Record<SlotId, string> = {
+  original: "Original photo",
+  A: "Variant A",
+  B: "Variant B",
+};
+
+/** Placeholder image URLs the canvas reads (#1344 wires real `Room` rows). */
+const PLACEHOLDER_URLS: Record<SlotId, string> = {
+  original: "/edit-room/original.jpg",
+  A: "/edit-room/variant-a.jpg",
+  B: "/edit-room/variant-b.jpg",
+};
+
 export function EditRoomStudio({
   saveStatus: _saveStatus,
   onDirectionsCommit,
+  projectId: _projectId,
+  roomId,
+  initialLookbookSlot,
+  touchUps,
 }: EditRoomStudioProps) {
   const [state, dispatch] = useReducer(editRoomReducer, initialEditRoomState);
+  const router = useRouter();
+  const [isLookbookPending, startLookbookTransition] = useTransition();
 
   // ─── Derived state ─────────────────────────────────────────────────
-  // `resolveTargetSlot` is the pure resolver pinned by
-  // `tests/edit-room-scope.test.ts`. Until #1340 ships the version
-  // strip, we treat the slot list as empty (so `viewing=original`
-  // always falls back to `B`); the wiring is a #1340 change.
-  const versions = useMemo(
+  // `resolveTargetSlot` needs the bare `{id,url}` shape. We derive it
+  // from the same data source as the strip's `Version[]` so the target
+  // slot the running overlay reports and the slot the strip highlights
+  // as in-flight never disagree.
+  const versions: Version[] = useMemo(
     () => [
-      { id: "original" as SlotId, url: null as string | null },
-      { id: "A" as SlotId, url: null as string | null },
-      { id: "B" as SlotId, url: null as string | null },
+      {
+        id: "original" as const,
+        label: SLOT_LABELS.original,
+        url: PLACEHOLDER_URLS.original,
+        touchUps: touchUps.original,
+      },
+      {
+        id: "A" as const,
+        label: SLOT_LABELS.A,
+        // Placeholder until #1340's real Room read lands — the strip
+        // marks empty slots with a "+" + "Empty" label.
+        url: null,
+        touchUps: touchUps.A,
+      },
+      {
+        id: "B" as const,
+        label: SLOT_LABELS.B,
+        url: null,
+        touchUps: touchUps.B,
+      },
     ],
-    []
+    [touchUps.original, touchUps.A, touchUps.B]
   );
   const targetSlot = useMemo(
     () => resolveTargetSlot({ viewing: state.viewing, versions }),
     [state.viewing, versions]
   );
+
+  // The strip's `lookbookSlot` lives in its own state slot — derived
+  // from `initialLookbookSlot` on mount, then mutated locally by the
+  // CTA click. This avoids a reducer dispatch round-trip for a
+  // server-driven value (the parent route's `router.refresh()` will
+  // repaint on a navigation; for now the local `lookbookSlot` updates
+  // immediately for snappy UI).
+  const [lookbookSlot, setLocalLookbookSlot] = useState<SlotId>(initialLookbookSlot);
+
+  // Reset the local lookbook slot when the parent route re-passes a
+  // different `initialLookbookSlot` (e.g. after router.refresh). This
+  // mirrors the React pattern for "treat props as initial values then
+  // own them locally".
+  useEffect(() => {
+    setLocalLookbookSlot(initialLookbookSlot);
+    // setLocalLookbookSlot is stable; the dep list deliberately tracks
+    // only `initialLookbookSlot` (the source-of-truth).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialLookbookSlot]);
 
   // The Run-button blocker; #1342 reads this directly to render the
   // "blocked reason" copy under the primary action. The resolver is
@@ -93,6 +154,50 @@ export function EditRoomStudio({
     );
     return () => window.clearTimeout(t);
   }, [state.toast]);
+
+  // ─── #1340 — VersionStrip callbacks ─────────────────────────────────
+  // Clicking a populated thumbnail switches the canvas view via
+  // SET_VIEWING. The reducer clears compare + selected + mask as
+  // side effects (per the design's "switching version resets overlay"
+  // intent), so we don't need to dispatch anything else here.
+  const handleSelectSlot = (slot: SlotId) => {
+    dispatch({ type: "SET_VIEWING", viewing: slot });
+  };
+
+  // The CTA persists the local lookbook slot AND calls the server
+  // action. We optimistically move the badge to the new slot so the
+  // UI is snappy; a `router.refresh()` then pulls the canonical
+  // value back from the server. The `useTransition` wrapper keeps the
+  // whole surface responsive while the action runs.
+  const handleUseInLookbook = (slot: SlotId) => {
+    if (slot === "original") {
+      // Defense in depth: the strip never invokes this with
+      // "original", and the server action rejects it via
+      // `assertLookbookPinnable`. The toast is the user-visible half
+      // of that contract so a future API caller gets feedback.
+      dispatch({
+        type: "SHOW_TOAST",
+        message: "Original photo cannot be pinned to the lookbook.",
+      });
+      return;
+    }
+    try {
+      assertLookbookPinnable(slot);
+    } catch {
+      return;
+    }
+    setLocalLookbookSlot(slot);
+    startLookbookTransition(async () => {
+      const result = await setLookbookVariant(roomId, slot);
+      if (!result.success) {
+        dispatch({ type: "SHOW_TOAST", message: result.error });
+        return;
+      }
+      // Pull the canonical `initialLookbookSlot` back so subsequent
+      // server-driven renders agree with the local optimistic move.
+      router.refresh();
+    });
+  };
 
   // 2. Directions debounce — the issue spec calls for 900ms. The
   //    reducer stores the verbatim text; this effect fires
@@ -137,6 +242,8 @@ export function EditRoomStudio({
       data-target-slot={targetSlot}
       data-compare={state.compare ? "true" : "false"}
       data-running={state.running === null ? "" : String(state.running)}
+      data-lookbook-slot={lookbookSlot}
+      data-lookbook-pending={isLookbookPending ? "true" : "false"}
       className="flex h-screen flex-col overflow-hidden bg-surface text-ink"
     >
       {/* #1338 — TopBar (breadcrumb + room picker + save status) */}
@@ -204,7 +311,15 @@ export function EditRoomStudio({
             data-testid="edit-room-version-strip"
             className="border-t border-outline/15 bg-surface-container-low"
           >
-            {/* Filled in by #1340 */}
+            <VersionStrip
+              versions={versions}
+              viewing={state.viewing}
+              lookbookSlot={lookbookSlot}
+              targetSlot={targetSlot}
+              running={state.running !== null || isLookbookPending}
+              onSelect={handleSelectSlot}
+              onUseInLookbook={handleUseInLookbook}
+            />
           </footer>
         </main>
 

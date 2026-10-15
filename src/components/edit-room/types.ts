@@ -41,6 +41,29 @@ export interface EditRoomStudioProps {
   saveStatus: SaveStatus;
   /** Fired 900ms after the user stops typing in the directions textarea. */
   onDirectionsCommit: (value: string) => void;
+  /**
+   * Issue #1340 — Required by the version strip's "Use in lookbook" CTA.
+   * Passed through to the `setLookbookVariant` server action so the
+   * column update can attribute the write. Stubbed to `"room-1"` in
+   * the shell's preview/demo surface; real values arrive in #1344
+   * (parent route wiring).
+   */
+  projectId: string;
+  /** Issue #1340 — Same context for the server action's room filter. */
+  roomId: string;
+  /**
+   * Issue #1340 — Initial variant pinned to the lookbook, surfaced from
+   * `Room.selectedVariantIndex` by the parent route. Drives the badge
+   * position on the strip's first paint and the CTA's static-line state.
+   */
+  initialLookbookSlot: SlotId;
+  /**
+   * Issue #1340 — Per-slot touch-up counts surfaced from
+   * `getVariantTouchUpCounts` by the parent route. Empty slots get a
+   * touch-ups count of 0. The shell does not need to refetch — the
+   * parent route's autosave controller handles the refresh cadence.
+   */
+  touchUps: { original: number; A: number; B: number };
 }
 
 /**
