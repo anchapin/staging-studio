@@ -466,7 +466,14 @@ export default function ProjectDetailView({
       showError("Paint the area you want to stage before clicking Run.");
       return;
     }
-    void editRoomRunClusterRef.current?.submitInpaint(maskUrl);
+    // Issue #1361 — call `beginRun`, not `submitInpaint`. The cluster
+    // awaits the parent-supplied `beforeRun` flush hook first, so
+    // typed directions land in `Room.rawDirectives` before the
+    // run's `promptDirectives` validation runs. Skipping this race
+    // means a user typing directives and clicking Run quickly won't
+    // submit with an empty-string `promptDirectives` (the autosave
+    // controller's 2 s idle timer hadn't fired yet).
+    editRoomRunClusterRef.current?.beginRun(maskUrl);
   }, [
     editRoomIsProcessing,
     editorRoomId,
@@ -1349,6 +1356,20 @@ export default function ProjectDetailView({
                         project.stagingDirectives ?? ""
                       }
                       guidance={editRoomGuidance}
+                      // Issue #1361 — flush the directive autosave
+                      // controller before the cluster calls
+                      // `submitInpaint`, so a fast Run click after
+                      // typing directives doesn't race the controller's
+                      // 2 s idle timer. The cluster surfaces a toast +
+                      // retry when flush() reports unsaved work remained;
+                      // the `editorRoomId` captured below is the focused
+                      // room whose controller `getDirectiveController`
+                      // already managed.
+                      beforeRun={async () => {
+                        const roomId = editorRoomId;
+                        if (!roomId) return true;
+                        return getDirectiveController(roomId).flush();
+                      }}
                       onRunningChange={(isProcessing) => {
                         // Push the cluster's run-state into two
                         // places: (a) the local `editRoomIsProcessing`

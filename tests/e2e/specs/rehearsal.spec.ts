@@ -139,21 +139,17 @@ test.describe("rehearsal drill", () => {
     await expect(
       page.getByRole("button", { name: "All rooms", exact: true })
     ).toBeVisible();
-    // The new surface's reducer (`useReducer(editRoomReducer,
-    // initialEditRoomState)` at EditRoomStudio.tsx:82) doesn't take an
-    // `initialDirections` prop, so the textarea is empty after any
-    // remount — even though the autosave controller persists
-    // `Room.rawDirectives` correctly across the reload. The
-    // Rewrite-from-directions CTA's `canRewrite` gate
-    // (CopyPanel.tsx:85) requires non-empty `directions`. Re-fill
-    // here so the copy leg can fire. The #1359 slice brings an
-    // `initialDirections` prop + lazy reducer initializer that
-    // subsumes this workaround in production — the e2e test
-    // deliberately keeps the workaround because the autosave
-    // controller's 2 s idle timer races the fast-loading test
-    // (the test does `fill` → 200 ms wait → `Run`, so the 2 s
-    // autosave often hasn't fired before the page reloads).
-    await page.getByRole("textbox", { name: "Directions" }).fill(DIRECTIVES);
+    // Issue #1361 — `EditRoomRunCluster.beginRun` (via the route's
+    // `beforeRun` flush hook) awaits the directive autosave
+    // controller's `flush()` before `submitInpaint`, so the inpaint
+    // submission on the first Run click above landed with
+    // `DIRECTIVES` already persisted to `Room.rawDirectives` — i.e.
+    // the autosave race that previously required this workaround
+    // is closed. Combined with #1359's `initialDirections` prop +
+    // lazy reducer initializer, the textarea on this re-mounted
+    // studio carries the autosaved value verbatim. No refill.
+    // (Pre-#1361 workarounds commented in the prior handoff at
+    // .handoffs/2026-10-16-directions-rehydration-mini-slice.md.)
 
     // ---- Copy (OpenAI simulated) ---------------------------------------
     // The redesign's `<CopyPanel>` reads its `directions` brief from
