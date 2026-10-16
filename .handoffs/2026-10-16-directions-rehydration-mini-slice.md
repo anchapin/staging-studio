@@ -376,3 +376,177 @@ install` on v22 without bumping the pin first. For this slice I
 ran `npm test`, `npm run typecheck`, `npm run lint`, `npm run
 build`, `npm run e2e` — all on existing deps, no install. Confirm
 CI's v24 isn't surprised by anything tsc/oxlint didn't catch.
+
+---
+
+## 7. FineTune persistence — scope reframe (2026-10-16, abortive session)
+
+**This session attempted the §6.1 FineTune persistence slice and
+aborted mid-way through, leaving NO partial code on disk.** All
+in-flight edits (`prisma/schema.prisma`, `src/lib/metadata-schemas.ts`,
+`src/components/edit-room/types.ts`) were reverted with
+`git checkout HEAD -- …` and Prisma regenerated. The repo is
+back to the post-#1361 clean state. This section records what
+I learned so the next session doesn't repeat the same mistakes.
+
+### What I found before aborting
+
+**The FineTune controls don't currently reach the inpaint run.**
+Per `src/components/edit-room/EditRoomStudio.tsx:223-227`, all
+five FineTune values are local `useState`. Per
+`src/app/(dashboard)/projects/[id]/project-detail-view.tsx:485-505`,
+`editRoomGuidance` is hardcoded with the constants
+`promptStrength: 0.6, maskBlur: 0, seed: undefined,
+creativeMode: false, lockSeed: false` (also the wrong
+`promptStrength` default — the API schema's documented default
+is **0.8**, per `src/lib/ai-route-schemas.ts:64`). So:
+
+> "persisting" FineTune values that don't reach the API is
+> decorative-only — the user's selections survive a reload but
+> still don't change anything.
+
+The original handoff framed this as a "persistence + rehydration"
+slice, but that framing assumed the wire existed. It didn't.
+
+### API mapping decisions still needed (research captured, not implemented)
+
+`src/lib/ai-route-schemas.ts:80-84` documents the inpaint
+request's accepted fields:
+- `promptStrength: number 0.1..1.0 (default 0.8)`
+- `maskBlur: integer 0..20 (default 5)`
+- `seed: integer 0..999999 (optional)`
+- `creativeMode: boolean (default false)`
+- `lockSeed: boolean (default false)`
+
+FineTune UI controls (`src/components/edit-room/FineTune.tsx:7-11`)
+expose 5 controls. Best-fit mapping by signal type:
+
+| FineTune control | Maps to API | Mapping |
+|---|---|---|
+| `strength` (0..100, default 80) | `promptStrength` (0.1..1.0, default 0.8) | clamp(x/100, 0.1, 1.0): UI 80 → API 0.8 |
+| `adherence` (0..100, default 75) | `creativeMode` (boolean) | threshold: adherence ≥ 75 → true |
+| `expand` (0..40, default 12) | `maskBlur` (0..20, default 5) | min(x, 20): UI 12 → API 12 |
+| `seed` (digits, default "") | `seed` + `lockSeed` | parseInt or undefined; non-empty → lockSeed=true |
+| `shadows` (boolean, default true) | **NO FIT** | API has no shadows field |
+
+### `shadows` decision (per user, 2026-10-16)
+
+User chose: **drop `shadows` from FineTune temporarily; file a
+follow-up issue to reintroduce it properly.** Persisting
+`fineTuneShadows` would create dead state with no API target.
+
+### Why the slice was aborted (engineering sin audit)
+
+- The slice was committed to without enough pre-work — the
+  "this is bigger than expected" revelation (wiring never
+  landed) came too late, when I already had three edited files.
+- I pushed past **broken state mid-file** to stay inside the
+  40-turn budget. `src/components/edit-room/types.ts` ended up
+  with the `EditRoomStudioProps` interface declaration line
+  missing and the `FineTuneValues` interface duplicated (once
+  at module scope, once nested inside the broken interface). The
+  fix would have been a clean rewrite of the affected section,
+  but the cleaner call was to revert all three files and stop.
+- The original FineTune slice was de-scoped by prior sessions
+  for exactly this reason — the AGENTS.md "no scope creep" rule
+  combined with the missing-fields-by-design FineTune wiring
+  made it larger than it looked at first.
+
+### Recommended next-step shape (not implemented)
+
+A proper FineTune slice in a future session should land in this
+order, with the schema + autosave wiring preceded by a
+~half-hour **product-input conversation** answering:
+
+1. **API mapping confirmation.** Is `adherence ≥ 75 → creativeMode`
+   the intended interpretation, or is `adherence` a different
+   dimension that just hasn't landed an API field yet?
+2. **Default reconciliation.** The route's hardcoded
+   `promptStrength: 0.6, maskBlur: 0` are wrong vs the API
+   schema's `0.8, 5` defaults. Should the route's
+   `editRoomGuidance` seed from the API defaults at mount, or
+   is the divergence intentional?
+3. **`lockSeed` semantics.** Should lockSeed be derived from
+   "seed is non-empty" (so it auto-sets when the user types a
+   seed, even if they don't explicitly intend to lock), or
+   should it be a separate FineTune control?
+4. **Storage shape.** 4 nullable columns on `Room` (per
+   `prisma/schema.prisma` issue #1362 design) is the planned
+   shape; this conversation confirms it before the schema
+   migration lands.
+
+Once those answers land, the implementation is mechanical:
+
+1. Schema migration: 4 nullable `fineTune*` columns on `Room`.
+   (`npm run db:push`. Per AGENTS.md: schema-first, no
+   migrations dir.)
+2. Zod extension: `roomMetadataSchema` accepts the 4 fields
+   with their documented ranges — the snippet I had ready was:
+   ```ts
+   const fineTuneStrengthSchema = z.number().int().min(0).max(100);
+   const fineTuneAdherenceSchema = z.number().int().min(0).max(100);
+   const fineTuneExpandSchema = z.number().int().min(0).max(40);
+   const fineTuneSeedSchema = z.string().regex(/^\d*$/).max(6);
+   ```
+3. `EditRoomStudio.tsx`: replace the 5 local `useState` for
+   FineTune with 4 controlled `useState` (still local shell
+   state — no reducer slot needed) seeded from an
+   `initialFineTune?: FineTuneValues` prop (shape defined in
+   `types.ts`; same pattern as `initialDirections` /
+   `initialCopyHeadline`). Drop the `shadows` `useState`.
+4. `FineTune.tsx`: 4 controls (drop `shadows` + its callback
+   prop).
+5. `StagePanel.tsx`: thread only the 4 props through to FineTune
+   (drop `shadows` + `onShadowsChange`).
+6. `FocusedRoomLike`: add `fineTuneStrength? / Adherence? /
+   Expand? / Seed?` for the resolver surface.
+7. `buildEditRoomStudioProps`: forward `initialFineTune` from
+   the row (4 nullable fields, coalesced to UI defaults).
+8. Route wiring: a per-room `AutosaveController<{
+   fineTuneStrength, fineTuneAdherence, fineTuneExpand,
+   fineTuneSeed }>` following the existing directive pattern at
+   `project-detail-view.tsx:583-622`. Same 2-second idle
+   window, same `onStatusChange` → `setFineTuneStatuses` flow.
+   The Map-of-controllers shape parallels `directiveControllersRef`.
+9. `editRoomGuidance` memo: derive from the in-memory fineTune
+   values (parallel to `directives[roomId]` at line 1418). The
+   memo's deps include the focused room's fineTune fields so
+   `<EditRoomRunCluster>` re-renders when fineTune changes.
+   Replace the hardcoded guidance with:
+   ```ts
+   promptStrength: clamp((strength ?? 80) / 100, 0.1, 1.0),
+   maskBlur: Math.min(expand ?? 12, 20),
+   seed: parseSeedOrUndefined(seed),
+   creativeMode: (adherence ?? 75) >= 75,
+   lockSeed: !!parseSeedOrUndefined(seed),
+   ```
+   Note: the existing `useMemo(..., [])` deps array becomes
+   wrong (it must depend on the fineTune fields now) — this is
+   a side-effect-of-correctness bug the current code has (it
+   would never re-render when the user changes FineTune
+   settings).
+10. Tests: 1 new unit per file (resolver, reducer-of-the-route
+    shape, FineTune render). 1 new e2e that types into FineTune,
+    waits for autosave, runs an inpaint, and asserts the
+    request body contains the expected mapped guidance. A
+    regression here is exactly the autosave-race second-order
+    risk from §3.3 of this handoff applied to fineTune values
+    instead of directives.
+11. PR shape: same squash-and-merge pattern as #1359/#1360/#1361.
+
+### What this session achieved instead
+
+- §6.0 CI infra fix: PR #1360 merged (`5372645`).
+- §6.2 autosave race fix: PR #1361 merged (`fe61999`).
+- Working tree restored to clean state. No half-baked
+  intermediate on disk. CI green (`bab1243` is HEAD of
+  `origin/develop`).
+- This handoff section records the abort cleanly so the next
+  session doesn't lose the research findings.
+
+The directional lesson: a "persist some fields" slice is always
+preceded by a "wire those fields into the model they affect"
+slice. The directions slice (#1359) worked because directions
+already wired; FineTune's wire was de-scoped by the prior
+redesign and never re-landed. Both halves were always going to be
+one slice — the original handoff just didn't see it yet.
