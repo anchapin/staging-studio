@@ -106,6 +106,24 @@ describe("readUploadedObjectSize", () => {
     await readUploadedObjectSize(client, "room-photos", "rooms/room1/before-image.jpg");
     expect(list).toHaveBeenCalledWith("rooms/room1", expect.objectContaining({ search: "before-image.jpg" }));
   });
+
+  // Issue #1344 follow-up: the hermetic e2e mock storage lacks a
+  // /storage/v1/object/list/<bucket> handler, so supabase-js's `list`
+  // call receives a non-array response shape. Without the defensive
+  // guard, `data.find` would throw `TypeError: data.find is not a
+  // function` and `confirmRoomPhotoUpload` would return
+  // `{ success: false, error: "data.find is not a function" }`,
+  // failing the upload spec. Treat any non-array response as "no
+  // match" and let the upload fall through to the downstream size
+  // check (the linked URL 404s if the object is actually missing).
+  it("returns null when the storage response is not an array (defensive)", async () => {
+    const weird = stubClient(() =>
+      Promise.resolve({ data: { error: "not_found" }, error: null })
+    );
+    await expect(
+      readUploadedObjectSize(weird, "room-photos", "rooms/room1/before-image.jpg")
+    ).resolves.toBeNull();
+  });
 });
 
 describe("removeStorageObjects", () => {

@@ -122,4 +122,18 @@ describe("security headers wiring (issue #1127)", () => {
   it("pins upgrade-insecure-requests", () => {
     expect(directives).toContain("upgrade-insecure-requests");
   });
+
+  // Issue #1344 follow-up: `browser-image-compression@2.0.2` (the room
+  // photo upload's client-side compressor) uses a blob: Web Worker. The
+  // CSP must permit it explicitly — without `worker-src 'self' blob:`,
+  // browsers fall back to `script-src`, the worker is blocked, and the
+  // upload throws `data.find is not a function` mid-compression. Pinned
+  // here so a future "tighten CSP" pass doesn't silently re-break the
+  // upload flow (the 9 pre-existing e2e failures from 2026-10-15).
+  it("allows blob: workers (browser-image-compression, room photo upload)", () => {
+    const workerSrc = directives.find((d) => d.startsWith("worker-src"));
+    expect(workerSrc, "worker-src directive missing from CSP").toBeDefined();
+    expect(workerSrc).toMatch(/'self'/);
+    expect(workerSrc).toMatch(/blob:/);
+  });
 });
