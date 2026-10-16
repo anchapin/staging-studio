@@ -52,7 +52,7 @@ test.describe("mask painting", () => {
     // The new surface's Directions textarea (label = "Directions" — see
     // StagePanel.tsx lines 263–268). The legacy "Staging directives
     // (required)" label is unreachable when the flag is on.
-    const directives = page.getByLabel("Directions");
+    const directives = page.getByRole("textbox", { name: "Directions" });
     await expect(directives).toBeVisible();
     await directives.fill("Add a neutral linen sofa and a warm wood coffee table.");
 
@@ -146,7 +146,7 @@ test.describe("mask painting on high-DPI displays", () => {
     interceptLabelInstances(page);
     await login(page);
     await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
-    const directives = page.getByLabel("Directions");
+    const directives = page.getByRole("textbox", { name: "Directions" });
     await expect(directives).toBeVisible();
     await directives.fill("Add a neutral linen sofa and a warm wood coffee table.");
     await page.getByRole("radio", { name: "Paint area" }).click();

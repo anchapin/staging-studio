@@ -134,7 +134,7 @@ test.describe("Edit Room redesign — mask paint (issue #1344, flag=ON)", () => 
     await expect(run).toBeDisabled();
 
     // Type a direction (still blocked until both directions + mask set).
-    await page.getByLabel("Directions").fill("Modern coastal palette.");
+    await page.getByRole("textbox", { name: "Directions" }).fill("Modern coastal palette.");
     await expect(run).toBeDisabled();
 
     // Paint 5 strokes → both directions + mask → unblocked.

@@ -130,6 +130,22 @@ function resolveInitialLookbookSlot(
 }
 
 /**
+ * Narrow `AutosaveStatus` (`"idle" | "dirty" | "saving" | "saved" |
+ * "error"`) to the new shell's `SaveStatus` (`"idle" | "saving" |
+ * "saved" | "error"`). The intermediate `"dirty"` state has no
+ * shell-level affordance — the legacy mount's pre-existing
+ * `editor-inspector-column.tsx` lumps `dirty` into the "Saved"
+ * copy too — so we treat it the same here. Unknown values (and
+ * `undefined`) fall through to `"idle"`, the conservative default.
+ */
+function narrowSaveStatus(value: unknown): EditRoomStudioProps["saveStatus"] {
+  if (value === "saving" || value === "saved" || value === "error") {
+    return value;
+  }
+  return "idle";
+}
+
+/**
  * Pure shape transform: builds the full `EditRoomStudioProps` from the
  * route's focused-room data. See module docstring for the field map.
  */
@@ -150,7 +166,16 @@ export function buildEditRoomStudioProps(
     onMaskChange,
   } = args;
   return {
-    saveStatus: directiveStatuses[focusedRoom.id] ?? "idle",
+    // Narrow `AutosaveStatus` ("idle" | "dirty" | "saving" | "saved" |
+    // "error") to the new shell's `SaveStatus` ("idle" | "saving" |
+    // "saved" | "error"). The route passes the broader
+    // `AutosaveStatus` map and the shell's `TopBar` `SAVE_LABEL` has
+    // no `"dirty"` entry, which would throw on the `.spin` read. The
+    // coarse narrowing here matches the legacy `<InpaintEditor>`'s
+    // pre-existing semantics: the user-facing pill shows "Saving…" /
+    // "Saved" / "Save failed" / "Saved" — the intermediate "dirty"
+    // state is invisible at the shell level.
+    saveStatus: narrowSaveStatus(directiveStatuses[focusedRoom.id]),
     onDirectionsCommit,
     projectId: project.id,
     roomId: focusedRoom.id,

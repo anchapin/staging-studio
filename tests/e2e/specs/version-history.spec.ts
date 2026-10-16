@@ -46,7 +46,7 @@ test.describe("version history thumbnail upload", () => {
     await login(page);
     await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
 
-    const directives = page.getByLabel("Directions");
+    const directives = page.getByRole("textbox", { name: "Directions" });
     await expect(directives).toBeVisible();
     await directives.fill("Add a neutral linen sofa and a warm wood coffee table.");
 

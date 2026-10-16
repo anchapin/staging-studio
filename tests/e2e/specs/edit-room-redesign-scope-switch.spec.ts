@@ -105,7 +105,7 @@ test.describe("Edit Room redesign — scope switch (issue #1344, flag=ON)", () =
     // The StagePanel's Directions textarea has id="directions" and
     // is labelled "Directions" (NOT "Staging directives (required)",
     // which is the legacy `<InpaintEditor>` label).
-    const directions = page.getByLabel("Directions");
+    const directions = page.getByRole("textbox", { name: "Directions" });
     await expect(directions).toBeVisible();
     await directions.fill("Modern coastal palette with linen sofa.");
 

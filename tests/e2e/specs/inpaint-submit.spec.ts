@@ -43,7 +43,7 @@ test.describe("inpaint submit and status-polling flow", () => {
 
     // The new surface's Directions textarea (label = "Directions" — see
     // StagePanel.tsx lines 263–268).
-    const directives = page.getByLabel("Directions");
+    const directives = page.getByRole("textbox", { name: "Directions" });
     await expect(directives).toBeVisible();
     await directives.fill("Add a neutral linen sofa and a warm wood coffee table.");
 
@@ -84,7 +84,7 @@ test.describe("inpaint submit and status-polling flow", () => {
     await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
 
     const customDirectives = "E2E test furniture placement directive";
-    const directives = page.getByLabel("Directions");
+    const directives = page.getByRole("textbox", { name: "Directions" });
     await expect(directives).toBeVisible();
     await directives.fill(customDirectives);
 

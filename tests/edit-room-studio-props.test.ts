@@ -269,6 +269,30 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
     expect(props.saveStatus).toBe("saving");
   });
 
+  it("narrows AutosaveStatus 'dirty' to shell SaveStatus 'idle' (issue #1344)", () => {
+    // The route's `directiveStatuses` map carries the broader
+    // `AutosaveStatus` ("idle" | "dirty" | "saving" | "saved" |
+    // "error"). The new shell's `<TopBar>` `SAVE_LABEL` only knows
+    // the four narrower shell states — passing "dirty" through would
+    // throw on the `save.spin` read at render time (this regression
+    // surfaced in the e2e suite after the harness flag flip in #1344).
+    // The resolver collapses "dirty" → "idle" because the legacy
+    // editor-inspector column treats "dirty" as the pre-saving "Saved"
+    // visual state too — the user-facing pill never reveals the
+    // distinction.
+    const props = buildEditRoomStudioProps(withRunArgs({
+      project: baseProject,
+      focusedRoom: baseFocusedRoom,
+      focusedInputs: baseFocusedInputs,
+      directiveStatuses: { "room-1": "dirty" as never },
+      touchUps: { original: 0, A: 0, B: 0 },
+      running: null,
+      onRun: () => {},
+      onExitToProject: () => {},
+    }));
+    expect(props.saveStatus).toBe("idle");
+  });
+
   it("forwards the listing-copy headline + body, coercing null → empty string", () => {
     const props = buildEditRoomStudioProps(withRunArgs({
       project: baseProject,

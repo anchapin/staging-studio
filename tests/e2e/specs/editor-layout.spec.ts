@@ -76,7 +76,7 @@ test.describe("editor layout", () => {
       // The primary Run button + Directions textarea (issue #1342 +
       // #1344): the two staging-affordance anchors on the new surface.
       await expect(page.getByTestId("run-button")).toBeVisible();
-      await expect(page.getByLabel("Directions")).toBeVisible();
+      await expect(page.getByRole("textbox", { name: "Directions" })).toBeVisible();
     });
   });
 

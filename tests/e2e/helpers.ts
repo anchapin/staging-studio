@@ -68,6 +68,15 @@ export async function loginAs(
  * Opens the focused single-room editor (issue #169 flow) for a seeded
  * room. Each grid card is a `.space-y-3` wrapper holding the room heading
  * and its "Edit staging" button.
+ *
+ * Issue #1344 — with `NEXT_PUBLIC_EDIT_ROOM_REDESIGN=1` the focused
+ * editor mounts BOTH the legacy "All rooms" exit button (the
+ * `<button title="Back to the project overview">` rendered by the
+ * route) AND the new `<EditRoomStudio>`'s TopBar (`aria-label="Exit
+ * to all rooms"` with text "All rooms"). A naive
+ * `getByRole("button", { name: "All rooms" })` matches both — the
+ * `title` attribute is the legacy-only discriminator and stays stable
+ * across the flag.
  */
 export async function openFocusedEditor(
   page: Page,
@@ -80,7 +89,9 @@ export async function openFocusedEditor(
     .locator(".space-y-3", { hasText: roomName })
     .getByRole("button", { name: "Edit staging" })
     .click();
-  await expect(page.getByRole("button", { name: "All rooms" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "All rooms", exact: true })
+  ).toBeVisible();
 }
 
 /**

@@ -76,7 +76,7 @@ test.describe("rehearsal drill", () => {
     // see StagePanel.tsx lines 263–268). The legacy "Staging
     // directives (required)" label lives on the legacy mount only and
     // is unreachable when the harness default is `1`.
-    await page.getByLabel("Directions").fill(DIRECTIVES);
+    await page.getByRole("textbox", { name: "Directions" }).fill(DIRECTIVES);
     // The new surface's Paint area scope radio accepts brush strokes.
     await page.getByRole("radio", { name: "Paint area" }).click();
     await paintMaskZigzag(page);
@@ -189,7 +189,7 @@ test.describe("rehearsal drill", () => {
       .getByRole("button", { name: "Edit staging" })
       .click();
 
-    await page.getByLabel("Directions").fill(DIRECTIVES);
+    await page.getByRole("textbox", { name: "Directions" }).fill(DIRECTIVES);
     await page.getByRole("radio", { name: "Paint area" }).click();
     await paintMaskZigzag(page);
 
