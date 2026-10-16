@@ -636,6 +636,109 @@ export default function ProjectDetailView({
     [getDirectiveController]
   );
 
+  /** Issue #1362a: per-room FineTune state. Mirror of the `directives`
+   * map (#496) — keyed by roomId, updated on every control change, fed
+   * to the AutosaveController as the full snapshot. The controller
+   * requires a non-partial type, so the route owns the latest-values
+   * map and the shell's onChange handlers fan a single field back to this
+   * map. The shell's local useState + this route-side map stay in sync
+   * because every onChange does both. */
+  const [fineTune, setFineTune] = useState<
+    Record<
+      string,
+      {
+        fineTuneStrength: number;
+        fineTuneExpand: number;
+        fineTuneSeed: string;
+      }
+    >
+  >({});
+
+  /** Issue #1362a: per-room autosave controllers for FineTune values. */
+  const fineTuneControllersRef = useRef(
+    new Map<
+      string,
+      AutosaveController<{
+        fineTuneStrength: number;
+        fineTuneExpand: number;
+        fineTuneSeed: string;
+      }>
+    >()
+  );
+  /**
+   * Issue #1362a: FineTune save status per room. The shell doesn't
+   * surface a separate "Saving…/Saved" pill for FineTune yet (the
+   * directives pill covers the textarea; the FineTune panel is
+   * collapsed by default and the user doesn't expect a status there).
+   * The state is still kept so the autosave controller's error
+   * transitions are observable for future telemetry / retry UX.
+   */
+  const [, setFineTuneStatuses] = useState<
+    Record<string, AutosaveStatus>
+  >({});
+
+  /**
+   * Issue #1362a: lazy factory for per-room FineTune autosave
+   * controllers. 2 s idle window (same as the directives controller
+   * — slider ticks are bursty and the 2 s window collapses them into
+   * one Prisma update), saves through `saveRoomMetadata` (which is
+   * now Zod-validated for the three new fields per #1362a).
+   */
+  const getFineTuneController = useCallback(
+    (roomId: string) => {
+      let controller = fineTuneControllersRef.current.get(roomId);
+      if (!controller) {
+        controller = new AutosaveController<{
+          fineTuneStrength: number;
+          fineTuneExpand: number;
+          fineTuneSeed: string;
+        }>({
+          save: async (payload) => {
+            const result = await saveRoomMetadata(roomId, payload);
+            return result.success;
+          },
+          idleMs: 2000,
+          onStatusChange: (status) => {
+            setFineTuneStatuses((prev) => ({ ...prev, [roomId]: status }));
+          },
+        });
+        fineTuneControllersRef.current.set(roomId, controller);
+      }
+      return controller;
+    },
+    []
+  );
+
+  /**
+   * Issue #1362a: fires on every FineTune control change. Accepts a
+   * partial patch (the shell only forwards the field the user
+   * touched), merges it into the route's `fineTune[roomId]` map, and
+   * fans the FULL snapshot into the AutosaveController. The
+   * controller's `edit()` requires a non-partial type, so the route
+   * owns the latest-values map and the shell's onChange handlers fan
+   * a single field back to this map.
+   */
+  const editFineTune = useCallback(
+    (
+      roomId: string,
+      patch: Partial<{
+        fineTuneStrength: number;
+        fineTuneExpand: number;
+        fineTuneSeed: string;
+      }>
+    ) => {
+      const existing = fineTune[roomId] ?? {
+        fineTuneStrength: 50,
+        fineTuneExpand: 12,
+        fineTuneSeed: "",
+      };
+      const next = { ...existing, ...patch };
+      setFineTune((prev) => ({ ...prev, [roomId]: next }));
+      getFineTuneController(roomId).edit(next);
+    },
+    [fineTune, getFineTuneController]
+  );
+
   /**
    * Explicit refetch through GET /api/projects/[id] (issue #90 retry-state
    * machinery). Not run on mount — initial render is server data (issue
@@ -1134,6 +1237,16 @@ export default function ProjectDetailView({
           maskDataUrl: maskDataUrlByRoom[focusedRoom.id] ?? null,
           onMaskChange: (value) =>
             setMaskDataUrlForRoom(focusedRoom.id, value),
+          // Issue #1362a — FineTune persistence. Three callbacks fan
+          // out to the per-room AutosaveController; each one forwards
+          // only the field the shell touched (the controller's `edit()`
+          // merges partials into its in-flight state).
+          onFineTuneStrengthChange: (value) =>
+            editFineTune(focusedRoom.id, { fineTuneStrength: value }),
+          onFineTuneExpandChange: (value) =>
+            editFineTune(focusedRoom.id, { fineTuneExpand: value }),
+          onFineTuneSeedChange: (value) =>
+            editFineTune(focusedRoom.id, { fineTuneSeed: value }),
         })
       : null;
 

@@ -3,10 +3,8 @@
  *
  * The Magic Patterns design's `components/FineTune.tsx` is collapsed
  * by default and exposes five controls when expanded:
- *  - How much can change (0–100%, default 80)
- *  - Follow directions (0–100%, default 75)
+ *  - How much can change (0–100%, default 50)
  *  - Blend edges (0–40 px, default 12) — hidden when scope === "whole-room"
- *  - Include floor shadows (toggle, default true) — hidden when scope === "whole-room"
  *  - Seed (numeric, "Random" placeholder, non-digits stripped on change)
  *
  * The port to this repo:
@@ -14,11 +12,28 @@
  *    explicit `open` prop to render the inner controls in a static
  *    markup — otherwise the component starts collapsed and the inner
  *    sliders/checkbox/numeric input aren't in the DOM.
- *  - All five control values are owned by the parent (the StagePanel
+ *  - All three control values are owned by the parent (the StagePanel
  *    shell). The component never holds generation settings — it
  *    just wires them to the right callbacks.
  *  - The motion.div height transition becomes the `<Collapsible>`
  *    CSS-grid trick — same UX, zero framer-motion dependency.
+ *
+ * STICKY NOTE #1362a (Q1 — `adherence` removal): The `<FineTune>`
+ * panel previously exposed a 5th `adherence` slider ("Higher sticks
+ * closer to your words") that had no API target. It was removed in
+ * #1362a because both UI sliders inverted against `promptStrength` /
+ * `strength` and conflicted in code. **Do NOT re-add `adherence`
+ * without first identifying an API field (or staging-package field)
+ * it lands on.** The follow-up issue for reintroducing `adherence`
+ * is filed but not yet scoped.
+ *
+ * STICKY NOTE #1362a (shadows removal): The "Include floor shadows"
+ * toggle was removed because DashScope masks are binary B/W (no
+ * server-side feathering). The pre-upload mask-feather utility in
+ * #1362b replaces it semantically — `expand` now feathers the mask
+ * data URL before submit. **Do NOT re-add `shadows` without first
+ * confirming the active provider accepts a server-side shadow
+ * parameter.**
  *
  * Pinned by `tests/edit-room-fine-tune.test.tsx`.
  */
@@ -28,7 +43,7 @@
 import { Collapsible } from "@/components/edit-room/collapsible";
 
 export interface FineTuneProps {
-  /** Current scope — controls whether blend-edges + shadows render. */
+  /** Current scope — controls whether the blend-edges slider renders. */
   scope: "whole-room" | "objects" | "paint";
   /** Open state — the panel is collapsed by default per the design. */
   open?: boolean;
@@ -37,15 +52,9 @@ export interface FineTuneProps {
   /** How-much-can-change value (0–100). */
   strength: number;
   onStrengthChange: (n: number) => void;
-  /** Follow-directions value (0–100). */
-  adherence: number;
-  onAdherenceChange: (n: number) => void;
   /** Blend-edges value (0–40 px) — only used when scope !== "whole-room". */
   expand: number;
   onExpandChange: (n: number) => void;
-  /** Include-floor-shadows toggle — only used when scope !== "whole-room". */
-  shadows: boolean;
-  onShadowsChange: (b: boolean) => void;
   /** Seed (digits only, stripped on change). */
   seed: string;
   onSeedChange: (s: string) => void;
@@ -63,12 +72,8 @@ export function FineTune({
   onOpenChange,
   strength,
   onStrengthChange,
-  adherence,
-  onAdherenceChange,
   expand,
   onExpandChange,
-  shadows,
-  onShadowsChange,
   seed,
   onSeedChange,
 }: FineTuneProps) {
@@ -108,43 +113,15 @@ export function FineTune({
             onChange={onStrengthChange}
             display={`${strength}%`}
           />
-          <Slider
-            label="Follow directions"
-            hint="Higher sticks closer to your words"
-            value={adherence}
-            onChange={onAdherenceChange}
-            display={`${adherence}%`}
-          />
           {!isWholeRoom && (
-            <>
-              <Slider
-                label="Blend edges"
-                hint="Grows the area so frames and edges regenerate cleanly"
-                value={expand}
-                max={40}
-                onChange={onExpandChange}
-                display={`${expand}px`}
-              />
-              <label
-                className="flex cursor-pointer items-start gap-2.5"
-                aria-label="Include floor shadows"
-              >
-                <input
-                  type="checkbox"
-                  checked={shadows}
-                  onChange={(e) => onShadowsChange(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 accent-primary"
-                />
-                <span>
-                  <span className="block text-[13px] font-medium text-ink">
-                    Include floor shadows
-                  </span>
-                  <span className="block text-xs text-ink-subtle">
-                    Extends the area downward to catch cast shadows
-                  </span>
-                </span>
-              </label>
-            </>
+            <Slider
+              label="Blend edges"
+              hint="Grows the area so frames and edges regenerate cleanly"
+              value={expand}
+              max={40}
+              onChange={onExpandChange}
+              display={`${expand}px`}
+            />
           )}
           <label className="flex items-center justify-between gap-3">
             <span className="text-[13px] font-medium text-ink">Seed</span>

@@ -96,14 +96,19 @@ export interface StagePanelProps {
   // (#1344). Defaults match the #1341 design's literal defaults so
   // existing tests (and storybook previews without these props) keep
   // rendering the same controls.
+  //
+  // Issue #1362a — `adherence` and `shadows` are removed entirely:
+  //   - `adherence` had no API field it landed on; both it and
+  //     `strength` inverted against `promptStrength` and conflicted in
+  //     code (Q1 user correction, §8). The control is gone, no Room
+  //     column is added for it. See STICKY NOTE in `FineTune.tsx`.
+  //   - `shadows` had no API field either (DashScope masks are binary
+  //     B/W — no server-side feathering). The pre-upload mask-feather
+  //     utility in Stage B (#1362b) replaces it semantically.
   strength?: number;
   onStrengthChange?: (n: number) => void;
-  adherence?: number;
-  onAdherenceChange?: (n: number) => void;
   expand?: number;
   onExpandChange?: (n: number) => void;
-  shadows?: boolean;
-  onShadowsChange?: (b: boolean) => void;
   seed?: string;
   onSeedChange?: (s: string) => void;
 }
@@ -134,14 +139,10 @@ export function StagePanel({
   onClearMask,
   projectAesthetic,
   projectGlobalDirectives,
-  strength = 80,
+  strength = 50,
   onStrengthChange = () => {},
-  adherence = 75,
-  onAdherenceChange = () => {},
   expand = 12,
   onExpandChange = () => {},
-  shadows = true,
-  onShadowsChange = () => {},
   seed = "",
   onSeedChange = () => {},
 }: StagePanelProps): ReactNode {
@@ -322,12 +323,8 @@ export function StagePanel({
         scope={scope}
         strength={strength}
         onStrengthChange={onStrengthChange}
-        adherence={adherence}
-        onAdherenceChange={onAdherenceChange}
         expand={expand}
         onExpandChange={onExpandChange}
-        shadows={shadows}
-        onShadowsChange={onShadowsChange}
         seed={seed}
         onSeedChange={onSeedChange}
       />

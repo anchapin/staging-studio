@@ -116,6 +116,47 @@ export interface EditRoomStudioProps {
    */
   initialDirections?: string;
   /**
+   * Issue #1362a — Initial persisted FineTune values from
+   * `Room.fineTuneStrength` / `Room.fineTuneExpand` / `Room.fineTuneSeed`.
+   * Pre-populates the FineTune panel's three surviving controls
+   * (strength, expand, seed) on first render; subsequent edits are
+   * shell-owned `useState` values fed through the route's
+   * `editFineTune` autosave controller. Each field is nullable so a
+   * legacy row (or any column not yet written) falls back to the
+   * UI's natural defaults at the `useState(seed ?? 50)` site.
+   *
+   * Marked optional for test-fixture ergonomics — pre-#1362a fixtures
+   * mount `<EditRoomStudio>` without it. The shell coerces
+   * `undefined → { strength:null, expand:null, seed:null }` at the
+   * `useState(initialFineTune?.strength ?? 50)` site so the controls
+   * start at their default values, matching the pre-#1362a shape.
+   *
+   * Stage A only persists. The persisted values do NOT reach DashScope
+   * yet — Stage B (#1362b) wires them into the alibaba adapter's
+   * `parameters.strength` / `parameters.seed` and adds the mask-feather
+   * utility for the `expand` slider.
+   */
+  initialFineTune?: {
+    strength: number | null;
+    expand: number | null;
+    seed: string | null;
+  };
+  /**
+   * Issue #1362a — FineTune autosave callbacks. The shell fires the
+   * relevant one on every control change; the route's
+   * `editFineTune(roomId, patch)` translates that into a
+   * `AutosaveController.edit()` call that debounces to `saveRoomMetadata`.
+   * Mirrors `onDirectionsCommit` (#1344 slice 2): the parent route owns
+   * the per-room controller map, the shell is a thin pass-through.
+   *
+   * Each callback receives only the field it owns so the parent's
+   * `editFineTune` can decide whether to send a partial patch or a
+   * full snapshot — same flexibility `rawDirectives` has today.
+   */
+  onFineTuneStrengthChange: (value: number) => void;
+  onFineTuneExpandChange: (value: number) => void;
+  onFineTuneSeedChange: (value: string) => void;
+  /**
    * Issue #1344 — Property address shown in the TopBar's breadcrumb.
    * Surfaced from `Project.propertyAddress` by the parent route.
    * Drives the breadcrumb `<span>` between "All rooms" and the

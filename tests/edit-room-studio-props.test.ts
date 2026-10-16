@@ -72,6 +72,12 @@ const baseFocusedInputs: FocusedRoomInputs = {
  * omits the slice-1 required fields (e.g. `onRun`, `onExitToProject`)
  * still satisfies the resolver's signature when the test only cares
  * about the slice-2 wiring.
+ *
+ * Issue #1362a — three more args (`onFineTuneStrengthChange`,
+ * `onFineTuneExpandChange`, `onFineTuneSeedChange`) for the FineTune
+ * persistence path. Same `Partial<>` shape as the slice-2 additions —
+ * `withRunArgs` supplies no-op defaults so existing fixtures don't
+ * have to thread them.
  */
 function withRunArgs(
   args: Partial<Parameters<typeof buildEditRoomStudioProps>[0]>
@@ -80,6 +86,9 @@ function withRunArgs(
     onDirectionsCommit: () => {},
     maskDataUrl: null,
     onMaskChange: () => {},
+    onFineTuneStrengthChange: () => {},
+    onFineTuneExpandChange: () => {},
+    onFineTuneSeedChange: () => {},
     ...args,
   } as Parameters<typeof buildEditRoomStudioProps>[0];
 }
@@ -383,6 +392,89 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
       onExitToProject: () => {},
     }));
     expect(props.initialDirections).toBe("");
+  });
+
+  // Issue #1362a — surface the three persisted FineTune columns
+  // (`fineTuneStrength`, `fineTuneExpand`, `fineTuneSeed`) as
+  // `initialFineTune`. The shell seeds its useStates from this bag;
+  // each field is nullable so legacy rows with nulls (and rows where
+  // any of the three were never written) fall through to the studio's
+  // UI defaults (strength=50, expand=12, seed="").
+  it("forwards Room.fineTune* → initialFineTune verbatim when all three are non-null", () => {
+    const props = buildEditRoomStudioProps(withRunArgs({
+      project: baseProject,
+      focusedRoom: {
+        ...baseFocusedRoom,
+        fineTuneStrength: 75,
+        fineTuneExpand: 18,
+        fineTuneSeed: "12345",
+      },
+      focusedInputs: baseFocusedInputs,
+      directiveStatuses: {},
+      touchUps: { original: 0, A: 0, B: 0 },
+      running: null,
+      onRun: () => {},
+      onExitToProject: () => {},
+    }));
+    expect(props.initialFineTune).toEqual({
+      strength: 75,
+      expand: 18,
+      seed: "12345",
+    });
+  });
+
+  it("forwards Room.fineTune* = null → initialFineTune = { strength:null, expand:null, seed:null } (first visit)", () => {
+    // The shell's `useState(initialFineTune?.strength ?? 50)` shape
+    // picks the UI default at the consumer; the resolver passes null
+    // through unchanged so the consumer decides what "absent" means.
+    const props = buildEditRoomStudioProps(withRunArgs({
+      project: baseProject,
+      focusedRoom: {
+        ...baseFocusedRoom,
+        fineTuneStrength: null,
+        fineTuneExpand: null,
+        fineTuneSeed: null,
+      },
+      focusedInputs: baseFocusedInputs,
+      directiveStatuses: {},
+      touchUps: { original: 0, A: 0, B: 0 },
+      running: null,
+      onRun: () => {},
+      onExitToProject: () => {},
+    }));
+    expect(props.initialFineTune).toEqual({
+      strength: null,
+      expand: null,
+      seed: null,
+    });
+  });
+
+  it("forwards partial Room.fineTune* mix → initialFineTune with each independently (per-field null coalescing)", () => {
+    // A row where the user set `fineTuneSeed` but never touched
+    // strength/expand still round-trips: seed surfaces verbatim,
+    // strength + expand surface as null, and the shell's per-field
+    // `useState(... ?? default)` shape picks the right default at
+    // each call site.
+    const props = buildEditRoomStudioProps(withRunArgs({
+      project: baseProject,
+      focusedRoom: {
+        ...baseFocusedRoom,
+        fineTuneStrength: null,
+        fineTuneExpand: null,
+        fineTuneSeed: "999",
+      },
+      focusedInputs: baseFocusedInputs,
+      directiveStatuses: {},
+      touchUps: { original: 0, A: 0, B: 0 },
+      running: null,
+      onRun: () => {},
+      onExitToProject: () => {},
+    }));
+    expect(props.initialFineTune).toEqual({
+      strength: null,
+      expand: null,
+      seed: "999",
+    });
   });
 
   it("forwards touch-ups count + running + onRun + onExitToProject verbatim", () => {
