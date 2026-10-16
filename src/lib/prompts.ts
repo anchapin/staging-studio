@@ -242,6 +242,100 @@ Based on the room details and staging directives, generate:
 Be specific, professional, and focused on maximizing the room's appeal to ${targetBuyer}.`;
 }
 
+export interface ListingCopyPromptInput {
+  roomName: string;
+  aesthetic: string;
+  targetBuyer: string;
+  /** Room-specific staging directives (override or supplement global directives). */
+  rawDirectives: string;
+  /** Issue #562: project-wide directives applied to every room. */
+  globalDirectives?: string;
+  /**
+   * Optional lookbook headline already on the room — feeds the model
+   * so a re-rewrite doesn't drift to a different angle. The legacy
+   * {@link buildCopyPrompt} carries `buyerDemographics` because the
+   * staging-copy fields (observed challenge, recommendation, …) read
+   * better with the buyer detail in view; the listing-copy fields
+   * stay short enough that a 200-char headline is more useful as a
+   * tone anchor than another 200 tokens of demographics.
+   */
+  priorHeadline?: string;
+}
+
+/**
+ * Builds the gpt-4o-mini prompt for the CopyPanel's "Rewrite from
+ * directions" CTA (issue #1343) sent to `generateObject` in
+ * `api/v1/listing-copy`.
+ *
+ * Output shape is exactly two fields (`headline` + `body`); both are
+ * sized to fit the `<CopyPanel>`'s `<input>` (200) and `<textarea
+ * maxLength={600}>` contracts (cf. `listingCopySchema` in
+ * `src/lib/room-copy-edit-schema.ts`). The prompt deliberately asks
+ * for two short fields and forbids bullets/JSON-in-prose so the
+ * structured-output schema stays easy to validate server-side — a
+ * stuck call that produces a 2000-character essay would blow past
+ * the body cap and the `saveListingCopy` write would reject the
+ * payload with a 422.
+ *
+ * Contract: pure string composition; the exact bytes are pinned by
+ * `tests/prompts.test.ts` — output quality of the paid model is
+ * sensitive to these strings, so edits here should be deliberate and
+ * re-pinned. Side effects: none (pure).
+ */
+export function buildListingCopyPrompt(input: ListingCopyPromptInput): string {
+  const {
+    roomName: rawRoomName,
+    aesthetic: rawAesthetic,
+    targetBuyer: rawTargetBuyer,
+    rawDirectives: rawRawDirectives,
+    globalDirectives: rawGlobalDirectives,
+    priorHeadline: rawPriorHeadline,
+  } = input;
+
+  const roomName = sanitizePromptValue(rawRoomName);
+  const aesthetic = sanitizePromptValue(rawAesthetic);
+  const targetBuyer = sanitizePromptValue(rawTargetBuyer);
+  const rawDirectives = sanitizePromptValue(rawRawDirectives);
+  const globalDirectives = sanitizePromptValue(rawGlobalDirectives);
+  const priorHeadline = rawPriorHeadline ? sanitizePromptValue(rawPriorHeadline) : "";
+
+  // Issue #562: merge global + room directives, same rule as
+  // `buildCopyPrompt` so the listing copy stays consistent with the
+  // staging copy when both are generated from the same project.
+  const mergedDirectives = mergeDirectives(globalDirectives, rawDirectives);
+
+  const priorBlock = priorHeadline
+    ? `\nThe previous headline on this room was: "${priorHeadline}".\nIf the staging directives still apply, prefer to keep the same framing; if the directives have changed, write a fresh headline from the new directives.`
+    : "";
+
+  return `You are a professional home staging copywriter for a staging company.
+
+Write the listing copy for a single room shown in the lookbook next to its before/after photos.
+- Room: ${roomName}
+- Design Aesthetic: ${aesthetic}
+- Target Buyer: ${targetBuyer}
+- Staging Directives: ${mergedDirectives}${priorBlock}
+
+Return exactly two fields, both written for the lookbook reader (a real-estate shopper scanning photos, not a stager reading notes):
+1. **headline** — a one-line, concrete headline (5–12 words, up to ${LISTING_COPY_HEADLINE_MAX} characters) that names a specific feature or mood of the staged room. Never generic ("Beautiful room!", "Stunning space!"). Avoid punctuation like a marketing slogan; this is descriptive.
+2. **body** — a one- or two-sentence paragraph (up to ${LISTING_COPY_BODY_MAX} characters) that brings the room to life for the target buyer. Mention a concrete staging choice the buyer would notice (light, palette, layout, focal point), not "Attention to detail".
+
+Do not include bullets, JSON, or any field other than the two above. Keep the prose specific to ${targetBuyer}; avoid filler words that could describe any room.`;
+}
+
+// Issue #1343 — the CopyPanel's `<input maxLength=…>` and `<textarea
+// maxLength=…>` are pinned to 200 and 600. The persisted schema
+// (`listingCopySchema` in `src/lib/room-copy-edit-schema.ts`) and the
+// rewrite-output schema (`listingCopyOutputSchema` in
+// `src/lib/ai-route-schemas.ts`) mirror these caps; the prompt asks
+// for output UNDER these caps so a borderline long headline still
+// fits through the body cap. Kept as locals (not imported) so
+// `prompts.ts` stays a leaf module — `ai-route-schemas.ts` already
+// imports from it via the buildCopyPrompt callers, and pulling
+// prompts in the other direction would risk a circular dependency.
+const LISTING_COPY_HEADLINE_MAX = 200;
+const LISTING_COPY_BODY_MAX = 600;
+
 /**
  * Builds the FLUX.1 Fill prompt from the room's aesthetic and staging
  * directives, appending {@link FRAMING_CONTEXT} so masked replacements

@@ -268,25 +268,87 @@ export function EditRoomStudio({
     copyBodyRef.current = copyBody;
   });
 
-  // The Rewrite-from-directions CTA stub (#1343 stub; #1344 wires
-  // the real gpt-4o-mini call to a route returning {headline, body}).
-  // The Magic Patterns design uses a 1.2s "Writing…" affordance
-  // before the inputs animate to the new values — same shape as
-  // the design, same interaction shape that the real call would
-  // produce. The handler is mounted in a useCallback so the
-  // Rewrite button's onClick ref is stable across renders.
-  const handleCopyRewrite = useCallback(() => {
+  // The Rewrite-from-directions CTA (issue #1343 + #1343.5) calls
+  // `POST /api/v1/listing-copy`, which writes the model's `{headline,
+  // body}` straight into the CopyPanel's local state. The 600ms
+  // AutosaveController wired above then debounces the change into
+  // `saveListingCopy` so the new copy lands in `Room.lookbookHeadline`
+  // / `Room.lookbookBody` — same flow as a user-typed edit.
+  //
+  // The Magic Patterns design's 1.2s "Writing…" affordance is preserved
+  // by `isCopyRewriting`: the route does the fetching, the panel just
+  // shows the spinner. On failure (401/403/429/5xx) the route surfaces
+  // a `message` field that we lift into the shell's toast so the user
+  // sees the failure without leaving the studio.
+  //
+  // The handler is mounted in a useCallback so the Rewrite button's
+  // onClick ref is stable across renders (matches #1343's contract).
+  const handleCopyRewrite = useCallback(async () => {
     if (isCopyRewriting) return;
     if (state.directions.trim().length === 0) return;
     setIsCopyRewriting(true);
-    window.setTimeout(() => {
-      setCopyHeadline(`Rewritten from your ${state.directions.length}-char brief`);
-      setCopyBody(
-        "Auto-generated placeholder: the AI rewrite of the listing copy lands in #1344."
-      );
+    try {
+      const response = await fetch("/api/v1/listing-copy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomId }),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | {
+            success?: boolean;
+            data?: { headline?: string; body?: string };
+            message?: string;
+            error?: string;
+          }
+        | null;
+      if (!response.ok || !payload?.success || !payload.data) {
+        // The route returns a user-facing `message` on every error
+        // class (quota, auth, integration, …) — prefer it over the
+        // generic `error` short label when present.
+        const message =
+          payload?.message ||
+          payload?.error ||
+          "We couldn't rewrite the listing copy. Please try again.";
+        dispatch({ type: "SHOW_TOAST", message });
+        return;
+      }
+      // After the success guard above, `payload.data.headline` and
+      // `payload.data.body` are present — but the inferred type is
+      // still `string | undefined` (the cast is loose). Narrow
+      // explicitly so the autosave controller sees two definite
+      // strings; an empty model response lands in the catch path
+      // above via the `!payload.data` check, not here.
+      const { headline, body } = payload.data;
+      if (typeof headline !== "string" || typeof body !== "string") {
+        dispatch({
+          type: "SHOW_TOAST",
+          message: "We couldn't rewrite the listing copy. Please try again.",
+        });
+        return;
+      }
+      // The route validates `headline`/`body` against
+      // `listingCopySchema` (200/600 caps) so the values are safe to
+      // hand to the controller. The autosave debounce picks up the
+      // mutation on the next render and persists to Prisma.
+      setCopyHeadline(headline);
+      setCopyBody(body);
+      copyAutosaveRef.current.edit({
+        lookbookHeadline: headline,
+        lookbookBody: body,
+      });
+    } catch (networkError) {
+      // The fetch itself failed (offline, DNS, CORS, …). The route's
+      // own error-shape is unreachable, so we synthesize a generic
+      // toast matching the classified-error unknown copy.
+      dispatch({
+        type: "SHOW_TOAST",
+        message: "We couldn't rewrite the listing copy. Please try again.",
+      });
+      console.error("[EditRoomStudio] listing-copy fetch failed", networkError);
+    } finally {
       setIsCopyRewriting(false);
-    }, 1200);
-  }, [isCopyRewriting, state.directions]);
+    }
+  }, [isCopyRewriting, state.directions, roomId]);
 
   // #1344 — Run button: the inspector is dumb, the SHELL owns the
   // button's loading state (it just forwards the parent's `running`

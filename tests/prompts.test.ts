@@ -6,6 +6,7 @@ import {
   buildCopyPrompt,
   buildFalFillPayload,
   buildInpaintPrompt,
+  buildListingCopyPrompt,
   buildReplicateFillPayload,
 } from "@/lib/prompts";
 
@@ -53,6 +54,85 @@ Be specific, professional, and focused on maximizing the room's appeal to Young 
     expect(prompt).toContain("- Target Buyer: \n");
     expect(prompt).toContain("- Staging Directives: \n");
     expect(prompt.endsWith("appeal to .")).toBe(true);
+  });
+});
+
+describe("buildListingCopyPrompt (issue #1343)", () => {
+  it("composes the exact listing-copy prompt for a representative room", () => {
+    expect(
+      buildListingCopyPrompt({
+        roomName: "Primary Bedroom",
+        aesthetic: "Modern Farmhouse",
+        targetBuyer: "Young families",
+        rawDirectives: "King bed centered on the accent wall; add two nightstands.",
+        priorHeadline: "Calm bedroom with restored crown molding",
+      })
+    ).toBe(
+      `You are a professional home staging copywriter for a staging company.
+
+Write the listing copy for a single room shown in the lookbook next to its before/after photos.
+- Room: Primary Bedroom
+- Design Aesthetic: Modern Farmhouse
+- Target Buyer: Young families
+- Staging Directives: King bed centered on the accent wall; add two nightstands.
+The previous headline on this room was: "Calm bedroom with restored crown molding".
+If the staging directives still apply, prefer to keep the same framing; if the directives have changed, write a fresh headline from the new directives.
+
+Return exactly two fields, both written for the lookbook reader (a real-estate shopper scanning photos, not a stager reading notes):
+1. **headline** — a one-line, concrete headline (5–12 words, up to 200 characters) that names a specific feature or mood of the staged room. Never generic ("Beautiful room!", "Stunning space!"). Avoid punctuation like a marketing slogan; this is descriptive.
+2. **body** — a one- or two-sentence paragraph (up to 600 characters) that brings the room to life for the target buyer. Mention a concrete staging choice the buyer would notice (light, palette, layout, focal point), not "Attention to detail".
+
+Do not include bullets, JSON, or any field other than the two above. Keep the prose specific to Young families; avoid filler words that could describe any room.`
+    );
+  });
+
+  it("omits the prior-headline block when priorHeadline is not provided", () => {
+    const prompt = buildListingCopyPrompt({
+      roomName: "Kitchen",
+      aesthetic: "Coastal",
+      targetBuyer: "First-time homebuyers",
+      rawDirectives: "Bring in a runner, swap to brushed-brass pulls.",
+    });
+    expect(prompt).not.toContain("previous headline");
+    expect(prompt).not.toContain('"Calm bedroom');
+  });
+
+  it("merges global and room directives the same way buildCopyPrompt does (#562)", () => {
+    const roomScoped = buildListingCopyPrompt({
+      roomName: "Kitchen",
+      aesthetic: "Coastal",
+      targetBuyer: "First-time homebuyers",
+      rawDirectives: "Bring in a runner.",
+      globalDirectives: "Lean into natural materials.",
+    });
+    expect(roomScoped).toContain(
+      "- Staging Directives: Lean into natural materials.\n\nRoom-specific: Bring in a runner."
+    );
+    // When only global directives exist, the merge still surfaces them
+    // (the listing-copy rewrite is still brief-able from project-level
+    // staging intent alone).
+    const globalOnly = buildListingCopyPrompt({
+      roomName: "Kitchen",
+      aesthetic: "Coastal",
+      targetBuyer: "First-time homebuyers",
+      rawDirectives: "",
+      globalDirectives: "Lean into natural materials.",
+    });
+    expect(globalOnly).toContain("- Staging Directives: Lean into natural materials.");
+  });
+
+  it("includes the headline/body cap copy so the model picks fields that fit listingCopySchema", () => {
+    const prompt = buildListingCopyPrompt({
+      roomName: "Kitchen",
+      aesthetic: "Coastal",
+      targetBuyer: "First-time homebuyers",
+      rawDirectives: "Light palette, brass hardware.",
+    });
+    // The caps here mirror the schema-side ones (200/600). Drift
+    // between prompt and schema would let a borderline-long output
+    // blow past `saveListingCopy`'s validation.
+    expect(prompt).toContain("up to 200 characters");
+    expect(prompt).toContain("up to 600 characters");
   });
 });
 
