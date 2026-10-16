@@ -74,18 +74,17 @@ async function paintStrokes(
   }
 }
 
-// Issue #1344 — `NEXT_PUBLIC_EDIT_ROOM_REDESIGN` is build-time inlined,
-// so the e2e harness boots ONE flag value per build. To keep the legacy
-// mask-paint / concept-flow / version-history specs passing (which
-// target `<InpaintEditor>` selectors verbatim) the harness defaults to
-// `"0"` (legacy surface live). The four `edit-room-redesign-*` specs
-// are written but the entire `describe` block is skipped today; a
-// follow-up slice either flips the harness default to `"1"` and updates
-// the legacy specs' selectors, or adds a runtime override (cookie /
-// localStorage) so a single suite can run both surfaces. Skipping here
-// keeps the suite green while preserving the spec text for that
-// follow-up.
-test.describe.skip("Edit Room redesign — mask paint (issue #1344, flag=ON)", () => {
+// Issue #1344 — `NEXT_PUBLIC_EDIT_ROOM_REDESIGN` is build-time inlined
+// at `"1"` (see tests/e2e/env.ts) so the new `<EditRoomStudio>`
+// surface is live for the whole suite. The four `edit-room-redesign-*`
+// specs exercise the wired-up submit path; the legacy
+// mask-paint / concept-flow / version-history / editor-layout /
+// rehearsal / inpaint-submit specs were updated to the new surface's
+// selectors in the same PR (Fill Region / Restage furnishings / Select
+// Regions + canvas-click batch / undo+redo / zoom live only on the
+// legacy surface and have no equivalent here yet, so the corresponding
+// subtests were dropped — they remain pinned at the lib level).
+test.describe("Edit Room redesign — mask paint (issue #1344, flag=ON)", () => {
   test("5 strokes → mask non-empty", async ({ page }) => {
     await login(page);
     await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");

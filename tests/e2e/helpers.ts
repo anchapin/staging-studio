@@ -101,6 +101,16 @@ export async function openEditorTab(
  * class that silently failed under the PoC's dispatched-event driver
  * (strokes never landed; exported masks were 100% black). Strokes cover a
  * deliberate band so the coverage assertion has margin.
+ *
+ * Issue #1344 — the harness default flipped to
+ * `NEXT_PUBLIC_EDIT_ROOM_REDESIGN=1`, so the focused editor now mounts
+ * the new `<EditRoomStudio>` (`[data-testid="edit-room-canvas"] canvas`).
+ * The legacy `<InpaintEditor>` (`role="application"` +
+ * `canvas[aria-label^="Room mask painting canvas"]`) lives behind the
+ * flag and is unreachable in the e2e build, so this helper targets the
+ * new surface. If a future slice wants to drive the legacy editor in
+ * a single spec, gate on the flag in that spec and reach for
+ * `legacyMaskCanvas` below.
  */
 export async function paintMaskZigzag(page: Page): Promise<void> {
   const canvas = maskCanvas(page);
@@ -119,7 +129,7 @@ export async function paintMaskZigzag(page: Page): Promise<void> {
   await page.waitForFunction(
     () => {
       const el = document.querySelector(
-        'canvas[aria-label^="Room mask painting canvas"]'
+        '[data-testid="edit-room-canvas"] canvas'
       );
       if (!(el instanceof HTMLCanvasElement)) return false;
       const key = `${el.width}x${el.height}`;
@@ -148,9 +158,7 @@ export async function paintMaskZigzag(page: Page): Promise<void> {
 }
 
 function maskCanvas(page: Page): ReturnType<Page["locator"]> {
-  return page
-    .getByRole("application")
-    .locator('canvas[aria-label^="Room mask painting canvas"]');
+  return page.locator('[data-testid="edit-room-canvas"] canvas').first();
 }
 
 interface InpaintCaptureState {

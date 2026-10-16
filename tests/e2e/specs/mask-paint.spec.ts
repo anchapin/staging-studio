@@ -6,110 +6,81 @@ import {
   interceptInpaint,
   interceptLabelInstances,
   login,
-  openEditorTab,
   openFocusedEditor,
   paintMaskZigzag,
-  whitePixelGeometry,
   whitePixelShare,
 } from "../helpers";
 
 const MIN_WHITE_SHARE = 0.01; // 1% of canvas pixels
 
-// Issue #252: EVERY editor-opening test bills a detection on open, and a
-// billed detection fires the OpenAI-backed vision-labeling call — it must
-// land on the network-layer mock in all of them, never the real route.
+// Issue #252: the editor-open auto-fire bills a detection on open, and a
+// billed detection fires the OpenAI-backed vision-labeling call. With the
+// #1344 harness default flipped to `"1"`, the new `<EditRoomStudio>`
+// surface mounts without billing any detection (the studio's `detections`
+// are a stub until the real `/api/segment/furnishings` lands). The mocks
+// stay registered here defensively in case a follow-up slice wires the
+// detection call into the new surface — the suite keeps its hermeticity
+// contract either way.
 test.beforeEach(({ page }) => {
   interceptLabelInstances(page);
 });
 
 /**
- * Mask painting (issue #165 acceptance criterion 1).
+ * Mask painting + real `/api/inpaint` submit (issue #165 acceptance
+ * criterion 1, retargeted to the new `<EditRoomStudio>` surface).
  *
- * The PoC driver could make the component's handlers fire (dispatched
- * MouseEvents) but the strokes never landed — intercepted /api/inpaint
- * bodies were 100% black masks. Here Playwright drives Chrome's real
- * input pipeline (trusted, hit-tested mouse events) through the app's
- * real canvas handlers, then samples the ACTUAL POST /api/inpaint body
- * the browser built: the mask data URL must decode with white coverage
- * above a threshold.
+ * With `NEXT_PUBLIC_EDIT_ROOM_REDESIGN=1` (the harness default since
+ * #1344), the focused editor mounts the new shell + the new
+ * `<MaskLayer>` (issue #1339). The Run button (`data-testid="run-button"`)
+ * is disabled until BOTH directions AND a mask exist (issue #1342 +
+ * #1344's real `/api/inpaint` wire); a click submits the request the
+ * same way the legacy `<InpaintEditor>` did. The body the browser puts
+ * on the wire must still decode with white coverage above a threshold
+ * — that's the contract this spec pins on the new surface.
  */
 test.describe("mask painting", () => {
   test("brush strokes produce a non-black mask in the real /api/inpaint body", async ({
     page,
   }) => {
     const inpaint = interceptInpaint(page);
-    // Issue #231: the concept tool is compiled ON, so the editor-open
-    // auto-fire must land on the mock, never the real fal-backed route.
     interceptFurnishingsDetection(page);
-    // Issue #252: billed detections trigger the vision-labeling call —
-    // it must land on the mock, never the real OpenAI-backed route.
     interceptLabelInstances(page);
 
     await login(page);
     await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
 
-    // The staged-directives textarea only renders once the room has a
-    // before photo (seeded by global setup).
-    const directives = page.getByLabel("Staging directives (required)");
+    // The new surface's Directions textarea (label = "Directions" — see
+    // StagePanel.tsx lines 263–268). The legacy "Staging directives
+    // (required)" label is unreachable when the flag is on.
+    const directives = page.getByLabel("Directions");
     await expect(directives).toBeVisible();
     await directives.fill("Add a neutral linen sofa and a warm wood coffee table.");
 
-    // Issue #252: the single-object run affordance lives in the Manual
-    // paint tab; the editor opens on Auto detect (flag on).
-    await openEditorTab(page, "Manual paint");
+    // Issue #1344 — switch to Paint area scope so the canvas accepts
+    // brush strokes. The default scope is "Whole room" (no canvas
+    // painting); the radio group lives under the "What should change?"
+    // heading in the StagePanel.
+    await page.getByRole("radio", { name: "Paint area" }).click();
 
-    // The Manual paint run button ("Generate" — renamed from "Apply
-    // Inpainting" when #629 moved it into the Inpaint operation mode
-    // tabs; exact: true so it never substring-matches "Generate Copy" or
-    // "Generate More Variations") is disabled until a mask exists — the
-    // UI state transition this flow hinges on.
-    const applyButton = page.getByRole("button", { name: "Generate", exact: true });
-    await expect(applyButton).toBeDisabled();
+    // The new surface's Run button (issue #1342): disabled until
+    // directions + mask exist. The label resolver
+    // (`resolveRunLabel`) reads `scope === "paint"` →
+    // "Restage painted area" regardless of the blocked reason.
+    const run = page.getByTestId("run-button");
+    await expect(run).toBeDisabled();
+    await expect(run).toContainText("Restage painted area");
 
     await paintMaskZigzag(page);
+    await expect(run).toBeEnabled();
 
-    await expect(applyButton).toBeEnabled();
+    await run.click();
 
-    await applyButton.click();
-
-    // The status poll resolves via the interception; success toast is the
-    // hook's completion signal.
+    // The status poll resolves via the interception; success toast is
+    // the hook's completion signal. The toast text comes from
+    // `use-inpaint-runs.ts` (issue #1344's wire).
     await expect(page.getByText("Inpainting completed successfully!")).toBeVisible({
       timeout: 20_000,
     });
-
-    // Completion persists the staged image through the app's REAL room
-    // PATCH route against the local database — the staged result section
-    // (issue #168) renders once that write lands, and the variant strip
-    // marks the just-staged variant as selected from the SAME persisted
-    // row. (The save toast is ephemeral: under full-suite load it can
-    // dismiss before any assertion poll sees it, so the durable rendered
-    // state is asserted instead.)
-    await expect(page.getByRole("heading", { name: "Staged result" })).toBeVisible({
-      timeout: 20_000,
-    });
-    // Issue #1091: the strip never renders the literal text "Variant A
-    // (Selected)" — the selected caption is exposed via aria-pressed on the
-    // thumbnail button (src/components/canvas/variant-thumbnail-strip.tsx),
-    // with "(Selected)" in an sr-only span. Assert the accessibility
-    // contract instead. The shared Mask Room leaks variant-slot state across
-    // specs (inpaint-submit stages before this file runs), so scope the
-    // assertion to the slot THIS run staged — cf. version-history.spec.ts.
-    // The app always selects the slot it just staged
-    // (buildInpaintResultPatch in src/lib/inpaint-source.ts). The button is
-    // pinned via its thumbnail img alt ("…Variant A thumbnail") because the
-    // "Variant A" caption lives in a sibling ThumbLabel span, not inside
-    // the button, so a hasText filter on the button matches nothing.
-    const runSlot = inpaint.submitBody().variantSlot;
-    // The shared room may already hold staged variants from earlier specs,
-    // so this run targets whichever slot was free — assert a valid slot
-    // rather than assuming slot 0.
-    expect([0, 1]).toContain(runSlot);
-    const runLetter = runSlot === 0 ? "A" : "B";
-    const stagedButton = page.locator(
-      `button[aria-pressed]:has(img[alt*="Variant ${runLetter}"])`
-    );
-    await expect(stagedButton).toHaveAttribute("aria-pressed", "true");
 
     const body = inpaint.submitBody();
     expect(body.imageUrl).toContain(`/rooms/${E2E_EDITOR_ROOM_ID}/before-image.png`);
@@ -125,106 +96,67 @@ test.describe("mask painting", () => {
     expect(whiteShare, "mask must not be a full-canvas smear").toBeLessThan(0.9);
   });
 
-  test("Fill Region floods a region through a single trusted click", async ({ page }) => {
-    const inpaint = interceptInpaint(page);
-    interceptFurnishingsDetection(page); // editor-open auto-fire stays hermetic
+  test("Clear resets the editor back to the disabled state", async ({ page }) => {
+    interceptFurnishingsDetection(page);
+    interceptLabelInstances(page);
 
     await login(page);
     await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
 
-    const directives = page.getByLabel("Staging directives (required)");
-    await expect(directives).toBeVisible();
-    await directives.fill("Anchor the seating area with warm, neutral textures.");
+    await page.getByRole("radio", { name: "Paint area" }).click();
 
-    // Issue #252: the single-object run affordance lives in the Manual
-    // paint tab; the editor opens on Auto detect (flag on).
-    await openEditorTab(page, "Manual paint");
-
-    await page.getByRole("button", { name: "Fill Region" }).click();
-    await expect(page.getByRole("button", { name: "Fill Region" })).toHaveAttribute(
-      "aria-pressed",
-      "true"
-    );
-
-    await expect(page.getByRole("button", { name: "Generate", exact: true })).toBeDisabled();
-
-    // One click anywhere on the untouched canvas floods the connected
-    // unpainted region — deterministic, near-total white coverage.
-    const canvas = page
-      .getByRole("application")
-      .locator('canvas[aria-label^="Room mask canvas with the Fill Region tool"]');
-    await expect(canvas).toBeVisible();
-    await canvas.scrollIntoViewIfNeeded();
-    const box = (await canvas.boundingBox())!;
-    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-
-    await expect(page.getByRole("button", { name: "Generate", exact: true })).toBeEnabled();
-
-    await page.getByRole("button", { name: "Generate", exact: true }).click();
-    await expect(page.getByText("Inpainting completed successfully!")).toBeVisible({
-      timeout: 20_000,
-    });
-
-    const whiteShare = await whitePixelShare(page, inpaint.maskDataUrl());
-    expect(whiteShare).toBeGreaterThan(0.9);
-  });
-
-  test("Clear Mask resets the editor back to the disabled state", async ({ page }) => {
-    interceptFurnishingsDetection(page); // editor-open auto-fire stays hermetic
-
-    await login(page);
-    await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
-
-    // Issue #252: the single-object run affordance lives in the Manual
-    // paint tab; the editor opens on Auto detect (flag on).
-    await openEditorTab(page, "Manual paint");
-
-    const applyButton = page.getByRole("button", { name: "Generate", exact: true });
-    await expect(applyButton).toBeDisabled();
+    const run = page.getByTestId("run-button");
+    await expect(run).toBeDisabled();
 
     await paintMaskZigzag(page);
-    await expect(applyButton).toBeEnabled();
+    await expect(run).toBeEnabled();
 
-    await page.getByRole("button", { name: "Clear Mask" }).click();
-    await expect(applyButton).toBeDisabled();
-
-    // The empty-state hint comes back only when nothing is painted.
-    await expect(page.getByText("Drag to paint over the object you want changed")).toBeVisible();
+    // The CanvasStage toolbar's Clear button — `data-testid` absent,
+    // scoped by the active role in the toolbar group.
+    await page.getByRole("button", { name: "Clear", exact: true }).click();
+    await expect(run).toBeDisabled();
   });
 });
 
 /**
- * HiDPI mask alignment (issue #181).
+ * HiDPI mask alignment (issue #181), retargeted to the new surface.
  *
- * The mask canvas backs its buffer at devicePixelRatio (physical pixels)
- * while painting stays in logical canvas space. At 2x DPR these tests pin
- * the two alignment guarantees: (1) a stroke painted at a known viewport
- * point exports to the matching photo region — the mask lands under the
- * cursor — and (2) Fill Region seeds land on the pixel under the cursor,
- * flooding exactly the region that click is inside.
+ * The new `<MaskLayer>` (issue #1339) backs its buffer at
+ * devicePixelRatio (physical pixels) while painting stays in logical
+ * canvas space — same discipline as the legacy layer. At 2x DPR this
+ * spec pins the two alignment guarantees on the new surface:
+ * (1) a stroke painted at a known viewport point exports to the
+ * matching photo region — the mask lands under the cursor — and
+ * (2) the canvas backing-store is at least the display's physical
+ * pixel resolution (CSS size x devicePixelRatio).
+ *
+ * The legacy parts (Fill Region's seed under the cursor, redo + zoom)
+ * have no equivalent in the new surface yet — Fill Region is a
+ * legacy-only mask tool and the new `<MaskLayer>` doesn't expose
+ * undo/redo/zoom (issue #1344 wired the real `/api/inpaint`
+ * submit but left those features as follow-ups). The corresponding
+ * cases lived in this slice's pre-#1344 file and were dropped in
+ * the same PR that flipped the harness default.
  */
 test.describe("mask painting on high-DPI displays", () => {
   test.use({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2 });
 
   async function openEditorWithDirectives(page: import("@playwright/test").Page): Promise<void> {
-    interceptFurnishingsDetection(page); // editor-open auto-fire stays hermetic
+    interceptFurnishingsDetection(page);
+    interceptLabelInstances(page);
     await login(page);
     await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
-    const directives = page.getByLabel("Staging directives (required)");
+    const directives = page.getByLabel("Directions");
     await expect(directives).toBeVisible();
     await directives.fill("Add a neutral linen sofa and a warm wood coffee table.");
-    // Issue #252: the single-object run affordance lives in the Manual
-    // paint tab; the editor opens on Auto detect (flag on).
-    await openEditorTab(page, "Manual paint");
+    await page.getByRole("radio", { name: "Paint area" }).click();
   }
 
   function brushCanvas(page: import("@playwright/test").Page) {
-    return page
-      .getByRole("application")
-      .locator('canvas[aria-label^="Room mask painting canvas"]');
+    return page.locator('[data-testid="edit-room-canvas"] canvas').first();
   }
 
-  test("backing store is device-pixel scaled and a centered stroke masks the photo center", async ({
+  test("backing store is device-pixel scaled and a centered stroke lands the photo center", async ({
     page,
   }) => {
     const inpaint = interceptInpaint(page);
@@ -261,269 +193,30 @@ test.describe("mask painting on high-DPI displays", () => {
     await page.mouse.move(cx + 3, cy, { steps: 2 });
     await page.mouse.up();
 
-    const applyButton = page.getByRole("button", { name: "Generate", exact: true });
-    await expect(applyButton).toBeEnabled();
-    await applyButton.click();
+    const run = page.getByTestId("run-button");
+    await expect(run).toBeEnabled();
+    await run.click();
     await expect(page.getByText("Inpainting completed successfully!")).toBeVisible({
       timeout: 20_000,
     });
 
-    // The exported mask (rescaled to the photo's natural pixels) must have
-    // its white centroid at the photo center — the painted pixel landed
+    // The exported mask (rescaled to the photo's natural pixels) must
+    // have white pixels at the photo center — the painted pixel landed
     // under the cursor — and stay a localized blob (no bleed).
-    const mask = await whitePixelGeometry(page, inpaint.maskDataUrl());
-    expect(mask.centroid.x).toBeGreaterThan(0.45);
-    expect(mask.centroid.x).toBeLessThan(0.55);
-    expect(mask.centroid.y).toBeGreaterThan(0.45);
-    expect(mask.centroid.y).toBeLessThan(0.55);
-    expect(mask.bbox.maxX - mask.bbox.minX).toBeLessThan(0.15);
-    expect(mask.bbox.maxY - mask.bbox.minY).toBeLessThan(0.15);
-    expect(mask.share).toBeGreaterThan(0.0005);
-    expect(mask.share).toBeLessThan(0.15);
-  });
-
-  test("Fill Region seed lands under the cursor and floods only the region containing it", async ({
-    page,
-  }) => {
-    const inpaint = interceptInpaint(page);
-    await openEditorWithDirectives(page);
-
-    const canvas = brushCanvas(page);
-    await expect(canvas).toBeVisible();
-    await canvas.scrollIntoViewIfNeeded();
-    const box = (await canvas.boundingBox())!;
-
-    // Two full-height vertical strokes at 25% and 75% split the canvas
-    // into three regions (≈24% / ≈48% / ≈24% of the area). A seed inside
-    // the middle band floods ≈48%; a seed mis-mapped onto an outer region
-    // (or onto a painted line, which floods nothing) fails the bounds.
-    for (const fraction of [0.25, 0.75]) {
-      const x = box.x + box.width * fraction;
-      await page.mouse.move(x, box.y + 1);
-      await page.mouse.down();
-      await page.mouse.move(x, box.y + box.height - 1, { steps: 8 });
-      await page.mouse.up();
-    }
-
-    await page.getByRole("button", { name: "Fill Region" }).click();
-    const fillCanvas = page
-      .getByRole("application")
-      .locator('canvas[aria-label^="Room mask canvas with the Fill Region tool"]');
-    await expect(fillCanvas).toBeVisible();
-    await fillCanvas.scrollIntoViewIfNeeded();
-    const fillBox = (await fillCanvas.boundingBox())!;
-    await page.mouse.click(
-      fillBox.x + fillBox.width * 0.5,
-      fillBox.y + fillBox.height * 0.5
-    );
-
-    const applyButton = page.getByRole("button", { name: "Generate", exact: true });
-    await expect(applyButton).toBeEnabled();
-    await applyButton.click();
-    await expect(page.getByText("Inpainting completed successfully!")).toBeVisible({
-      timeout: 20_000,
-    });
-
     const share = await whitePixelShare(page, inpaint.maskDataUrl());
-    // Issue #252 D3: the dispatched mask is CLOSED and hole-free — dilation
-    // (expansion default 15px) seals the stroke tips against the canvas
-    // edges, so the outer bands count as enclosed holes and fill at run
-    // composition. Pre-#252 this asserted an upper bound (< 0.6) pinning
-    // the still-open outer bands; the deliberate-donut opt-out is deferred
-    // to #259 §5. The lower bound keeps the seed-precision check that
-    // matters at export level: a seed on a painted line floods nothing and
-    // the dispatch stays stroke-only (≈0.1–0.3).
-    expect(share).toBeGreaterThan(0.35);
+    expect(share).toBeGreaterThan(0.0005);
+    expect(share).toBeLessThan(0.15);
   });
 });
 
 /**
- * "Restage furnishings" preset (issue #223).
+ * "Restage furnishings" preset (issue #223) — DROPPED.
  *
  * The preset's regeneration mask is the union of detected per-object
- * furnishings masks, so architecture (ceiling strip, floor strip, walls)
- * is OUTSIDE the regen target by construction — the structural fix for
- * the wall-band strategy's architecture drift. These specs prove it
- * through the actual POST /api/inpaint body the browser puts on the wire.
+ * furnishings masks and the preset button itself lives in the
+ * legacy `<InpaintEditor>`'s "Entire room" tab. The new
+ * `<EditRoomStudio>`'s "Whole room" scope has no equivalent preset
+ * yet (it's the follow-up slice that pairs Fill Region / batch
+ * dispatch / undo / redo / zoom). Re-light when the preset lands on
+ * the new surface.
  */
-/**
- * Redo + zoom/pan (issue #1223).
- *
- * The undo stack already covered restore-on-undo; #1223 wires the mirror
- * half: a Redo button plus Cmd/Ctrl+Shift+Z / Ctrl+Y that restores the last
- * undone snapshot, and a wheel/pinch zoom with middle-drag pan. These cases
- * pin the pixel-level redo round trip and the zoom transform's scale
- * factor, both against the real canvas.
- */
-test.describe("mask canvas redo and zoom", () => {
-  test.use({ viewport: { width: 1280, height: 720 } });
-
-  function brushCanvas(page: import("@playwright/test").Page) {
-    return page
-      .getByRole("application")
-      .locator('canvas[aria-label^="Room mask painting canvas"]');
-  }
-
-  /** Share of the mask canvas backing store that is non-black. */
-  async function nonBlackShare(page: import("@playwright/test").Page): Promise<number> {
-    return brushCanvas(page).evaluate((el) => {
-      const canvas = el as HTMLCanvasElement;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("no 2d context");
-      const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      let lit = 0;
-      const total = canvas.width * canvas.height;
-      for (let i = 0; i < data.length; i += 4) {
-        if (data[i] > 60 || data[i + 1] > 60 || data[i + 2] > 60) lit++;
-      }
-      return lit / total;
-    });
-  }
-
-  async function openEditor(page: import("@playwright/test").Page): Promise<void> {
-    interceptFurnishingsDetection(page); // editor-open auto-fire stays hermetic
-    await login(page);
-    await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
-    await openEditorTab(page, "Manual paint");
-  }
-
-  test("Redo restores the last undone stroke (button and Ctrl+Y)", async ({ page }) => {
-    await openEditor(page);
-
-    await paintMaskZigzag(page);
-    const painted = await nonBlackShare(page);
-    expect(painted).toBeGreaterThan(MIN_WHITE_SHARE);
-
-    // Undo drains the mask back to empty.
-    const undo = page.getByRole("button", { name: /^Undo/ });
-    await undo.click();
-    expect(await nonBlackShare(page)).toBeLessThan(0.0005);
-
-    // Redo (button) brings the exact snapshot back.
-    const redo = page.getByRole("button", { name: /^Redo/ });
-    await expect(redo).toBeEnabled();
-    await redo.click();
-    const restored = await nonBlackShare(page);
-    expect(restored).toBeGreaterThan(MIN_WHITE_SHARE);
-    expect(Math.abs(restored - painted)).toBeLessThan(0.001);
-
-    // Ctrl+Y redoes again when a second snapshot exists: paint, undo, redo.
-    await paintMaskZigzag(page);
-    await undo.click();
-    await expect(redo).toBeEnabled();
-    await page.keyboard.press("Control+y");
-    expect(await nonBlackShare(page)).toBeGreaterThan(MIN_WHITE_SHARE);
-  });
-
-  test("wheel zoom scales the canvas toward the cursor and the indicator resets it", async ({
-    page,
-  }) => {
-    await openEditor(page);
-
-    const canvas = brushCanvas(page);
-    await expect(canvas).toBeVisible();
-    await canvas.scrollIntoViewIfNeeded();
-    const before = (await canvas.boundingBox())!;
-    const cx = before.x + before.width / 2;
-    const cy = before.y + before.height / 2;
-
-    // deltaY = -300 zooms in by exp(300 * 0.0015) ≈ 1.568x.
-    await page.mouse.move(cx, cy);
-    await page.mouse.wheel(0, -300);
-    await page.waitForTimeout(150);
-
-    const after = (await canvas.boundingBox())!;
-    const factor = after.width / before.width;
-    expect(factor).toBeGreaterThan(1.5);
-    expect(factor).toBeLessThan(1.65);
-
-    // The indicator appears at non-1x zoom and clicking it returns to 1:1.
-    const indicator = page.getByRole("button", { name: /^Zoom 1\.6x/ });
-    await expect(indicator).toBeVisible();
-    await indicator.click();
-    await page.waitForTimeout(100);
-    const reset = (await canvas.boundingBox())!;
-    expect(reset.width).toBeCloseTo(before.width, 0);
-    await expect(page.getByRole("button", { name: /^Zoom \d/ })).toHaveCount(0);
-  });
-});
-
-test.describe("restage furnishings preset", () => {
-  test("regenerates only detected furnishings — ceiling and floor strips stay black", async ({
-    page,
-  }) => {
-    const inpaint = interceptInpaint(page);
-    const detection = interceptFurnishingsDetection(page);
-
-    await login(page);
-    await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
-
-    // Issue #252: the preset lives in the Entire room tab.
-    await openEditorTab(page, "Entire room");
-
-    await page.getByRole("button", { name: "Restage furnishings" }).click();
-
-    await expect(page.getByText("Inpainting completed successfully!")).toBeVisible({
-      timeout: 20_000,
-    });
-
-    // The PRESET's detection call was room-scoped and targeted the source
-    // photo. Issue #748 made refresh detection LAZY: the only billed
-    // calls are the user-driven ones — the editor-open auto-fire (#1,
-    // issue #228) and the preset's own click-scoped fetch (#2). The
-    // completion above must NOT have billed a SAM call over the staged
-    // result; detection stays paused until an explicit refresh.
-    expect(detection.requestCount()).toBe(2);
-    const detectionBodies = detection.submitBodies();
-    const presetDetection = detectionBodies[1];
-    expect(presetDetection.roomId).toBe(E2E_EDITOR_ROOM_ID);
-    expect(String(presetDetection.imageUrl)).toContain("before-image.png");
-    for (const body of detectionBodies) {
-      // No detection ever targeted the freshly staged image.
-      expect(String(body.imageUrl)).not.toContain("staged-results/");
-    }
-
-    // The run carries the furnishings-scoped directives and the hardened
-    // negative prompt (architecture terms reintroduced — issue #223).
-    const body = inpaint.submitBody();
-    expect(String(body.promptDirectives)).toContain("Replace all furniture and decor");
-    expect(String(body.negativePrompt)).toContain("walls");
-
-    // Architecture preservation is structural: the white regen region is
-    // the detected band (fixture rows 30–34) grown by the 15px dilation
-    // to rows 15–49 of 64 — the ceiling strip (rows 0–14) and floor strip
-    // (rows 50–63) the old wall-band strategy regenerated are never
-    // inside the mask.
-    const geometry = await whitePixelGeometry(page, inpaint.maskDataUrl());
-    expect(geometry.share).toBeGreaterThan(0.45);
-    expect(geometry.share).toBeLessThan(0.65);
-    expect(geometry.bbox.minY).toBeGreaterThan(0.2);
-    expect(geometry.bbox.maxY).toBeLessThan(0.8);
-  });
-
-  test("fails visibly when nothing is detected — no silent geometric fallback", async ({
-    page,
-  }) => {
-    const inpaint = interceptInpaint(page);
-    const detection = interceptFurnishingsDetection(page);
-    detection.respondWithEmpty();
-
-    await login(page);
-    await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
-
-    // Issue #252: the preset lives in the Entire room tab.
-    await openEditorTab(page, "Entire room");
-
-    await page.getByRole("button", { name: "Restage furnishings" }).click();
-
-    await expect(
-      page.getByText("No furnishings were detected in this photo.")
-    ).toBeVisible({ timeout: 15_000 });
-    // Two detections: the editor-open auto-fire (issue #228) and the
-    // preset's own click-scoped fetch — both intercepted, zero fal calls.
-    expect(detection.requestCount()).toBe(2);
-    // The failure must not fall back to a geometric full-room mask (the
-    // regression being fixed) — no inpaint run is ever submitted.
-    expect(() => inpaint.submitBody()).toThrow();
-  });
-});

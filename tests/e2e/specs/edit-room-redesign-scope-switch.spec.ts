@@ -27,18 +27,12 @@ import { login, openFocusedEditor } from "../helpers";
 
 const NEW_STUDIO_TESTID = "edit-room-studio";
 
-// Issue #1344 — `NEXT_PUBLIC_EDIT_ROOM_REDESIGN` is build-time inlined,
-// so the e2e harness boots ONE flag value per build. To keep the legacy
-// mask-paint / concept-flow / version-history specs passing (which
-// target `<InpaintEditor>` selectors verbatim) the harness defaults to
-// `"0"` (legacy surface live). The four `edit-room-redesign-*` specs
-// are written but the entire `describe` block is skipped today; a
-// follow-up slice either flips the harness default to `"1"` and updates
-// the legacy specs' selectors, or adds a runtime override (cookie /
-// localStorage) so a single suite can run both surfaces. Skipping here
-// keeps the suite green while preserving the spec text for that
-// follow-up.
-test.describe.skip("Edit Room redesign — scope switch (issue #1344, flag=ON)", () => {
+// Issue #1344 — `NEXT_PUBLIC_EDIT_ROOM_REDESIGN` is build-time inlined
+// at `"1"` (see tests/e2e/env.ts) so the new `<EditRoomStudio>`
+// surface is live for the whole suite. The four `edit-room-redesign-*`
+// specs exercise the wired-up submit path; the legacy specs were
+// updated to the new surface's selectors in the same PR.
+test.describe("Edit Room redesign — scope switch (issue #1344, flag=ON)", () => {
   test("with the flag on, the new studio renders under /projects/[id]", async ({
     page,
   }) => {
@@ -71,17 +65,25 @@ test.describe.skip("Edit Room redesign — scope switch (issue #1344, flag=ON)",
     await expect(wholeRoom).toBeChecked();
 
     await objects.click();
-    // The Objects scope surfaces a concept-type field — the Magic Patterns
-    // design uses a "Lamp", "Chair", etc. chip row; "Other…" is the
-    // always-present fallback. Either side: the ConceptChips section
-    // header is the inspector-body anchor.
-    await expect(page.getByText("Add a concept to stage objects.")).toBeVisible();
+    // The Objects scope swaps the inspector body to the chip-row +
+    // object-list pattern. On the ORIGINAL photo (the studio's default
+    // viewing), the panel renders an explanatory notice — the chip
+    // row + DetectedObjectList only mount when `viewing !== "original"`,
+    // because picking objects off an empty room is meaningless. The
+    // notice text comes from src/components/edit-room/StagePanel.tsx
+    // (lines 217–222).
+    await expect(
+      page.getByText(/The original photo is empty\./)
+    ).toBeVisible();
 
     await paintArea.click();
-    // Paint-area scope swaps to a status line + brush controls. The
-    // StagePanel renders "Brush over…" / "Area painted. Start over"
-    // depending on hasMask.
-    await expect(page.getByText("Brush over the area you want to restage.")).toBeVisible();
+    // Paint-area scope swaps to a status line. The StagePanel renders
+    // "Brush over the part of the photo…" (no mask yet) and
+    // "Area painted. Start over" once the mask is non-empty
+    // (StagePanel.tsx lines 238–255).
+    await expect(
+      page.getByText(/Brush over the part of the photo/)
+    ).toBeVisible();
 
     // And back to whole-room to leave the suite deterministic.
     await wholeRoom.click();

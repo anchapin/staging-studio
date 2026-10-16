@@ -10,7 +10,6 @@ import {
   interceptLabelInstances,
   login,
   mockStorageEntries,
-  openEditorTab,
   paintMaskZigzag,
   uploadRoomPhotoViaUi,
   whitePixelShare,
@@ -73,16 +72,15 @@ test.describe("rehearsal drill", () => {
     await expect(page.getByRole("button", { name: "All rooms" })).toBeVisible();
 
     // ---- Directives + mask --------------------------------------------
-    // ("Staging directives (required)" is the Room Details field — the
-    // Manual paint panel's inline mirror carries a distinct label since
-    // issue #742, so this locator stays unique.)
-    await page.getByLabel("Staging directives (required)").fill(DIRECTIVES);
+    // The new surface's Directions textarea (label = "Directions" —
+    // see StagePanel.tsx lines 263–268). The legacy "Staging
+    // directives (required)" label lives on the legacy mount only and
+    // is unreachable when the harness default is `1`.
+    await page.getByLabel("Directions").fill(DIRECTIVES);
+    // The new surface's Paint area scope radio accepts brush strokes.
+    await page.getByRole("radio", { name: "Paint area" }).click();
     await paintMaskZigzag(page);
-    // Issue #252: the single-object run affordance lives in the Manual
-    // paint tab; the editor opens on Auto detect (flag on). The run
-    // button reads "Generate" since #629's operation mode tabs.
-    await openEditorTab(page, "Manual paint");
-    const applyButton = page.getByRole("button", { name: "Generate", exact: true });
+    const applyButton = page.getByTestId("run-button");
     await expect(applyButton).toBeEnabled();
 
     // ---- Inpaint (fal.ai simulated) ------------------------------------
@@ -108,7 +106,7 @@ test.describe("rehearsal drill", () => {
       page.locator('img[alt="Rehearsal Room staged — Variant A"]')
     ).toBeVisible({ timeout: 20_000 });
 
-    // Back into the focused editor for the copy + export legs.
+    // Back into the project dashboard for the copy + export legs.
     await page
       .locator(".space-y-3", { hasText: "Rehearsal Room" })
       .getByRole("button", { name: "Edit staging" })
@@ -191,13 +189,11 @@ test.describe("rehearsal drill", () => {
       .getByRole("button", { name: "Edit staging" })
       .click();
 
-    await page.getByLabel("Staging directives (required)").fill(DIRECTIVES);
+    await page.getByLabel("Directions").fill(DIRECTIVES);
+    await page.getByRole("radio", { name: "Paint area" }).click();
     await paintMaskZigzag(page);
-    // Issue #252: the single-object run affordance lives in the Manual
-    // paint tab; the editor opens on Auto detect (flag on).
-    await openEditorTab(page, "Manual paint");
 
-    await page.getByRole("button", { name: "Generate", exact: true }).click();
+    await page.getByTestId("run-button").click();
 
     // The submit itself succeeds (interception), then polling reports the
     // terminal failure — the fallback reveal must name the problem and
