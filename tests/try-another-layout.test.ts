@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { inpaintRequestSchema } from "@/lib/ai-route-schemas";
+import { inpaintSubmitSchema } from "@/lib/inpaint-submit";
 import {
   ARRANGEMENT_VARIATION_DIRECTIVE,
   TRY_ANOTHER_LAYOUT_LABEL,
@@ -110,7 +110,7 @@ describe("buildTryAnotherLayoutDirectives", () => {
       aesthetic,
       nudge: "free the doorway",
     });
-    const parsed = inpaintRequestSchema.safeParse({
+    const parsed = inpaintSubmitSchema.safeParse({
       imageUrl: "https://room.supabase.co/storage/v1/object/public/before.jpg",
       maskUrl: "data:image/png;base64,AAAA",
       promptDirectives: directives,

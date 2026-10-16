@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { inpaintRequestSchema } from "@/lib/ai-route-schemas";
+import { inpaintSubmitSchema } from "@/lib/inpaint-submit";
 import { HOLISTIC_NEGATIVE_PROMPT } from "@/lib/holistic-prompt";
 import {
   HOLISTIC_PRESET_FALLBACK_AESTHETIC,
@@ -92,7 +92,7 @@ describe("resolveHolisticPreset", () => {
   it("produces a request body the inpaint route schema accepts (with and without an aesthetic)", () => {
     for (const aesthetic of ["Modern Farmhouse", "", "   ", undefined]) {
       const plan = resolveHolisticPreset({ aesthetic });
-      const parsed = inpaintRequestSchema.safeParse({
+      const parsed = inpaintSubmitSchema.safeParse({
         imageUrl: "https://example.supabase.co/storage/v1/object/public/rooms/before.png",
         maskUrl: "data:image/png;base64,AAAA",
         promptDirectives: plan.directives,

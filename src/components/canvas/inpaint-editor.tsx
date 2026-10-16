@@ -33,6 +33,7 @@ import type { InpaintEditorProps } from "./inpaint-editor-props";
 import VersionHistoryPills from "./version-history-pills";
 import ExitToProjectButton from "./exit-to-project-button";
 import { confirmLeaveEditorInBrowser } from "@/lib/editor-leave";
+import { parseSeedOrUndefined } from "@/lib/finetune-wire";
 
 export default function InpaintEditor({
   roomId,
@@ -70,14 +71,26 @@ export default function InpaintEditor({
   // shadows cast by objects are swallowed by the regenerated region.
   const [includeFloorShadow, setIncludeFloorShadow] = useState(false);
 
-  // Issue #558: AI guidance controls for inpaint runs
-  const [promptStrength, setPromptStrength] = useState(0.8);
-  // maskBlur, creativeMode, lockSeed: controlled by the new operation-mode tabs in issue #629.
-  // The setters are unused (no UI for these in the Manual paint panel any more).
-  const [maskBlur] = useState(5);
-  const [creativeMode] = useState(false);
-  const [lockSeed] = useState(false);
-  const [seed, setSeed] = useState<number | undefined>(undefined);
+  // Issue #1362b (Stage B): AI guidance controls for inpaint runs.
+  // The legacy `promptStrength` (issue #558) is the LOCAL UX name for
+  // the Inpaint Operation Mode tabs' "Inpaint strength" slider — a
+  // 0..1 float in the legacy editor (vs the FineTune UI's 0..100
+  // int, mapped via `clamp((s ?? 50) / 100, 0, 1)` in the project
+  // route's `editRoomGuidance` memo). The wire shape was renamed
+  // `strength` in #1362b but the local variable name is preserved so
+  // `<ManualTabPanel>`'s prop surface (still named `promptStrength` in
+  // its interface, since this is the legacy non-redesign editor)
+  // stays typed. The default 0.5 matches DashScope's wire default.
+  // `maskBlur` / `creativeMode` / `lockSeed` were removed in the
+  // same stage (no surviving UI control after #1362a's adherence +
+  // shadows removal).
+  const [promptStrength, setPromptStrength] = useState(0.5);
+  // `seed` is the FineTune UI input — a digits-only string the user
+  // types. The route's `editRoomGuidance` memo parses it via
+  // `parseSeedOrUndefined` before forwarding to the provider. The
+  // legacy editor's `submitHolisticRun` accepts `number | undefined`,
+  // so the wire call site parses here.
+  const [seed, setSeed] = useState<string>("");
 
   // Issue #629: Inpaint Operation Mode — secondary tab strip inside Manual paint panel.
   // Issue #692: only Inpaint Zone is wired; the other tabs render disabled with a
@@ -206,17 +219,18 @@ export default function InpaintEditor({
 
   // Inpaint runs (issue #691 extraction): status-hook wiring, the shared
   // submit path, and the per-object batch runner live in use-inpaint-runs.ts.
-  // Issue #558 guidance memo: keeps the hook's callback identity stable
-  // across renders that don't touch the guidance params.
+  // Issue #1362b guidance memo: keeps the hook's callback identity
+  // stable across renders that don't touch the guidance params.
+  // `strength` (renamed from `promptStrength` at the wire) + `seed`
+  // are the only surviving fields; `maskBlur` / `creativeMode` /
+  // `lockSeed` were removed. The hook expects a `number |
+  // undefined` seed, so we parse the FineTune string here.
   const runGuidance = useMemo(
     () => ({
-      promptStrength,
-      maskBlur,
-      seed,
-      creativeMode,
-      lockSeed,
+      strength: promptStrength,
+      seed: parseSeedOrUndefined(seed),
     }),
-    [promptStrength, maskBlur, seed, creativeMode, lockSeed]
+    [promptStrength, seed]
   );
   const {
     isProcessing,
@@ -302,12 +316,21 @@ export default function InpaintEditor({
   // mask + aesthetic-derived directives; this just forwards them into
   // the shared run launcher. The one-click preset (issue #191) reuses
   // the same shape and launcher.
-  // Issue #846: submitHolisticRun encapsulates the beginInpaintRun call.
+  // Issue #846 / #1362b: submitHolisticRun encapsulates the
+  // beginInpaintRun call. The legacy guidance fields (`maskBlur`,
+  // `creativeMode`, `lockSeed`) were removed in #1362b — only
+  // `strength` + `seed` are forwarded. The FineTune UI keeps
+  // `seed` as a digits-only string; `submitHolisticRun` accepts
+  // `number | undefined`, so we parse here.
   const handleHolisticRun = useCallback(
     (run: { maskDataUrl: string; promptDirectives: string; negativePrompt: string }) => {
-      submitHolisticRun({ ...run, promptStrength, maskBlur, seed, creativeMode, lockSeed });
+      submitHolisticRun({
+        ...run,
+        strength: promptStrength,
+        seed: parseSeedOrUndefined(seed),
+      });
     },
-    [submitHolisticRun, promptStrength, maskBlur, seed, creativeMode, lockSeed]
+    [submitHolisticRun, promptStrength, seed]
   );
 
   // Issue #252 D5: control-panel tab state (issue #691 hook) — purely

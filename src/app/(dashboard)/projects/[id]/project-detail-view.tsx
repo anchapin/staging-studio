@@ -73,6 +73,8 @@ import {
 import { projectFetchStateFromStatus } from "@/lib/project-fetch-state";
 import { resolveEditRoomRedesignEnabled } from "@/lib/edit-room-flag";
 import { buildEditRoomStudioProps } from "@/lib/edit-room-studio-props";
+import { clamp, parseSeedOrUndefined } from "@/lib/finetune-wire";
+import { featherMask } from "@/lib/mask-feather";
 import { EditRoomStudio } from "@/components/edit-room/EditRoomStudio";
 import {
   buildInpaintResultPatch,
@@ -482,28 +484,6 @@ export default function ProjectDetailView({
   ]);
 
   /**
-   * Issue #1344 (real `useInpaintRuns` wire) — guidance memo for the
-   * `<EditRoomRunCluster>` (mounted in JSX). The new studio's scope
-   * today is whole-room / painted-area, so the legacy
-   * `submitHolisticRun` defaults apply (`promptStrength: 0.6`,
-   * `maskBlur: 0`, `seed: undefined`, `creativeMode: false`,
-   * `lockSeed: false`). FineTune persistence (issue #1344 follow-up)
-   * is a separate slice — when the Inspector owns its own FineTune
-   * state, this memo will read from it. Memo never changes today, so
-   * the cluster re-receives the same object identity and its
-   * `useCallback`s don't re-bind.
-   */
-  const editRoomGuidance = useMemo(
-    () => ({
-      promptStrength: 0.6,
-      maskBlur: 0,
-      seed: undefined,
-      creativeMode: false,
-      lockSeed: false,
-    }),
-    []
-  );
-  /**
    * Issue #1344 — read the flag once on mount (it's `NEXT_PUBLIC_*`,
    * so the same value reaches both server-rendered and client-rendered
    * trees). The flag is a deployment-time switch, not a per-request
@@ -738,6 +718,38 @@ export default function ProjectDetailView({
     },
     [fineTune, getFineTuneController]
   );
+
+  /**
+   * Issue #1362b (Stage B) — guidance memo for the `<EditRoomRunCluster>`
+   * (mounted in JSX). Reads the per-room FineTune state from
+   * `fineTune[editorRoomId]` (issue #1362a) and forwards
+   * `strength` (renamed from `promptStrength`) + `seed` to the
+   * inpaint submit path. The default UI strength of 50 maps to
+   * 0.5 at the DashScope wire — the persisted-default and
+   * DashScope-wire default now align at 0.5.
+   *
+   * `maskBlur` is gone — the FineTune `expand` slider feathers the
+   * mask client-side before submit (`src/lib/mask-feather.ts`),
+   * driven through the cluster's `beforeSubmit` prop. `lockSeed`
+   * and `creativeMode` are gone (no surviving UI control after
+   * #1362a's adherence + shadows removal).
+   *
+   * Memo deps include `editorRoomId` + `fineTune` so a slider tick
+   * (or a room switch) re-runs the memo with the new value; the
+   * cluster re-receives a fresh `guidance` object and the inpaint
+   * submit path picks up the new `strength` / `seed` on the next
+   * Run click. Declared after `fineTune` / `editorRoomId` /
+   * `focusedRoom` so the variable references typecheck.
+   */
+  const editRoomGuidance = useMemo(() => {
+    const ft = editorRoomId ? fineTune[editorRoomId] : undefined;
+    const strength = clamp((ft?.fineTuneStrength ?? 50) / 100, 0, 1);
+    const seed = parseSeedOrUndefined(ft?.fineTuneSeed);
+    return { strength, seed };
+    // `clamp` and `parseSeedOrUndefined` are stable module-level
+    // helpers; not in the deps array.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorRoomId, fineTune]);
 
   /**
    * Explicit refetch through GET /api/projects/[id] (issue #90 retry-state
@@ -1482,6 +1494,24 @@ export default function ProjectDetailView({
                         const roomId = editorRoomId;
                         if (!roomId) return true;
                         return getDirectiveController(roomId).flush();
+                      }}
+                      // Issue #1362b (Stage B) — mask feathering for
+                      // the FineTune `expand` slider. The cluster
+                      // invokes this BEFORE `beforeRun`, with the
+                      // user's painted mask data URL, and uses the
+                      // returned feathered URL in the submit. Reads the
+                      // latest expand from the route's per-room
+                      // `fineTune[roomId]` map (kept in sync with the
+                      // studio's local state via `editFineTune`); the
+                      // map is also persisted through the autosave
+                      // controller, so the value here is the same one
+                      // the user sees on the slider. `expand === 0`
+                      // returns the input unchanged (passthrough).
+                      beforeSubmit={async (maskDataUrl) => {
+                        const roomId = editorRoomId;
+                        if (!roomId) return maskDataUrl;
+                        const expandPx = fineTune[roomId]?.fineTuneExpand ?? 0;
+                        return featherMask(maskDataUrl, expandPx);
                       }}
                       onRunningChange={(isProcessing) => {
                         // Push the cluster's run-state into two

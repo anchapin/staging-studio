@@ -35,6 +35,18 @@
  * confirming the active provider accepts a server-side shadow
  * parameter.**
  *
+ * STICKY NOTE #1362b (Q3 — `lockSeed` no-op): The `lockSeed` toggle
+ * was removed in #1362b because auto-setting it would bill identical
+ * reruns (the user clicking Run twice with the same `fineTuneSeed`
+ * would generate the same image, billed twice). The surviving shape
+ * is "user types a seed once, the next run honors it, the rerun
+ * rolls fresh" — `lockSeed` would have flipped that to "every rerun
+ * honors the typed seed indefinitely", which costs money without
+ * adding value. The seed flows through `parseSeedOrUndefined` (in
+ * `src/lib/finetune-wire.ts`) → `parameters.seed` on the DashScope
+ * request. **Do NOT re-add `lockSeed` without first modeling the
+ * cost-of-reruns UX.**
+ *
  * Pinned by `tests/edit-room-fine-tune.test.tsx`.
  */
 

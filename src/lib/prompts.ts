@@ -70,24 +70,18 @@ export interface FalFillPayloadInput {
    */
   negativePrompt?: string;
   /**
-   * Issue #558: AI guidance controls.
-   * `promptStrength` (0.1–1.0): how closely AI follows the text prompt.
-   * Defaults to 0.8.
+   * Issue #1362b: AI guidance strength (0.0–1.0). Renamed from the
+   * legacy `promptStrength` (#558) to match DashScope's wire field.
+   * The numeric scaling is unchanged (`strength * 10` ⇒ fal's 1..10
+   * `guidance`), so the output payload bytes are equivalent to the
+   * pre-rename form for any input in 0..1.
    */
-  promptStrength?: number;
+  strength?: number;
   /**
-   * Issue #558: feather edges of the mask for softer transitions (0–20).
-   * Defaults to 5.
-   */
-  maskBlur?: number;
-  /**
-   * Issue #558: reproducible seed for iteration (0–999999). Omit for random.
+   * Issue #558: reproducible seed for iteration (0–999999). Omit for
+   * random. Carried into the wire payload as `seed`.
    */
   seed?: number;
-  /**
-   * Issue #558: when true, use a lower guidance value for higher variation.
-   */
-  creativeMode?: boolean;
 }
 
 // Type alias (not interface) so the payload stays assignable to the
@@ -99,9 +93,7 @@ export type FalFillPayload = {
   negative_prompt: string;
   guidance: number;
   num_inference_steps: number;
-  /** Issue #558: feather edges of the mask. */
-  mask_blur?: number;
-  /** Issue #558: reproducible seed. */
+  /** Issue #558 / #1362b: reproducible seed. */
   seed?: number;
 }
 
@@ -365,25 +357,26 @@ export function buildInpaintPrompt(
  * Contract: `guidance` defaults to 7.5 and `num_inference_steps` to 28;
  * `negative_prompt` is {@link NEGATIVE_PROMPT} unless the caller passes
  * `negativePrompt` (the holistic full-room path does); image/mask/prompt
- * fields pass through unchanged. When `promptStrength` is provided (issue #558),
- * it overrides the default guidance (scaled to fal.ai's 1–10 range). When
- * `creativeMode` is true, a lower guidance (~4.0) enables higher variation.
- * `mask_blur` feathers mask edges for softer transitions. `seed` enables
- * reproducible results when `lockSeed` is set. The exact shape is pinned by
- * `tests/prompts.test.ts` — changing it alters paid generation output.
- * Side effects: none (pure).
+ * fields pass through unchanged. When `strength` is provided (issue
+ * #1362b, renamed from the legacy `promptStrength` in #558), it
+ * overrides the default guidance (scaled to fal.ai's 1–10 range).
+ * `seed` enables reproducible results; mask blur is now a browser-side
+ * pre-upload pass (`src/lib/mask-feather.ts`) and is not in the wire
+ * payload. The exact shape is pinned by `tests/prompts.test.ts` —
+ * changing it alters paid generation output. Side effects: none
+ * (pure).
  */
 export function buildFalFillPayload(
   input: FalFillPayloadInput
 ): FalFillPayload {
-  // Issue #558: compute effective guidance. Creative mode uses a lower
-  // guidance for more variation; otherwise use promptStrength (scaled from
-  // the 0.1–1.0 UI range to fal.ai's 1–10 scale), falling back to 7.5.
+  // Issue #1362b: compute effective guidance. With `strength`
+  // (renamed from `promptStrength` in #558) in the 0.0–1.0 range
+  // (DashScope's wire default), the numeric mapping to fal's 1..10
+  // guidance is byte-equivalent to the legacy `promptStrength * 10`
+  // expression. Default 7.5 when neither field is set.
   let guidance = 7.5;
-  if (input.creativeMode) {
-    guidance = 4.0;
-  } else if (input.promptStrength !== undefined) {
-    guidance = input.promptStrength * 10;
+  if (input.strength !== undefined) {
+    guidance = input.strength * 10;
   }
 
   const payload: FalFillPayload = {
@@ -395,10 +388,7 @@ export function buildFalFillPayload(
     num_inference_steps: 28,
   };
 
-  // Issue #558: optional AI guidance params
-  if (input.maskBlur !== undefined) {
-    payload.mask_blur = input.maskBlur;
-  }
+  // Issue #558: optional seed (carried forward into the wire payload).
   if (input.seed !== undefined) {
     payload.seed = input.seed;
   }
@@ -413,34 +403,42 @@ export function buildFalFillPayload(
  * (`/v1/services/aigc/multimodal-generation/generation`) takes a much
  * smaller payload than fal or Replicate: `image_url` + `prompt` are
  * the only call-shape fields used today. Provider-specific knobs
- * (`guidance`, `mask_blur`, `num_inference_steps`, `negative_prompt`,
- * `seed`) are not exposed — DashScope accepts a single `seed` at the
- * top level of `parameters`, and the alibaba-adapter hardcodes the
- * other values. Documenting the dropped fields here so a future
- * operator who tries to wire one through is pointed at the right place.
+ * (`guidance`, `num_inference_steps`, `negative_prompt`) are not
+ * exposed — DashScope accepts a single `seed` and `strength` at the
+ * top level of `parameters`, and the alibaba-adapter threads the
+ * caller's values through. Mask feathering is now a browser-side
+ * pre-upload pass (`src/lib/mask-feather.ts`); it is not in the wire
+ * payload. Documenting the dropped fields here so a future operator
+ * who tries to wire one through is pointed at the right place.
  */
 export interface AlibabaFillPayloadInput {
   imageUrl: string;
   /** Alibaba is instruction-mode; mask_url is ignored by the model. */
   maskUrl: string;
   prompt: string;
-  /** Held for API parity; the adapter does not forward `negativePrompt`. */
-  negativePrompt?: string;
-  /** Held for API parity; the adapter uses a fixed guidance scale. */
-  promptStrength?: number;
-  /** Held for API parity; the adapter does not forward `maskBlur`. */
-  maskBlur?: number;
-  /** Held for API parity; the adapter hardcodes its own seed value. */
+  /** Issue #1362b: forwarded to the alibaba adapter as
+   * `parameters.strength` (0.0..1.0, default 0.5 = DashScope wire
+   * default). Held in this builder's input for API parity with the
+   * fal / Replicate builders; the alibaba-adapter reads it. */
+  strength?: number;
+  /** Issue #1362b: forwarded to the alibaba adapter as
+   * `parameters.seed`. The legacy "held for parity" note is
+   * removed — DashScope accepts a seed at the top of `parameters`,
+   * and the adapter threads the caller's value through. */
   seed?: number;
-  /** Held for API parity; the adapter hardcodes its own sampling choice. */
-  creativeMode?: boolean;
 }
 
 /**
- * The DashScope multimodal-conversation payload, provider-neutral.
+ * The DashScope multimodal-conversation payload shape THIS BUILDER
+ * produces — only `image_url` + `prompt`. The alibaba-adapter
+ * constructs the final DashScope request body and folds `strength`
+ * + `seed` into the `parameters` block; see
+ * `src/lib/alibaba-adapter.ts:dashscopeGenerate`.
+ *
  * Only the fields the model actually consumes are populated; the
- * "held for parity" fields above are intentionally NOT included so
- * the wire shape is the minimum the API accepts.
+ * `strength` / `seed` input fields are intentionally NOT in this
+ * payload shape because they belong to the `parameters` block, not
+ * the input messages — that's the adapter's job.
  */
 export type AlibabaFillPayload = {
   image_url: string;
@@ -465,16 +463,23 @@ export function buildAlibabaFillPayload(
  * UI inputs to the Replicate field names; the negative prompt uses
  * the same default since the architecture-no-touch invariant is
  * provider-agnostic.
+ *
+ * Issue #1362b: `promptStrength` renamed to `strength` (DashScope
+ * wire name parity); `creativeMode` removed (no surviving UI control
+ * after #1362a's adherence + shadows removal; the wire default
+ * prompt_strength of 1.0 takes its place); `maskBlur` removed
+ * (browser-side feathering pre-upload). The Replicate adapter is
+ * dormant (INFERENCE_PROVIDER=replicate throws on configure), but
+ * the builder is kept type-correct in case it gets revived.
  */
 export interface ReplicateFillPayloadInput {
   imageUrl: string;
   maskUrl: string;
   prompt: string;
   negativePrompt?: string;
-  promptStrength?: number;
-  maskBlur?: number;
+  /** Issue #1362b: AI guidance (0.0–1.0, scaled to 1..10 at the wire). */
+  strength?: number;
   seed?: number;
-  creativeMode?: boolean;
 }
 
 export type ReplicateFillPayload = {
@@ -497,14 +502,12 @@ export type ReplicateFillPayload = {
 export function buildReplicateFillPayload(
   input: ReplicateFillPayloadInput
 ): ReplicateFillPayload {
-  // Issue #558: same guidance logic as the fal payload — creative
-  // mode is a lower prompt_strength, otherwise scale from 0.1–1.0
-  // to Replicate's 1–10 range.
+  // Issue #1362b: same guidance logic as the fal payload — scale
+  // `strength` from 0..1 to Replicate's 1..10 range. Default 1.0
+  // when `strength` is omitted.
   let promptStrength = 1.0;
-  if (input.creativeMode) {
-    promptStrength = 0.5;
-  } else if (input.promptStrength !== undefined) {
-    promptStrength = input.promptStrength * 10;
+  if (input.strength !== undefined) {
+    promptStrength = input.strength * 10;
   }
 
   const payload: ReplicateFillPayload = {

@@ -265,24 +265,32 @@ describe("buildReplicateFillPayload", () => {
     expect(serialized.safety_tolerance).toBe(2);
   });
 
-  it("scales promptStrength 0.1–1.0 up to Replicate's 1–10 range", () => {
+  it("scales strength 0.0–1.0 up to Replicate's 1–10 range (#1362b)", () => {
+    // Issue #1362b: `promptStrength` was renamed to `strength` to
+    // match DashScope's wire field. The numeric mapping
+    // (`strength * 10`) is unchanged, so the output payload byte
+    // for any input in 0..1 is equivalent to the pre-rename form.
     const payload = buildReplicateFillPayload({
       imageUrl: "i",
       maskUrl: "m",
       prompt: "p",
-      promptStrength: 0.7,
+      strength: 0.7,
     });
     expect(payload.prompt_strength).toBe(7);
   });
 
-  it("drops prompt_strength to 0.5 in creative mode (lower guidance = more variation)", () => {
+  it("uses the default prompt_strength of 1.0 when neither strength nor creativeMode is set (#1362b)", () => {
+    // Issue #1362b: `creativeMode` was removed (no surviving UI
+    // control after #1362a's adherence + shadows removal). The
+    // previous creative-mode behavior (prompt_strength = 0.5) is
+    // now expressed as `strength: 0.05` (which scales to 0.5 at the
+    // wire), or simply omitted to get the 1.0 default.
     const payload = buildReplicateFillPayload({
       imageUrl: "i",
       maskUrl: "m",
       prompt: "p",
-      creativeMode: true,
     });
-    expect(payload.prompt_strength).toBe(0.5);
+    expect(payload.prompt_strength).toBe(1);
   });
 
   it("carries exactly the seven documented keys — no payload drift", () => {
