@@ -77,6 +77,7 @@ describe("v1 route version-header consistency (#1099)", () => {
         "/api/v1/export-pdf",
         "/api/v1/inpaint",
         "/api/v1/generate-copy",
+        "/api/v1/listing-copy",
         "/api/v1/segment",
       ])
     );
