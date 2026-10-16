@@ -255,6 +255,15 @@ export function nextEnv(): Record<string, string> {
     E2E_BROWSERLESS_PDF_URL: MOCK_BROWSERLESS_URL,
     NEXT_PUBLIC_APP_URL: APP_URL,
     PREVIEW_TOKEN_SECRET: "e2e-preview-token-secret",
+    // Issue #1106 (encryption at rest): the signature route's
+    // `encryptSignature` requires SIGNATURE_ENCRYPTION_KEY in
+    // production NODE_ENV (the dev fallback is NODE_ENV-gated). The
+    // e2e harness runs a production build, so without this the route
+    // throws on the first sign POST and the signoff spec fails with a
+    // generic 500. A dummy value is fine — the encryption is opaque
+    // to the spec; only round-trip parity matters, and the test never
+    // re-decrypts across processes.
+    SIGNATURE_ENCRYPTION_KEY: "w+L7BwGEjMFqNqHOlNhZR+o6KLUokyJ8fP5lhumSVn4=",
     // Issue #1344: `NEXT_PUBLIC_*` is build-time inlined, so the
     // harness can carry only ONE flag value per build. We default to
     // `"1"` (new `<EditRoomStudio>` surface live) so the four

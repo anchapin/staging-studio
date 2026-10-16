@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { ZodError } from "zod";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { createPreflightResponse, withCors } from "@/lib/cors";
 import {
@@ -80,6 +81,50 @@ function validationFailure(error: ZodError): NextResponse {
 }
 
 /**
+ * Loose pre-parse schema used to extract the route's CREDENTIAL (the
+ * preview token + the projectId the token is scoped to) BEFORE the
+ * full request body is validated. The token is what authorizes the
+ * mutation, so a missing/malformed token must answer 401 ("expired or
+ * is invalid") even if the rest of the body is also malformed — the
+ * e2e signoff spec's tampered-token case pins exactly this contract.
+ *
+ * Why a separate schema instead of just calling safeParse on the
+ * request shape: the full `signProjectRequestSchema` requires
+ * `consentAttested: true` (#1113) and a cuid-shaped `projectId`, so
+ * any body missing those would fail validation with 400 `consentRequired`
+ * / 400 `invalidProject` BEFORE the token is ever checked. A
+ * credentialless body that also happens to have a tampered token would
+ * leak the wrong status — credential forgery should always surface as
+ * 401, not 400, regardless of body shape.
+ *
+ * Scoping: this schema only validates the fields the credential check
+ * needs. `projectId` is left as a generic string (cuid-shape is
+ * enforced by the full schema downstream) so a malformed projectId
+ * does NOT short-circuit the credential gate; it falls through to the
+ * full body parse and surfaces as 400 `invalidProject` per the existing
+ * `validationFailure` mapping. The e2e signoff spec only exercises
+ * the missing-token / tampered-token shape, so a projectId shape
+ * error never reaches the e2e suite as a 401.
+ */
+const signProjectCredentialSchema = z
+  .object({
+    projectId: z.string(),
+    token: z.string().min(1, { message: "Preview token is required." }),
+  })
+  .passthrough();
+
+/**
+ * Maps a credential-pre-parse failure (missing/malformed token) to
+ * the same 401 shape the token gate would emit. The e2e signoff spec
+ * asserts the message "expired or is invalid" for tampered tokens;
+ * a missing token surfaces the same message because the request, in
+ * that shape, cannot present a valid credential.
+ */
+function credentialFailure(_error: ZodError): NextResponse {
+  return NextResponse.json(SIGN_ERROR_COPY.invalidToken, { status: 401 });
+}
+
+/**
  * POST /api/sign-project
  *
  * Saves the client's digital sign-off signature to a project record.
@@ -87,15 +132,22 @@ function validationFailure(error: ZodError): NextResponse {
  * PDF export). This allows clients to sign the lookbook without
  * creating an account.
  *
- * Gate order (issue #1078): the payload and HMAC preview token are
- * validated FIRST, before any session lookup. A valid token scoped to
+ * Gate order (issues #1078 + signoff e2e): the HMAC preview token is
+ * the credential, so the route extracts and verifies it FIRST, before
+ * any other body field is validated. A valid token scoped to
  * `projectId` is the credential — cookie-less preview visitors (the
  * whole point of the token surface from issue #684) must reach the
- * Prisma write without being 401'd by `getAuthedPrismaUser`. The
- * session check still runs as defense-in-depth when no valid token is
- * presented (a missing/forged token falls through to the session gate,
- * preserving the prior 401 behavior for unauthenticated requests
- * without a token).
+ * Prisma write without being 401'd by `getAuthedPrismaUser`. A
+ * tampered or missing token answers 401 (`expired or is invalid`)
+ * regardless of what the rest of the body looks like, so a forged
+ * credential can't be hidden behind a downstream 400 from a malformed
+ * signatureDataUrl or a missing consentAttested (issue #1113). Once
+ * the credential is verified, the full body is validated by
+ * `signProjectRequestSchema` (cuid projectId, PNG data-URL prefix,
+ * ~1 MB cap, consentAttested literal). The session check still runs
+ * as defense-in-depth when no valid token is presented (a missing /
+ * forged token falls through to the session gate, preserving the prior
+ * 401 behavior for unauthenticated requests without a token).
  *
  * Thin wrapper (issue #684): the payload is validated by
  * `signProjectRequestSchema` (projectId cuid pattern, PNG data-URL
@@ -109,21 +161,37 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
-    const parsed = signProjectRequestSchema.safeParse(body);
-    if (!parsed.success) {
-      return withCors(validationFailure(parsed.error));
+    // Credential-first gate (issues #1078 + signoff e2e): the HMAC
+    // preview token is the route's intended credential, and a missing
+    // or malformed token must answer 401 even when the rest of the
+    // body would also fail validation. We pre-parse just the credential
+    // fields (projectId + token) BEFORE the full body schema runs, so
+    // tampered tokens can't leak as 400 `consentRequired` /
+    // `invalidProject` from a downstream field check.
+    const credentialParsed = signProjectCredentialSchema.safeParse(body);
+    if (!credentialParsed.success) {
+      return withCors(credentialFailure(credentialParsed.error));
     }
-    const { projectId, signatureDataUrl, token } = parsed.data;
+    const { projectId, token } = credentialParsed.data;
 
-    // Token-first gate (issue #1078): the HMAC preview token is the
-    // route's intended credential. Verify it before consulting the
-    // session so cookie-less preview visitors aren't 401'd out of the
-    // mutation that the preview page renders.
+    // Token-first gate (issue #1078): verify the token before
+    // consulting the session so cookie-less preview visitors aren't
+    // 401'd out of the mutation that the preview page renders.
     const tokenVerification = await verifyPreviewToken(token);
     const tokenUnlocked = tokenMatchesProject(tokenVerification, projectId);
     if (!tokenUnlocked) {
       return withCors(NextResponse.json(SIGN_ERROR_COPY.invalidToken, { status: 401 }));
     }
+
+    // The credential is valid. Now validate the full request body:
+    // a valid token does NOT excuse a malformed signatureDataUrl or a
+    // missing consentAttested (issue #1113) — those are caller-side
+    // mistakes, not credential failures, so they remain 400.
+    const parsed = signProjectRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return withCors(validationFailure(parsed.error));
+    }
+    const { signatureDataUrl } = parsed.data;
 
     // Defense-in-depth for session-bearing callers: an authenticated
     // firm user with a (now-validated) token still goes through the

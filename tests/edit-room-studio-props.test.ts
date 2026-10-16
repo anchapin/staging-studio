@@ -323,6 +323,68 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
     expect(props.initialCopyBody).toBe("Refreshed textiles lift the space.");
   });
 
+  // Issue #1359 — surface `Room.rawDirectives` as `initialDirections`
+  // so the studio's Directions textarea restores on mount. Three pins
+  // cover the three shapes the focused-room row can carry at runtime:
+  // a non-null string (the happy path after the user has typed once),
+  // null (the column was never written — first visit), and the
+  // coerces-from-missing edge case.
+  it("forwards Room.rawDirectives → initialDirections verbatim when non-null", () => {
+    const props = buildEditRoomStudioProps(withRunArgs({
+      project: baseProject,
+      focusedRoom: {
+        ...baseFocusedRoom,
+        rawDirectives: "Modern coastal palette.",
+      },
+      focusedInputs: baseFocusedInputs,
+      directiveStatuses: {},
+      touchUps: { original: 0, A: 0, B: 0 },
+      running: null,
+      onRun: () => {},
+      onExitToProject: () => {},
+    }));
+    expect(props.initialDirections).toBe("Modern coastal palette.");
+  });
+
+  it("coerces Room.rawDirectives=null → initialDirections='' (first visit)", () => {
+    // The reducer initializer seeds `state.directions` from this
+    // value, so an empty string (not `null`) is required — the
+    // textarea uses a controlled string value. Same coercion shape
+    // as `initialCopyHeadline` / `initialCopyBody`.
+    const props = buildEditRoomStudioProps(withRunArgs({
+      project: baseProject,
+      focusedRoom: { ...baseFocusedRoom, rawDirectives: null },
+      focusedInputs: baseFocusedInputs,
+      directiveStatuses: {},
+      touchUps: { original: 0, A: 0, B: 0 },
+      running: null,
+      onRun: () => {},
+      onExitToProject: () => {},
+    }));
+    expect(props.initialDirections).toBe("");
+  });
+
+  it("coerces missing Room.rawDirectives → initialDirections='' (legacy room rows)", () => {
+    // Older focused-room projections may omit `rawDirectives`
+    // entirely. The resolver must not throw on the optional-missing
+    // shape — it should fall through to the same empty-string
+    // default as the null case.
+    const { rawDirectives: _omit, ...roomWithoutRawDirectives } =
+      baseFocusedRoom;
+    void _omit;
+    const props = buildEditRoomStudioProps(withRunArgs({
+      project: baseProject,
+      focusedRoom: roomWithoutRawDirectives,
+      focusedInputs: baseFocusedInputs,
+      directiveStatuses: {},
+      touchUps: { original: 0, A: 0, B: 0 },
+      running: null,
+      onRun: () => {},
+      onExitToProject: () => {},
+    }));
+    expect(props.initialDirections).toBe("");
+  });
+
   it("forwards touch-ups count + running + onRun + onExitToProject verbatim", () => {
     const onRun = () => {};
     const onExitToProject = () => {};

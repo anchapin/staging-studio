@@ -67,6 +67,13 @@ export interface FocusedRoomLike {
   selectedVariantIndex: number | null;
   lookbookHeadline?: string | null;
   lookbookBody?: string | null;
+  /**
+   * Issue #1359 — surfaced from `Room.rawDirectives` so the studio
+   * can seed `state.directions` from the persisted value on mount.
+   * Without this, page reloads present an empty textarea even though
+   * the autosave controller wrote the user's keystrokes correctly.
+   */
+  rawDirectives?: string | null;
 }
 
 /** The minimal focused-inputs slice the resolver reads. */
@@ -186,6 +193,12 @@ export function buildEditRoomStudioProps(
     touchUps,
     initialCopyHeadline: focusedRoom.lookbookHeadline ?? "",
     initialCopyBody: focusedRoom.lookbookBody ?? "",
+    // Issue #1359 — seed the shell's `state.directions` from
+    // `Room.rawDirectives` so a page reload restores the user's
+    // typed directions in the textarea (was previously dropped on
+    // remount; the copy tab's "Rewrite from directions" CTA
+    // dead-ended as a result).
+    initialDirections: focusedRoom.rawDirectives ?? "",
     address: project.propertyAddress,
     imageUrl: focusedInputs.inpaintImageUrl ?? "",
     lookbookVariantUrls: {

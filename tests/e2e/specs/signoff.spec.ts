@@ -172,12 +172,17 @@ test.describe("client signature & acceptance flow (issue #695)", () => {
     expect(response?.status()).toBe(404);
 
     // API level: the session-less mutation endpoint must refuse the same
-    // forged credential with 401 before touching the database.
+    // forged credential with 401 before touching the database. The body
+    // is otherwise schema-valid (consentAttested: true + valid PNG) so
+    // the 401 can only come from the tampered token — a regression to
+    // 400 would mean the route is leaking body-shape errors in place of
+    // credential failures.
     const signResponse = await page.request.post("/api/sign-project", {
       data: {
         projectId: E2E_SIGNOFF_PROJECT_ID,
         signatureDataUrl: TINY_PNG_DATA_URL,
         token: tampered,
+        consentAttested: true,
       },
     });
     expect(signResponse.status()).toBe(401);
@@ -190,10 +195,15 @@ test.describe("client signature & acceptance flow (issue #695)", () => {
     page,
   }) => {
     const token = await signPreviewToken(E2E_SIGNOFF_PROJECT_ID);
+    // Issue #1113: `consentAttested: true` is required by the schema;
+    // a body without it fails validation with 400 `consentRequired`
+    // before the immutability check runs, which is not what this
+    // test is asserting.
     const payload = {
       projectId: E2E_SIGNOFF_PROJECT_ID,
       signatureDataUrl: TINY_PNG_DATA_URL,
       token,
+      consentAttested: true,
     };
 
     // In-suite the drawing test above already signed the project (this

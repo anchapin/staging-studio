@@ -274,21 +274,53 @@ describe("POST /api/sign-project — issue #1078 token-first gate order", () => 
     expect(prisma.project.update).not.toHaveBeenCalled();
   });
 
-  it("returns 400 for an invalid projectId format", async () => {
+  it("returns 401 when the body's projectId does not match the token scope (token-first gate)", async () => {
+    // The body's projectId is non-cuid AND does not match the token's
+    // scope (the beforeEach mock returns MOCK_PROJECT_ID as the token's
+    // scope). The credential-first gate fires first: the projectId
+    // shape is technically wrong, but the route has no valid
+    // projectId to read the body against, so the token-vs-body
+    // mismatch takes precedence and answers 401. This is the same
+    // surface the e2e signoff tampered-token test exercises, just
+    // with a different (also-invalid) projectId.
+    const req = buildRequest(validPayload("not-a-cuid"));
+    const res = await POST(req);
+
+    expect(res.status).toBe(401);
+    const json = await res.json();
+    expect(json.message).toContain("expired or is invalid");
+  });
+
+  it("returns 400 for an invalid projectId format when the token scope matches the body", async () => {
+    // To exercise the schema-level field-error path, the body and
+    // token must agree on the projectId. Here both use a non-cuid
+    // (the token's mock returns a valid string regardless of body
+    // shape). The credential pre-parse accepts any string projectId;
+    // the full schema parse catches the bad shape and surfaces 400
+    // `invalidProject` per the `validationFailure` mapping.
+    vi.mocked(verifyPreviewToken).mockResolvedValue({
+      valid: true,
+      projectId: "not-a-cuid",
+    });
     const req = buildRequest(validPayload("not-a-cuid"));
     const res = await POST(req);
 
     expect(res.status).toBe(400);
     const json = await res.json();
-    // The schema-level field-error path maps projectId failures to
-    // "The project could not be found." (matches invalidProject copy).
     expect(json.message).toContain("could not be found");
   });
 
   // Issue #1113: the legally-worded approval checkbox is no longer
-  // decorative. The schema rejects `consentAttested !== true` BEFORE
-  // any token/session/Prisma work — a client pressing Sign & Approve
-  // without ticking the box must not get a Signed record.
+  // decorative. The schema rejects `consentAttested !== true` before
+  // the Prisma write — a client pressing Sign & Approve without
+  // ticking the box must not get a Signed record.
+  //
+  // Credential-first gate ordering: the token IS verified before the
+  // body parse (the token is the credential, and a forged token must
+  // answer 401 regardless of body shape). The Prisma write is the
+  // side effect under test here — the body parse must keep the write
+  // from running. The "verifyPreviewToken was not called" assertion
+  // has moved to the credential-first test below.
   it("returns 400 when consentAttested is false (issue #1113)", async () => {
     const req = buildRequest({
       ...validPayload(),
@@ -301,8 +333,8 @@ describe("POST /api/sign-project — issue #1078 token-first gate order", () => 
     expect(json.message).toContain(
       "staging-plan approval statement before signing",
     );
-    // The token-gate, session-gate, and Prisma write must NOT have run.
-    expect(verifyPreviewToken).not.toHaveBeenCalled();
+    // The Prisma write must NOT have run — consentAttested is the
+    // gate that prevents burning a Signed record without attestation.
     expect(prisma.project.updateMany).not.toHaveBeenCalled();
   });
 
@@ -334,6 +366,79 @@ describe("POST /api/sign-project — issue #1078 token-first gate order", () => 
     // path (no `projectId` or `signatureDataUrl` field match).
     expect(json.message).toContain("expired or is invalid");
     expect(verifyPreviewToken).not.toHaveBeenCalled();
+  });
+
+  // Credential-first gate: a tampered token must answer 401 even when
+  // the rest of the body is also malformed. Pre-fix, the strict
+  // `consentAttested: z.literal(true)` requirement failed the parse
+  // first and the route returned 400 `consentRequired`, hiding the
+  // credential forgery behind a body-shape error.
+  it("returns 401 for a tampered token even when the body also fails schema (credential-first gate)", async () => {
+    vi.mocked(verifyPreviewToken).mockResolvedValue({ valid: false });
+    const getUserSpy = vi.mocked(getAuthedPrismaUser);
+    const updateManySpy = vi.mocked(prisma.project.updateMany);
+    getUserSpy.mockClear();
+    updateManySpy.mockClear();
+
+    // Body has a tampered token AND no consentAttested: only the
+    // credential check should fire, surfacing 401 — not 400.
+    const req = buildRequest({
+      projectId: MOCK_PROJECT_ID,
+      signatureDataUrl: TINY_PNG_DATA_URL,
+      token: "tampered-token",
+      // consentAttested intentionally omitted to ensure the
+      // pre-parse doesn't accidentally validate the body first.
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(401);
+    const json = await res.json();
+    expect(json.message).toContain("expired or is invalid");
+    // Session and Prisma must not have been consulted.
+    expect(getUserSpy).not.toHaveBeenCalled();
+    expect(updateManySpy).not.toHaveBeenCalled();
+  });
+
+  // A missing token field answers 401 (`expired or is invalid`) so a
+  // caller cannot distinguish a forged token from a forgotten one —
+  // both surface the same credential error, matching the route's
+  // "token is the credential" contract.
+  it("returns 401 when the token field is missing from the body", async () => {
+    const req = buildRequest({
+      projectId: MOCK_PROJECT_ID,
+      signatureDataUrl: TINY_PNG_DATA_URL,
+      consentAttested: true,
+      // token intentionally omitted.
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(401);
+    const json = await res.json();
+    expect(json.message).toContain("expired or is invalid");
+    expect(verifyPreviewToken).not.toHaveBeenCalled();
+  });
+
+  // Once the credential is verified, the full body still has to
+  // validate. A valid token does not excuse a missing consentAttested
+  // (issue #1113) — the caller-side mistake is a 400, not 401.
+  it("returns 400 consentRequired when a valid token is paired with no consentAttested", async () => {
+    // beforeEach configures verifyPreviewToken → valid for MOCK_PROJECT_ID.
+    const req = buildRequest({
+      projectId: MOCK_PROJECT_ID,
+      signatureDataUrl: TINY_PNG_DATA_URL,
+      token: "valid-token",
+      // consentAttested intentionally omitted.
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.message).toContain(
+      "staging-plan approval statement before signing",
+    );
+    // Token was verified, but the Prisma write must NOT have run.
+    expect(verifyPreviewToken).toHaveBeenCalledTimes(1);
+    expect(prisma.project.updateMany).not.toHaveBeenCalled();
   });
 
   it("logs sign_project_save_failed and returns 500 when the Prisma update throws", async () => {
