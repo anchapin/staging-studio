@@ -26,7 +26,7 @@
  * legacy `<InpaintEditor>`-shaped submit path.
  */
 
-import { forwardRef, useEffect, useImperativeHandle } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 
 import {
   useInpaintRuns,
@@ -61,8 +61,23 @@ export interface EditRoomRunClusterHandle {
    * Submits a painted-area inpaint run. Returns the underlying
    * hook's promise; the parent awaits it for the success-path
    * branch (`editorBusy` flips back to false in `onInpaintComplete`).
+   *
+   * Pre-condition: any in-memory autosave the run depends on
+   * (e.g. typed directives) must already be in the DB. Call
+   * `beginRun` instead if you want the cluster to flush those
+   * first.
    */
   submitInpaint: (maskDataUrl: string) => Promise<void>;
+  /**
+   * Issue #1361 — runs `beforeRun` (parent-supplied flush hook,
+   * typically the directive autosave controller's `flush()`),
+   * surfaces an error toast if `beforeRun` reports unsaved work
+   * remained, and only then calls `submitInpaint`. Closes the
+   * autosave race where a user types directives, clicks Run,
+   * and the run submits with an empty `promptDirectives` string
+   * because the 2 s autosave controller hadn't fired yet.
+   */
+  beginRun: (maskDataUrl: string) => Promise<void>;
 }
 
 export interface EditRoomRunClusterProps {
@@ -93,6 +108,15 @@ export interface EditRoomRunClusterProps {
     retryLabel?: string
   ) => void;
   showSuccess: (message: string) => void;
+  /**
+   * Issue #1361 — invoked by `beginRun` before `submitInpaint`
+   * fires, so run-side-effect chain (typed directives →
+   * `Room.rawDirectives`) is race-free. Resolves `true` when all
+   * pending writes landed; `false` when unsaved work remains
+   * (the cluster surfaces a toast via `showError` and skips
+   * the submit so the run doesn't proceed on top of lost edits).
+   */
+  beforeRun?: () => Promise<boolean>;
 }
 
 /**
@@ -133,11 +157,49 @@ export const EditRoomRunCluster = forwardRef<
     setSelectedInstanceIndices: () => {},
   });
 
+  // Issue #1361 — flush autosave (parent-supplied) before
+  // submitting, so `cluster.submitInpaint` reads directions the
+  // user actually persisted (not an empty string the autosave
+  // timer hadn't yet flushed). The Retry callback inside the
+  // error toast re-enters the latest `beginRun` via a ref-stable
+  // closure so the imperative handle's reference stays stable
+  // across renders (oxlint's react-hooks rules don't allow
+  // self-referential useCallback; this is the project-canonical
+  // pattern — EditRoomStudio.tsx:442-444 uses the same shape
+  // for `onCommitRef`).
+  const beginRunRef = useRef<(maskDataUrl: string) => Promise<void>>(
+    async () => {}
+  );
+  // Refresh the ref's current in an effect so oxlint's
+  // `react/refs` rule (which forbids in-render `.current`
+  // assignment) is satisfied. No dep array: re-runs every
+  // render to capture the freshest props + cluster hook.
+  useEffect(() => {
+    beginRunRef.current = async (maskDataUrl: string): Promise<void> => {
+      if (props.beforeRun) {
+        const flushed = await props.beforeRun();
+        if (!flushed) {
+          props.showError(
+            "Couldn't save your directions before running — please retry in a moment.",
+            true,
+            () => {
+              void beginRunRef.current(maskDataUrl);
+            },
+            "Retry run"
+          );
+          return;
+        }
+      }
+      await cluster.submitInpaint(maskDataUrl);
+    };
+  });
+
   useImperativeHandle(
     ref,
     () => ({
       isProcessing: cluster.isProcessing,
       submitInpaint: cluster.submitInpaint,
+      beginRun: beginRunRef.current,
     }),
     [cluster.isProcessing, cluster.submitInpaint]
   );
