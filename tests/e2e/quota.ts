@@ -3,6 +3,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 
 import {
   DATABASE_URL,
+  E2E_DAILY_COPY_LIMIT,
   E2E_DAILY_EXPORT_LIMIT,
   E2E_DAILY_INPAINT_LIMIT,
   E2E_USER_ID,
@@ -39,6 +40,16 @@ import {
 const EXPORT_SURFACE = "export";
 /** The `inpaint` surface key (#1131). */
 const INPAINT_SURFACE = "inpaint";
+/**
+ * The `copy` surface key (#1343). Reused by both `/api/generate-copy`
+ * (legacy, returns the four staging-copy fields) and `/api/v1/listing-copy`
+ * (new, returns the listing-copy `headline` + `body` columns) — one daily
+ * cap covers both because both are gpt-4o-mini copy generation for the
+ * same user. The new listing-copy route uses the same `claimDailyQuota`
+ * path the export + inpaint routes use, so the helper mirrors
+ * {@link withExportUsageAtLimit}.
+ */
+const COPY_SURFACE = "copy";
 
 /**
  * The current server-local calendar day as `YYYY-MM-DD`, matching
@@ -83,6 +94,18 @@ export async function withExportUsageAtLimit<T>(fn: () => Promise<T>): Promise<T
  */
 export async function withInpaintUsageAtLimit<T>(fn: () => Promise<T>): Promise<T> {
   return withUsageAtCount(INPAINT_SURFACE, E2E_DAILY_INPAINT_LIMIT, fn);
+}
+
+/**
+ * Issue #1343 — same contract as {@link withExportUsageAtLimit} for the
+ * `copy` surface, used by the CopyPanel e2e spec to reach the 429 branch
+ * of `/api/v1/listing-copy`. The route's quota is shared with the legacy
+ * `/api/generate-copy`, so this helper covers both surfaces — a seed
+ * here will 429 a future staging-copy generation in the same suite run
+ * unless the `finally` restores the prior value (which it does).
+ */
+export async function withCopyUsageAtLimit<T>(fn: () => Promise<T>): Promise<T> {
+  return withUsageAtCount(COPY_SURFACE, E2E_DAILY_COPY_LIMIT, fn);
 }
 
 /** Pins `surface` usage for today at `count`, then restores it exactly. */
