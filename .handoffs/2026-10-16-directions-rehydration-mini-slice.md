@@ -310,12 +310,22 @@ The next session should now address, **in priority order**:
 
 ### 6.0 — CI e2e is red everywhere (infrastructure)
 
-`origin/develop`'s e2e job has been failing with
-`DATABASE_URL is unset` on every push since at least 2026-10-15.
-The fix is one line in `.github/workflows/ci.yml`. Until that
-lands, **the e2e suite is effectively unobserved in CI** — local
-runs catch regressions only when humans manually re-run them,
-which is unsustainable. Land this before any further feature work.
+**RESOLVED** by PR #1360 (squash-merged as `5372645` on
+`origin/develop`). The one-line fix:
+
+```yaml
+e2e:
+  env:
+    DATABASE_URL: postgresql://e2e:e2e@127.0.0.1:39921/staging_studio_e2e
+```
+
+ships inside `e2e:` job in `.github/workflows/ci.yml`. Post-merge
+CI run `38953955638` confirmed the suite now actually runs end to
+end: `E2E (Playwright)` completed **successfully** in 2m 57s (vs.
+the old failure pattern of 30s with the `DATABASE_URL is unset`
+error). The hermetic 86-spec suite is now signaling real
+regressions on the merges that cause them, instead of always-red
+boilerplate.
 
 ### 6.1 — FineTune persistence (Issue open question #3 from prior handoffs)
 
