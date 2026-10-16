@@ -5,7 +5,6 @@ import { E2E_REHEARSAL_PROJECT_ID, E2E_REHEARSAL_ROOM_ID } from "../env";
 import {
   interceptExportPdf,
   interceptFurnishingsDetection,
-  interceptGenerateCopy,
   interceptInpaint,
   interceptLabelInstances,
   login,
@@ -40,7 +39,13 @@ test.describe("rehearsal drill", () => {
     // both editor visits are covered by this one interception.
     interceptFurnishingsDetection(page);
     interceptLabelInstances(page); // issue #252: billed detections label via OpenAI — keep it mocked
-    interceptGenerateCopy(page);
+    // The redesign's `<CopyPanel>` (issue #1343) posts to
+    // `/api/v1/listing-copy` instead of the legacy `/api/generate-copy` —
+    // mock the new route directly in this spec (the helper used by
+    // `edit-room-redesign-copypanel.spec.ts` is intentionally local
+    // there, not exported to `helpers.ts`, since the legacy surface no
+    // longer has a buyer for it).
+    interceptRehearsalListingCopy(page);
     interceptExportPdf(page, "success");
 
     await login(page);
@@ -98,9 +103,19 @@ test.describe("rehearsal drill", () => {
     await expect(page.getByText("Inpainting completed successfully!")).toBeVisible({
       timeout: 20_000,
     });
-    await expect(page.getByRole("heading", { name: "Staged result" })).toBeVisible({
-      timeout: 20_000,
-    });
+    // Post-inpaint confirmation: the new `<VersionStrip>` (issue
+    // #1340) repaints the slot's caption from "Empty" to "First
+    // pass" once `v.url` lands (VersionStrip.tsx:144–150). The
+    // section's `aria-label="Versions"` scopes the search so it
+    // doesn't match the empty default state on mount. The legacy
+    // "Staged result" heading lived on the pre-redesign surface; PR
+    // #1355 retargeted every other selector to the redesign, this
+    // spec missed the retarget in that pass.
+    await expect(
+      page
+        .getByRole("region", { name: "Versions" })
+        .getByText("First pass", { exact: true })
+    ).toBeVisible({ timeout: 20_000 });
 
     const body = inpaint.submitBody();
     expect(body.roomId).toBe(E2E_REHEARSAL_ROOM_ID);
@@ -124,24 +139,37 @@ test.describe("rehearsal drill", () => {
     await expect(
       page.getByRole("button", { name: "All rooms", exact: true })
     ).toBeVisible();
+    // The new surface's reducer (`useReducer(editRoomReducer,
+    // initialEditRoomState)` at EditRoomStudio.tsx:82) doesn't take an
+    // `initialDirections` prop, so the textarea is empty after any
+    // remount — even though the autosave controller persists
+    // `Room.stagingDirectives` correctly across the reload. The
+    // Rewrite-from-directions CTA's `canRewrite` gate
+    // (CopyPanel.tsx:85) requires non-empty `directions`. Re-fill
+    // here so the copy leg can fire. This is a test-only workaround;
+    // the missing-seed is a real product gap the next session should
+    // consider — see the handoff's open questions list.
+    await page.getByRole("textbox", { name: "Directions" }).fill(DIRECTIVES);
 
     // ---- Copy (OpenAI simulated) ---------------------------------------
-    // Copy generation reads the room's shared staging directives — the
-    // Room copy section no longer carries its own directives box (its
-    // hint now points at the Room Details field), so seed the copy run
-    // through that field (issue #742).
-    const copyForm = page.locator('section[aria-label="Room copy"]');
-    await page
-      .getByLabel("Staging directives (required)")
-      .fill("Key priorities: brighten, declutter, and define a seating area.");
-    await copyForm.getByRole("button", { name: "Generate Copy" }).click();
-    await expect(page.getByText("Copy generated successfully!")).toBeVisible({
-      timeout: 20_000,
-    });
-    await expect(
-      page.getByText("E2E: anchor the seating area with a neutral sofa and layered lighting.")
-    ).toBeVisible();
-    await expect(page.getByText("Pack away personal photos")).toBeVisible();
+    // The redesign's `<CopyPanel>` reads its `directions` brief from
+    // the shared Staging-tab textarea (already populated by the inpaint
+    // leg above), exposes `<Headline>` / `<Description>` inputs, and
+    // persists the rewrite via `POST /api/v1/listing-copy` (issue
+    // #1343). The success path writes the rewrite's `headline`/`body`
+    // straight into the two inputs (no toast on success) — that's
+    // what we wait on. The CTA's `canRewrite` (CopyPanel.tsx:85) is
+    // already enabled because `DIRECTIVES` is non-empty from the
+    // inpaint leg.
+    await page.getByTestId("inspector-tab-copy").click();
+    await expect(page.getByTestId("copy-panel")).toBeVisible();
+    await page.getByTestId("copy-rewrite-button").click();
+    await expect(page.getByLabel("Headline")).toHaveValue(
+      "E2E: anchor the seating area with a neutral sofa and layered lighting."
+    );
+    await expect(page.getByLabel("Description")).toHaveValue(
+      "E2E: buyers picture slow mornings in a calm, finished space."
+    );
 
     // ---- Export (Browserless simulated, success) ------------------------
     // Export lives on the lookbook page (issue #250 feedback): the book
@@ -233,3 +261,44 @@ test.describe("rehearsal drill", () => {
     await expect(page.getByRole("button", { name: "Retry PDF export" })).toBeVisible();
   });
 });
+
+/**
+ * Local helper: mocks `POST /api/v1/listing-copy` (issue #1343's
+ * rewrite route) with the same `{ success, data: { headline, body } }`
+ * shape the real route returns. Mirrors the inline mock in
+ * `edit-room-redesign-copypanel.spec.ts` — kept local here because
+ * the rehearsal spec is the only other consumer; promoting to
+ * `helpers.ts` would add API surface area for a single additional
+ * caller. The fixed `headline` / `body` strings are the spec's
+ * post-rewrite assertions — changing them would fail the test
+ * loudly.
+ *
+ * The mock runs at the browser network layer (`page.route`); the
+ * real `/api/v1/listing-copy` route never executes, so the
+ * `OPENAI_API_KEY` is not exercised. (Same hermeticity guarantee
+ * the previous `interceptGenerateCopy` helper provided for the
+ * legacy `/api/generate-copy` route.)
+ */
+function interceptRehearsalListingCopy(page: import("@playwright/test").Page): void {
+  page.route("**/api/v1/listing-copy", (route) => {
+    if (route.request().method() !== "POST") {
+      void route.fallback();
+      return;
+    }
+    void route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        data: {
+          headline:
+            "E2E: anchor the seating area with a neutral sofa and layered lighting.",
+          body: "E2E: buyers picture slow mornings in a calm, finished space.",
+        },
+        finishReason: "stop",
+        usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
+        model: "gpt-4o-mini",
+      }),
+    });
+  });
+}
