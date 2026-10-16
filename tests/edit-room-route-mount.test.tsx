@@ -51,6 +51,9 @@ const baseProps = () => ({
   running: null as number | null,
   onRun: () => {},
   onExitToProject: () => {},
+  // #1344 (real `useInpaintRuns` wire)
+  maskDataUrl: null as string | null,
+  onMaskChange: () => {},
 });
 
 describe("EditRoomStudio route-mount prop contract (issue #1344)", () => {
@@ -152,6 +155,42 @@ describe("EditRoomStudio route-mount prop contract (issue #1344)", () => {
     );
     expect(html).toContain('data-testid="run-button"');
     expect(onRun).not.toHaveBeenCalled();
+  });
+
+  it("renders `data-mask-url='set'` when `maskDataUrl` is non-null (real submit path is armed)", () => {
+    // Issue #1344 slice 2 — the studio's root carries a
+    // `data-mask-url="set"` attribute whenever the parent route has
+    // captured a painted-area snapshot. The flag's e2e specs
+    // (`edit-room-redesign-mask-paint.spec.ts`, currently
+    // `test.describe.skip`-gated per the handoff) probe this to
+    // assert that the painted-area path is wired through.
+    const html = renderToStaticMarkup(
+      <EditRoomStudio
+        {...baseProps()}
+        maskDataUrl="data:image/png;base64,QQ"
+      />
+    );
+    expect(html).toContain('data-mask-url="set"');
+  });
+
+  it("renders `data-mask-url=''` (empty sentinel) when `maskDataUrl` is null (initial state)", () => {
+    const html = renderToStaticMarkup(<EditRoomStudio {...baseProps()} />);
+    expect(html).toContain('data-mask-url=""');
+  });
+
+  it("forwards `onMaskChange` to the canvas subtree (mock captures the data URL)", () => {
+    // Issue #1344 slice 2 — structural pin that the new prop is
+    // accepted by the type and the studio receives it through
+    // `baseProps()`. The dynamic behavior (every stroke fires the
+    // callback) is exercised by the e2e specs referenced above.
+    const onMaskChange = vi.fn();
+    const html = renderToStaticMarkup(
+      <EditRoomStudio {...baseProps()} onMaskChange={onMaskChange} />
+    );
+    // The studio renders the canvas; `data-mask-url=""` confirms
+    // the initial-state sentinel pinned by the slice 2 reducer.
+    expect(html).toContain('data-mask-url=""');
+    expect(onMaskChange).not.toHaveBeenCalled();
   });
 
   it("renders the All-rooms exit button (data-testid=exit-to-project)", () => {

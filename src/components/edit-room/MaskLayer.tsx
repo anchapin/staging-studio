@@ -1,5 +1,8 @@
 /**
  * Issue #1339 — CanvasStage + MaskLayer + CompareLayer + on-canvas object boxes.
+ * Issue #1344 (real `useInpaintRuns` wire) — `MaskLayer` exports the mask
+ *               buffer via `onChange(dataUrl | null)` so the parent route
+ *               can hand the painted area to `submitInpaint` at run time.
  *
  * `MaskLayer` is the on-canvas freehand paint surface. Verbatim port of
  * the Magic Patterns `MaskLayer` (`dVy8jC2kXpi1ca8b4A1hcS/components/MaskLayer.tsx`),
@@ -16,6 +19,9 @@
  *    stroke color (`#8f4d20` — the `secondary` Atelier token)
  *  - the brush cursor: a positioned `<span>` ringed with a white border
  *    + box-shadow, hidden when the pointer leaves the canvas
+ *  - `onChange?: (dataUrl | null)` — fires after every stroke (paint or
+ *    erase) and on clearRect; the parent route captures the latest
+ *    data URL for `/api/inpaint`'s `maskUrl` body field.
  *
  * What this component does NOT own (deferred to #1340 / #1344 / #1341):
  *  - mask buffer persistence / export / undo (those still live in
@@ -26,6 +32,10 @@
  * paint mode, so the parent can flip `hasMask = true` (issue
  * acceptance criterion). Erase-mode strokes do NOT count as "new paint"
  * — flipping the flag on every erase toggle would be wrong.
+ *
+ * `onChange` is unrelated to `onPainted` — it fires on EVERY stroke
+ * (paint and erase) so the parent's submit path can grab the latest
+ * buffer, including the all-cleared state (`null`).
  */
 
 import {
@@ -57,6 +67,18 @@ export interface MaskLayerProps {
   onPainted: () => void;
   /** Bumping this clears the canvas (the reducer's CLEAR_MASK). */
   resetKey: number;
+  /**
+   * Fires after every stroke (paint or erase) and on clearRect; emits
+   * the canvas's current `toDataURL("image/png")` representation, or
+   * `null` when the buffer is empty (i.e. cleared by resetKey or
+   * erased down to nothing). The parent uses this to capture the mask
+   * to hand to `/api/inpaint`'s `maskUrl` body field on submit
+   * (issue #1344 — real `useInpaintRuns` wire).
+   *
+   * Optional: legacy call sites and SSR renderers omit the prop and
+   * the layer renders unchanged (issue #1339 contract).
+   */
+  onChange?: (dataUrl: string | null) => void;
 }
 
 /** Freehand mask over the photo. Strokes draw opaque, the layer shows at 55%. */
@@ -67,11 +89,29 @@ export function MaskLayer({
   mode,
   onPainted,
   resetKey,
+  onChange,
 }: MaskLayerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
   const last = useRef<{ x: number; y: number } | null>(null);
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
+
+  // Build a snapshot of the current canvas (or `null` if the buffer is
+  // empty enough that the toDataURL round-trip would only waste bytes).
+  // `onChange` is held behind a ref so the snapshotter's identity stays
+  // stable across renders — `stroke()` runs inside pointer handlers
+  // and re-allocating the closure would otherwise force-unmount.
+  const onChangeRef = useRef<((dataUrl: string | null) => void) | null>(onChange);
+  useEffect(() => {
+    onChangeRef.current = onChange ?? null;
+  });
+  const emitChange = () => {
+    const cb = onChangeRef.current;
+    if (!cb) return;
+    const c = canvasRef.current;
+    if (!c) return;
+    cb(c.toDataURL("image/png"));
+  };
 
   // Set the canvas backing store to width × devicePixelRatio so the
   // strokes render at the display's resolution. Reset the transform
@@ -90,6 +130,11 @@ export function MaskLayer({
     const ctx = c.getContext("2d");
     ctx?.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx?.clearRect(0, 0, width, height);
+    // Issue #1344 (real run wire) — `resetKey` bump means CLEAR_MASK;
+    // signal the parent that the mask buffer is now empty. Without
+    // this, the parent route would keep a stale data URL from the
+    // previous paint and submit it on the next Run click.
+    onChangeRef.current?.(null);
   }, [width, height, resetKey]);
 
   const point = (e: RPointerEvent) => {
@@ -115,6 +160,13 @@ export function MaskLayer({
     ctx.lineTo(to.x, to.y);
     ctx.stroke();
     last.current = to;
+    // Issue #1344 — emit the buffer snapshot after every stroke so the
+    // parent route always holds the latest mask data URL. The reduce
+    // step (`hasMask` flag flip) is still on `onPainted` for paint
+    // strokes; this fires unconditionally, paint or erase, so a
+    // submit-click after an erase-only interaction still gets the
+    // (possibly-reduced) snapshot.
+    emitChange();
   };
 
   return (

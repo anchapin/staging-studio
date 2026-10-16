@@ -91,6 +91,12 @@ export interface CanvasStageProps {
   onMaskPainted: () => void;
   /** Fires on the Clear button. */
   onClearMask: () => void;
+  /** #1344 (real `useInpaintRuns` wire) — fires after every stroke
+   *  (paint or erase) and on the CLEAR_MASK reset effect; emits the
+   *  canvas's current `toDataURL("image/png")` snapshot, or `null`
+   *  when the buffer is empty. The shell forwards this up to the
+   *  parent route so `submitInpaint(maskUrl)` has a fresh payload. */
+  onMaskChange?: (dataUrl: string | null) => void;
   /** True iff the user has any painted strokes. */
   hasMask: boolean;
   /** Brush diameter in CSS px. */
@@ -263,6 +269,7 @@ export function CanvasStage(props: CanvasStageProps) {
               brushSize={Math.max(BRUSH_SIZE_MIN, props.brushSize)}
               mode={props.brushMode}
               onPainted={props.onMaskPainted}
+              onChange={props.onMaskChange}
             />
           )}
 

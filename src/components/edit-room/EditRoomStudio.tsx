@@ -76,10 +76,35 @@ export function EditRoomStudio({
   running,
   onRun,
   onExitToProject,
+  maskDataUrl,
+  onMaskChange,
 }: EditRoomStudioProps) {
   const [state, dispatch] = useReducer(editRoomReducer, initialEditRoomState);
   const router = useRouter();
   const [isLookbookPending, startLookbookTransition] = useTransition();
+
+  // #1344 (real `useInpaintRuns` wire) — mirror the parent route's
+  // `maskDataUrlByRoom[roomId]` into the shell's reducer on every
+  // change. The route is the source of truth (it owns the submit
+  // payload), but the canvas subtree reads from the reducer so it
+  // can react without an imperative handle — e.g. the run-button's
+  // blocked-reason check can downgrade if the mask is cleared.
+  useEffect(() => {
+    dispatch({ type: "SET_MASK_DATA_URL", value: maskDataUrl });
+    // `dispatch` is stable; the dep list deliberately tracks only
+    // `maskDataUrl` so a parent re-render with the same URL doesn't
+    // re-dispatch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [maskDataUrl]);
+
+  // The `onMaskChange` callback is held behind a ref so the canvas
+  // subtree's identity stays stable across renders — MaskLayer reads
+  // it via a ref the same way (same pattern as `onCommitRef` below).
+  // oxlint's `react/refs` rule will flag any in-render assignment.
+  const onMaskChangeRef = useRef(onMaskChange);
+  useEffect(() => {
+    onMaskChangeRef.current = onMaskChange;
+  });
 
   // ─── Derived state ─────────────────────────────────────────────────
   // `resolveTargetSlot` needs the bare `{id,url}` shape. We derive it
@@ -378,6 +403,7 @@ export function EditRoomStudio({
       data-target-slot={targetSlot}
       data-compare={state.compare ? "true" : "false"}
       data-running={running === null ? "" : String(running)}
+      data-mask-url={maskDataUrl === null ? "" : "set"}
       data-lookbook-slot={lookbookSlot}
       data-lookbook-pending={isLookbookPending ? "true" : "false"}
       className="flex h-screen flex-col overflow-hidden bg-surface text-ink"
@@ -430,6 +456,17 @@ export function EditRoomStudio({
               maskVersion={state.maskVersion}
               onMaskPainted={() => dispatch({ type: "MARK_MASK_PAINTED" })}
               onClearMask={() => dispatch({ type: "CLEAR_MASK" })}
+              onMaskChange={(dataUrl) => {
+                // The shell mirrors the new data URL into the reducer so
+                // the canvas subtree can read it without an imperative
+                // handle (e.g. for `data-mask-url` UIs). The shell also
+                // forwards to the parent route's `maskDataUrlByRoom`
+                // state via the onMaskChange prop (held in a ref so the
+                // pointer handler doesn't re-bind on every parent
+                // re-render).
+                dispatch({ type: "SET_MASK_DATA_URL", value: dataUrl });
+                onMaskChangeRef.current(dataUrl);
+              }}
               hasMask={state.hasMask}
               brushSize={state.brushSize}
               onBrushSizeChange={(n) => dispatch({ type: "SET_BRUSH_SIZE", size: n })}

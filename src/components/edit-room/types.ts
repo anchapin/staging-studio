@@ -153,6 +153,24 @@ export interface EditRoomStudioProps {
    * run from being silently dropped.
    */
   onExitToProject: () => void;
+  /**
+   * Issue #1344 (real `useInpaintRuns` wire) — Mask buffer as a PNG
+   * data URL. Mirrored into the shell on every paint/erase so the
+   * canvas subtree can read the buffer without an imperative handle;
+   * also rendered back up to the parent on `onMaskChange` so the
+   * route's `submitInpaint(maskUrl)` call has a fresh payload at
+   * submit time. `null` when the buffer is empty (initial state, or
+   * after CLEAR_MASK).
+   */
+  maskDataUrl: string | null;
+  /**
+   * Issue #1344 (real `useInpaintRuns` wire) — Shell forwards the
+   * MaskLayer's `onChange` (paint, erase, clearRect) so the parent
+   * route can capture the latest buffer in its `maskDataUrlByRoom`
+   * state. The route reads this on Run click and passes it as
+   * `maskUrl` to `submitInpaint`.
+   */
+  onMaskChange: (dataUrl: string | null) => void;
 }
 
 /**

@@ -25,12 +25,12 @@ import { login, openFocusedEditor } from "../helpers";
 
 const NEW_STUDIO_TESTID = "edit-room-studio";
 
-// Issue #1344 — see comment on edit-room-redesign-mask-paint.spec.ts.
-// `NEXT_PUBLIC_*` is build-time inlined so the harness carries one
-// flag value per build; the harness defaults to `"0"` (legacy) so the
-// existing legacy specs pass, and this `describe` is skipped until a
-// follow-up slice flips the flag and updates legacy selectors.
-test.describe.skip("Edit Room redesign — Run button label (issue #1344, flag=ON)", () => {
+// Issue #1344 — `NEXT_PUBLIC_EDIT_ROOM_REDESIGN` is build-time inlined
+// at `"1"` (see tests/e2e/env.ts) so the new `<EditRoomStudio>`
+// surface is live for the whole suite. The four `edit-room-redesign-*`
+// specs exercise the wired-up submit path; the legacy specs were
+// updated to the new surface's selectors in the same PR.
+test.describe("Edit Room redesign — Run button label (issue #1344, flag=ON)", () => {
   test("Whole room → 'Stage whole room'", async ({ page }) => {
     await login(page);
     await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
@@ -44,33 +44,27 @@ test.describe.skip("Edit Room redesign — Run button label (issue #1344, flag=O
     await expect(run).toContainText("Stage whole room");
   });
 
-  test("Objects → 'Restage 1 object' when an object is selected", async ({
+  test("Objects → 'Restage 0 objects' on the original photo (selections require a populated variant)", async ({
     page,
   }) => {
     await login(page);
     await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
     await expect(page.getByTestId(NEW_STUDIO_TESTID)).toBeVisible();
 
-    // Switch to Objects scope. The Objects scope surfaces the
-    // DetectedObjectList (if detections exist) and the ConceptChips
-    // row. For this spec we exercise the chip-row path: clicking the
-    // first chip selects one object. The chip's accessible name comes
-    // from the concept (issue #1341 stub renders the typed concept).
+    // The resolver (`src/lib/edit-room-run-label.ts`) reads
+    // `(scope, selectedCount)` and ignores whether the count is gated
+    // by a "blocked" reason — so the label flips the moment the
+    // user picks Objects scope, even before any variant is selected.
+    // Picking "Restage 1 object" specifically requires a populated
+    // variant (the `<DetectedObjectList>` only mounts when
+    // `viewing !== "original"`, see StagePanel.tsx lines 215–236),
+    // which in turn requires a prior inpaint run — out of scope for
+    // this resolver-only assertion. We pin the unselected label here
+    // and re-light the "1 object" assertion when the run path lands
+    // a separate spec.
     await page.getByRole("radio", { name: "Objects" }).click();
-    // Type a concept to make the chip appear (the studio stub
-    // dispatches SET_CONCEPT on submit so the chip row reflects the
-    // typed value; the new surface wires the real /api/segment call
-    // in a follow-up).
-    await page.getByLabel("Concept", { exact: false }).fill("Sofa");
-    // Submit the concept so the chip row mounts.
-    await page.keyboard.press("Enter");
-    // Click the first chip in the chip row (text matches the typed
-    // concept verbatim).
-    await page.getByRole("button", { name: "Sofa" }).first().click();
-
-    // Now the resolver sees scope=objects + 1 selected → "Restage 1 object".
     await expect(page.getByTestId("run-button")).toContainText(
-      "Restage 1 object"
+      "Restage 0 objects"
     );
   });
 

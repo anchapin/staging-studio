@@ -2,12 +2,14 @@
  * Shared `EditRoomStudio` mount props for the shell's test files.
  *
  * Issue #1344 — The shell's prop contract grew (route-mount slice).
- * Three test files (uses-stage-panel, uses-inspector, uses-version-strip)
- * each render the shell a half-dozen times to pin mount-shape contracts.
- * Keeping every call site in sync is a maintenance trap; this fixture
- * keeps a single source of truth for "the minimum prop bag the shell
- * needs to render" so a future contract addition only needs a fixture
- * edit, not an N-site search-and-replace.
+ * Issue #1344 (real `useInpaintRuns` wire) — added `maskDataUrl` +
+ * `onMaskChange` for the painted-area submit path. Three test files
+ * (uses-stage-panel, uses-inspector, uses-version-strip) each render
+ * the shell a half-dozen times to pin mount-shape contracts. Keeping
+ * every call site in sync is a maintenance trap; this fixture keeps a
+ * single source of truth for "the minimum prop bag the shell needs to
+ * render" so a future contract addition only needs a fixture edit, not
+ * an N-site search-and-replace.
  */
 
 import type { EditRoomStudioProps } from "@/components/edit-room/types";
@@ -56,6 +58,8 @@ export function baseProps(
     running: null,
     onRun: () => {},
     onExitToProject: () => {},
+    maskDataUrl: null,
+    onMaskChange: () => {},
     ...rest,
   };
 }

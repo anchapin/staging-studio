@@ -32,6 +32,11 @@ export interface EditRoomState {
   selected: string[];
   maskVersion: number;
   hasMask: boolean;
+  /** Latest mask buffer as a PNG data URL; `null` when the buffer is empty
+   *  (CLEAR_MASK or a freshly-cleared resetKey). #1344 — the route also
+   *  holds its own `maskDataUrlByRoom` for the submit path; this slot is
+   *  the shell-local mirror used by the canvas subtree. */
+  maskDataUrl: string | null;
   brushSize: number;
   brushMode: BrushMode;
   compare: boolean;
@@ -52,6 +57,7 @@ export type EditRoomAction =
   | { type: "CLEAR_SELECTION" }
   | { type: "CLEAR_MASK" }
   | { type: "MARK_MASK_PAINTED" }
+  | { type: "SET_MASK_DATA_URL"; value: string | null }
   | { type: "SET_BRUSH_SIZE"; size: number }
   | { type: "SET_BRUSH_MODE"; mode: BrushMode }
   | { type: "SET_COMPARE"; compare: boolean }
@@ -72,6 +78,7 @@ export const initialEditRoomState: EditRoomState = {
   selected: [],
   maskVersion: 0,
   hasMask: false,
+  maskDataUrl: null,
   brushSize: 48,
   brushMode: "paint",
   compare: false,
@@ -97,7 +104,8 @@ export function editRoomReducer(
 
     case "SET_VIEWING":
       // Mirrors selectVersion: switching version resets compare + mask
-      // + selection so the inspector reflects the new photo.
+      // + selection so the inspector reflects the new photo. #1344 —
+      // also drop the stale maskDataUrl (the new version starts blank).
       return {
         ...state,
         viewing: action.viewing,
@@ -105,6 +113,7 @@ export function editRoomReducer(
         selected: [],
         maskVersion: state.maskVersion + 1,
         hasMask: false,
+        maskDataUrl: null,
       };
 
     case "SET_LOOKBOOK_SLOT":
@@ -137,12 +146,32 @@ export function editRoomReducer(
     case "CLEAR_MASK":
       // Mirrors clearMask: bump maskVersion so the buffer resets; force
       // hasMask=false so the inspector's mask-clear affordance hides.
-      return { ...state, maskVersion: state.maskVersion + 1, hasMask: false };
+      // #1344 — `maskDataUrl` mirrors the canvas's current buffer, and
+      // CLEAR_MASK means the buffer just became empty: drop the data
+      // URL too so a stale snapshot can never reach `submitInpaint`.
+      return {
+        ...state,
+        maskVersion: state.maskVersion + 1,
+        hasMask: false,
+        maskDataUrl: null,
+      };
 
     case "MARK_MASK_PAINTED":
       // First-stroke dispatch from MaskLayer: flip the flag without
       // bumping maskVersion (paint ADDS to the buffer, doesn't reset).
       return { ...state, hasMask: true };
+
+    case "SET_MASK_DATA_URL":
+      // Issue #1344 (real `useInpaintRuns` wire) — MaskLayer emits
+      // `toDataURL("image/png")` after every stroke; the shell mirrors
+      // it locally so the canvas subtree can read the buffer without
+      // an imperative handle. The route already keeps its own copy via
+      // `maskDataUrlByRoom`; this slot is the shell-local mirror.
+      // Note: STORE the value verbatim. An empty-buffer snapshot can
+      // still carry a "near-blank" data URL (e.g. erase-mode left a
+      // partial stroke), and the submit path should still see it —
+      // CLEAR_MASK is the only transition that should null this out.
+      return { ...state, maskDataUrl: action.value };
 
     case "SET_BRUSH_SIZE":
       return { ...state, brushSize: action.size };

@@ -240,12 +240,17 @@ export function nextEnv(): Record<string, string> {
     PREVIEW_TOKEN_SECRET: "e2e-preview-token-secret",
     // Issue #1344: `NEXT_PUBLIC_*` is build-time inlined, so the
     // harness can carry only ONE flag value per build. We default to
-    // `"0"` (legacy surface live) so the existing mask-paint /
-    // concept-flow / version-history specs continue to pass — they
-    // target the legacy `<InpaintEditor>` selectors verbatim. The
-    // four `edit-room-redesign-*` specs are written but `test.skip`
-    // gated with a TODO; light them up by flipping this to `"1"` and
-    // updating the legacy specs' selectors in a follow-up slice.
-    NEXT_PUBLIC_EDIT_ROOM_REDESIGN: "0",
+    // `"1"` (new `<EditRoomStudio>` surface live) so the four
+    // `edit-room-redesign-*` specs exercise the wired-up submit
+    // path; the legacy specs (mask-paint / concept-flow /
+    // version-history / editor-layout / rehearsal / inpaint-submit)
+    // were updated to the new surface's selectors in the same PR.
+    // Features that lived only on the legacy surface (Fill Region,
+    // Restage furnishings preset, Select Regions + batch panel via
+    // canvas-click, undo/redo, zoom) have no equivalent in the
+    // new surface yet and the corresponding subtests were dropped;
+    // they remain pinned at the lib-level where they live and will
+    // re-light on the new surface when those features land.
+    NEXT_PUBLIC_EDIT_ROOM_REDESIGN: "1",
   };
 }
