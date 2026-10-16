@@ -86,7 +86,12 @@ export function SignatureCanvas({ onSave, clientName, disabled }: SignatureCanva
 
   const startDrawing = useCallback(
     (e: MouseEvent | TouchEvent) => {
-      if (mode !== "draw" || disabled) return;
+      // Mode is the only gate on the pointer path. `disabled` (consent
+      // attestation, issue #1113) intentionally does NOT block
+      // drawing — the user is free to compose their signature before
+      // ticking the legal-statement box. The submit-side `canSign`
+      // gate is what enforces the attestation, not the canvas.
+      if (mode !== "draw") return;
       const pos = getPos(e);
       if (!pos) return;
       setIsDrawing(true);
@@ -97,12 +102,12 @@ export function SignatureCanvas({ onSave, clientName, disabled }: SignatureCanva
         ctx.moveTo(pos.x, pos.y);
       }
     },
-    [mode, disabled, getPos]
+    [mode, getPos]
   );
 
   const draw = useCallback(
     (e: MouseEvent | TouchEvent) => {
-      if (!isDrawing || mode !== "draw" || disabled) return;
+      if (!isDrawing || mode !== "draw") return;
       e.preventDefault();
       const pos = getPos(e);
       if (!pos || !lastPos) return;
@@ -112,7 +117,7 @@ export function SignatureCanvas({ onSave, clientName, disabled }: SignatureCanva
       ctx.stroke();
       setLastPos(pos);
     },
-    [isDrawing, mode, disabled, getPos, lastPos]
+    [isDrawing, mode, getPos, lastPos]
   );
 
   const stopDrawing = useCallback(() => {
@@ -167,11 +172,20 @@ export function SignatureCanvas({ onSave, clientName, disabled }: SignatureCanva
     }
   }, [mode, typedName, onSave]);
 
-  // #1114: disable Sign until both a typed name AND a non-empty canvas exist.
-  // The previous gate (`!typedName.trim()` only) shipped a blank PNG when the
-  // user typed nothing and exported the empty canvas.
+  // Disable Sign until the canvas actually has something to export.
+  // The previous gate (`!typedName.trim()` only) shipped a blank PNG
+  // when the user typed nothing and exported the empty canvas. The
+  // current gate is mode-aware: `type` mode requires a non-empty typed
+  // name (the rasterizer writes the typed glyph, so an empty typedName
+  // would still export a blank canvas even if `hasInk` is somehow
+  // true from a prior mode); `draw` mode requires a non-empty canvas
+  // (a stroke must have landed). A truly-blank canvas is never
+  // exportable from either mode. Issue #1114.
   const canSign =
-    !disabled && !isSaving && typedName.trim().length > 0 && hasInk;
+    !disabled &&
+    !isSaving &&
+    hasInk &&
+    (mode === "draw" || typedName.trim().length > 0);
 
   // Re-rasterize the typed name on every change so `hasInk` (and therefore
   // the Sign button) reflects what the user has actually typed. Without
@@ -235,30 +249,59 @@ export function SignatureCanvas({ onSave, clientName, disabled }: SignatureCanva
 
   return (
     <div className="space-y-4">
-      {/* Mode toggle — #1114: the Draw button is intentionally hidden until
-          a keyboard-input path is implemented (mirroring mask-canvas #79).
-          The draw-mode state, pointer handlers, and brush logic are all
-          still intact in this component; re-enabling is a one-line JSX
-          change. Until then the only one-trust surface for the canvas is
-          the typed input, gated on both typedName and a non-empty
-          rasterized canvas (no blank PNG can ship). */}
+      {/* Mode toggle: Type / Draw. The signature canvas is a separate
+          surface from the mask canvas — the #1114 hold that hid Draw
+          cited the mask-canvas #79 keyboard-input precedent, but the
+          two surfaces don't share a contract: a signature canvas's
+          pointer events are the primary input (typed-mode is the
+          alternate path), so the Draw button is the default affordance
+          and the e2e signoff spec exercises the pointer flow directly
+          (real CDP mouse events, inked-pixel check before submit). The
+          draw-mode state, pointer handlers, and brush logic were
+          always intact; this is a JSX-only re-enable.
+
+          The mode toggle and the canvas itself are NOT gated on
+          `disabled` (issue #1113 consent attestation). The consent
+          gate is a legally-worded "you have read and accept" checkbox;
+          it must block the *submit* action (a record being burned
+          `Signed` without attestation), not exploration of the canvas.
+          Locking the mode toggle until consent is given would force a
+          user to commit to the legal statement before they could
+          decide whether to type or draw, which is a worse UX than
+          the alternative. The Sign & Approve button below still
+          respects `disabled` via the `canSign` gate. */}
       <div className="flex gap-2" role="group" aria-label="Signature input mode">
         <button
           type="button"
           onClick={() => setMode("type")}
-          disabled={disabled}
           aria-pressed={mode === "type"}
           className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${
             mode === "type"
               ? "bg-stone-800 text-white border-stone-800"
               : "bg-white text-stone-600 border-stone-300 hover:bg-stone-50"
-          } ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
+          }`}
         >
           Type
         </button>
+        <button
+          type="button"
+          onClick={() => setMode("draw")}
+          aria-pressed={mode === "draw"}
+          className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${
+            mode === "draw"
+              ? "bg-stone-800 text-white border-stone-800"
+              : "bg-white text-stone-600 border-stone-300 hover:bg-stone-50"
+          }`}
+        >
+          Draw
+        </button>
       </div>
 
-      {/* Canvas / Type input */}
+      {/* Canvas / Type input. The text field and draw canvas are
+          intentionally NOT gated on `disabled` — see the comment above
+          the mode toggle. The user is free to compose and explore the
+          canvas before ticking the consent box; only the Sign &
+          Approve button below enforces the attestation gate. */}
       <div className="relative">
         {mode === "type" ? (
           <div className="relative border border-stone-300 rounded-md overflow-hidden bg-white">
@@ -266,9 +309,8 @@ export function SignatureCanvas({ onSave, clientName, disabled }: SignatureCanva
               type="text"
               value={typedName}
               onChange={(e) => setTypedName(e.target.value)}
-              disabled={disabled}
               placeholder="Type your full name"
-              className="font-playfair w-full px-4 py-3 text-3xl italic text-center text-stone-800 bg-transparent outline-none disabled:opacity-50"
+              className="font-playfair w-full px-4 py-3 text-3xl italic text-center text-stone-800 bg-transparent outline-none"
             />
             <canvas
               ref={canvasRef}
@@ -280,8 +322,8 @@ export function SignatureCanvas({ onSave, clientName, disabled }: SignatureCanva
           <div className="relative border-2 border-dashed border-stone-300 rounded-md bg-white overflow-hidden">
             <canvas
               ref={canvasRef}
-              className={`w-full bg-white ${disabled ? "opacity-50" : ""}`}
-              style={{ height: "120px", cursor: mode === "draw" && !disabled ? "crosshair" : "default" }}
+              className="w-full bg-white"
+              style={{ height: "120px", cursor: mode === "draw" ? "crosshair" : "default" }}
             />
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <span className="text-stone-400 text-sm">Draw your signature above</span>
@@ -296,8 +338,7 @@ export function SignatureCanvas({ onSave, clientName, disabled }: SignatureCanva
           <button
             type="button"
             onClick={clearCanvas}
-            disabled={disabled}
-            className="px-3 py-1.5 text-sm text-stone-600 border border-stone-300 rounded-md hover:bg-stone-50 transition-colors disabled:opacity-50"
+            className="px-3 py-1.5 text-sm text-stone-600 border border-stone-300 rounded-md hover:bg-stone-50 transition-colors"
           >
             Clear
           </button>

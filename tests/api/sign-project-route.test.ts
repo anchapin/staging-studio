@@ -208,8 +208,16 @@ describe("POST /api/sign-project", () => {
   });
 
   // Issue #1113: the legally-worded approval checkbox is no longer
-  // decorative. A request without `consentAttested: true` must be
-  // rejected before any token/session/Prisma work.
+  // decorative. A request without `consentAttested: true` must not
+  // burn a Signed record.
+  //
+  // Credential-first gate ordering: the token IS verified before the
+  // body parse (the token is the credential, and a forged token must
+  // answer 401 regardless of body shape). The Prisma write is the
+  // side effect under test here — the body parse must keep the write
+  // from running. The "verifyPreviewToken was not called" assertion
+  // has moved to the credential-first test in
+  // `tests/sign-project-route.test.ts`.
   it("returns 400 when consentAttested is false (issue #1113)", async () => {
     vi.mocked(verifyPreviewToken).mockResolvedValue({ valid: true, projectId: MOCK_PROJECT_ID });
 
@@ -221,8 +229,7 @@ describe("POST /api/sign-project", () => {
     expect(json.message).toContain(
       "staging-plan approval statement before signing",
     );
-    // Token-gate, session-gate, and Prisma write must NOT have run.
-    expect(verifyPreviewToken).not.toHaveBeenCalled();
+    // Prisma write must NOT have run.
     expect(prisma.project.updateMany).not.toHaveBeenCalled();
   });
 
@@ -235,7 +242,6 @@ describe("POST /api/sign-project", () => {
     const res = await POST(req);
 
     expect(res.status).toBe(400);
-    expect(verifyPreviewToken).not.toHaveBeenCalled();
     expect(prisma.project.updateMany).not.toHaveBeenCalled();
   });
 });
