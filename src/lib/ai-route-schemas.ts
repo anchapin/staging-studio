@@ -105,6 +105,60 @@ export const generateCopyRequestSchema = z
   .strict();
 
 /**
+ * Zod schema for the `POST /api/v1/listing-copy` request body (issue
+ * #1343).
+ *
+ * Contract: `roomId` alone identifies the room — the route reads every
+ * prompt input (`Room.name`, `Room.rawDirectives`, and the parent
+ * project's `stagingAesthetic` / `targetBuyer`) server-side from the
+ * persisted record, mirroring {@link generateCopyRequestSchema}. The
+ * request body carries no prompt context so a client cannot spoof
+ * project context per request. `.strict()` rejects unknown keys so a
+ * stale client fails loudly instead of silently generating copy for a
+ * room other than the one they edited.
+ *
+ * The output schema is a separate {@link listingCopyOutputSchema} —
+ * the route writes the OpenAI structured response through it before
+ * returning, so a malformed model output is caught at the API edge,
+ * not at lookbook render time.
+ *
+ * Side effects: none (pure validation); the OpenAI call happens in
+ * the route, gated by `assertOpenAIConfigured()`/`OPENAI_API_KEY` and
+ * the daily `copy` quota (`DAILY_COPY_LIMIT`).
+ */
+export const listingCopyRequestSchema = z
+  .object({
+    roomId: z.string().min(1),
+  })
+  .strict();
+
+/** Hard cap on the rewritten headline, mirrors `listingCopySchema`. */
+export const LISTING_COPY_HEADLINE_MAX = 200;
+/** Hard cap on the rewritten body, mirrors `listingCopySchema`. */
+export const LISTING_COPY_BODY_MAX = 600;
+
+/**
+ * Zod schema for the gpt-4o-mini structured output of
+ * `POST /api/v1/listing-copy` (issue #1343): one short headline
+ * (1–{@link LISTING_COPY_HEADLINE_MAX} chars) and one body paragraph
+ * (1–{@link LISTING_COPY_BODY_MAX} chars), both trimmed to non-blank.
+ *
+ * The caps mirror `listingCopySchema` (`src/lib/room-copy-edit-schema.ts`)
+ * exactly so the route can hand the response straight to the
+ * `saveListingCopy` server action without re-validating. The model's
+ * output is sometimes empty/whitespace on a stuck call — a
+ * `string().min(1)` rejects that loudly so the catch block falls
+ * through to the standard `no-object-generated` branch instead of
+ * persisting blanks.
+ *
+ * Side effects: none (pure validation).
+ */
+export const listingCopyOutputSchema = z.object({
+  headline: z.string().trim().min(1).max(LISTING_COPY_HEADLINE_MAX),
+  body: z.string().trim().min(1).max(LISTING_COPY_BODY_MAX),
+});
+
+/**
  * Zod schema for a SAM 3.1 detection concept (issue #227).
  *
  * Contract: a single lowercase word or short phrase — lowercase letters,
