@@ -164,6 +164,23 @@ export const E2E_DAILY_EXPORT_LIMIT = 20;
  */
 export const E2E_DAILY_INPAINT_LIMIT = 20;
 
+/**
+ * Issue #1343 — the daily copy cap the harness expects the gpt-4o-mini
+ * copy surfaces (`/api/generate-copy` and `/api/v1/listing-copy`) to
+ * apply.
+ *
+ * Mirrors `DEFAULT_DAILY_COPY_LIMIT` in `src/lib/api-quota.ts` for the
+ * same reason as {@link E2E_DAILY_EXPORT_LIMIT}: the suite deliberately
+ * leaves `DAILY_COPY_LIMIT` unset so the app default applies, and any
+ * drift between the two constants surfaces as a failing spec rather than
+ * a silently-broken quota test. Used by `withCopyUsageAtLimit` (see
+ * `quota.ts`) to pin the ledger row at the cap and reach the 429 branch
+ * of `/api/v1/listing-copy` — which is otherwise unreachable in a single
+ * run because the default cap (50) is well above what one spec would
+ * burn.
+ */
+export const E2E_DAILY_COPY_LIMIT = 50;
+
 /** Port/host for the mock Supabase (GoTrue auth + Storage). */
 export const MOCK_SUPABASE_PORT = 39911;
 export const MOCK_SUPABASE_HOST = "127.0.0.1";
