@@ -87,6 +87,26 @@ export const initialEditRoomState: EditRoomState = {
 };
 
 /**
+ * Build a shell state with optional overrides — used by the shell's
+ * lazy `useReducer(reducer, initialArg, init)` form (see
+ * `EditRoomStudio.tsx`) so a parent route can seed a reducer slot
+ * from a server-supplied value without mutating the canonical
+ * `initialEditRoomState` (which the reducer test pins as a frozen
+ * default).
+ *
+ * Issue #1359 — the seed use case is `directions`, supplied from
+ * `Room.rawDirectives` so the textarea restores on remount. The
+ * factory takes a partial so future seed fields (copy headline /
+ * body, lookbook slot, etc.) compose without a `Partial<…>` cast
+ * at the call site.
+ */
+export function createInitialEditRoomState(
+  overrides: Partial<EditRoomState> = {}
+): EditRoomState {
+  return { ...initialEditRoomState, ...overrides };
+}
+
+/**
  * The pure reducer. Returns a new state object on every action — never
  * mutates the input. The two transitions that mirror multiple App.tsx
  * setters in one go (SET_VIEWING clears compare + selected + mask) are

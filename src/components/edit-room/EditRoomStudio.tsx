@@ -37,6 +37,7 @@ import { TopBar } from "@/components/edit-room/TopBar";
 import { Toast } from "@/components/edit-room/Toast";
 import { VersionStrip } from "@/components/edit-room/VersionStrip";
 import {
+  createInitialEditRoomState,
   editRoomReducer,
   initialEditRoomState,
 } from "@/components/edit-room/edit-room-reducer";
@@ -68,6 +69,7 @@ export function EditRoomStudio({
   touchUps,
   initialCopyHeadline,
   initialCopyBody,
+  initialDirections,
   address,
   imageUrl,
   lookbookVariantUrls,
@@ -79,9 +81,42 @@ export function EditRoomStudio({
   maskDataUrl,
   onMaskChange,
 }: EditRoomStudioProps) {
-  const [state, dispatch] = useReducer(editRoomReducer, initialEditRoomState);
+  // Issue #1359 — seed the reducer from `Room.rawDirectives` via a lazy
+  // initializer so the Directions textarea restores on mount instead
+  // of starting empty (the previous behavior silently dropped the
+  // user's persisted work until they re-typed it). The lazy form is
+  // React's canonical pattern for deriving initial state from a prop
+  // and only runs once per mount, even under strict-mode double-render.
+  // `initialDirections ?? ""` lets the prop stay optional (existing
+  // pre-#1359 fixtures don't pass it) while still coercing undefined
+  // to the canonical empty-string default the reducer expects.
+  const seededDirections = initialDirections ?? "";
+  const [state, dispatch] = useReducer(
+    editRoomReducer,
+    null,
+    () => createInitialEditRoomState({ directions: seededDirections })
+  );
   const router = useRouter();
   const [isLookbookPending, startLookbookTransition] = useTransition();
+
+  // Room-switch reset — if the parent re-passes a different
+  // `initialDirections` (the studio stays mounted across room switches,
+  // no `key=` remounts it today), reset the reducer so the textarea
+  // reflects the new room's saved value. Mirrors the
+  // `initialLookbookSlot` reset pattern above. The `dispatch` and
+  // `lastCommittedValue` (declared further below, near the debounce
+  // effect) are captured by closure; refs and dispatchers stay
+  // referentially stable across renders so this effect is safe to
+  // bind once. `seededDirections` is the canonical empty-string
+  // version of the optional prop, matching the initializer above.
+  // The dep list tracks `seededDirections` (not `initialDirections`)
+  // so an absent-to-empty transition on a re-render doesn't reset
+  // the seeded reducer state to the wrong value.
+  useEffect(() => {
+    dispatch({ type: "SET_DIRECTIONS", value: seededDirections });
+    lastCommittedValue.current = seededDirections;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seededDirections]);
 
   // #1344 (real `useInpaintRuns` wire) — mirror the parent route's
   // `maskDataUrlByRoom[roomId]` into the shell's reducer on every
@@ -433,8 +468,17 @@ export function EditRoomStudio({
   // on every render — that would push the commit indefinitely into the
   // future. The `lastCommittedValue` guard makes the effect a no-op when
   // the value hasn't actually changed (mount + parent re-renders).
+  //
+  // Issue #1359 — initialise `lastCommittedValue.current` to the
+  // seeded `seededDirections` (canonical `initialDirections ?? ""`)
+  // so a mount-with-persisted-data doesn't fire a redundant 900ms
+  // debounce → autosave round trip on every page load. `useRef`
+  // only captures the first render's value, and `seededDirections`
+  // is stable for the studio's lifetime (the parent re-seeds only
+  // on room switch, which the `SET_DIRECTIONS` reset effect above
+  // handles symmetrically).
   const directionsTimer = useRef<number | undefined>(undefined);
-  const lastCommittedValue = useRef<string>("");
+  const lastCommittedValue = useRef<string>(seededDirections);
   const onCommitRef = useRef(onDirectionsCommit);
   // Refs-as-latest-callback pattern (per React docs): keep the ref's
   // `.current` fresh in an effect, never during render. oxlint's

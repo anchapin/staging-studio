@@ -88,6 +88,34 @@ export interface EditRoomStudioProps {
    */
   initialCopyBody: string;
   /**
+   * Issue #1359 — Initial persisted staging directives from
+   * `Room.rawDirectives`. Pre-populates the Directions textarea on
+   * mount so a page reload doesn't present an empty form even
+   * though the autosave controller persists the user's keystrokes
+   * correctly. Empty string (not `null` — the textarea uses a
+   * controlled string value) when `Room.rawDirectives` is null.
+   *
+   * The shell seeds the reducer with this value via React's lazy
+   * `useReducer(reducer, initialArg, init)` form (the initializer
+   * runs once per mount), then owns the field locally. A separate
+   * `useEffect` watching `initialDirections` (same pattern as the
+   * `initialLookbookSlot` reset above) re-seeds the reducer when
+   * the prop changes — for the rare case where the user switches
+   * rooms without remounting the studio.
+   *
+   * Without this seed, the reducer's `directions: ""` initial value
+   * wins, and the listing copy tab's "Rewrite from directions" CTA
+   * (gated on `directions.trim().length > 0`) dead-ends after a
+   * reload even though the directives are saved in the DB.
+   *
+   * Marked optional for test-fixture ergonomics (existing fixtures
+   * written before #1359 mount `<EditRoomStudio>` without it). The
+   * shell coerces `undefined → ""` in the lazy initializer so the
+   * textarea starts empty when no seed is supplied, matching the
+   * pre-#1359 default shape.
+   */
+  initialDirections?: string;
+  /**
    * Issue #1344 — Property address shown in the TopBar's breadcrumb.
    * Surfaced from `Project.propertyAddress` by the parent route.
    * Drives the breadcrumb `<span>` between "All rooms" and the

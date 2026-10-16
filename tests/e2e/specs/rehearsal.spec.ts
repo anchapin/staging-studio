@@ -143,12 +143,16 @@ test.describe("rehearsal drill", () => {
     // initialEditRoomState)` at EditRoomStudio.tsx:82) doesn't take an
     // `initialDirections` prop, so the textarea is empty after any
     // remount — even though the autosave controller persists
-    // `Room.stagingDirectives` correctly across the reload. The
+    // `Room.rawDirectives` correctly across the reload. The
     // Rewrite-from-directions CTA's `canRewrite` gate
     // (CopyPanel.tsx:85) requires non-empty `directions`. Re-fill
-    // here so the copy leg can fire. This is a test-only workaround;
-    // the missing-seed is a real product gap the next session should
-    // consider — see the handoff's open questions list.
+    // here so the copy leg can fire. The #1359 slice brings an
+    // `initialDirections` prop + lazy reducer initializer that
+    // subsumes this workaround in production — the e2e test
+    // deliberately keeps the workaround because the autosave
+    // controller's 2 s idle timer races the fast-loading test
+    // (the test does `fill` → 200 ms wait → `Run`, so the 2 s
+    // autosave often hasn't fired before the page reloads).
     await page.getByRole("textbox", { name: "Directions" }).fill(DIRECTIVES);
 
     // ---- Copy (OpenAI simulated) ---------------------------------------

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createInitialEditRoomState,
   editRoomReducer,
   initialEditRoomState,
   type EditRoomAction,
@@ -214,5 +215,33 @@ describe("editRoomReducer", () => {
       value: "  warm walnut  ",
     });
     expect(after.directions).toBe("  warm walnut  ");
+  });
+
+  // Issue #1359 — `createInitialEditRoomState` is the lazy-initializer
+  // entry point used by `<EditRoomStudio>` to seed the reducer from the
+  // parent route's `Room.rawDirectives`. Two pins cover the contracts
+  // the shell depends on: (1) with no overrides, the returned shape
+  // matches the canonical `initialEditRoomState` exactly (the old
+  // default stays valid for any caller that wasn't yet updated), and
+  // (2) an override lands verbatim without disturbing other fields
+  // (the reducer operates on `directions` only — the factory must not
+  // reset unrelated slots like `maskVersion`).
+  it("createInitialEditRoomState() returns the canonical default when called with no overrides", () => {
+    expect(createInitialEditRoomState()).toEqual(initialEditRoomState);
+  });
+
+  it("createInitialEditRoomState({ directions }) seeds `directions` without disturbing other fields", () => {
+    const seeded = createInitialEditRoomState({
+      directions: "Anchor the seating area with a neutral sofa.",
+    });
+    expect(seeded.directions).toBe(
+      "Anchor the seating area with a neutral sofa."
+    );
+    // Unrelated slots retain their defaults (the parent route's
+    // `focusedRoom.rawDirectives` only seeds `directions`).
+    expect(seeded.scope).toBe(initialEditRoomState.scope);
+    expect(seeded.viewing).toBe(initialEditRoomState.viewing);
+    expect(seeded.maskVersion).toBe(initialEditRoomState.maskVersion);
+    expect(seeded.brushSize).toBe(initialEditRoomState.brushSize);
   });
 });
