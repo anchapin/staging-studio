@@ -2,19 +2,24 @@
  * Issue #1341 — `<FineTune>` (advanced generation controls).
  *
  * The Fine-tune panel is collapsed by default; expanding it surfaces
- * five controls — how-much-can-change, follow-directions, blend-edges
- * (px, scope !== "whole-room" only), include-floor-shadows (checkbox,
- * scope !== "whole-room" only), and a numeric seed input that strips
+ * three controls — how-much-can-change, blend-edges (px, scope !==
+ * "whole-room" only), and a numeric seed input that strips
  * non-digits on change.
+ *
+ * Issue #1362a — `adherence` (Follow directions) and `shadows` (Include
+ * floor shadows) are removed. Adherence had no API field it landed on
+ * and conflicted with `strength` (Q1 user correction). Shadows had no
+ * API field either — DashScope masks are binary B/W. Stage B
+ * (#1362b) replaces shadows semantically with a pre-upload
+ * mask-feather utility driven by the `expand` slider.
  *
  * Pinned cases:
  *  - Collapsed by default — the inner controls do not appear in markup.
  *  - Chevron rotates 180° on toggle (CSS class swap).
- *  - All five sliders (or three sliders + checkbox in whole-room scope)
- *    commit values via their `onChange` handlers.
+ *  - All three controls (or two controls in whole-room scope) commit
+ *    values via their `onChange` handlers.
  *  - The seed input strips non-digits on change.
- *  - The blend-edges and floor-shadows controls are hidden when
- *    scope === "whole-room".
+ *  - The blend-edges slider is hidden when scope === "whole-room".
  *  - The "Defaults" hint text renders when collapsed.
  *  - No hex literals — every color is an Atelier token.
  *
@@ -28,19 +33,15 @@ import { describe, expect, it } from "vitest";
 
 import { FineTune } from "@/components/edit-room/FineTune";
 
-describe("FineTune (issue #1341)", () => {
+describe("FineTune (issue #1341, narrowed by #1362a)", () => {
   it("renders the panel header with the Fine-tune label", () => {
     const html = renderToStaticMarkup(
       <FineTune
         scope="objects"
-        strength={80}
+        strength={50}
         onStrengthChange={() => {}}
-        adherence={75}
-        onAdherenceChange={() => {}}
         expand={12}
         onExpandChange={() => {}}
-        shadows={true}
-        onShadowsChange={() => {}}
         seed=""
         onSeedChange={() => {}}
       />
@@ -52,14 +53,10 @@ describe("FineTune (issue #1341)", () => {
     const html = renderToStaticMarkup(
       <FineTune
         scope="objects"
-        strength={80}
+        strength={50}
         onStrengthChange={() => {}}
-        adherence={75}
-        onAdherenceChange={() => {}}
         expand={12}
         onExpandChange={() => {}}
-        shadows={true}
-        onShadowsChange={() => {}}
         seed=""
         onSeedChange={() => {}}
       />
@@ -72,35 +69,26 @@ describe("FineTune (issue #1341)", () => {
     const html = renderToStaticMarkup(
       <FineTune
         scope="objects"
-        strength={80}
+        strength={50}
         onStrengthChange={() => {}}
-        adherence={75}
-        onAdherenceChange={() => {}}
         expand={12}
         onExpandChange={() => {}}
-        shadows={true}
-        onShadowsChange={() => {}}
         seed=""
         onSeedChange={() => {}}
       />
     );
-    // The two sliders that show in every scope are absent.
+    // The strength slider that shows in every scope is absent.
     expect(html).not.toContain("How much can change");
-    expect(html).not.toContain("Follow directions");
   });
 
   it("renders a toggle button with aria-expanded=false when collapsed", () => {
     const html = renderToStaticMarkup(
       <FineTune
         scope="objects"
-        strength={80}
+        strength={50}
         onStrengthChange={() => {}}
-        adherence={75}
-        onAdherenceChange={() => {}}
         expand={12}
         onExpandChange={() => {}}
-        shadows={true}
-        onShadowsChange={() => {}}
         seed=""
         onSeedChange={() => {}}
       />
@@ -108,42 +96,35 @@ describe("FineTune (issue #1341)", () => {
     expect(html).toMatch(/aria-expanded="false"/);
   });
 
-  it("renders the blend-edges slider and floor-shadows checkbox for non-whole-room scopes", () => {
+  it("renders the blend-edges slider for non-whole-room scopes", () => {
     // The collapsed render hides the controls — the structural test
     // pins them via the `open` prop (#1341 exposes this for tests).
     const html = renderToStaticMarkup(
       <FineTune
         scope="objects"
         open
-        strength={80}
+        strength={50}
         onStrengthChange={() => {}}
-        adherence={75}
-        onAdherenceChange={() => {}}
         expand={12}
         onExpandChange={() => {}}
-        shadows={true}
-        onShadowsChange={() => {}}
         seed=""
         onSeedChange={() => {}}
       />
     );
     expect(html).toContain("Blend edges");
-    expect(html).toContain("Include floor shadows");
+    // Issue #1362a — "Include floor shadows" checkbox is gone.
+    expect(html).not.toContain("Include floor shadows");
   });
 
-  it("omits the blend-edges slider + floor-shadows checkbox when scope === 'whole-room'", () => {
+  it("omits the blend-edges slider when scope === 'whole-room'", () => {
     const html = renderToStaticMarkup(
       <FineTune
         scope="whole-room"
         open
-        strength={80}
+        strength={50}
         onStrengthChange={() => {}}
-        adherence={75}
-        onAdherenceChange={() => {}}
         expand={12}
         onExpandChange={() => {}}
-        shadows={true}
-        onShadowsChange={() => {}}
         seed=""
         onSeedChange={() => {}}
       />
@@ -152,31 +133,28 @@ describe("FineTune (issue #1341)", () => {
     expect(html).not.toContain("Include floor shadows");
   });
 
-  it("renders all five controls (or three in whole-room) when open", () => {
+  it("renders all three controls (or two in whole-room) when open", () => {
     const html = renderToStaticMarkup(
       <FineTune
         scope="objects"
         open
-        strength={80}
+        strength={50}
         onStrengthChange={() => {}}
-        adherence={75}
-        onAdherenceChange={() => {}}
         expand={12}
         onExpandChange={() => {}}
-        shadows={true}
-        onShadowsChange={() => {}}
         seed=""
         onSeedChange={() => {}}
       />
     );
-    // Three sliders (two always + blend-edges) + one checkbox (shadows)
-    // + one numeric input (seed).
+    // Two sliders (strength + blend-edges) + one numeric input (seed).
     expect(html).toContain("How much can change");
-    expect(html).toContain("Follow directions");
     expect(html).toContain("Blend edges");
-    expect(html).toContain("Include floor shadows");
     expect(html).toContain("Seed");
     expect(html).toContain('placeholder="Random"');
+    // Issue #1362a — `adherence`/`Follow directions` and `shadows`/`Include
+    // floor shadows` are gone.
+    expect(html).not.toContain("Follow directions");
+    expect(html).not.toContain("Include floor shadows");
   });
 
   it("renders the strength value with a percent suffix in the display", () => {
@@ -186,12 +164,8 @@ describe("FineTune (issue #1341)", () => {
         open
         strength={42}
         onStrengthChange={() => {}}
-        adherence={75}
-        onAdherenceChange={() => {}}
         expand={12}
         onExpandChange={() => {}}
-        shadows={true}
-        onShadowsChange={() => {}}
         seed=""
         onSeedChange={() => {}}
       />
@@ -204,14 +178,10 @@ describe("FineTune (issue #1341)", () => {
       <FineTune
         scope="objects"
         open
-        strength={80}
+        strength={50}
         onStrengthChange={() => {}}
-        adherence={75}
-        onAdherenceChange={() => {}}
         expand={20}
         onExpandChange={() => {}}
-        shadows={true}
-        onShadowsChange={() => {}}
         seed=""
         onSeedChange={() => {}}
       />
@@ -224,14 +194,10 @@ describe("FineTune (issue #1341)", () => {
       <FineTune
         scope="objects"
         open
-        strength={80}
+        strength={50}
         onStrengthChange={() => {}}
-        adherence={75}
-        onAdherenceChange={() => {}}
         expand={12}
         onExpandChange={() => {}}
-        shadows={true}
-        onShadowsChange={() => {}}
         seed=""
         onSeedChange={() => {}}
       />
@@ -247,14 +213,10 @@ describe("FineTune (issue #1341)", () => {
       <FineTune
         scope="objects"
         open
-        strength={80}
+        strength={50}
         onStrengthChange={() => {}}
-        adherence={75}
-        onAdherenceChange={() => {}}
         expand={12}
         onExpandChange={() => {}}
-        shadows={true}
-        onShadowsChange={() => {}}
         seed=""
         onSeedChange={() => {}}
       />

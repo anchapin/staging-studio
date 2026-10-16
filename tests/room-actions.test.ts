@@ -60,6 +60,11 @@ beforeEach(() => {
     // Issue #1343 — listing-copy columns.
     lookbookHeadline: null,
     lookbookBody: null,
+    // Issue #1362a — FineTune persistence columns. `prisma.room.findFirst`'s
+    // generated return type now requires these fields on the mock.
+    fineTuneStrength: null,
+    fineTuneExpand: null,
+    fineTuneSeed: null,
     createdAt: new Date(),
   });
 });
@@ -107,6 +112,10 @@ describe("saveRoomMetadata", () => {
       // Issue #1343 — listing-copy columns.
       lookbookHeadline: null,
       lookbookBody: null,
+      // Issue #1362a — FineTune persistence columns.
+      fineTuneStrength: null,
+      fineTuneExpand: null,
+      fineTuneSeed: null,
       createdAt: new Date(),
     });
 

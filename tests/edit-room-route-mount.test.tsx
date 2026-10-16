@@ -54,6 +54,18 @@ const baseProps = () => ({
   // #1344 (real `useInpaintRuns` wire)
   maskDataUrl: null as string | null,
   onMaskChange: () => {},
+  // Issue #1362a — FineTune persistence. Default bag mirrors a legacy
+  // row (all-null); the shell's per-field `useState(... ?? default)`
+  // shape picks UI defaults (strength=50 → 0.5 at the wire, expand=12,
+  // seed="").
+  initialFineTune: {
+    strength: null,
+    expand: null,
+    seed: null,
+  },
+  onFineTuneStrengthChange: () => {},
+  onFineTuneExpandChange: () => {},
+  onFineTuneSeedChange: () => {},
 });
 
 describe("EditRoomStudio route-mount prop contract (issue #1344)", () => {

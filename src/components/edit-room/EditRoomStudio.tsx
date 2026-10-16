@@ -70,6 +70,10 @@ export function EditRoomStudio({
   initialCopyHeadline,
   initialCopyBody,
   initialDirections,
+  initialFineTune,
+  onFineTuneStrengthChange,
+  onFineTuneExpandChange,
+  onFineTuneSeedChange,
   address,
   imageUrl,
   lookbookVariantUrls,
@@ -216,15 +220,32 @@ export function EditRoomStudio({
 
   // ─── #1342 — Inspector state ──────────────────────────────────────
   // The Inspector is controlled: the shell owns `activeTab` and the
-  // FineTune five values (local useState — they are not surfaced
-  // outside the studio yet, so they don't need reducer discipline).
-  // #1344 wires FineTune persistence to the autosave controller.
+  // FineTune values (local useState — they are not surfaced outside
+  // the studio yet, so they don't need reducer discipline).
+  //
+  // Issue #1362a — FineTune persistence. `adherence` and `shadows` are
+  // gone (see `FineTune.tsx` STICKY NOTE). The three surviving values
+  // seed from `initialFineTune ??` and re-seed on prop change (room
+  // switch). Each onChange handler calls the route's `editFineTune`
+  // callback which flows through the AutosaveController (2 s idle) to
+  // `saveRoomMetadata` — same shape as `rawDirectives` (#496).
   const [activeTab, setActiveTab] = useState<InspectorTab>("stage");
-  const [strength, setStrength] = useState(80);
-  const [adherence, setAdherence] = useState(75);
-  const [expand, setExpand] = useState(12);
-  const [shadows, setShadows] = useState(true);
-  const [seed, setSeed] = useState("");
+  const [strength, setStrength] = useState(initialFineTune?.strength ?? 50);
+  const [expand, setExpand] = useState(initialFineTune?.expand ?? 12);
+  const [seed, setSeed] = useState(initialFineTune?.seed ?? "");
+
+  // Re-seed the three FineTune useStates when `initialFineTune` changes
+  // (e.g. after the user switches rooms without remounting the studio).
+  // Same shape as the `initialLookbookSlot` reset above. Trade-off: an
+  // in-flight typed value on the prior room is silently overwritten by
+  // the new room's persisted value; the autosave fires on
+  // blur/navigate, so the prior room's value lands in the DB anyway.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setStrength(initialFineTune?.strength ?? 50);
+    setExpand(initialFineTune?.expand ?? 12);
+    setSeed(initialFineTune?.seed ?? "");
+  }, [initialFineTune]);
 
   // ─── #1343 — CopyPanel state (Listing copy tab) ──────────────────
   // The CopyPanel mirrors the Room's persisted `lookbookHeadline` /
@@ -643,15 +664,24 @@ export function EditRoomStudio({
           projectAesthetic={aesthetic}
           projectGlobalDirectives={globalDirectives}
           strength={strength}
-          onStrengthChange={setStrength}
-          adherence={adherence}
-          onAdherenceChange={setAdherence}
+          // Issue #1362a — FineTune persistence. The local `setX` updates
+          // shell state (already done via the new `useEffect` re-seed);
+          // the matching `onFineTuneXChange` callback fans out to the
+          // route's AutosaveController so the change lands in the DB.
+          onStrengthChange={(value) => {
+            setStrength(value);
+            onFineTuneStrengthChange(value);
+          }}
           expand={expand}
-          onExpandChange={setExpand}
-          shadows={shadows}
-          onShadowsChange={setShadows}
+          onExpandChange={(value) => {
+            setExpand(value);
+            onFineTuneExpandChange(value);
+          }}
           seed={seed}
-          onSeedChange={setSeed}
+          onSeedChange={(value) => {
+            setSeed(value);
+            onFineTuneSeedChange(value);
+          }}
           activeTab={activeTab}
           onTabChange={setActiveTab}
           blockedReason={blockedReason}

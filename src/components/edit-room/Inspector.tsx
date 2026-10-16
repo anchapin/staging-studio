@@ -78,14 +78,13 @@ export interface InspectorProps {
   // The Inspector doesn't care about the values; it just threads them
   // through to the StagePanel → FineTune so the shell can wire them
   // to the autosave controller in #1344.
+  //
+  // Issue #1362a — `adherence` and `shadows` removed (Q1 + Gemini
+  // finding — see `FineTune.tsx` STICKY NOTE).
   strength?: number;
   onStrengthChange?: (n: number) => void;
-  adherence?: number;
-  onAdherenceChange?: (n: number) => void;
   expand?: number;
   onExpandChange?: (n: number) => void;
-  shadows?: boolean;
-  onShadowsChange?: (b: boolean) => void;
   seed?: string;
   onSeedChange?: (s: string) => void;
 
@@ -162,14 +161,11 @@ export function Inspector(props: InspectorProps): ReactNode {
     projectGlobalDirectives,
     // Fine-tune pass-through (optional — defaults to StagePanel's
     // literal defaults when the shell hasn't wired them).
+    // Issue #1362a — `adherence` and `shadows` removed.
     strength,
     onStrengthChange,
-    adherence,
-    onAdherenceChange,
     expand,
     onExpandChange,
-    shadows,
-    onShadowsChange,
     seed,
     onSeedChange,
   } = props;
@@ -266,12 +262,8 @@ export function Inspector(props: InspectorProps): ReactNode {
             projectGlobalDirectives={projectGlobalDirectives}
             strength={strength}
             onStrengthChange={onStrengthChange}
-            adherence={adherence}
-            onAdherenceChange={onAdherenceChange}
             expand={expand}
             onExpandChange={onExpandChange}
-            shadows={shadows}
-            onShadowsChange={onShadowsChange}
             seed={seed}
             onSeedChange={onSeedChange}
           />

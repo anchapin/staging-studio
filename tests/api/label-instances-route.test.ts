@@ -49,6 +49,14 @@ const mockRoom = {
   // Issue #1343 — listing-copy columns.
   lookbookHeadline: null,
   lookbookBody: null,
+  // Issue #1362a — FineTune persistence columns (issue #1362a).
+  // The label-instances route does not read or write these fields,
+  // but `prisma.room.findFirst`'s generated return type now requires
+  // them on the mock — null matches a legacy row that has never had
+  // any FineTune column written.
+  fineTuneStrength: null,
+  fineTuneExpand: null,
+  fineTuneSeed: null,
   createdAt: new Date(),
 };
 

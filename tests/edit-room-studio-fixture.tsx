@@ -10,6 +10,12 @@
  * single source of truth for "the minimum prop bag the shell needs to
  * render" so a future contract addition only needs a fixture edit, not
  * an N-site search-and-replace.
+ *
+ * Issue #1362a — FineTune persistence: four new required props
+ * (`initialFineTune` + three on-change callbacks). The defaults mirror
+ * a legacy row that has never had any FineTune column written
+ * (all-null), so the shell's `useState(initialFineTune?.strength ?? 50)`
+ * shape lands at the UI's natural defaults.
  */
 
 import type { EditRoomStudioProps } from "@/components/edit-room/types";
@@ -60,6 +66,19 @@ export function baseProps(
     onExitToProject: () => {},
     maskDataUrl: null,
     onMaskChange: () => {},
+    // Issue #1362a — FineTune persistence. Default bag mirrors a
+    // legacy row (all-null); the shell's per-field `useState(... ?? default)`
+    // shape picks UI defaults (strength=50 → 0.5 at the wire, expand=12,
+    // seed=""). Tests that exercise persisted-FineTune rehydrate
+    // override `initialFineTune` and the matching on-change callback.
+    initialFineTune: {
+      strength: null,
+      expand: null,
+      seed: null,
+    },
+    onFineTuneStrengthChange: () => {},
+    onFineTuneExpandChange: () => {},
+    onFineTuneSeedChange: () => {},
     ...rest,
   };
 }

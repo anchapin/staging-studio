@@ -112,6 +112,21 @@ model Room {
   lookbookHeadline     String?
   lookbookBody         String?
 
+  // Issue #1362a — FineTune persistence columns. Three nullable columns
+  // mirror the FineTune UI's three surviving controls after the §8
+  // Q1/Q3 + Gemini-finding cleanup (adherence and shadows removed;
+  // creativeMode + lockSeed never had UI controls):
+  //   - strength 0..100, UI percent → maps to DashScope `parameters.strength` (0..1)
+  //   - expand 0..40, pre-upload mask feathering radius in pixels
+  //   - seed: up to 6 digits (digits-only constraint enforced by Zod)
+  // All three are nullable so existing rooms ship without any FineTune
+  // state and the UI falls back to its defaults (strength=50 → 0.5,
+  // expand=12, seed=""). Stage A only persists; Stage B (#1362b) wires
+  // the persisted values into the DashScope request.
+  fineTuneStrength     Int?
+  fineTuneExpand       Int?
+  fineTuneSeed         String?
+
   sortOrder           Int      @default(0) // for manual room reordering
 
   createdAt            DateTime @default(now())

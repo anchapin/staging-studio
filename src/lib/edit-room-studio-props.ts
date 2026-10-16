@@ -74,6 +74,18 @@ export interface FocusedRoomLike {
    * the autosave controller wrote the user's keystrokes correctly.
    */
   rawDirectives?: string | null;
+  /**
+   * Issue #1362a — FineTune persistence. All three columns are
+   * nullable on `Room`, so a legacy row ships `null` for each. The
+   * resolver forwards null → `undefined` so the studio's
+   * `useState(seed ?? 50)` fallbacks land at the UI's natural
+   * defaults (strength=50 → 0.5 at the wire; expand=12; seed="").
+   * Stage A only persists; Stage B (#1362b) wires the persisted values
+   * into the DashScope request.
+   */
+  fineTuneStrength?: number | null;
+  fineTuneExpand?: number | null;
+  fineTuneSeed?: string | null;
 }
 
 /** The minimal focused-inputs slice the resolver reads. */
@@ -120,6 +132,17 @@ export interface BuildEditRoomStudioPropsArgs {
    * CLEAR_MASK.
    */
   onMaskChange: (value: string | null) => void;
+  /**
+   * Issue #1362a — FineTune autosave callbacks. The route's
+   * `editFineTune(roomId, patch)` fans out to the per-room
+   * AutosaveController; the shell calls the relevant one on each
+   * control change. Three callbacks so the shell can update local
+   * state in the same handler that fires the autosave (same shape as
+   * the directives `onDirectionsCommit`).
+   */
+  onFineTuneStrengthChange: (value: number) => void;
+  onFineTuneExpandChange: (value: number) => void;
+  onFineTuneSeedChange: (value: string) => void;
 }
 
 /**
@@ -171,6 +194,9 @@ export function buildEditRoomStudioProps(
     onDirectionsCommit,
     maskDataUrl,
     onMaskChange,
+    onFineTuneStrengthChange,
+    onFineTuneExpandChange,
+    onFineTuneSeedChange,
   } = args;
   return {
     // Narrow `AutosaveStatus` ("idle" | "dirty" | "saving" | "saved" |
@@ -199,6 +225,15 @@ export function buildEditRoomStudioProps(
     // remount; the copy tab's "Rewrite from directions" CTA
     // dead-ended as a result).
     initialDirections: focusedRoom.rawDirectives ?? "",
+    // Issue #1362a — seed the shell's FineTune useStates from the
+    // persisted columns. Each column is nullable (legacy rows have
+    // nulls); the studio's `useState(initialFineTune.strength ?? 50)`
+    // shape handles missing → UI defaults.
+    initialFineTune: {
+      strength: focusedRoom.fineTuneStrength ?? null,
+      expand: focusedRoom.fineTuneExpand ?? null,
+      seed: focusedRoom.fineTuneSeed ?? null,
+    },
     address: project.propertyAddress,
     imageUrl: focusedInputs.inpaintImageUrl ?? "",
     lookbookVariantUrls: {
@@ -212,5 +247,12 @@ export function buildEditRoomStudioProps(
     onExitToProject,
     maskDataUrl,
     onMaskChange,
+    // Issue #1362a — pass-through to the shell's FineTune useStates.
+    // The shell fans these out to the matching useState setters and
+    // fires the parent route's `editFineTune(roomId, patch)` via the
+    // same handler.
+    onFineTuneStrengthChange,
+    onFineTuneExpandChange,
+    onFineTuneSeedChange,
   };
 }

@@ -46,18 +46,20 @@ export type ProjectMetadataInput = z.infer<typeof projectMetadataSchema>;
  * `saveRoomMetadata` server action (issue #682).
  *
  * Purpose: validates the client-controlled room-data object before it
- * reaches Prisma so only the two editable room fields (`name`,
- * `rawDirectives`) are ever written. Both fields are optional (autosave
- * sends only what changed); `.strict()` rejects unknown keys outright,
- * so a crafted payload carrying `projectId` (re-parenting outside the
- * ownership chain), `selectedVariantIndex`, or image URLs can never
- * ride this path.
+ * reaches Prisma so only the five editable room fields (`name`,
+ * `rawDirectives`, `fineTuneStrength`, `fineTuneExpand`, `fineTuneSeed`)
+ * are ever written. All five are optional (autosave sends only what
+ * changed); `.strict()` rejects unknown keys outright, so a crafted
+ * payload carrying `projectId` (re-parenting outside the ownership
+ * chain), `selectedVariantIndex`, or image URLs can never ride this
+ * path.
  *
- * Contract: every present field must be a string of at most 2,000
- * characters (matching the client textarea caps). Empty strings parse
- * (an autosave may clear the directives) and an entirely empty object
- * parses — Prisma ignores absent/undefined keys and `update` tolerates
- * empty `data`.
+ * Contract: the two text fields must be strings of at most 2,000
+ * characters (matching the client textarea caps); the three FineTune
+ * fields use the FineTune UI's natural constraints (0..100, 0..40,
+ * digits-only 6 chars max). Empty strings parse (an autosave may clear
+ * the directives) and an entirely empty object parses — Prisma ignores
+ * absent/undefined keys and `update` tolerates empty `data`.
  *
  * Side effects: none — pure validation.
  */
@@ -65,6 +67,30 @@ export const roomMetadataSchema = z
   .object({
     name: metadataTextField("Room name"),
     rawDirectives: metadataTextField("Raw directives"),
+    // Issue #1362a — FineTune persistence. The same AutosaveController
+    // shape that backs `rawDirectives` (issue #496) is now reused for
+    // the three surviving FineTune controls. Bounds mirror the UI:
+    //   - strength: 0..100 (UI percent; DashScope `parameters.strength`
+    //     is 0..1, divided by 100 at the route layer in #1362b).
+    //   - expand:   0..40 (pre-upload mask feathering radius in px;
+    //     Stage B's `mask-feather.ts` reads this and feathers the mask
+    //     data URL before submit).
+    //   - seed:     digits-only, max 6 chars. Matches FineTune.tsx's
+    //     `e.target.value.replace(/\D/g, "")` constraint.
+    fineTuneStrength: z
+      .number()
+      .int({ message: "FineTune strength must be a whole number" })
+      .min(0, { message: "FineTune strength must be between 0 and 100" })
+      .max(100, { message: "FineTune strength must be between 0 and 100" }),
+    fineTuneExpand: z
+      .number()
+      .int({ message: "FineTune expand must be a whole number" })
+      .min(0, { message: "FineTune expand must be between 0 and 40 pixels" })
+      .max(40, { message: "FineTune expand must be between 0 and 40 pixels" }),
+    fineTuneSeed: z
+      .string()
+      .regex(/^\d*$/, { message: "FineTune seed must contain only digits" })
+      .max(6, { message: "FineTune seed must be 6 digits or fewer" }),
   })
   .partial()
   .strict();
