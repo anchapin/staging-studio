@@ -107,6 +107,15 @@ export async function readUploadedObjectSize(
     limit: 100,
   });
   if (error || !data) return null;
+  // The storage list response is typed as an array, but a misbehaving
+  // backend (or a stub) can return a non-iterable shape — e.g. the
+  // hermetic e2e mock's `__e2e/storage` responder. Calling `.find` on
+  // such a value would surface as `TypeError: data.find is not a
+  // function` in `confirmRoomPhotoUpload` and fail the entire upload
+  // with that message. Treat any non-array response as "no match" and
+  // let the upload fall through to the downstream size check (the
+  // linked URL 404s if the object is actually missing).
+  if (!Array.isArray(data)) return null;
 
   const match = data.find((entry) => entry.name === fileName);
   if (!match || !match.metadata || typeof match.metadata.size !== "number") {

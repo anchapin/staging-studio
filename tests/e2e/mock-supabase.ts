@@ -455,6 +455,24 @@ export class MockSupabase {
       return;
     }
 
+    // Object listing (issue #1344 follow-up): the room-photo upload
+    // action's size-enforcement call (`readUploadedObjectSize`) needs
+    // a real /storage/v1/object/list/<bucket> responder — without
+    // it, the e2e mock returns a non-array shape, and the action's
+    // `data.find` call throws `TypeError: data.find is not a
+    // function`, surfacing as a "Room photo upload failed." toast in
+    // the spec. supabase-js sends the prefix + search + limit as a
+    // JSON body on POST /object/list/<bucket>, so we read the body
+    // and filter the in-memory object map by bucket + prefix +
+    // (optional) substring search, then project the rows into the
+    // `{ name, metadata: { size, mimetype } }` shape supabase-js
+    // expects.
+    if (mode === "list" && req.method === "POST") {
+      const listBucket = parts[4];
+      void this.handleList(req, res, listBucket);
+      return;
+    }
+
     // Plain upload (issue #747): saveInpaintVersion uploads version-history
     // thumbnails with supabase-js `.upload()`, which services as a plain
     // POST /object/<bucket>/<path>. Blob bodies arrive wrapped in a
@@ -494,6 +512,49 @@ export class MockSupabase {
     const contentType = String(req.headers["content-type"] ?? "application/octet-stream");
     this.storeObject(bucket, objectPath, bytes, contentType);
     this.ackObject(res, bucket, objectPath);
+  }
+
+  /**
+   * `POST /storage/v1/object/list/<bucket>` (issue #1344 follow-up):
+   * supabase-js v2 sends `{ prefix, search, limit, sortBy, ... }` as a
+   * JSON body. Filter the in-memory object map by bucket + prefix,
+   * optionally narrow by the substring `search`, and project each row
+   * into the `{ name, metadata: { size, mimetype }, ... }` shape
+   * supabase-js hands back to the caller. Used by
+   * `readUploadedObjectSize` in the room-photo upload action to read
+   * the just-uploaded object's byte size and enforce the 10 MB cap
+   * (issue #1145).
+   */
+  private async handleList(
+    req: IncomingMessage,
+    res: ServerResponse,
+    bucket: string
+  ): Promise<void> {
+    const raw = await readBody(req);
+    let body: { prefix?: string; search?: string } = {};
+    try {
+      body = JSON.parse(raw.toString("utf8"));
+    } catch {
+      // supabase-js always sends a JSON body; if a future version
+      // sends something else, fall through with an empty filter and
+      // return the full bucket.
+    }
+    const prefix = body.prefix ?? "";
+    const search = body.search ?? "";
+    const now = new Date().toISOString();
+    const entries = this.listObjects()
+      .filter((o) => o.bucket === bucket)
+      .filter((o) => (prefix ? o.path.startsWith(prefix) : true))
+      .filter((o) => (search ? o.path.includes(search) : true))
+      .map((o) => ({
+        name: o.path.slice(prefix.length).replace(/^\/+/, "") || o.path,
+        id: `${o.bucket}/${o.path}`,
+        updated_at: now,
+        created_at: now,
+        last_accessed_at: now,
+        metadata: { size: o.size, mimetype: o.contentType },
+      }));
+    json(res, 200, entries);
   }
 
   /**

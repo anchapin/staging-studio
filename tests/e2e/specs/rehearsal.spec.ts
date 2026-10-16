@@ -70,7 +70,9 @@ test.describe("rehearsal drill", () => {
       .locator(".space-y-3", { hasText: "Rehearsal Room" })
       .getByRole("button", { name: "Edit staging" })
       .click();
-    await expect(page.getByRole("button", { name: "All rooms" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "All rooms", exact: true })
+    ).toBeVisible();
 
     // ---- Directives + mask --------------------------------------------
     // The new surface's Directions textarea (label = "Directions" —
@@ -119,7 +121,9 @@ test.describe("rehearsal drill", () => {
       .locator(".space-y-3", { hasText: "Rehearsal Room" })
       .getByRole("button", { name: "Edit staging" })
       .click();
-    await expect(page.getByRole("button", { name: "All rooms" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "All rooms", exact: true })
+    ).toBeVisible();
 
     // ---- Copy (OpenAI simulated) ---------------------------------------
     // Copy generation reads the room's shared staging directives — the

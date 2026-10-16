@@ -45,6 +45,12 @@ import { signPreviewToken } from "@/lib/preview-token";
 
 const PROJECT_ID_PATTERN = /^c[a-z0-9]{24}$/;
 const PREVIEW_TOKEN_QUERY_PARAM = "token";
+// Issue #1222: the capture path marks itself so the print CSS keeps the
+// render full-bleed. Local copy (the test mocks `@/lib/preview-token` and
+// only re-exports `signPreviewToken`); mirror the values from
+// `lib/preview-token.ts` so the v1 path matches the unversioned path.
+const PREVIEW_CAPTURE_QUERY_PARAM = "capture";
+const PREVIEW_CAPTURE_QUERY_VALUE = "pdf";
 
 export const dynamic = "force-dynamic";
 
@@ -187,7 +193,12 @@ export async function POST(req: NextRequest) {
 
     // Signed, short-lived, projectId-scoped token for cookie-less access
     const token = await signPreviewToken(projectId);
-    const previewUrl = `${appUrl}/preview/${projectId}?${PREVIEW_TOKEN_QUERY_PARAM}=${encodeURIComponent(token)}`;
+    // Mirror the unversioned route's `capture=pdf` marker (issue #1222)
+    // so the v1 path renders the same full-bleed print CSS as the
+    // unversioned path. Without it the lookbook-print-baseline spec's
+    // `expect(body.url).toContain("capture=pdf")` matches the wrong
+    // request when the v1 spec sorts first in the suite's run order.
+    const previewUrl = `${appUrl}/preview/${projectId}?${PREVIEW_TOKEN_QUERY_PARAM}=${encodeURIComponent(token)}&${PREVIEW_CAPTURE_QUERY_PARAM}=${PREVIEW_CAPTURE_QUERY_VALUE}`;
 
     // Fetch PDF with circuit breaker and timeout
     // Issue #201/#1132: claim one export unit ATOMICALLY here, on the
