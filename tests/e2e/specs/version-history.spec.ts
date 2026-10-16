@@ -9,6 +9,7 @@ import {
   mockStorageEntries,
   openFocusedEditor,
   paintMaskZigzag,
+  waitForDirectivesSaved,
   type MockStorageEntry,
 } from "../helpers";
 
@@ -66,6 +67,14 @@ test.describe("version history thumbnail upload", () => {
         .map((entry) => entry.path)
     );
 
+    await expect(page.getByTestId("run-button")).toBeEnabled();
+    // Wait for the route's autosave to settle the typed directives
+    // before Run fires (see inpaint-submit.spec.ts for the same
+    // rationale — the cluster's `useInpaintRuns` validates
+    // `promptDirectives.trim()` against the route's prop, which only
+    // updates after the shell's 900ms debounce lands the typed
+    // value into `directives[roomId]`).
+    await waitForDirectivesSaved(page);
     await page.getByTestId("run-button").click();
     await expect(page.getByText("Inpainting completed successfully!")).toBeVisible({
       timeout: 20_000,

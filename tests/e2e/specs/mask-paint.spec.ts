@@ -8,6 +8,7 @@ import {
   login,
   openFocusedEditor,
   paintMaskZigzag,
+  waitForDirectivesSaved,
   whitePixelShare,
 } from "../helpers";
 
@@ -72,6 +73,13 @@ test.describe("mask painting", () => {
 
     await paintMaskZigzag(page);
     await expect(run).toBeEnabled();
+    // The route's `directives[roomId]` only updates 900ms after the
+    // shell's debounce fires (see `EditRoomStudio.tsx`'s 900ms timer);
+    // the cluster's `useInpaintRuns` reads from that prop and its
+    // `submitInpaint` validates `promptDirectives.trim()` BEFORE
+    // issuing the run. Wait for the autosave status pill to flip back
+    // to "Saved" so the route has the typed value before Run fires.
+    await waitForDirectivesSaved(page);
 
     await run.click();
 
@@ -106,6 +114,12 @@ test.describe("mask painting", () => {
     await page.getByRole("radio", { name: "Paint area" }).click();
 
     const run = page.getByTestId("run-button");
+    await expect(run).toBeDisabled();
+
+    // The new surface's Run button requires BOTH directions AND a
+    // non-empty mask (see `resolveStageBlockedReason`). Fill
+    // directions first so the only thing gating the run is the mask.
+    await page.getByRole("textbox", { name: "Directions" }).fill("E2E: paint + clear.");
     await expect(run).toBeDisabled();
 
     await paintMaskZigzag(page);
@@ -150,6 +164,10 @@ test.describe("mask painting on high-DPI displays", () => {
     await expect(directives).toBeVisible();
     await directives.fill("Add a neutral linen sofa and a warm wood coffee table.");
     await page.getByRole("radio", { name: "Paint area" }).click();
+    // Issue #1344 — wait for the route's autosave to settle the typed
+    // directives into `directives[roomId]` before any Run click (see
+    // `waitForDirectivesSaved` in helpers.ts for the full rationale).
+    await waitForDirectivesSaved(page);
   }
 
   function brushCanvas(page: import("@playwright/test").Page) {
@@ -195,6 +213,13 @@ test.describe("mask painting on high-DPI displays", () => {
 
     const run = page.getByTestId("run-button");
     await expect(run).toBeEnabled();
+    // The route's `directives[roomId]` only updates 900ms after the
+    // shell's debounce fires (see `EditRoomStudio.tsx`'s 900ms timer);
+    // the cluster's `useInpaintRuns` reads from that prop and its
+    // `submitInpaint` validates `promptDirectives.trim()` BEFORE
+    // issuing the run. Wait for the autosave status pill to flip back
+    // to "Saved" so the route has the typed value before Run fires.
+    await waitForDirectivesSaved(page);
     await run.click();
     await expect(page.getByText("Inpainting completed successfully!")).toBeVisible({
       timeout: 20_000,

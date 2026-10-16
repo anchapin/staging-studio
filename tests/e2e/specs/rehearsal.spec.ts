@@ -12,6 +12,7 @@ import {
   mockStorageEntries,
   paintMaskZigzag,
   uploadRoomPhotoViaUi,
+  waitForDirectivesSaved,
   whitePixelShare,
 } from "../helpers";
 
@@ -82,6 +83,13 @@ test.describe("rehearsal drill", () => {
     await paintMaskZigzag(page);
     const applyButton = page.getByTestId("run-button");
     await expect(applyButton).toBeEnabled();
+    // Wait for the route's autosave to settle the typed directives
+    // before Run fires (see inpaint-submit.spec.ts for the same
+    // rationale — the cluster's `useInpaintRuns` validates
+    // `promptDirectives.trim()` against the route's prop, which only
+    // updates after the shell's 900ms debounce lands the typed
+    // value into `directives[roomId]`).
+    await waitForDirectivesSaved(page);
 
     // ---- Inpaint (fal.ai simulated) ------------------------------------
     await applyButton.click();
@@ -193,6 +201,8 @@ test.describe("rehearsal drill", () => {
     await page.getByRole("radio", { name: "Paint area" }).click();
     await paintMaskZigzag(page);
 
+    await expect(page.getByTestId("run-button")).toBeEnabled();
+    await waitForDirectivesSaved(page);
     await page.getByTestId("run-button").click();
 
     // The submit itself succeeds (interception), then polling reports the

@@ -107,6 +107,22 @@ export async function openEditorTab(
 }
 
 /**
+ * Issue #1344 — wait for the route's autosave pill to flip back to
+ * "Saved" so the typed directions propagate to the cluster's
+ * `promptDirectives` prop before any Run click. The shell debounces
+ * `onDirectionsCommit` at 900ms (`EditRoomStudio.tsx` line 52); the
+ * route's `AutosaveController` waits 2000ms after the commit before
+ * flipping the pill to "Saved" (`api-quota.ts` #1344). The cluster's
+ * `useInpaintRuns` validates `promptDirectives.trim()` against the
+ * route's prop — calling Run before the autosave settles races the
+ * debounce and trips the "Add staging directives to brief the AI on
+ * your vision." error toast. This helper makes the spec deterministic.
+ */
+export async function waitForDirectivesSaved(page: Page): Promise<void> {
+  await expect(page.getByText("Saved").first()).toBeVisible({ timeout: 6_000 });
+}
+
+/**
  * Paints a multi-stroke zig-zag across the middle of the mask canvas with
  * REAL trusted mouse events (CDP input pipeline) — the exact interaction
  * class that silently failed under the PoC's dispatched-event driver
@@ -223,6 +239,15 @@ export function interceptInpaint(page: Page): InpaintInterception {
       body: JSON.stringify({
         status: "completed",
         imageUrl: STAGED_RESULT_PUBLIC_URL,
+        // Match the real route's success-payload shape (see
+        // `pollInpaintStatus` + `persistInpaintImage` in
+        // `src/lib/inpaint-status.ts`): `persisted: true` is the
+        // signal `use-inpaint-status.ts` reads to fire the
+        // "Inpainting completed successfully!" toast. Without it the
+        // toast is suppressed and the spec's
+        // `expect(page.getByText("Inpainting completed
+        // successfully!"))` timeouts even though the run succeeded.
+        persisted: true,
       }),
     });
   };
@@ -550,9 +575,18 @@ function minimalPdfBytes(): Buffer {
 
 /**
  * Decodes a PNG data URL INSIDE the browser and measures the share of
- * white pixels — sampling the actual mask payload the app put on the wire
- * (issue #165's acceptance criterion: white coverage above a threshold,
- * not a 100% black export).
+ * painted pixels — sampling the actual mask payload the app put on the
+ * wire (issue #165's acceptance criterion: non-black coverage above a
+ * threshold, not a 100% black export).
+ *
+ * Issue #1344 — the legacy `<InpaintEditor>`'s `use-mask-painting`
+ * stroked with `ctx.strokeStyle = "white"`, so this helper checked
+ * for R/G/B > 200. The new `<EditRoomStudio>`'s `<MaskLayer>` strokes
+ * with the Atelier Canvas bronze `#8f4d20` (R=143, G=77, B=32) — same
+ * fill-opacity contract (opaque over black) but the colour shifted to
+ * match the design system. The check below detects ANY painted
+ * pixel (any of R/G/B > 0), so the helper works against both the
+ * legacy and the new surface.
  */
 export async function whitePixelShare(page: Page, dataUrl: string): Promise<number> {
   return page.evaluate(async (src) => {
@@ -569,12 +603,12 @@ export async function whitePixelShare(page: Page, dataUrl: string): Promise<numb
     if (!ctx) throw new Error("no 2d context");
     ctx.drawImage(image, 0, 0);
     const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    let white = 0;
+    let painted = 0;
     const total = canvas.width * canvas.height;
     for (let i = 0; i < data.length; i += 4) {
-      if (data[i] > 200 && data[i + 1] > 200 && data[i + 2] > 200) white++;
+      if (data[i] > 0 || data[i + 1] > 0 || data[i + 2] > 0) painted++;
     }
-    return white / total;
+    return painted / total;
   }, dataUrl);
 }
 
@@ -588,10 +622,18 @@ export interface WhitePixelGeometry {
 }
 
 /**
- * Decodes a PNG data URL INSIDE the browser and locates its white pixels
- * geometrically — normalized share, centroid, and bounding box. Issue #181
- * uses this to prove a stroke painted at a known viewport point exports to
- * the matching photo region (mask lands under the cursor) at 2x DPR.
+ * Decodes a PNG data URL INSIDE the browser and locates its painted
+ * pixels geometrically — normalized share, centroid, and bounding
+ * box. Issue #181 uses this to prove a stroke painted at a known
+ * viewport point exports to the matching photo region (mask lands
+ * under the cursor) at 2x DPR.
+ *
+ * Issue #1344 — the new `<EditRoomStudio>`'s `<MaskLayer>` strokes
+ * with the Atelier Canvas bronze `#8f4d20` (the design system
+ * stroke color) instead of the legacy surface's plain white. The
+ * detector below matches any non-black pixel (R/G/B > 0) so it
+ * works against both surfaces; the share remains co-monotone with
+ * coverage under the new color.
  */
 export async function whitePixelGeometry(page: Page, dataUrl: string): Promise<WhitePixelGeometry> {
   return page.evaluate(async (src) => {
@@ -608,7 +650,7 @@ export async function whitePixelGeometry(page: Page, dataUrl: string): Promise<W
     if (!ctx) throw new Error("no 2d context");
     ctx.drawImage(image, 0, 0);
     const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    let white = 0;
+    let painted = 0;
     let sumX = 0;
     let sumY = 0;
     let minX = canvas.width;
@@ -618,8 +660,8 @@ export async function whitePixelGeometry(page: Page, dataUrl: string): Promise<W
     for (let y = 0; y < canvas.height; y++) {
       for (let x = 0; x < canvas.width; x++) {
         const i = (y * canvas.width + x) * 4;
-        if (data[i] > 200 && data[i + 1] > 200 && data[i + 2] > 200) {
-          white++;
+        if (data[i] > 0 || data[i + 1] > 0 || data[i + 2] > 0) {
+          painted++;
           sumX += x;
           sumY += y;
           if (x < minX) minX = x;
@@ -629,10 +671,10 @@ export async function whitePixelGeometry(page: Page, dataUrl: string): Promise<W
         }
       }
     }
-    if (white === 0) throw new Error("mask contains no white pixels");
+    if (painted === 0) throw new Error("mask contains no painted pixels");
     return {
-      share: white / (canvas.width * canvas.height),
-      centroid: { x: sumX / white / canvas.width, y: sumY / white / canvas.height },
+      share: painted / (canvas.width * canvas.height),
+      centroid: { x: sumX / painted / canvas.width, y: sumY / painted / canvas.height },
       bbox: {
         minX: minX / canvas.width,
         maxX: maxX / canvas.width,

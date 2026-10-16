@@ -8,6 +8,7 @@ import {
   login,
   openFocusedEditor,
   paintMaskZigzag,
+  waitForDirectivesSaved,
 } from "../helpers";
 
 /**
@@ -55,6 +56,13 @@ test.describe("inpaint submit and status-polling flow", () => {
 
     await paintMaskZigzag(page);
     await expect(run).toBeEnabled();
+    // The route's `directives[roomId]` only updates 900ms after the
+    // shell's debounce fires; the cluster's `useInpaintRuns` reads
+    // from that prop and its `submitInpaint` validates
+    // `promptDirectives.trim()` BEFORE issuing the run. Wait for the
+    // autosave status pill to flip back to "Saved" so the route has
+    // the typed value before Run fires.
+    await waitForDirectivesSaved(page);
 
     await run.click();
 
@@ -92,6 +100,14 @@ test.describe("inpaint submit and status-polling flow", () => {
     await paintMaskZigzag(page);
 
     const run = page.getByTestId("run-button");
+    await expect(run).toBeEnabled();
+    // Wait for the route's autosave to settle the typed directives
+    // before Run fires (the cluster's `useInpaintRuns` validates
+    // `promptDirectives.trim()` against the route's prop, not the
+    // shell's local state — the shell's 900ms debounce lands the
+    // typed value into the route's `directives[roomId]` only after
+    // settle).
+    await waitForDirectivesSaved(page);
     await run.click();
     await expect(page.getByText("Inpainting completed successfully!")).toBeVisible({
       timeout: 20_000,
