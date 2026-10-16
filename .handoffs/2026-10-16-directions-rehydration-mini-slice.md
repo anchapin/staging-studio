@@ -335,13 +335,19 @@ migration. Worth its own conversation.
 
 ### 6.2 — Autosave race uncovered by this session
 
-Still applicable even after merge — production users will hit the
-same race in real usage when typing fast and clicking Run before
-the 2s autosave timer fires. Recommended fix: have the Run button
-`flush()` the directive autosave controller before submitting
-inpaint (threaded via `<EditRoomRunClusterHandle>`, same shape as
-`beginEditRoomRun`). Once landed, the `fill(DIRECTIVES)` workaround
-in `tests/e2e/specs/rehearsal.spec.ts:142` can retire.
+**RESOLVED** by PR #1361 (squash-merged as `fe61999` on
+`origin/develop`). Threaded a `beforeRun?: () => Promise<boolean>`
+flush hook through `<EditRoomRunCluster>`, exposed a new
+`beginRun(maskDataUrl)` slot on the imperative handle, and
+swapped the route's `beginEditRoomRun` to call it. The cluster
+blocks on `flush()` before `submitInpaint` so typed directives
+land in `Room.rawDirectives` first; on `flush()` reporting
+unsaved work remained the cluster surfaces a Retry toast and
+skips the submit. Post-merge CI run `38956787323` confirmed the
+full 86-spec hermetic suite now runs end to end successfully in
+~2m 33s (vs. previous always-red 30s). The rehearsal spec's
+`fill(DIRECTIVES)` workaround at `tests/e2e/specs/rehearsal.spec.ts:142`
+retired; the main drill now finishes in 6s end-to-end.
 
 ### 6.3 — Mask-paint toast timing
 
