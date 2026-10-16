@@ -102,6 +102,17 @@ jobs:
     # it here is the schema error GitHub was rejecting the whole file
     # with since PR #1313. See issue #1104.
     timeout-minutes: 30
+    # The hermetic harness asserts `process.env.DATABASE_URL` in
+    # `tests/e2e/global-setup.ts:353` (defensive guard from issue #1102).
+    # Without this env block the assertion rejects the unset value and
+    # the suite fails before the first spec — every develop-branch push
+    # has been red since at least 2026-10-15 for this reason. The
+    # hardcoded `DATABASE_URL` constant in `tests/e2e/env.ts:198` already
+    # points at this same ephemeral URL; surfacing it here just makes it
+    # visible to `process.env` at job time. The container is brought up
+    # by `ensureDockerPostgres()` in the same global-setup script.
+    env:
+      DATABASE_URL: postgresql://e2e:e2e@127.0.0.1:39921/staging_studio_e2e
     # Measured on a clean checkout with no env files (the closest thing to
     # this runner available locally): `npm ci` ~20s, then ~4min for the
     # production build inside the webServer plus all 62 specs. The 30min
