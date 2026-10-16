@@ -304,7 +304,7 @@ correct; the CI red is a separate operational issue.
   - `edit-room-studio-props.ts:193-198` (resolver forwards initialDirections)
   - `types.ts:90-117` (initialDirections prop doc + signature)
 
-## 6. Updated priorities (post-merge)
+## 6.1. Updated priorities (post-merge)
 
 The next session should now address, **in priority order**:
 
@@ -379,15 +379,16 @@ CI's v24 isn't surprised by anything tsc/oxlint didn't catch.
 
 ---
 
-## 7. FineTune persistence — scope reframe (2026-10-16, abortive session)
+## 8. FineTune persistence — scope reframe (2026-10-16, abortive session)
 
 **This session attempted the §6.1 FineTune persistence slice and
 aborted mid-way through, leaving NO partial code on disk.** All
 in-flight edits (`prisma/schema.prisma`, `src/lib/metadata-schemas.ts`,
 `src/components/edit-room/types.ts`) were reverted with
 `git checkout HEAD -- …` and Prisma regenerated. The repo is
-back to the post-#1361 clean state. This section records what
-I learned so the next session doesn't repeat the same mistakes.
+back to the post-#1361 clean state. This section records the
+research findings so the next session doesn't repeat the same
+mistakes or re-do the product-conversation groundwork.
 
 ### What I found before aborting
 
@@ -397,9 +398,9 @@ five FineTune values are local `useState`. Per
 `src/app/(dashboard)/projects/[id]/project-detail-view.tsx:485-505`,
 `editRoomGuidance` is hardcoded with the constants
 `promptStrength: 0.6, maskBlur: 0, seed: undefined,
-creativeMode: false, lockSeed: false` (also the wrong
-`promptStrength` default — the API schema's documented default
-is **0.8**, per `src/lib/ai-route-schemas.ts:64`). So:
+creativeMode: false, lockSeed: false` (also a **wrong**
+`promptStrength` default — the schema doc claims 0.8, the
+DashScope wire default is 0.5; details below). So:
 
 > "persisting" FineTune values that don't reach the API is
 > decorative-only — the user's selections survive a reload but
@@ -408,38 +409,300 @@ is **0.8**, per `src/lib/ai-route-schemas.ts:64`). So:
 The original handoff framed this as a "persistence + rehydration"
 slice, but that framing assumed the wire existed. It didn't.
 
-### API mapping decisions still needed (research captured, not implemented)
+### The Gemini finding (2026-10-16) — bigger than the original framing
 
-`src/lib/ai-route-schemas.ts:80-84` documents the inpaint
-request's accepted fields:
-- `promptStrength: number 0.1..1.0 (default 0.8)`
-- `maskBlur: integer 0..20 (default 5)`
-- `seed: integer 0..999999 (optional)`
-- `creativeMode: boolean (default false)`
-- `lockSeed: boolean (default false)`
+The user surfaced DashScope's parameter surface from an external
+source (Google Gemini). The summary (the user relayed it; the
+full text is on Slack) makes the picture substantially clearer:
 
-FineTune UI controls (`src/components/edit-room/FineTune.tsx:7-11`)
-expose 5 controls. Best-fit mapping by signal type:
+**DashScope's `qwen-image-2.1-pro` and `wan2.1-image-edit` (the
+example JSON in the notes) `parameters` block supports:**
 
-| FineTune control | Maps to API | Mapping |
-|---|---|---|
-| `strength` (0..100, default 80) | `promptStrength` (0.1..1.0, default 0.8) | clamp(x/100, 0.1, 1.0): UI 80 → API 0.8 |
-| `adherence` (0..100, default 75) | `creativeMode` (boolean) | threshold: adherence ≥ 75 → true |
-| `expand` (0..40, default 12) | `maskBlur` (0..20, default 5) | min(x, 20): UI 12 → API 12 |
-| `seed` (digits, default "") | `seed` + `lockSeed` | parseInt or undefined; non-empty → lockSeed=true |
-| `shadows` (boolean, default true) | **NO FIT** | API has no shadows field |
+- ✅ `seed` (integer 0..2147483647) — used by `qwen-image-2.1-pro`.
+- ✅ `strength` (float 0.0..1.0, default **0.5**) — supported on
+  image-to-image / editing tasks (Wan series). The note uses
+  `wan2.1-image-edit`. **This is the actual wire field; the
+  repo's schema's `promptStrength` is a wrong-name alias from
+  fal/Replicate days.**
+- ✅ `prompt_extend` (boolean) and `style` (string presets) —
+  fine-mode controls, server-side. User has no surface for these.
+- ✅ `negative_prompt`, `size`, `watermark`, `n` — already handled
+  in the alibaba adapter's hardcoded `parameters` block.
+- ❌ `temperature` — exposure is restricted to text/LLM endpoints,
+  not image synthesis.
+- ❌ `cfg_scale` / `guidance_scale` / `top_p` / sampling
+  temperature — none exposed for image synthesis.
+- ❌ **`mask_blur`** — not a provider parameter at all. DashScope
+  uses binary B/W mask images, no feathering on the server side.
+  Mask feathering is a client-side / pre-upload concern — apply it
+  to the data URL before submitting.
 
-### `shadows` decision (per user, 2026-10-16)
+**The repo's `alibaba-adapter.ts:187-193` hardcodes:**
 
-User chose: **drop `shadows` from FineTune temporarily; file a
-follow-up issue to reintroduce it properly.** Persisting
-`fineTuneShadows` would create dead state with no API target.
+```ts
+parameters: {
+  n: 1,
+  watermark: false,
+  prompt_extend: true,
+  seed: 42,    // hardcoded
+  size: "2048*1536",
+}
+```
+
+— which doesn't even consume the `seed` parameter from the
+caller, never mind the other 4 guidance fields. **The alibaba
+adapter has been dropping `promptStrength`, `maskBlur`, `seed`,
+`creativeMode`, `lockSeed` on the floor since #1240 landed the
+DashScope migration.** The schema advertised them; the adapter
+ignored them.
+
+### Three drifts this slice has to fix together
+
+1. **Schema doc** (`ai-route-schemas.ts:64-84`) documents 5 guidance
+   fields (`promptStrength`, `maskBlur`, `seed`, `creativeMode`,
+   `lockSeed`).
+2. **Schema field names** — `promptStrength` is wrong; DashScope's
+   wire is `strength`.
+3. **Schema defaults** — even within the existing schema, the
+   route's hardcoded values (`promptStrength: 0.6, maskBlur: 0`)
+   disagree with the schema's documented defaults
+   (`0.8` and `5`, though the Gemini notes say DashScope's
+   `strength` default is `0.5` — the schema doc itself was wrong,
+   not just the route).
+4. **Adapter** — `alibaba-adapter.ts:187-193` doesn't read any of
+   the above fields; it hardcodes its own 5-parameter block.
+
+The schema is advertising a fal/Replicate-shaped surface that
+neither the adapter nor the active provider ever implements. This
+is an undocumented 2-year-old bug whose first observable symptom
+would have been "FineTune controls do nothing."
+
+### Decisions made before aborting (user input captured)
+
+The four product-input questions were answered (some corrected
+from the agent's first instincts):
+
+1. **Q1 — `adherence` handling.** ✅ **Drop `adherence` from
+   FineTune entirely.** UI control removed, no Room column.
+   Originally the agent recommended mapping adherence →
+   creativeMode via threshold; user correctly pointed out that
+   `strength` and `adherence` both invert against `promptStrength`
+   and would conflict in code. P2 wins.
+
+2. **Q2 — Default reconciliation.** ✅ Adopt an `API_DEFAULTS`
+   constant in `inpaint-submit.ts` (or `ai-route-schemas.ts`),
+   with the **DashScope-correct default of 0.5** (NOT the
+   schema's stale 0.8). `editRoomGuidance` derives from the
+   API default + the FineTune overlay.
+
+3. **Q3 — `lockSeed` semantics.** ✅ **`lockSeed: false` always
+   (no special treatment).** User corrected the agent's first
+   instinct (which had been "auto-set `lockSeed: true` when the
+   user types a seed"). The user's sharper insight: locking the
+   seed forces identical output across reruns, which means the
+   user is paying for an API call that returns the same image
+   they already have. A lock is a deliberate cost (e.g.,
+   cross-room reproducibility), not a default. **Default
+   `lockSeed: false`; the lock toggle is an opt-in if we ever
+   ship one.**
+
+4. **Q4 — Storage shape.** ✅ **3 nullable Int/String columns
+   on `Room`** (one per knob, convention fit). Reduced from 4
+   after Q1 dropped adherence. Adherence removed from the
+   column set entirely.
+
+### Recommended next-step shape (revised after Gemini finding)
+
+The original §7 11-step list landed before the Gemini findings
+came in. **The shape is materially different now** — the slice
+is no longer "just persistence," it's "wire-up + persistence,"
+which is what §7 originally noted in the directional lesson. The
+revised shape, in order:
+
+1. **Schema migration.** 3 nullable columns on `Room`:
+   - `fineTuneStrength Int?` (0..100)
+   - `fineTuneExpand Int?` (0..40)
+   - `fineTuneSeed String?` (digits only, max 6)
+   Run `npm run db:push` (per AGENTS.md: schema-first, no
+   migrations dir). Add the `fineTuneStrength`/`Expand`/`Seed`
+   columns to `prisma/schema.prisma`. Document the absence of
+   `fineTuneShadows` with a TODO pointer to the follow-up that
+   handles shadows properly (per the user's earlier choice).
+
+2. **Renaming at the API surface.** The repo's
+   `inpaintRequestSchema` (`ai-route-schemas.ts`) has been
+   advertising the wrong field name since the #1240 migration:
+   `promptStrength` should be `strength` per DashScope's wire
+   (default **0.5** per Gemini). Update:
+   - Field rename: `promptStrength` → `strength`.
+   - Default: 0.5 (down from the schema's stale 0.8).
+   - Drop `creativeMode`, `lockSeed` from the schema entirely
+     — see Q3 above (no FineTune input that maps to them, no
+     user-facing toggle).
+   - Keep `maskBlur` for now as a *placeholder* — but rename it
+     to clarify it's the pre-upload feathering pass (e.g.,
+     `maskFeatherPx`), not a provider parameter. Or remove it
+     entirely once the feathering helper is in place.
+
+3. **Alibaba adapter wiring.** Replace the hardcoded
+   `parameters` block in `src/lib/alibaba-adapter.ts:187-193`:
+   - Drop `seed: 42` — read from the call's `input.seed`.
+   - Add `parameters.strength` from the call's
+     `input.promptStrength` (or `input.strength` if renamed
+     per step 2).
+   - Do NOT add `parameters.maskBlur` (DashScope doesn't
+     accept it).
+   - The `seed: 42` hardcode goes away in this slice — the
+     user passing a seed should now actually pass a seed.
+
+4. **Mask feathering utility.** New `src/lib/mask-feather.ts`
+   helper:
+   - Takes a base64 PNG mask + a pixel radius.
+   - Returns a feathered base64 PNG (binary B/W, edges blurred
+     by N px).
+   - Implementation: `<canvas>` with `imageSmoothingEnabled` +
+     a 2D canvas blur filter, OR a small in-memory box-blur.
+   - Thread through `/api/inpaint` and `/api/v1/inpaint` to
+     apply the user's `expand` value before POSTing.
+   - This is the new home for the `maskBlur` → wire relationship.
+     If the user's `expand: 25` is set, the mask is pre-blurred
+     by 25 px before submit.
+
+5. **`lockSeed` semantics — explicit no-op.** No schema field
+   for it; no UI control. Persisted `fineTuneSeed` is
+   *informational-on-the-next-run*: when the user types a seed,
+   it's used for the next inpaint; subsequent reruns roll
+   fresh. Document this in the `FineTune` tooltip ("type a
+   number for reproducibility on the next run; leave blank for
+   random").
+
+6. **`editRoomGuidance` rewire.** Replace the current
+   `useMemo(..., [])` (which holds hardcoded constants at
+   `src/app/(dashboard)/projects/[id]/project-detail-view.tsx:496-505`)
+   with a memo that depends on the in-memory FineTune values
+   (parallel to `directives[roomId]` at line 1418). Replace the
+   constants with:
+   ```ts
+   // Assumes rename: promptStrength → strength in step 2.
+   strength: clamp((strength ?? 80) / 100, 0.0, 1.0),
+   maskBlur: clamp(expand ?? 12, 0, 40),  // pre-upload feather px
+   seed: parseSeedOrUndefined(seed),
+   // (creativeMode + lockSeed removed per Q3)
+   ```
+   The `useMemo` deps array must include the focused room's
+   fineTune values — this is a real correctness bug in the
+   current code (a `useMemo(..., [])` deps array that should
+   depend on changing state).
+
+7. **`EditRoomStudio` migration.** Move FineTune from 5 local
+   `useState` to 3 controlled values. Same shape as the
+   existing `initialDirections` /
+   `initialCopyHeadline`:
+   - New `initialFineTune?: { strength, expand, seed }` prop
+     on `EditRoomStudioProps`.
+   - 3 `useState`, seeded from `initialFineTune ??` with UI
+     defaults (`strength: 80`, `expand: 12`, `seed: ""`).
+   - 3 onChange callbacks back up to the route's `editFineTune`.
+
+8. **Drop `adherence` and `shadows` from UI.** Modify
+   `src/components/edit-room/FineTune.tsx` and
+   `StagePanel.tsx`:
+   - Remove the `<Slider>` for adherence (FineTune.tsx)
+     and the section that mentions "follow directions".
+   - Remove the `<label>` for `shadows` (FineTune.tsx) and its
+     prop in FineTuneProps + StagePanel.
+
+9. **Zod extension.** Extend `roomMetadataSchema` in
+   `src/lib/metadata-schemas.ts`:
+   ```ts
+   const fineTuneStrengthSchema = z.number().int().min(0).max(100);
+   const fineTuneExpandSchema = z.number().int().min(0).max(40);
+   const fineTuneSeedSchema = z
+     .string()
+     .regex(/^\d*$/, { message: "Seed must contain only digits" })
+     .max(6);
+   ```
+   Add these three as `.partial().strict()` fields alongside
+   the existing `name` + `rawDirectives`.
+
+10. **Route wiring for persistence.** Add a parallel
+    `fineTuneControllersRef` and `fineTuneStatuses` state at
+    `project-detail-view.tsx` (alongside the existing
+    `directiveControllersRef` / `directiveStatuses`). Same
+    `AutosaveController<T>` shape:
+    ```ts
+    new AutosaveController<{
+      fineTuneStrength: number;
+      fineTuneExpand: number;
+      fineTuneSeed: string;
+    }>({ idleMs: 2000, save: ... })
+    ```
+    Add `editFineTune(roomId, patch)` and `getFineTuneController`
+    that parallel the existing `editDirectives` /
+    `getDirectiveController`. Same flow through `saveRoomMetadata`.
+
+11. **Resolver + FocusedRoomLike.** Add the 3 nullable columns
+    to `FocusedRoomLike` in `src/lib/edit-room-studio-props.ts`,
+    and forward `initialFineTune` from
+    `buildEditRoomStudioProps` (the existing call site already
+    passed `focusedRoom` through — add the new forward).
+
+12. **Tests + e2e.**
+    - Unit: alibaba-adapter threading (assert `parameters.strength`
+      and `parameters.seed` land on the wire when caller supplies
+      them).
+    - Unit: `mask-feather.ts` box-blur pixel-radius boundary.
+    - Unit: `editRoomStudioProps` resolver forwards the 3 fields
+      (verbatim + null-coalesced cases).
+    - E2E: type `seed: 12345`, run inpaint, capture the
+      DashScope mock body and assert `parameters.seed: 12345`
+      (not the old hardcoded `42`).
+
+13. **PR shape.** Squash-merge as `#1362`. Branch
+    `mp-redesign/issue-1362-finetune-persistence-and-wire`.
+
+### Pinned sticky notes for the next session
+
+These three notes get paraphrased into a `// STICKY NOTE #NNNN`
+comment at the relevant call site after the slice lands, so the
+intentional design decisions don't get reverted as "dead code"
+by a future "cleanup" pass:
+
+> **STICKY NOTE Q1 (`adherence` drop):** The `<FineTune>` panel
+> previously exposed a 5th `adherence` slider ("Higher sticks
+> closer to your words") that had no API target. It was removed
+> in #1362 because both UI sliders inverted against
+> `promptStrength`/`strength` and conflicted in code. **Do NOT
+> re-add `adherence` without first identifying an API field (or
+> staging-package field) it lands on.** The follow-up issue for
+> reintroducing `adherence` is filed but not yet scoped.
+
+> **STICKY NOTE Q3 (`lockSeed` no-op):** The `lockSeed` field
+> was removed from the schema, the alibaba adapter, and the
+> route's `editRoomGuidance` in #1362. Default behavior is
+> `lockSeed: false` — the user's `seed` is used once on the next
+> rerun, then a fresh seed is rolled. The agent's first instinct
+> (auto-set `lockSeed: true` on non-empty) was rejected for
+> wasting API money on identical reruns. **If a lock toggle is
+> ever added, it must be opt-in (not auto-defaulted).**
+
+> **STICKY NOTE Gemini finding (2026-10-16):** The repo's
+> `inpaintRequestSchema`'s `promptStrength` field was advisory
+> theater — Alibaba DashScope doesn't accept it. The field is
+> renamed to `strength` to match DashScope's wire
+> (`parameters.strength`, float 0.0..1.0, default 0.5). `maskBlur`
+> (FineTune's `expand`) is replaced with a *server-side mask
+> feathering utility* — different shape entirely, since
+> DashScope masks are binary. This slice landed both halves
+> together: persistence alone would be decorative.
 
 ### Why the slice was aborted (engineering sin audit)
 
 - The slice was committed to without enough pre-work — the
   "this is bigger than expected" revelation (wiring never
-  landed) came too late, when I already had three edited files.
+  landed, and then the DashScope parameter surface was
+  nothing like fal/Replicate) came too late, when I already
+  had three edited files.
 - I pushed past **broken state mid-file** to stay inside the
   40-turn budget. `src/components/edit-room/types.ts` ended up
   with the `EditRoomStudioProps` interface declaration line
@@ -451,88 +714,14 @@ follow-up issue to reintroduce it properly.** Persisting
   for exactly this reason — the AGENTS.md "no scope creep" rule
   combined with the missing-fields-by-design FineTune wiring
   made it larger than it looked at first.
-
-### Recommended next-step shape (not implemented)
-
-A proper FineTune slice in a future session should land in this
-order, with the schema + autosave wiring preceded by a
-~half-hour **product-input conversation** answering:
-
-1. **API mapping confirmation.** Is `adherence ≥ 75 → creativeMode`
-   the intended interpretation, or is `adherence` a different
-   dimension that just hasn't landed an API field yet?
-2. **Default reconciliation.** The route's hardcoded
-   `promptStrength: 0.6, maskBlur: 0` are wrong vs the API
-   schema's `0.8, 5` defaults. Should the route's
-   `editRoomGuidance` seed from the API defaults at mount, or
-   is the divergence intentional?
-3. **`lockSeed` semantics.** Should lockSeed be derived from
-   "seed is non-empty" (so it auto-sets when the user types a
-   seed, even if they don't explicitly intend to lock), or
-   should it be a separate FineTune control?
-4. **Storage shape.** 4 nullable columns on `Room` (per
-   `prisma/schema.prisma` issue #1362 design) is the planned
-   shape; this conversation confirms it before the schema
-   migration lands.
-
-Once those answers land, the implementation is mechanical:
-
-1. Schema migration: 4 nullable `fineTune*` columns on `Room`.
-   (`npm run db:push`. Per AGENTS.md: schema-first, no
-   migrations dir.)
-2. Zod extension: `roomMetadataSchema` accepts the 4 fields
-   with their documented ranges — the snippet I had ready was:
-   ```ts
-   const fineTuneStrengthSchema = z.number().int().min(0).max(100);
-   const fineTuneAdherenceSchema = z.number().int().min(0).max(100);
-   const fineTuneExpandSchema = z.number().int().min(0).max(40);
-   const fineTuneSeedSchema = z.string().regex(/^\d*$/).max(6);
-   ```
-3. `EditRoomStudio.tsx`: replace the 5 local `useState` for
-   FineTune with 4 controlled `useState` (still local shell
-   state — no reducer slot needed) seeded from an
-   `initialFineTune?: FineTuneValues` prop (shape defined in
-   `types.ts`; same pattern as `initialDirections` /
-   `initialCopyHeadline`). Drop the `shadows` `useState`.
-4. `FineTune.tsx`: 4 controls (drop `shadows` + its callback
-   prop).
-5. `StagePanel.tsx`: thread only the 4 props through to FineTune
-   (drop `shadows` + `onShadowsChange`).
-6. `FocusedRoomLike`: add `fineTuneStrength? / Adherence? /
-   Expand? / Seed?` for the resolver surface.
-7. `buildEditRoomStudioProps`: forward `initialFineTune` from
-   the row (4 nullable fields, coalesced to UI defaults).
-8. Route wiring: a per-room `AutosaveController<{
-   fineTuneStrength, fineTuneAdherence, fineTuneExpand,
-   fineTuneSeed }>` following the existing directive pattern at
-   `project-detail-view.tsx:583-622`. Same 2-second idle
-   window, same `onStatusChange` → `setFineTuneStatuses` flow.
-   The Map-of-controllers shape parallels `directiveControllersRef`.
-9. `editRoomGuidance` memo: derive from the in-memory fineTune
-   values (parallel to `directives[roomId]` at line 1418). The
-   memo's deps include the focused room's fineTune fields so
-   `<EditRoomRunCluster>` re-renders when fineTune changes.
-   Replace the hardcoded guidance with:
-   ```ts
-   promptStrength: clamp((strength ?? 80) / 100, 0.1, 1.0),
-   maskBlur: Math.min(expand ?? 12, 20),
-   seed: parseSeedOrUndefined(seed),
-   creativeMode: (adherence ?? 75) >= 75,
-   lockSeed: !!parseSeedOrUndefined(seed),
-   ```
-   Note: the existing `useMemo(..., [])` deps array becomes
-   wrong (it must depend on the fineTune fields now) — this is
-   a side-effect-of-correctness bug the current code has (it
-   would never re-render when the user changes FineTune
-   settings).
-10. Tests: 1 new unit per file (resolver, reducer-of-the-route
-    shape, FineTune render). 1 new e2e that types into FineTune,
-    waits for autosave, runs an inpaint, and asserts the
-    request body contains the expected mapped guidance. A
-    regression here is exactly the autosave-race second-order
-    risk from §3.3 of this handoff applied to fineTune values
-    instead of directives.
-11. PR shape: same squash-and-merge pattern as #1359/#1360/#1361.
+- A second sin: my first two recommendations on Q1 (adherence
+  → creativeMode) and Q3 (auto-set lockSeed) were wrong. The
+  user corrected both — adherence because of the
+  conflict-with-strength axis, lockSeed because of the
+  identical-rerun cost. The product-conversation step that
+  §7 originally flagged as a 30-minute pre-slice investment
+  was vindicated: those two corrections both came from the
+  user, not the agent.
 
 ### What this session achieved instead
 
@@ -540,13 +729,22 @@ Once those answers land, the implementation is mechanical:
 - §6.2 autosave race fix: PR #1361 merged (`fe61999`).
 - Working tree restored to clean state. No half-baked
   intermediate on disk. CI green (`bab1243` is HEAD of
-  `origin/develop`).
+  `origin/develop` until the next push).
 - This handoff section records the abort cleanly so the next
   session doesn't lose the research findings.
 
 The directional lesson: a "persist some fields" slice is always
 preceded by a "wire those fields into the model they affect"
-slice. The directions slice (#1359) worked because directions
+slice. The directions slice (#1359) worked because directives
 already wired; FineTune's wire was de-scoped by the prior
 redesign and never re-landed. Both halves were always going to be
-one slice — the original handoff just didn't see it yet.
+one slice — the original handoff didn't see it yet, and neither
+did the agent when this session started coding.
+
+The **second-order** lesson: "DashScope has these parameters" is
+not the same as "the schema field of that name lands at the
+provider." `inpaintRequestSchema`'s `promptStrength` had been
+documented and validated on every inpaint call for at least a
+year; it never reached the wire. The slice that names a real field
+after the wire's actual surface — not after what the schema doc
+says — is the slice that lands.
