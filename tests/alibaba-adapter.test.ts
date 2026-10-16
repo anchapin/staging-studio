@@ -238,3 +238,106 @@ describe("Alibaba adapter (DashScope multimodal-conversation)", () => {
     ).rejects.toThrow(/circuit open/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Wire-shape tests — issue #1362b Stage B
+//
+// The pre-Stage-B adapter hardcoded `parameters.seed: 42` and never
+// forwarded `parameters.strength` from the caller. Stage B threads
+// `strength` + `seed` from `options.input` (the caller-supplied
+// `LogicalInpaintInput`) through to the DashScope `parameters`
+// block, with `strength` defaulting to 0.5 (DashScope's wire
+// default). The existing tests above mock at the
+// `cb.execute()` level — they never see the request body — so we
+// add a separate describe block that captures the body by running
+// the circuit breaker's thunk against a fetch spy.
+//
+// The pattern: `mockExecute` is reassigned to a wrapper that
+// invokes its thunk argument (so the inner `fetch()` call runs),
+// then captures the JSON-encoded body via a real `vi.stubGlobal`
+// fetch spy that records the body and returns the synthetic
+// DashScope response shape.
+// ---------------------------------------------------------------------------
+
+describe("Alibaba adapter — wire shape (issue #1362b, Stage B)", () => {
+  let capturedBody: { parameters?: Record<string, unknown> } | null;
+
+  beforeEach(() => {
+    capturedBody = null;
+    // Make `cb.execute(thunk)` actually run `thunk`, so the inner
+    // `fetch()` call goes through our fetch spy.
+    mockExecute.mockImplementation(async (thunk: () => Promise<unknown>) => {
+      return await thunk();
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: unknown, init?: RequestInit) => {
+        const bodyText = String(init?.body ?? "{}");
+        capturedBody = JSON.parse(bodyText);
+        return new Response(JSON.stringify(buildDashScopeResponse("https://dashscope-result-sz.oss-accelerate.aliyuncs.com/x.png")), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }),
+    );
+  });
+
+  it("defaults parameters.strength to 0.5 (DashScope's wire default) when the caller omits strength", async () => {
+    const { createAlibabaClient } = await import("@/lib/alibaba-adapter");
+    const client = createAlibabaClient();
+    const { LOGICAL_MODEL } = await import("@/lib/inference");
+    await client.submit(LOGICAL_MODEL.FLUX_FILL, {
+      input: { imageUrl: "https://example.com/room.jpg", prompt: "Stage it" },
+    });
+    expect(capturedBody).not.toBeNull();
+    expect(capturedBody!.parameters).toMatchObject({ strength: 0.5 });
+  });
+
+  it("forwards parameters.strength from the caller's input (e.g. 0.7)", async () => {
+    const { createAlibabaClient } = await import("@/lib/alibaba-adapter");
+    const client = createAlibabaClient();
+    const { LOGICAL_MODEL } = await import("@/lib/inference");
+    await client.submit(LOGICAL_MODEL.FLUX_FILL, {
+      input: {
+        imageUrl: "https://example.com/room.jpg",
+        prompt: "Stage it",
+        strength: 0.7,
+      },
+    });
+    expect(capturedBody).not.toBeNull();
+    expect(capturedBody!.parameters).toMatchObject({ strength: 0.7 });
+  });
+
+  it("forwards parameters.seed from the caller's input (e.g. 12345)", async () => {
+    // Issue #1362b: the pre-Stage-B adapter hardcoded `seed: 42` —
+    // every user-typed seed was silently dropped. Stage B reads the
+    // caller's `seed` off `options.input` and folds it into
+    // `parameters.seed`. Omitted ⇒ no `seed` key in the body
+    // (DashScope rolls fresh).
+    const { createAlibabaClient } = await import("@/lib/alibaba-adapter");
+    const client = createAlibabaClient();
+    const { LOGICAL_MODEL } = await import("@/lib/inference");
+    await client.submit(LOGICAL_MODEL.FLUX_FILL, {
+      input: {
+        imageUrl: "https://example.com/room.jpg",
+        prompt: "Stage it",
+        seed: 12345,
+      },
+    });
+    expect(capturedBody).not.toBeNull();
+    expect(capturedBody!.parameters).toMatchObject({ seed: 12345 });
+  });
+
+  it("omits parameters.seed entirely when the caller does not supply one (roll fresh on DashScope)", async () => {
+    // Stage B: omit `seed` so DashScope rolls fresh, rather than
+    // baking in `seed: 42` and rerunning the same output every time.
+    const { createAlibabaClient } = await import("@/lib/alibaba-adapter");
+    const client = createAlibabaClient();
+    const { LOGICAL_MODEL } = await import("@/lib/inference");
+    await client.submit(LOGICAL_MODEL.FLUX_FILL, {
+      input: { imageUrl: "https://example.com/room.jpg", prompt: "Stage it" },
+    });
+    expect(capturedBody).not.toBeNull();
+    expect(capturedBody!.parameters).not.toHaveProperty("seed");
+  });
+});

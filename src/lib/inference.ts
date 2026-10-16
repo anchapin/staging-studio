@@ -136,11 +136,20 @@ export interface LogicalInpaintInput {
   maskUrl: string;
   prompt: string;
   negativePrompt?: string;
-  /** 0.1–1.0, scaled to the provider's guidance range. */
-  promptStrength?: number;
-  maskBlur?: number;
+  /**
+   * Issue #1362b: AI guidance strength. Renamed from `promptStrength`
+   * to match DashScope's `parameters.strength` wire field. Range is
+   * 0.0–1.0 (DashScope's wire default is 0.5). The numeric mapping
+   * to the fal / Replicate guidance range (1–10) is byte-equivalent
+   * to the legacy `promptStrength * 10` expression.
+   */
+  strength?: number;
+  /**
+   * Issue #1362b: reproducible seed for iteration (0–999999). Omit
+   * for random. The alibaba-adapter threads this through to
+   * `parameters.seed`; fal / Replicate carry it as `seed`.
+   */
   seed?: number;
-  creativeMode?: boolean;
 }
 
 // ─── Client selection ──────────────────────────────────────────────────────

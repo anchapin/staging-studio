@@ -323,11 +323,20 @@ export async function evaluateQualityGate(
 
 /**
  * Provider-neutral input for `submitInpaintToActiveProvider`. The
- * fields map 1:1 to the historical FalSubmitOptions shape so the
- * call site in `submitInpaintRequest` is unchanged after the
+ * fields map 1:1 to the route's `inpaintRequestSchema` (#1362b) so
+ * the call site in `submitInpaintRequest` is unchanged after the
  * Alibaba migration; the provider adapter decides which fields it
  * actually consumes (e.g. Alibaba ignores `maskUrl` because its
  * endpoint is instruction-mode only).
+ *
+ * Issue #1362b: `promptStrength` was renamed to `strength` to match
+ * DashScope's `parameters.strength` wire field. The legacy
+ * `maskBlur` (FineTune's "expand" slider) is gone from this surface
+ * entirely — feathering is now a browser-side pre-upload pass
+ * (`src/lib/mask-feather.ts`), not a provider parameter. The legacy
+ * `creativeMode` and `lockSeed` were removed in the same stage
+ * (no surviving UI control after #1362a's adherence + shadows
+ * removal).
  */
 export interface InpaintSubmitOptions {
   imageUrl: string;
@@ -335,10 +344,10 @@ export interface InpaintSubmitOptions {
   aesthetic: string;
   promptDirectives: string;
   negativePrompt?: string;
-  promptStrength?: number;
-  maskBlur?: number;
+  /** Issue #1362b: DashScope `parameters.strength` (0..1, default 0.5). */
+  strength?: number;
+  /** Issue #1362b: user's typed seed (digits-only, parsed to int). */
   seed?: number;
-  creativeMode?: boolean;
 }
 
 /**
@@ -355,7 +364,7 @@ export async function submitInpaintToActiveProvider(
   request_id: string;
   result?: { imageUrl: string; width: number | null; height: number | null };
 }> {
-  const { imageUrl, maskUrl, aesthetic, promptDirectives, negativePrompt, promptStrength, maskBlur, seed, creativeMode } = options;
+  const { imageUrl, maskUrl, aesthetic, promptDirectives, negativePrompt, strength, seed } = options;
   const prompt = buildInpaintPrompt(aesthetic, promptDirectives);
 
   // Resolve the active provider once. The submit call goes through
@@ -370,10 +379,8 @@ export async function submitInpaintToActiveProvider(
     maskUrl,
     prompt,
     negativePrompt,
-    promptStrength,
-    maskBlur,
+    strength,
     seed,
-    creativeMode,
   };
   const input = buildInpaintPayloadForActiveProvider(logicalInput);
 
@@ -524,10 +531,9 @@ export async function submitInpaintRequest(
     aesthetic: string;
     promptDirectives: string;
     negativePrompt?: string;
-    promptStrength?: number;
-    maskBlur?: number;
+    /** Issue #1362b: renamed from `promptStrength`. */
+    strength?: number;
     seed?: number;
-    creativeMode?: boolean;
     maskCoverageRatio?: number;
     variantSlot: number;
     sourceSlot: number | null;
@@ -545,10 +551,8 @@ export async function submitInpaintRequest(
     aesthetic: params.aesthetic,
     promptDirectives: params.promptDirectives,
     negativePrompt: params.negativePrompt,
-    promptStrength: params.promptStrength,
-    maskBlur: params.maskBlur,
+    strength: params.strength,
     seed: params.seed,
-    creativeMode: params.creativeMode,
   });
 
   // The fal job is queued and billed at this point, so the quota unit is

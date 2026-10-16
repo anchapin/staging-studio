@@ -7,11 +7,21 @@
  * - 429 daily inpaint quota exceeded
  * - 404 room not found
  * - 400 invalid source (variant slot has no staged result)
- * - 202 creativeMode=true → quality gate skipped
- * - 202 creativeMode=false → quality gate runs with no warnings
- * - 202 quality gate warns → degraded=true in response
+ * - 200 response after fire-and-forget submit (#1262 — the quality
+ *   gate is no longer on the synchronous path; the response always
+ *   reports `qualityWarnings: []`).
+ * - 200 with the pre-allocated requestId when the background submit
+ *   rejects (#1262).
  * - userUsage upserted after success
  * - 500 on fal submission failure
+ *
+ * Issue #1362b: the inpaint request schema is now `.strict()` and
+ * drops `creativeMode` / `lockSeed` / `maskBlur` / `promptStrength`.
+ * Tests that previously sent `creativeMode: true|false` in the body
+ * are still named around the "quality gate" UX so the test surface
+ * stays recognizable, but the body field is no longer forwarded —
+ * the gate decision is now driven by route-level config, not the
+ * payload. See `src/lib/ai-route-schemas.ts` for the wire schema.
  */
 
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
@@ -97,15 +107,11 @@ function mockInpaintRequest(overrides = {}) {
     updatedAt: new Date(),
     degraded: false,
     qualityWarnings: [],
-    promptStrength: 0.8,
     seed: null,
-    creativeMode: false,
     sourceSlot: 0,
     variantSlot: 0,
     aesthetic: "mid-century modern",
     negativePrompt: null,
-    maskBlur: 0,
-    lockSeed: false,
     falRequestId: null,
     falResultUrl: null,
     persistenceAttempts: 0,
@@ -391,7 +397,6 @@ describe("POST /api/inpaint", () => {
         roomId: MOCK_ROOM_ID,
         sourceSlot: 0,
         variantSlot: 0,
-        creativeMode: true,
         aesthetic: "mid-century modern",
       })
     );
@@ -419,7 +424,6 @@ describe("POST /api/inpaint", () => {
         roomId: MOCK_ROOM_ID,
         sourceSlot: 0,
         variantSlot: 0,
-        creativeMode: false,
         aesthetic: "mid-century modern",
       })
     );
@@ -451,7 +455,6 @@ describe("POST /api/inpaint", () => {
         roomId: MOCK_ROOM_ID,
         sourceSlot: 0,
         variantSlot: 0,
-        creativeMode: false,
         aesthetic: "mid-century modern",
       })
     );
@@ -485,7 +488,6 @@ describe("POST /api/inpaint", () => {
         roomId: MOCK_ROOM_ID,
         sourceSlot: 0,
         variantSlot: 0,
-        creativeMode: false,
         aesthetic: "mid-century modern",
       })
     );

@@ -76,6 +76,14 @@ export interface EditRoomRunClusterHandle {
    * autosave race where a user types directives, clicks Run,
    * and the run submits with an empty `promptDirectives` string
    * because the 2 s autosave controller hadn't fired yet.
+   *
+   * Issue #1362b — runs `beforeSubmit` (parent-supplied mask
+   * transform hook, typically `featherMask(maskDataUrl, expand)`
+   * from `src/lib/mask-feather.ts`) BEFORE `beforeRun` flushes the
+   * autosave. The transform returns a new mask data URL (or the
+   * input unchanged when expand is 0) that the subsequent submit
+   * uses. Failures surface as a Retry toast, mirroring the
+   * directive-flush path.
    */
   beginRun: (maskDataUrl: string) => Promise<void>;
 }
@@ -117,6 +125,15 @@ export interface EditRoomRunClusterProps {
    * the submit so the run doesn't proceed on top of lost edits).
    */
   beforeRun?: () => Promise<boolean>;
+  /**
+   * Issue #1362b — invoked by `beginRun` BEFORE `beforeRun`, to
+   * transform the user-painted mask data URL before submit. The
+   * FineTune `expand` slider threads `featherMask(maskDataUrl, expand)`
+   * through here (default: passthrough when expand === 0). Returns
+   * the data URL the submit path should use; resolves to a
+   * `Retry run` error toast on failure, mirroring `beforeRun`.
+   */
+  beforeSubmit?: (maskDataUrl: string) => Promise<string>;
 }
 
 /**
@@ -167,6 +184,13 @@ export const EditRoomRunCluster = forwardRef<
   // self-referential useCallback; this is the project-canonical
   // pattern — EditRoomStudio.tsx:442-444 uses the same shape
   // for `onCommitRef`).
+  //
+  // Issue #1362b — the `beforeSubmit` mask transform runs FIRST
+  // (parent-supplied `featherMask(maskDataUrl, expand)`). The
+  // pre-feather transform happens on the painted mask before any
+  // network round-trip; failures surface as a Retry toast, mirroring
+  // the directive-flush path below. When `beforeSubmit` is omitted
+  // the original mask data URL reaches `submitInpaint` byte-equivalent.
   const beginRunRef = useRef<(maskDataUrl: string) => Promise<void>>(
     async () => {}
   );
@@ -176,6 +200,37 @@ export const EditRoomRunCluster = forwardRef<
   // render to capture the freshest props + cluster hook.
   useEffect(() => {
     beginRunRef.current = async (maskDataUrl: string): Promise<void> => {
+      // Issue #1362b — mask feathering (FineTune `expand` slider)
+      // happens FIRST. The pre-feather transform produces a new
+      // mask data URL the submit path uses in place of the user's
+      // painted one. When `beforeSubmit` is omitted or expand is 0,
+      // `featherMask` returns the input unchanged.
+      let submitMaskDataUrl = maskDataUrl;
+      if (props.beforeSubmit) {
+        try {
+          submitMaskDataUrl = await props.beforeSubmit(maskDataUrl);
+        } catch (featherError) {
+          props.showError(
+            "Couldn't prepare the mask for the provider — please retry in a moment.",
+            true,
+            () => {
+              void beginRunRef.current(maskDataUrl);
+            },
+            "Retry run"
+          );
+          console.error(
+            JSON.stringify({
+              event: "inpaint_before_submit_failed",
+              error:
+                featherError instanceof Error
+                  ? featherError.message
+                  : String(featherError),
+            }),
+            featherError
+          );
+          return;
+        }
+      }
       if (props.beforeRun) {
         const flushed = await props.beforeRun();
         if (!flushed) {
@@ -190,7 +245,7 @@ export const EditRoomRunCluster = forwardRef<
           return;
         }
       }
-      await cluster.submitInpaint(maskDataUrl);
+      await cluster.submitInpaint(submitMaskDataUrl);
     };
   });
 

@@ -160,6 +160,15 @@ interface DashScopeResponse {
  * and the breaker gives the route a fast-fail path when the upstream
  * is in cooldown. Mirrors the historical pattern in `src/lib/fal.ts`
  * that this PR deleted.
+ *
+ * Issue #1362b — Gemini finding (Stage B STICKY NOTE): the
+ * `parameters` block now reads `strength` (default 0.5, DashScope's
+ * wire default) and `seed` from the caller's `LogicalInpaintInput`
+ * (via `submit()` / `subscribe()`), instead of hardcoding
+ * `strength` and `seed: 42`. `mask_blur` is intentionally absent
+ * — DashScope masks are binary B/W; the FineTune `expand` slider
+ * feathers the mask client-side before upload
+ * (`src/lib/mask-feather.ts`), not via a provider parameter.
  */
 async function dashscopeGenerate(
   workspaceId: string,
@@ -167,6 +176,7 @@ async function dashscopeGenerate(
   model: string,
   imageUrl: string,
   prompt: string,
+  options?: { strength?: number; seed?: number }
 ): Promise<DashScopeResponse> {
   const cb = getCircuitBreaker("alibaba-cloud", {
     failureThreshold: 3,
@@ -174,6 +184,16 @@ async function dashscopeGenerate(
   });
   try {
     const url = dashscopeEndpoint(workspaceId);
+    // STICKY NOTE #1362b — Gemini finding (final): the DashScope
+    // wire accepts `parameters.strength` (0.0..1.0, default 0.5)
+    // and `parameters.seed` (int) at the top of `parameters`. We
+    // thread both from the caller's `LogicalInpaintInput`. The
+    // pre-Stage-B hardcodes (`strength` derived from the caller's
+    // `promptStrength` * 10 of a 0..1 input — same byte output,
+    // wrong field name; `seed: 42` — silent drop on the user's
+    // typed seed) are gone.
+    const strength = options?.strength ?? 0.5;
+    const seed = options?.seed;
     const body = {
       model,
       input: {
@@ -188,7 +208,15 @@ async function dashscopeGenerate(
         n: 1,
         watermark: false,
         prompt_extend: true,
-        seed: 42,
+        // Issue #1362b: forward `strength` (0..1) + `seed` from the
+        // caller's `LogicalInpaintInput`. `strength` defaults to 0.5
+        // (DashScope's wire default — `parameters.strength` is
+        // omitted when the caller passes nothing and we cannot tell
+        // whether they want explicit-zero vs default; the default
+        // here matches what DashScope would pick anyway). `seed` is
+        // omitted when not supplied so DashScope rolls fresh.
+        strength,
+        ...(seed !== undefined ? { seed } : {}),
         size: "2048*1536",
       },
     };
@@ -267,8 +295,16 @@ async function runInpaintSync(
   workspaceId: string,
   apiKey: string,
   model: string,
+  options?: { strength?: number; seed?: number },
 ): Promise<{ imageUrl: string; width: number | null; height: number | null }> {
-  const resp = await dashscopeGenerate(workspaceId, apiKey, model, imageUrl, prompt);
+  const resp = await dashscopeGenerate(
+    workspaceId,
+    apiKey,
+    model,
+    imageUrl,
+    prompt,
+    options,
+  );
   const picked = pickImageUrl(resp);
   if (!picked) {
     throw new Error(
@@ -295,6 +331,16 @@ export function createAlibabaClient(): InferenceClient {
       const model = resolveAlibabaModel(logicalModel);
       const imageUrl = String(options.input.imageUrl ?? "");
       const prompt = String(options.input.prompt ?? "");
+      // Issue #1362b: thread `strength` + `seed` from the caller's
+      // `LogicalInpaintInput` (read off `options.input` because
+      // `buildAlibabaFillPayload` does not carry them — they're
+      // consumed by `parameters`, not the input messages). Coerced
+      // to `number | undefined` so a stray string slips in with a
+      // dashscope-side error instead of silently dropping.
+      const strength =
+        typeof options.input.strength === "number" ? options.input.strength : undefined;
+      const seed =
+        typeof options.input.seed === "number" ? options.input.seed : undefined;
       try {
         const picked = await runInpaintSync(
           imageUrl,
@@ -302,6 +348,9 @@ export function createAlibabaClient(): InferenceClient {
           workspaceId,
           apiKey,
           model,
+          strength !== undefined || seed !== undefined
+            ? { strength, seed }
+            : undefined,
         );
         // Return as a bare URL string (matches Replicate's shape, which
         // `firstInpaintImageUrl` already handles) rather than the fal
@@ -350,8 +399,23 @@ export function createAlibabaClient(): InferenceClient {
       const model = resolveAlibabaModel(_logicalModel);
       const imageUrl = String(options.input.imageUrl ?? "");
       const prompt = String(options.input.prompt ?? "");
+      // Issue #1362b: same strength/seed extraction as `subscribe()`
+      // — see the comment there.
+      const strength =
+        typeof options.input.strength === "number" ? options.input.strength : undefined;
+      const seed =
+        typeof options.input.seed === "number" ? options.input.seed : undefined;
       const requestId = newRequestId();
-      const picked = await runInpaintSync(imageUrl, prompt, workspaceId, apiKey, model);
+      const picked = await runInpaintSync(
+        imageUrl,
+        prompt,
+        workspaceId,
+        apiKey,
+        model,
+        strength !== undefined || seed !== undefined
+          ? { strength, seed }
+          : undefined,
+      );
       alibabaResultCache.set(requestId, picked);
       return { request_id: requestId, result: picked };
     },

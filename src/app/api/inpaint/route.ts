@@ -189,10 +189,14 @@ async function postInpaint(request: NextRequest) {
       aesthetic: parsed.data.aesthetic,
       promptDirectives: parsed.data.promptDirectives,
       negativePrompt: parsed.data.negativePrompt,
-      promptStrength: parsed.data.promptStrength,
-      maskBlur: parsed.data.maskBlur,
+      // Issue #1362b: schema renamed `promptStrength` → `strength`
+      // to match DashScope's `parameters.strength` wire field; the
+      // legacy `maskBlur` / `creativeMode` / `lockSeed` fields are
+      // gone (mask feathering moved to a browser-side pre-upload
+      // pass; creativeMode/lockSeed had no surviving UI control
+      // after #1362a's adherence + shadows removal).
+      strength: parsed.data.strength,
       seed: parsed.data.seed,
-      creativeMode: parsed.data.creativeMode,
     };
 
     // Fire-and-forget. `void` makes the linter happy; the promise
