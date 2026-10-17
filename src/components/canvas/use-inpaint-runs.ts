@@ -19,7 +19,7 @@ import {
   type PerObjectBatchPlan,
 } from "@/lib/multi-select-batch";
 import { type DeclutterIntensity } from "@/lib/holistic-prompt";
-import { generateThumbnailFromUrl } from "./version-history-panel";
+import { generateThumbnailFromUrl } from "@/lib/inpaint-thumbnail";
 import { saveInpaintVersion } from "@/app/actions/inpaint-versions";
 
 /** Issue #1362b (Stage B): AI guidance parameters shared by every

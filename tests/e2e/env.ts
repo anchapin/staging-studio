@@ -264,19 +264,17 @@ export function nextEnv(): Record<string, string> {
     // to the spec; only round-trip parity matters, and the test never
     // re-decrypts across processes.
     SIGNATURE_ENCRYPTION_KEY: "w+L7BwGEjMFqNqHOlNhZR+o6KLUokyJ8fP5lhumSVn4=",
-    // Issue #1344: `NEXT_PUBLIC_*` is build-time inlined, so the
-    // harness can carry only ONE flag value per build. We default to
-    // `"1"` (new `<EditRoomStudio>` surface live) so the four
-    // `edit-room-redesign-*` specs exercise the wired-up submit
-    // path; the legacy specs (mask-paint / concept-flow /
-    // version-history / editor-layout / rehearsal / inpaint-submit)
-    // were updated to the new surface's selectors in the same PR.
+    // Issue #1346 wave-5 retired `NEXT_PUBLIC_EDIT_ROOM_REDESIGN` —
+    // the `<EditRoomStudio>` surface is the only mount, so the
+    // harness no longer needs to flip the env var. The four
+    // `edit-room-redesign-*` specs + the legacy retargeted specs
+    // (mask-paint / concept-flow / version-history / editor-layout /
+    // rehearsal / inpaint-submit) all run against the new surface.
     // Features that lived only on the legacy surface (Fill Region,
     // Restage furnishings preset, Select Regions + batch panel via
-    // canvas-click, undo/redo, zoom) have no equivalent in the
-    // new surface yet and the corresponding subtests were dropped;
-    // they remain pinned at the lib-level where they live and will
+    // canvas-click, undo/redo, zoom) have no equivalent in the new
+    // surface yet and the corresponding subtests were dropped; they
+    // remain pinned at the lib-level where they live and will
     // re-light on the new surface when those features land.
-    NEXT_PUBLIC_EDIT_ROOM_REDESIGN: "1",
   };
 }
