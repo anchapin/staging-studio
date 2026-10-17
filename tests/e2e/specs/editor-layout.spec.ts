@@ -122,8 +122,11 @@ test.describe("editor layout", () => {
     // Studio presence: testid is `edit-room-studio` (see #1344).
     await expect(page.getByTestId("edit-room-studio")).toBeVisible();
     // Inspector two-tab shell: Staging + Listing copy tabs are present
-    // (issue #1342 — `inspector-tab-{staging,listing}` ids).
-    await expect(page.getByTestId("inspector-tab-staging")).toBeVisible();
-    await expect(page.getByTestId("inspector-tab-listing")).toBeVisible();
+    // (issue #1342 — `inspector-tab-{stage,copy}` ids per the #1353
+    // rename; the legacy `inspector-tab-{staging,listing}` ids were
+    // retired when the Inspector's tab labels collapsed to two —
+    // `stage` / `copy`).
+    await expect(page.getByTestId("inspector-tab-stage")).toBeVisible();
+    await expect(page.getByTestId("inspector-tab-copy")).toBeVisible();
   });
 });

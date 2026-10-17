@@ -36,6 +36,7 @@ import { Inspector, type InspectorTab } from "@/components/edit-room/Inspector";
 import { TopBar } from "@/components/edit-room/TopBar";
 import { Toast } from "@/components/edit-room/Toast";
 import { VersionStrip } from "@/components/edit-room/VersionStrip";
+import { StudioWorkflowStepper } from "@/components/dashboard/studio-workflow-stepper";
 import {
   createInitialEditRoomState,
   editRoomReducer,
@@ -536,6 +537,19 @@ export function EditRoomStudio({
           /* #1340/#1344 wires the real room switcher */
         }}
         onExitToProject={onExitToProject}
+      />
+
+      {/* Issue #1345 — the StudioWorkflowStepper stays on /refine
+          (placed directly under the TopBar as a thin row, per the
+          #1345 design intent). Hidden below the `lg` breakpoint to
+          match the legacy /refine visibility. Without this, the
+          studio-workflow e2e spec (tests/e2e/specs/studio-workflow.spec.ts)
+          fails its `aria-current` assertions on the Brush Refinement
+          chip — see issue #1372. */}
+      <StudioWorkflowStepper
+        projectId={projectId}
+        activeStep="refine"
+        className="hidden lg:block border-b border-outline/20 bg-surface-container-lowest px-3 py-2"
       />
 
       <div className="flex min-h-0 flex-1">

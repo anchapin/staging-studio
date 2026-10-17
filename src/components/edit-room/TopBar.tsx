@@ -91,7 +91,7 @@ export function TopBar({
 
   return (
     <header className="flex h-14 shrink-0 items-center justify-between border-b border-outline/20 bg-surface-container-lowest px-4">
-      <div className="flex min-w-0 items-center gap-1">
+      <nav aria-label="Edit room location" className="flex min-w-0 items-center gap-1">
         <button
           type="button"
           onClick={onExitToProject}
@@ -174,7 +174,7 @@ export function TopBar({
             <ChevronRight className="h-4 w-4" aria-hidden />
           </button>
         </div>
-      </div>
+      </nav>
 
       <div className="flex shrink-0 items-center gap-4">
         <span
