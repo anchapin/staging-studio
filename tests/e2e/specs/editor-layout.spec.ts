@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { E2E_EDITOR_PROJECT_ID } from "../env";
+import { E2E_EDITOR_PROJECT_ID, E2E_EDITOR_ROOM_ID } from "../env";
 import {
   interceptFurnishingsDetection,
   interceptLabelInstances,
@@ -106,5 +106,24 @@ test.describe("editor layout", () => {
         documentScroll.clientWidth + 2
       );
     });
+  });
+
+  // Issue #1345 — `/refine` route mounts the same wave-4 studio shell
+  // when the redesign flag is on, gated by the host page's `?room=`
+  // resolution. Mirrors the project-view flag-on assertion above;
+  // legacy `RefineStudioClient` is unreachable under this flag.
+  test("refine route mounts the new EditRoomStudio shell under the redesign flag", async ({
+    page,
+  }) => {
+    await login(page);
+    await page.goto(
+      `/projects/${E2E_EDITOR_PROJECT_ID}/refine?room=${E2E_EDITOR_ROOM_ID}`,
+    );
+    // Studio presence: testid is `edit-room-studio` (see #1344).
+    await expect(page.getByTestId("edit-room-studio")).toBeVisible();
+    // Inspector two-tab shell: Staging + Listing copy tabs are present
+    // (issue #1342 — `inspector-tab-{staging,listing}` ids).
+    await expect(page.getByTestId("inspector-tab-staging")).toBeVisible();
+    await expect(page.getByTestId("inspector-tab-listing")).toBeVisible();
   });
 });
