@@ -745,11 +745,23 @@ export default function ProjectDetailView({
    * comment originally described no longer exists: the shell lifted
    * the textarea's source of truth to the parent route map and the
    * reducer no longer holds a `directions` slice. The
-   * `__test_setDirectives` binding is kept as a backward-compat
-   * shim behind the `NEXT_PUBLIC_EDIT_ROOM_REDESIGN` gate while DOM-
-   * driven replacement decisions land in a follow-up; new tests
-   * should drive the textarea via `userEvent` (`page.fill` +
-   * `page.locator(...).press("Tab")`) rather than call this seam.
+   * `__test_setDirectives` binding is kept (NOT retired in #1365)
+   * because the underlying React 19/Next 16 event-delegation issue
+   * that motivated the original seam was independent of where the
+   * textarea's `value` lives: the route lift moved the *destination*
+   * of `onChange` (route map instead of reducer), but did not fix the
+   * *trigger* of `onChange` (`page.fill`'s dispatched `input` event
+   * reportedly does not reach React 19's event delegation root on
+   * this controlled textarea — see the spec's doc-comment for the
+   * reproduced failure modes). DOM-driven replacement (Path A in
+   * the #1365 next-session handoff) was therefore not retired; the
+   * e2e suite would re-flake if the seam were dropped without a
+   * separately verified DOM strategy. Future tests MAY attempt the
+   * replacement once the delegation issue is root-caused; until
+   * then, this seam pins the FineTune blend-edges wire (#1362c)
+   * reproducibly and `__test_submitInpaint` pins the same wire
+   * regardless of how the textarea is populated.
+   *
    * `__test_submitInpaint` remains useful because the cluster's
    * `beginRun` orchestrates `beforeSubmit` + `featherMask` + the
    * POST-body composition regardless of how the textarea is

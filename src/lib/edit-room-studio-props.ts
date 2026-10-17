@@ -101,6 +101,15 @@ export interface FocusedRoomInputs {
    * shape compat). New fixtures must supply this field; legacy
    * fixtures that omit it fall back to `initialDirections` inside
    * the shell's `liveDirections` derivation.
+   *
+   * Shape choice — `string`, not `string | null | undefined`: the
+   * route's fallback chain (`directives[roomId] ?? room.rawDirectives
+   * ?? ""`) collapses to `""` at the call site before the resolver
+   * ever sees it. Widening the type to accept null would just shift
+   * the `??` from the route to the resolver without changing
+   * behavior — kept narrow here so a future caller that forgets the
+   * fallback surfaces as a typecheck rather than a silent `null` in
+   * the textarea. (#1365 next-session handoff, Priority 1.)
    */
   roomDirectives: string;
 }
