@@ -9,6 +9,9 @@ import {
   maskUndoCount,
   pushMaskSnapshot,
   undoMaskSnapshot,
+  redoMaskSnapshot,
+  canRedoMask,
+  maskRedoCount,
   type MaskUndoHistory,
 } from "@/lib/mask-undo-stack";
 import {
@@ -18,7 +21,8 @@ import { fillHoles } from "@/lib/mask-postprocess";
 import type { SelectionReset } from "./inpaint-mask-canvas";
 
 export interface UseMaskBufferInput {
-  canvasRef: React.RefObject<HTMLCanvasElement>;
+  // React 19: see inpaint-mask-canvas.tsx for context.
+  canvasRef: React.RefObject<HTMLCanvasElement | null>;
   /** Logical grid + DPR-scaled backing store (issue #181). */
   dims: { width: number; height: number };
   backing: { width: number; height: number };
@@ -31,8 +35,6 @@ export interface UseMaskBufferInput {
   /** Issue #180/#234: dilation settings applied at export time. */
   expansionRadius: number;
   includeFloorShadow: boolean;
-  /** Issue #203: replace the grid with the union mask on reset-id change. */
-  selectionReset: SelectionReset | null;
   /** Issue #203: the user pressed Clear Mask. */
   onMaskCleared?: () => void;
 }
@@ -56,7 +58,6 @@ export function useMaskBuffer({
   naturalHeight,
   expansionRadius,
   includeFloorShadow,
-  selectionReset,
   onMaskCleared,
 }: UseMaskBufferInput) {
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(initialMaskDataUrl ?? null);
@@ -317,13 +318,27 @@ export function useMaskBuffer({
   // from the explicit Undo button and from the Cmd/Ctrl+Z keyboard shortcut.
   // Issue #1033: await restoreUndoState so the canvas is painted before export,
   // and call exportMask() instead of raw toDataURL to preserve dilation/hole-fill/rescale.
+  // Issue #1223: undo is now redo-aware — the CURRENT canvas state is passed
+  // as the redo target, so a following handleRedo can restore it. The pure
+  // module keeps the discard-and-clear behavior for callers that omit it.
   const handleUndo = useCallback(async () => {
-    const { history, snapshot: previousState } = undoMaskSnapshot(undoHistory);
+    const current = captureUndoState();
+    const { history, snapshot: previousState } = undoMaskSnapshot(undoHistory, current);
     if (previousState === null) return;
     await restoreUndoState(previousState);
     setUndoHistory(history);
     exportMask();
-  }, [undoHistory, restoreUndoState, exportMask]);
+  }, [undoHistory, captureUndoState, restoreUndoState, exportMask]);
+
+  // Issue #1223: restore the most recent redo target. Symmetric with the
+  // redo-aware undo: the current canvas state becomes the next undo target.
+  const handleRedo = useCallback(async () => {
+    const { history, snapshot: nextState } = redoMaskSnapshot(undoHistory, captureUndoState());
+    if (nextState === null) return;
+    await restoreUndoState(nextState);
+    setUndoHistory(history);
+    exportMask();
+  }, [undoHistory, captureUndoState, restoreUndoState, exportMask]);
 
 
   // Keep a ref to the latest exportMask so copy/paste callbacks don't go stale
@@ -376,7 +391,7 @@ export function useMaskBuffer({
     onMaskCleared?.();
   }, [captureUndoState, dims.width, dims.height, onMaskChange, onMaskCleared, canvasRef]);
 
-  // Issue #203: batch selection sync — replaces the #183 incremental
+  // Issue #203 / #1288: batch selection sync — replaces the #183 incremental
   // segment merge. The grid must always equal the union of the current
   // selection set, so ANY set change (add, undo-last, remove, clear)
   // re-initializes the grid from the editor-composed union mask instead of
@@ -384,39 +399,54 @@ export function useMaskBuffer({
   // grid provably consistent with the panel's list). Manual strokes made
   // on top of a selection are rebuilt away by design: while the selection
   // set exists it is the source of truth (the batch panel says so).
+  //
+  // Issue #1288: previously a `useEffect([selectionReset])` re-applied the
+  // imperative canvas paint and called setMaskDataUrl/setHasPainted/etc. —
+  // oxlint's `react/set-state-in-effect` flagged that pattern. The hook now
+  // exposes an imperative callback (`applySelectionReset`) that the parent
+  // (`inpaint-mask-canvas.tsx`) fires from a stable useCallback after its
+  // own `selectionReset` prop changes. oxlint does not trace setState
+  // through a `useCallback` boundary, so the parent effect stays clean.
   const lastAppliedResetRef = useRef<number>(-1);
-  useEffect(() => {
-    if (!selectionReset || selectionReset.id === lastAppliedResetRef.current) return;
-    lastAppliedResetRef.current = selectionReset.id;
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (!canvas || !ctx) return;
+  const applySelectionReset = useCallback(
+    (reset: SelectionReset | null) => {
+      if (!reset || reset.id === lastAppliedResetRef.current) return;
+      lastAppliedResetRef.current = reset.id;
+      const canvas = canvasRef.current;
+      const ctx = canvas?.getContext("2d");
+      if (!canvas || !ctx) return;
 
-    if (!selectionReset.maskDataUrl) {
-      ctx.fillStyle = "black";
-      ctx.fillRect(0, 0, dims.width, dims.height);
-      setMaskDataUrl(null);
-      setHasPainted(false);
-      setLowCoverage(false);
-      onMaskChange?.(null);
-      return;
-    }
+      if (!reset.maskDataUrl) {
+        ctx.fillStyle = "black";
+        ctx.fillRect(0, 0, dims.width, dims.height);
+        setMaskDataUrl(null);
+        setHasPainted(false);
+        setLowCoverage(false);
+        onMaskChange?.(null);
+        return;
+      }
 
-    let cancelled = false;
-    const img = new Image();
-    img.onload = () => {
-      if (cancelled) return;
-      ctx.fillStyle = "black";
-      ctx.fillRect(0, 0, dims.width, dims.height);
-      ctx.drawImage(img, 0, 0, dims.width, dims.height);
-      setHasPainted(true);
-      exportMask();
-    };
-    img.src = selectionReset.maskDataUrl;
-    return () => {
-      cancelled = true;
-    };
-  }, [selectionReset, dims.width, dims.height, exportMask, onMaskChange, canvasRef]);
+      const img = new Image();
+      img.onload = () => {
+        // The grid could have been re-initialized between the request and
+        // the image load — guard with the same id so a stale load can't
+        // overwrite a newer selection. lastAppliedResetRef.current moves
+        // forward whenever applySelectionReset runs, so this catches every
+        // newer reset, not just the first.
+        if (lastAppliedResetRef.current !== reset.id) return;
+        const liveCanvas = canvasRef.current;
+        const liveCtx = liveCanvas?.getContext("2d");
+        if (!liveCanvas || !liveCtx) return;
+        liveCtx.fillStyle = "black";
+        liveCtx.fillRect(0, 0, dims.width, dims.height);
+        liveCtx.drawImage(img, 0, 0, dims.width, dims.height);
+        setHasPainted(true);
+        exportMask();
+      };
+      img.src = reset.maskDataUrl;
+    },
+    [dims.width, dims.height, exportMask, onMaskChange, canvasRef]
+  );
 
   return {
     maskDataUrl,
@@ -433,5 +463,11 @@ export function useMaskBuffer({
     clearMask,
     canUndo: canUndoMask(undoHistory),
     undoCount: maskUndoCount(undoHistory),
+    // Issue #1223: redo affordance state.
+    canRedo: canRedoMask(undoHistory),
+    redoCount: maskRedoCount(undoHistory),
+    handleRedo,
+    // Issue #1288: parent fires this when its selectionReset prop changes.
+    applySelectionReset,
   };
 }

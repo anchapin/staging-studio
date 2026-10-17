@@ -113,21 +113,28 @@ function extractErrorText(error: unknown): { message: string; name: string } {
  * Status/retryable come from the unified class table so the integration
  * routes cannot drift; the route supplies only its user-facing copy.
  */
+export function classifyIntegrationErrorClass(
+  error: unknown
+): IntegrationErrorClass {
+  const { message, name } = extractErrorText(error);
+  const haystack = message.toLowerCase();
+
+  if (TIMEOUT_ERROR_NAMES.has(name)) {
+    return "timeout";
+  }
+  const matched = CLASS_RULES.find((r) =>
+    r.patterns.some((p) => haystack.includes(p))
+  );
+  return matched?.errorClass ?? "unknown";
+}
+
 export function classifyIntegrationError(
   error: unknown,
   context: IntegrationErrorCopyTable
 ): ClassifiedIntegrationError {
-  const { message, name } = extractErrorText(error);
-  const haystack = message.toLowerCase();
-
-  let rule: ClassRule;
-  if (TIMEOUT_ERROR_NAMES.has(name)) {
-    rule = CLASS_RULES.find((r) => r.errorClass === "timeout") ?? UNKNOWN_RULE;
-  } else {
-    rule =
-      CLASS_RULES.find((r) => r.patterns.some((p) => haystack.includes(p))) ??
-      UNKNOWN_RULE;
-  }
+  const rule =
+    CLASS_RULES.find((r) => r.errorClass === classifyIntegrationErrorClass(error)) ??
+    UNKNOWN_RULE;
 
   const copy = context[rule.errorClass] ?? context.unknown;
 

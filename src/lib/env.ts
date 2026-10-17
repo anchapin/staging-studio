@@ -5,7 +5,9 @@ const ENV_VAR_DOCS: Record<string, string> = {
   DATABASE_URL: "Supabase dashboard → Settings/API → database connection string",
   OPENAI_API_KEY: "platform.openai.com → API keys",
   FAL_KEY: "fal.ai dashboard → API keys",
+  REPLICATE_API_TOKEN: "replicate.com → Account → API tokens",
   BROWSERLESS_API_KEY: "browserless.io → account API key",
+  SIGNATURE_ENCRYPTION_KEY: "openssl rand -base64 32 (production only — dev falls back to a fixed public key)",
 };
 
 /**

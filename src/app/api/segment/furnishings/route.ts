@@ -1,21 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { assertFalConfigured, falSubscribeWithCircuitBreaker } from "@/lib/fal";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { buildDeprecationHeaders } from "@/lib/api-version";
 import { furnishingsSegmentRequestSchema } from "@/lib/ai-route-schemas";
 import { classifyIntegrationError } from "@/lib/error-classify";
+import { getInferenceClient, LOGICAL_MODEL, assertInferenceConfigured } from "@/lib/inference";
 import {
   DEFAULT_DAILY_SEGMENT_LIMIT,
   DAILY_LIMIT_ENV_VAR,
   dailyQuotaExceededPayload,
-  evaluateDailyQuota,
-  getDailyUsage,
-  recordDailyUsage,
+  claimDailyQuota,
+  refundDailyQuota,
   resolveDailyLimit,
 } from "@/lib/api-quota";
+import type { QuotaClaim } from "@/lib/api-quota";
 import {
-  FAL_FURNISHING_DETECTION_MODEL,
   buildFurnishingDetectionPayload,
   parseFurnishingDetectionResponse,
 } from "@/lib/furnishing-detection";
@@ -26,6 +25,7 @@ import {
   API_ERROR_INVALID_CONCEPT,
   API_ERROR_ROOM_NOT_FOUND,
 } from "@/lib/api-errors";
+import { DETECTION_TIMEOUT_MS } from "@/lib/segment-timeouts";
 
 export const INVALID_FURNISHINGS_REQUEST_MESSAGE =
   "We couldn't read the room details — try reloading the room.";
@@ -64,7 +64,17 @@ const INVALID_CONCEPT_COPY = {
 // SAM 3.1 detection completes in seconds; bound the wait so a hung
 // provider degrades to the retryable timeout copy instead of hanging
 // the detection request.
-const DETECTION_TIMEOUT_MS = 90_000;
+
+/**
+ * Issue #1118: this route's worst case is the fal subscribe bounded by
+ * DETECTION_TIMEOUT_MS followed — sequentially — by the mask fetches,
+ * each armed with a fresh timeout of the same length. Without this
+ * declaration the platform default kills the function before either
+ * internal timeout fires, so the caller gets an opaque 504/500 instead
+ * of the classified "Request timeout" copy and `recordDailyUsage` never
+ * runs, leaving the paid SAM call unbilled.
+ */
+export const maxDuration = 300;
 
 /**
  * Fetches a fal-hosted mask image and re-encodes it as a data URL so the
@@ -94,6 +104,10 @@ async function fetchMaskAsDataUrl(url: string): Promise<string> {
 
 export async function POST(request: NextRequest) {
   let roomId: string | undefined;
+  // Issue #1132: per-request record of an atomic quota claim so the catch
+  // below can refund it when detection fails.
+  let segmentUserId: string | undefined;
+  let segmentClaim: QuotaClaim | null = null;
   try {
     const user = await getAuthedPrismaUser();
     if (!user) {
@@ -107,39 +121,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Issue #226: daily per-user segment guardrail (in-process counter —
-    // see lib/api-quota.ts for the mechanism and its multi-instance
-    // limitation). Checked BEFORE the body is parsed so a user at their
-    // cap never reaches the paid provider.
-    const segmentLimit = resolveDailyLimit(
-      process.env[DAILY_LIMIT_ENV_VAR.segment],
-      DEFAULT_DAILY_SEGMENT_LIMIT
-    );
-    const segmentQuota = evaluateDailyQuota(
-      await getDailyUsage("segment", user.id),
-      segmentLimit
-    );
-    if (!segmentQuota.allowed) {
-      console.warn(
-        JSON.stringify({
-          event: "segment_daily_quota_exceeded",
-          userId: user.id,
-          used: segmentQuota.used,
-          limit: segmentQuota.limit,
-        })
-      );
-      return NextResponse.json(
-        {
-          ...dailyQuotaExceededPayload(segmentQuota, "Please try again tomorrow."),
-          code: API_ERROR_RATE_LIMIT_EXCEEDED,
-        },
-        { status: 429 }
-      );
-    }
-
     const parsed = furnishingsSegmentRequestSchema.safeParse(await request.json());
     if (!parsed.success) {
-      // Issue #227: concept-shaped failures get actionable, non-retryable
+      segmentUserId = user.id;
+
+    // Issue #227: concept-shaped failures get actionable, non-retryable
       // copy — the fix is editing the input, not resending it.
       const conceptInvalid = parsed.error.issues.some((issue) =>
         issue.path.includes("concept")
@@ -176,15 +162,52 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    assertFalConfigured();
+    assertInferenceConfigured();
+
+    // Issue #226/#1132: claim one segment unit ATOMICALLY here, on the
+    // eve of the paid call, instead of gate-reading the counter up front.
+    // The conditional increment (UPDATE ... WHERE count <= limit - N) is
+    // serialized by Postgres, so a concurrent burst can no longer all
+    // read the same pre-spend count and all reach SAM 3.1; losers get 429
+    // with the same payload shape as before. A failed detection refunds
+    // the claim in the catch below, so net accounting is unchanged.
+    segmentClaim = await claimDailyQuota(
+      "segment",
+      user.id,
+      resolveDailyLimit(
+        process.env[DAILY_LIMIT_ENV_VAR.segment],
+        DEFAULT_DAILY_SEGMENT_LIMIT
+      )
+    );
+    if (!segmentClaim.claimed) {
+      console.warn(
+        JSON.stringify({
+          event: "segment_daily_quota_exceeded",
+          userId: user.id,
+          used: segmentClaim.used,
+          limit: segmentClaim.limit,
+        })
+      );
+      return NextResponse.json(
+        {
+          ...dailyQuotaExceededPayload(segmentClaim, "Please try again tomorrow."),
+          code: API_ERROR_RATE_LIMIT_EXCEEDED,
+        },
+        { status: 429 }
+      );
+    }
 
     // Synchronous detection call: SAM 3.1 completes in seconds, so a
-    // direct queue-aware subscribe keeps the preset flow single-round-trip
-    // (the same pattern as /api/segment). Omitted concept ⇒ the payload
-    // builder applies the verified "furniture" default, so the preset
-    // path stays byte-equivalent.
+    // direct queue-aware subscribe keeps the preset flow
+    // single-round-trip (the same pattern as /api/segment). Omitted
+    // concept ⇒ the payload builder applies the verified "furniture"
+    // default, so the preset path stays byte-equivalent. The active
+    // provider (fal by default; Replicate when
+    // INFERENCE_PROVIDER=replicate) is resolved here once per
+    // request and the subscribe goes through the abstraction.
     const payload = buildFurnishingDetectionPayload({ imageUrl, concept });
-    const result = await falSubscribeWithCircuitBreaker(FAL_FURNISHING_DETECTION_MODEL, {
+    const inference = await getInferenceClient();
+    const result = await inference.subscribe(LOGICAL_MODEL.SAM_3_1_IMAGE, {
       input: payload,
       abortSignal: AbortSignal.timeout(DETECTION_TIMEOUT_MS),
     });
@@ -194,23 +217,67 @@ export async function POST(request: NextRequest) {
       throw new Error("Detection response did not include mask images");
     }
 
-    const maskDataUrls = await Promise.all(
+    // Issue #1119: settle per mask. `Promise.all` rejected the whole
+    // batch when a single mask URL was slow or 5xx, so the user got
+    // ZERO regions after an already-billed SAM call — auto-detect
+    // dead-ends on one bad URL. The classified error path is taken only
+    // when every mask fails, matching the failure tolerance the inpaint
+    // path already has (`persistInpaintImage` returns `{persisted:false}`
+    // and the status route retries).
+    const settled = await Promise.allSettled(
       detection.maskUrls.map((maskUrl) => fetchMaskAsDataUrl(maskUrl))
     );
 
+    const maskDataUrls: string[] = [];
+    const keptScores: number[] = [];
+    let failedMaskCount = 0;
+
+    settled.forEach((outcome, index) => {
+      if (outcome.status === "fulfilled") {
+        maskDataUrls.push(outcome.value);
+        const score = detection.scores?.[index];
+        if (score !== undefined) keptScores.push(score);
+        return;
+      }
+      failedMaskCount += 1;
+    });
+
+    if (failedMaskCount > 0) {
+      console.warn(
+        JSON.stringify({
+          event: "furnishings_mask_fetch_partial",
+          roomId: roomId ?? null,
+          requested: settled.length,
+          failed: failedMaskCount,
+        })
+      );
+    }
+
+    // Every mask failing is indistinguishable from a broken detection,
+    // so it takes the classified error path rather than presenting as
+    // "no furnishings found".
+    if (settled.length > 0 && maskDataUrls.length === 0) {
+      throw new Error("Every detected mask image failed to download");
+    }
+
     // An empty maskDataUrls list is a VALID result ("no {concept} found"
     // is presentable, not an error) — the response succeeds either way.
-    // Billing is recorded only for completed detections (the
-    // segment_concept_timing console.log was removed as debug debris,
-    // #720).
-    await recordDailyUsage("segment", user.id);
+    // No charge is written here: the unit was claimed atomically before
+    // the SAM call (issue #1132), and a failed detection is refunded in
+    // the catch below, so only completed detections net-count, as before
+    // (#720).
 
     return NextResponse.json({
       concept: payload.prompt,
       maskDataUrls,
-      scores: detection.scores,
+      scores: detection.scores ? keptScores : detection.scores,
     });
   } catch (error) {
+    // Issue #1132: give the claimed unit back when detection fails, so a
+    // failed attempt costs the user nothing (the pre-#1132 behavior).
+    if (segmentUserId && segmentClaim?.claimed) {
+      await refundDailyQuota("segment", segmentUserId);
+    }
     console.error(
       JSON.stringify({ event: "furnishings_detection_failed", roomId: roomId ?? null }),
       error

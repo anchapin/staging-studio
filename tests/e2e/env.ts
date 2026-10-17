@@ -28,6 +28,26 @@
  * the whole suite run, and specs are sequential (`workers: 1`), so a spec
  * that needs its OWN provider calls must slice the log by a count delta
  * taken before the request — never index from 0.
+ *
+ * **Hermeticity / dotenv dependency (issue #1102):** the one place the
+ * harness writes to a database is `pushSchema()` in `global-setup.ts`,
+ * which shells out to `npx prisma db push` with `DATABASE_URL` set in
+ * the spawn env, plus `seed()`, which constructs its own `PrismaClient`.
+ * Prisma 7 loads `.env` (via `prisma.config.ts`'s `import "dotenv/config"`)
+ * and the `DATABASE_URL` it reads from `.env` would OVERRIDE the spawn-env
+ * value if dotenv's "do not overwrite existing process.env" rule ever
+ * changed (it is documented behavior today, but is one Prisma major bump
+ * away from silently shifting). On a developer machine that `.env` is the
+ * symlink to `.env.local`, which holds the **real** Supabase connection
+ * string — so a regression here would push the schema to, and seed rows
+ * into, production. The contract rests on that dotenv rule continuing to
+ * hold. To make the regression impossible rather than "verifiable," the harness
+ * ALSO calls `assertEphemeralDatabaseUrl()` (defined in
+ * `tests/e2e/database-url-guard.ts`, imported by `global-setup.ts`) at
+ * the top of `main()`, `pushSchema()`, and `seed()`, which rejects any
+ * URL whose shape doesn't match the disposable container
+ * (`postgresql://e2e:e2e@127.0.0.1:<POSTGRES_PORT>/…e2e…`). Do not weaken
+ * those checks without replacing them with something stricter.
  */
 
 /**
@@ -46,6 +66,20 @@
 export const E2E_USER_ID = "e2euser0000000000000000000user";
 export const E2E_EMAIL = "e2e@stagingstudio.test";
 export const E2E_PASSWORD = "e2e-password";
+
+/**
+ * Second GoTrue identity, used to exercise ownership-check 403 branches
+ * that a single-user seed can't reach (issue #1101). The mock GoTrue
+ * (`mock-supabase.ts`) mints a session for this identity when the
+ * password grant arrives with `E2E_OTHER_EMAIL`; a Prisma `User` row
+ * with `E2E_OTHER_USER_ID` is seeded in `global-setup.ts` so
+ * `getAuthedPrismaUser` can resolve it. It owns NO projects, which is
+ * the whole point — every seeded project belongs to {@link E2E_USER_ID},
+ * so any export-pdf request from this user must hit the 403 branch.
+ */
+export const E2E_OTHER_USER_ID = "e2eotheruser000000000000000other";
+export const E2E_OTHER_EMAIL = "e2e-other@stagingstudio.test";
+export const E2E_OTHER_PASSWORD = "e2e-other-password";
 
 export const E2E_UPLOAD_PROJECT_ID = "cupload000000000000000000";
 export const E2E_UPLOAD_ROOM_ID = "e2euploadroom0000000000000room";
@@ -115,6 +149,37 @@ export const E2E_ABSENT_PROJECT_ID = "cmissing00000000000000000";
  * branch, which is otherwise unreachable in a single run.
  */
 export const E2E_DAILY_EXPORT_LIMIT = 20;
+
+/**
+ * The daily inpaint cap the harness expects `POST /api/inpaint` to apply.
+ *
+ * Mirrors `DEFAULT_DAILY_INPAINT_LIMIT` in `src/lib/api-quota.ts` for the
+ * same reason as {@link E2E_DAILY_EXPORT_LIMIT}: `nextEnv()` leaves
+ * `DAILY_INPAINT_LIMIT` unset so the app default applies, and a spec
+ * asserting the route's reported `limit` fails loudly if the two drift.
+ *
+ * Used by `withInpaintUsageAtLimit` (see `quota.ts`) to pin the ledger row
+ * at the cap and reach the 429 branch — which, for an inpaint submit,
+ * means the request is rejected before fal.ai is contacted (#1131).
+ */
+export const E2E_DAILY_INPAINT_LIMIT = 20;
+
+/**
+ * Issue #1343 — the daily copy cap the harness expects the gpt-4o-mini
+ * copy surfaces (`/api/generate-copy` and `/api/v1/listing-copy`) to
+ * apply.
+ *
+ * Mirrors `DEFAULT_DAILY_COPY_LIMIT` in `src/lib/api-quota.ts` for the
+ * same reason as {@link E2E_DAILY_EXPORT_LIMIT}: the suite deliberately
+ * leaves `DAILY_COPY_LIMIT` unset so the app default applies, and any
+ * drift between the two constants surfaces as a failing spec rather than
+ * a silently-broken quota test. Used by `withCopyUsageAtLimit` (see
+ * `quota.ts`) to pin the ledger row at the cap and reach the 429 branch
+ * of `/api/v1/listing-copy` — which is otherwise unreachable in a single
+ * run because the default cap (50) is well above what one spec would
+ * burn.
+ */
+export const E2E_DAILY_COPY_LIMIT = 50;
 
 /** Port/host for the mock Supabase (GoTrue auth + Storage). */
 export const MOCK_SUPABASE_PORT = 39911;
@@ -190,5 +255,28 @@ export function nextEnv(): Record<string, string> {
     E2E_BROWSERLESS_PDF_URL: MOCK_BROWSERLESS_URL,
     NEXT_PUBLIC_APP_URL: APP_URL,
     PREVIEW_TOKEN_SECRET: "e2e-preview-token-secret",
+    // Issue #1106 (encryption at rest): the signature route's
+    // `encryptSignature` requires SIGNATURE_ENCRYPTION_KEY in
+    // production NODE_ENV (the dev fallback is NODE_ENV-gated). The
+    // e2e harness runs a production build, so without this the route
+    // throws on the first sign POST and the signoff spec fails with a
+    // generic 500. A dummy value is fine — the encryption is opaque
+    // to the spec; only round-trip parity matters, and the test never
+    // re-decrypts across processes.
+    SIGNATURE_ENCRYPTION_KEY: "w+L7BwGEjMFqNqHOlNhZR+o6KLUokyJ8fP5lhumSVn4=",
+    // Issue #1344: `NEXT_PUBLIC_*` is build-time inlined, so the
+    // harness can carry only ONE flag value per build. We default to
+    // `"1"` (new `<EditRoomStudio>` surface live) so the four
+    // `edit-room-redesign-*` specs exercise the wired-up submit
+    // path; the legacy specs (mask-paint / concept-flow /
+    // version-history / editor-layout / rehearsal / inpaint-submit)
+    // were updated to the new surface's selectors in the same PR.
+    // Features that lived only on the legacy surface (Fill Region,
+    // Restage furnishings preset, Select Regions + batch panel via
+    // canvas-click, undo/redo, zoom) have no equivalent in the
+    // new surface yet and the corresponding subtests were dropped;
+    // they remain pinned at the lib-level where they live and will
+    // re-light on the new surface when those features land.
+    NEXT_PUBLIC_EDIT_ROOM_REDESIGN: "1",
   };
 }

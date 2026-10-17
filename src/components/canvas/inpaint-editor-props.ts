@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { InpaintSource } from "@/lib/inpaint-source";
+import type { AutosaveStatus } from "@/lib/autosave-controller";
 
 export interface InpaintEditorProps {
   roomId: string;
@@ -57,5 +58,21 @@ export interface InpaintEditorProps {
   projectName?: string;
   /** Issue #638: Room name for Focus Canvas Mode breadcrumb. */
   roomName?: string;
+  /**
+   * Issue #1188: return to the project overview. When set, Zen Mode and
+   * Focus Canvas show a "Back to project" control (their chrome hides the
+   * page header). The editor flushes pending edits and confirms first if
+   * a run is in flight.
+   */
+  onExitToProject?: () => void;
+  /** Issue #1188: reports run state so the page can guard its own exits. */
+  onProcessingChange?: (isProcessing: boolean) => void;
+  /**
+   * Issue #1155: the directive autosave status from the controller instance
+   * that actually performs the save, owned by the parent (project-detail-view
+   * keeps one controller per room). Replaces the orphan module-level registry
+   * that no save ever drove.
+   */
+  saveStatus?: AutosaveStatus;
 }
 

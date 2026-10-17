@@ -6,9 +6,10 @@
  *
  * POST /api/v1/sign-project
  *
- * Version header: API-Version: v1
+ * Version header: X-Supabase-API-Version: v1
  */
 import { NextRequest, NextResponse } from "next/server";
+import { buildVersionHeaders } from "@/lib/api-version";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest) {
     status: response.status,
     headers: {
       "Content-Type": response.headers.get("Content-Type") ?? "application/json",
-      "API-Version": "v1",
+      ...buildVersionHeaders("v1"),
     },
   });
 }
@@ -55,7 +56,7 @@ export async function OPTIONS(): Promise<NextResponse> {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "POST, OPTIONS",
       "Access-Control-Allow-Headers": "*",
-      "API-Version": "v1",
+      ...buildVersionHeaders("v1"),
     },
   });
 }

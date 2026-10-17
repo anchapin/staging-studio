@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -131,5 +133,68 @@ describe("instrumentation", () => {
       const { register } = await import("@/../instrumentation");
       await expect(register()).resolves.not.toThrow();
     });
+
+    it("should export onRequestError equal to Sentry.captureRequestError (issue #1107)", async () => {
+      // Server-side request error API hook — Next 15+ invokes this for
+      // unhandled errors on the server, and it must be wired to the
+      // Sentry hook so the SDK can ship them to the DSN. The wiring
+      // only matters when the SDK actually fires; with no DSN the
+      // SDK no-ops, but the binding itself must exist.
+      const Sentry = await import("@sentry/nextjs");
+      const mod = await import("@/../instrumentation");
+      expect(typeof mod.onRequestError).toBe("function");
+      expect(mod.onRequestError).toBe(Sentry.captureRequestError);
+    });
+  });
+});
+
+describe("issue #1107 wiring", () => {
+  const repoRoot = path.resolve(__dirname, "..");
+
+  it("next.config.ts wraps the user config with withSentryConfig", () => {
+    // The Sentry webpack plugin (which discovers
+    // sentry.client.config.ts and sentry.server.config.ts) is
+    // installed by withSentryConfig; without this wrapping the SDK
+    // never runs even though the config files exist on disk.
+    const source = fs.readFileSync(
+      path.join(repoRoot, "next.config.ts"),
+      "utf8",
+    );
+    expect(source).toMatch(
+      /import\s*\{\s*withSentryConfig\s*\}\s*from\s*["']@sentry\/nextjs\/config["']/,
+    );
+    expect(source).toMatch(/withSentryConfig\(\s*nextConfig\b/);
+  });
+
+  it("global-error.tsx only calls Sentry.captureException when DSN is set", () => {
+    // The component sits behind a guard; if the guard regresses to
+    // "always capture" the SDK init runs against an undefined DSN and
+    // throws at module-load. The guard must stay.
+    const source = fs.readFileSync(
+      path.join(repoRoot, "src/app/global-error.tsx"),
+      "utf8",
+    );
+    expect(source).toMatch(/process\.env\.NEXT_PUBLIC_SENTRY_DSN/);
+    expect(source).toMatch(/Sentry\.captureException/);
+    // The capture must be inside the if-block, not unconditional.
+    const captureIdx = source.indexOf("Sentry.captureException");
+    const dsnIdx = source.indexOf("NEXT_PUBLIC_SENTRY_DSN");
+    expect(captureIdx).toBeGreaterThan(dsnIdx);
+  });
+
+  it(".env.example documents NEXT_PUBLIC_SENTRY_DSN", () => {
+    const source = fs.readFileSync(
+      path.join(repoRoot, ".env.example"),
+      "utf8",
+    );
+    expect(source).toMatch(/NEXT_PUBLIC_SENTRY_DSN/);
+  });
+
+  it("docs/DEPLOYMENT.md documents NEXT_PUBLIC_SENTRY_DSN", () => {
+    const source = fs.readFileSync(
+      path.join(repoRoot, "docs/DEPLOYMENT.md"),
+      "utf8",
+    );
+    expect(source).toMatch(/NEXT_PUBLIC_SENTRY_DSN/);
   });
 });

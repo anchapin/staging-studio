@@ -10,8 +10,11 @@ import {
 
 export interface MaskCanvasStageProps {
   /** The interactive mask canvas + decorative overlay canvas refs. */
-  canvasRef: RefObject<HTMLCanvasElement>;
-  overlayCanvasRef: RefObject<HTMLCanvasElement>;
+  // React 19: `useRef<HTMLCanvasElement | null>(null)` returns
+  // `RefObject<HTMLCanvasElement | null>`. The two ref props below mirror
+  // that nullable shape; the consuming code null-guards `.current` accesses.
+  canvasRef: RefObject<HTMLCanvasElement | null>;
+  overlayCanvasRef: RefObject<HTMLCanvasElement | null>;
   /** Logical grid + DPR-scaled backing store (issue #181). */
   dims: { width: number; height: number };
   backing: { width: number; height: number };

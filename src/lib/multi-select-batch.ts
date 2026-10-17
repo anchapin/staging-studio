@@ -374,10 +374,17 @@ export interface ConceptSelectAllReduction {
 export function applyConceptSelectAll(
   selections: BatchSelection[],
   selectedInstanceIndices: number[],
-  candidates: readonly ConceptSelectAllCandidate[]
+  candidates: readonly ConceptSelectAllCandidate[],
+  existingRegionGrids?: ReadonlyMap<number, InstanceMaskGrid>
 ): ConceptSelectAllReduction {
   const grids = new Map<number, InstanceMaskGrid>();
   for (const candidate of candidates) grids.set(candidate.instanceIndex, candidate.grid);
+  // Supplement with existing region grids so the merge check can find them.
+  if (existingRegionGrids) {
+    for (const [index, grid] of existingRegionGrids) {
+      if (!grids.has(index)) grids.set(index, grid);
+    }
+  }
 
   // Walk candidates in rank order: skip already-selected instances and
   // duplicate rounded seed points (vs the existing set AND this walk).
@@ -480,10 +487,10 @@ export function applyConceptSelectAll(
         index === mergeTarget
           ? {
               ...selection,
-              memberInstanceIndices: [
+              memberInstanceIndices: [...new Set([
                 ...(selection.memberInstanceIndices ?? []),
                 ...memberIndices,
-              ],
+              ])].sort((a, b) => a - b),
             }
           : selection
       );

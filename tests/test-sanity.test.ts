@@ -5,7 +5,8 @@ import { describe, expect, it } from "vitest";
 /**
  * Issue #693: tautology-test sanity guard.
  *
- * Every tests/*.test.ts must import at least one real module — either a
+ * Every test file under tests/ matching *.test.ts or *.test.tsx must
+ * import at least one real module — either a
  * production module (`@/…` alias or a relative path into `src/`) or a
  * local helper file that exists on disk. A test whose only imports are
  * `vitest` and Node built-ins re-asserts its own inline literals: it
@@ -21,16 +22,44 @@ import { describe, expect, it } from "vitest";
  *
  * The guard file itself is excluded (it imports only fs/path/vitest by
  * design — its subject IS the tests directory).
+ *
+ * Issue #1153: The guard now walks `TESTS_DIR` recursively and matches
+ * /\.test\.tsx?$/ to cover nested test files (tests/lib/, tests/api/,
+ * tests/actions/, etc.) and .test.tsx files.
  */
 
 /** Test files that legitimately import no module, with the reason each is pending removal. */
 const ALLOWED_NO_MODULE_IMPORTS: readonly Record<string, string>[] = [
-  // Empty since #694 landed: inpaint-undo.test.ts was replaced by
-  // mask-undo-stack.test.ts, which imports the real @/lib module.
+  {
+    // revalidate-preview.test.ts pins the issue #1225 contract statically
+    // (walks src/app/actions/*.ts and asserts revalidatePath pairings) — it
+    // has no production call to make. A previous anchor import of
+    // PREVIEW_TOKEN_TTL_SECONDS was removed by #1287 as a dead
+    // no-unused-vars hit; the contract is enforceable without it.
+    "revalidate-preview.test.ts":
+      "static-analysis contract pin for issue #1225; no production call is appropriate (see #1287)",
+  },
 ];
 
 const TESTS_DIR = path.dirname(new URL(import.meta.url).pathname);
 const SELF_NAME = path.basename(new URL(import.meta.url).pathname);
+
+/**
+ * Recursively walk a directory and return all file paths matching a pattern.
+ */
+function walkDir(dir: string, pattern: RegExp): string[] {
+  const results: string[] = [];
+  const entries = readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...walkDir(fullPath, pattern));
+    } else if (entry.isFile() && pattern.test(entry.name)) {
+      results.push(fullPath);
+    }
+  }
+  return results;
+}
 
 function extractImportSpecifiers(source: string): string[] {
   const specifiers: string[] = [];
@@ -71,8 +100,9 @@ function importsARealModule(source: string, fromDir: string): boolean {
 
 describe("tautology sanity guard — issue #693", () => {
   it("every unit test file imports at least one real module", () => {
-    const testFiles = readdirSync(TESTS_DIR).filter(
-      (name) => name.endsWith(".test.ts") && name !== SELF_NAME
+    // Walk TESTS_DIR recursively and match /\.test\.tsx?$/ (issue #1153)
+    const testFiles = walkDir(TESTS_DIR, /\.test\.tsx?$/).filter(
+      (filePath) => !filePath.endsWith(SELF_NAME)
     );
     expect(testFiles.length).toBeGreaterThan(0);
 
@@ -81,16 +111,17 @@ describe("tautology sanity guard — issue #693", () => {
     );
     const offenders: string[] = [];
 
-    for (const name of testFiles) {
-      const source = readFileSync(path.join(TESTS_DIR, name), "utf8");
-      if (!importsARealModule(source, TESTS_DIR) && !whitelisted.has(name)) {
-        offenders.push(name);
+    for (const filePath of testFiles) {
+      const source = readFileSync(filePath, "utf8");
+      const fileName = path.basename(filePath);
+      if (!importsARealModule(source, path.dirname(filePath)) && !whitelisted.has(fileName)) {
+        offenders.push(fileName);
       }
     }
 
     expect(
       offenders,
-      `tests/*.test.ts that import zero real modules (tautology risk, see #693): ${offenders.join(", ")}. ` +
+      `tests/**/*.test.ts(x) that import zero real modules (tautology risk, see #693): ${offenders.join(", ")}. ` +
         "Import the production module (extract pure logic to src/lib first if needed) or delete the test."
     ).toEqual([]);
   });

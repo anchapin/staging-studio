@@ -13,6 +13,17 @@ import type { VariantSlot } from "@/lib/inpaint-source";
 /** Thumbnails render at a fixed 208px square (issue #479 — 96px was too small to see detail). */
 const THUMBNAIL_SIZES = "208px";
 
+/**
+ * Issue #1190: every strip column and the thumbnail box inside it share
+ * ONE size source. The Original column used to be `w-20 sm:w-24` (80/96px)
+ * around a fixed `w-52` (208px) button, so the Original image spilled
+ * ~120px into Variant A; the variant columns (`w-44` below `sm`) had the
+ * same 32px spill on narrow screens. Column width now always equals the
+ * thumbnail width at every breakpoint, so `gap-3` is the only spacing.
+ */
+export const THUMB_COLUMN_CLASS = "flex w-44 sm:w-52";
+export const THUMB_BOX_CLASS = "h-44 w-44 sm:h-52 sm:w-52";
+
 const VARIANT_LETTER: Record<VariantSlot, "A" | "B"> = { 0: "A", 1: "B" };
 
 /**
@@ -86,13 +97,14 @@ export default function VariantThumbnailStrip({
       aria-label="Room variants"
       className={cn("flex snap-x snap-mandatory items-start gap-3 overflow-x-auto pb-2", className)}
     >
-      <div className="flex w-20 sm:w-24 shrink-0 snap-start flex-col items-center gap-1">
+      <div className={cn(THUMB_COLUMN_CLASS, "shrink-0 snap-start flex-col items-center gap-1")}>
         <button
           type="button"
           aria-pressed={selection === "original"}
           onClick={() => onSelect("original")}
           className={cn(
-            "relative block h-52 w-52 overflow-hidden rounded-md border bg-muted transition-shadow",
+            "relative block overflow-hidden rounded-md border bg-muted transition-shadow",
+            THUMB_BOX_CLASS,
             selection === "original"
               ? "border-foreground ring-2 ring-ring ring-offset-2"
               : "border-border hover:border-muted-foreground"
@@ -124,14 +136,15 @@ export default function VariantThumbnailStrip({
         const letter = VARIANT_LETTER[slot];
         const touchUps = touchUpCounts?.[slot] ?? 0;
         return (
-          <div key={slot} className="flex w-44 sm:w-52 shrink-0 snap-start flex-col items-center gap-1">
-            <span className="relative block h-52 w-52">
+          <div key={slot} className={cn(THUMB_COLUMN_CLASS, "shrink-0 snap-start flex-col items-center gap-1")}>
+            <span className={cn("relative block", THUMB_BOX_CLASS)}>
               <button
                 type="button"
                 aria-pressed={selected}
                 onClick={() => onSelect(slot)}
                 className={cn(
-                  "relative block h-52 w-52 overflow-hidden rounded-md border bg-muted transition-shadow",
+                  "relative block overflow-hidden rounded-md border bg-muted transition-shadow",
+            THUMB_BOX_CLASS,
                   selected
                     ? "border-foreground ring-2 ring-ring ring-offset-2"
                     : "border-border hover:border-muted-foreground"

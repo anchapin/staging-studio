@@ -4,7 +4,6 @@ import {
   aiImageUrlSchema,
   aiMaskUrlSchema,
   inpaintRequestSchema,
-  segmentPointSchema,
   segmentConceptSchema,
   visionLabelCropSchema,
   visionLabelOutputSchema,
@@ -15,13 +14,12 @@ import {
 
 /**
  * Issue #1061: ai-route-schemas — the schemas consumed by /api/inpaint,
- * /api/segment, /api/segment/furnishings, /api/label-instances, and the
+ * /api/segment/furnishings, /api/label-instances, and the
  * AI-quality-gate pre-flight checks.
  *
- * `generateCopyRequestSchema`, `segmentRequestSchema`,
- * `furnishingsSegmentRequestSchema`, `visionLabelRequestSchema`, and
- * `batchRoomTypesRequestSchema` are pinned in
- * tests/generate-copy-request-schema.test.ts and
+ * `generateCopyRequestSchema`, `furnishingsSegmentRequestSchema`,
+ * `visionLabelRequestSchema`, and `batchRoomTypesRequestSchema` are
+ * pinned in tests/generate-copy-request-schema.test.ts and
  * tests/segment-request-schema.test.ts (file names predate the
  * 1:1 convention). This file covers the schemas still missing
  * direct coverage, plus invariants shared across all of them
@@ -116,15 +114,16 @@ describe("inpaintRequestSchema (issue #1061)", () => {
     expect(result.success).toBe(true);
   });
 
-  it("accepts the full AI-guidance field set", () => {
+  it("accepts the full AI-guidance field set (#1362b: strength + seed)", () => {
+    // Issue #1362b: the schema is now `.strict()` and the legacy
+    // fields (`promptStrength`, `maskBlur`, `creativeMode`,
+    // `lockSeed`) are dropped. The surviving guidance set is
+    // `strength` (DashScope wire name, 0..1) + `seed`.
     const result = inpaintRequestSchema.safeParse({
       ...validBody,
       negativePrompt: "Do not alter the windows.",
-      promptStrength: 0.85,
-      maskBlur: 6,
+      strength: 0.85,
       seed: 42,
-      creativeMode: false,
-      lockSeed: true,
     });
     expect(result.success).toBe(true);
   });
@@ -154,24 +153,52 @@ describe("inpaintRequestSchema (issue #1061)", () => {
     ).toBe(false);
   });
 
-  it("rejects promptStrength outside 0.1–1.0", () => {
+  it("rejects strength outside 0.0–1.0 (DashScope wire range, #1362b)", () => {
+    // Issue #1362b: the field is `strength` (renamed from
+    // `promptStrength`); the range matches DashScope's wire default
+    // (0.5) — not fal's 0.1–1.0. Pin both ends.
     expect(
-      inpaintRequestSchema.safeParse({ ...validBody, promptStrength: 1.5 })
-        .success
+      inpaintRequestSchema.safeParse({ ...validBody, strength: 1.5 }).success
     ).toBe(false);
     expect(
-      inpaintRequestSchema.safeParse({ ...validBody, promptStrength: 0.05 })
+      inpaintRequestSchema.safeParse({ ...validBody, strength: -0.1 })
         .success
     ).toBe(false);
+    // Boundary at 0 and 1 must succeed.
+    expect(
+      inpaintRequestSchema.safeParse({ ...validBody, strength: 0 }).success
+    ).toBe(true);
+    expect(
+      inpaintRequestSchema.safeParse({ ...validBody, strength: 1 }).success
+    ).toBe(true);
   });
 
-  it("rejects maskBlur outside 0–20", () => {
-    expect(
-      inpaintRequestSchema.safeParse({ ...validBody, maskBlur: 21 }).success
-    ).toBe(false);
-    expect(
-      inpaintRequestSchema.safeParse({ ...validBody, maskBlur: -1 }).success
-    ).toBe(false);
+  it("rejects legacy guidance fields (promptStrength/maskBlur/creativeMode/lockSeed) under .strict() (#1362b)", () => {
+    // The schema is `.strict()` (issue #1362b) so a stale client
+    // sending the pre-Stage-B field set fails loudly with an
+    // "unrecognized key" error instead of silently dropping the
+    // user's choice on the floor. Each legacy field gets its own
+    // pin so a future operator who un-strictens the schema sees the
+    // failure surface explicitly.
+    for (const legacyField of [
+      "promptStrength",
+      "maskBlur",
+      "creativeMode",
+      "lockSeed",
+    ]) {
+      const result = inpaintRequestSchema.safeParse({
+        ...validBody,
+        [legacyField]: legacyField === "creativeMode" || legacyField === "lockSeed" ? false : 1,
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        // `.strict()` surfaces an "unrecognized_keys" issue. The
+        // exact path may shift between Zod versions, so we assert
+        // the error mentions the legacy field name.
+        const messages = JSON.stringify(result.error.issues);
+        expect(messages).toContain(legacyField);
+      }
+    }
   });
 
   it("rejects seed outside 0–999999", () => {
@@ -188,25 +215,6 @@ describe("inpaintRequestSchema (issue #1061)", () => {
         imageUrl: "https://example.com/x.png",
       }).success
     ).toBe(false);
-  });
-});
-
-describe("segmentPointSchema (issue #1061)", () => {
-  it("accepts a point with non-negative finite coordinates", () => {
-    expect(segmentPointSchema.safeParse({ x: 0, y: 0 }).success).toBe(true);
-    expect(segmentPointSchema.safeParse({ x: 1024, y: 768 }).success).toBe(true);
-  });
-
-  it("rejects negative coordinates", () => {
-    expect(segmentPointSchema.safeParse({ x: -1, y: 0 }).success).toBe(false);
-    expect(segmentPointSchema.safeParse({ x: 0, y: -1 }).success).toBe(false);
-  });
-
-  it("rejects non-finite coordinates (NaN, Infinity)", () => {
-    expect(segmentPointSchema.safeParse({ x: NaN, y: 0 }).success).toBe(false);
-    expect(segmentPointSchema.safeParse({ x: 0, y: Infinity }).success).toBe(
-      false
-    );
   });
 });
 

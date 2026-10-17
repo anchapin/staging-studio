@@ -46,14 +46,37 @@ export function ConsultationReportClient({
   const [saveState, setSaveState] = useState<SignatureSaveState>(
     initialSignatureSaveState
   );
+  // "Page was generated on" stamp: capture once at mount so the SSR HTML
+  // and the client-hydrated value agree, and re-renders don't shift it.
+  const [generatedAt] = useState(() => new Date());
 
   const submitSignature = async (dataUrl: string) => {
+    // Issue #1113: same defense-in-depth early-return as the
+    // signoff-page client. The SignatureCanvas is disabled until
+    // `agreed` flips to true (see the canvas mount) but we never
+    // trust the client-side gate alone — refuse here so a hot-key,
+    // devtools edit, or stale click cannot bypass the consent.
+    if (!agreed) {
+      setSaveState((prev) =>
+        nextSignatureSaveState(prev, {
+          kind: "fail",
+          error:
+            "Please confirm you have read and accept the staging-plan approval statement before signing.",
+        })
+      );
+      return;
+    }
     setSaveState((prev) => nextSignatureSaveState(prev, { kind: "save", dataUrl }));
     try {
       const res = await fetch("/api/sign-project", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: project.id, signatureDataUrl: dataUrl, token: previewToken }),
+        body: JSON.stringify({
+          projectId: project.id,
+          signatureDataUrl: dataUrl,
+          token: previewToken,
+          consentAttested: true,
+        }),
       });
       if (!res.ok) {
         const data = await res.json();
@@ -194,7 +217,11 @@ export function ConsultationReportClient({
               Prepared by {user.firmName}
             </p>
 
-            {/* Signature Canvas */}
+            {/* Signature Canvas — issue #1113: gated on `agreed` so the
+                  inner "Sign & Approve" button cannot fire until the
+                  client confirms the legally-worded approval text. The
+                  canvas itself remains #1114's domain and is left
+                  untouched. */}
             <div className="space-y-4">
               <div>
                 <p className="block font-jakarta text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
@@ -203,7 +230,7 @@ export function ConsultationReportClient({
                 <SignatureCanvas
                   onSave={handleSave}
                   clientName={project.clientName}
-                  disabled={false}
+                  disabled={!agreed}
                 />
               </div>
 
@@ -222,12 +249,15 @@ export function ConsultationReportClient({
                     Date
                   </p>
                   <p className="font-playfair text-lg text-foreground border-b border-on-surface-variant/40 pb-1">
-                    {formatLongDate(new Date())}
+                    {formatLongDate(generatedAt)}
                   </p>
                 </div>
               </div>
 
-              {/* Approval checkbox */}
+              {/* Approval checkbox — issue #1113: now read by the request
+                  body, gating the signature canvas above. Rendered
+                  AFTER the canvas so the canvas stays locked until
+                  consent is given. */}
               <div className="space-y-2 pt-4">
                 <label className="flex items-start gap-3 cursor-pointer group">
                   <input
@@ -240,6 +270,14 @@ export function ConsultationReportClient({
                     {APPROVAL_TEXT}
                   </span>
                 </label>
+                {!agreed && (
+                  <p
+                    className="font-jakarta text-xs text-stone-500 pl-7"
+                    aria-live="polite"
+                  >
+                    Tick the box above to enable signing.
+                  </p>
+                )}
               </div>
 
               {saveState.kind === "failed" && (

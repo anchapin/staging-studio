@@ -1,7 +1,14 @@
 import { generateObject } from "ai";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { aiModel, assertOpenAIConfigured, generateWithCircuitBreaker } from "@/lib/ai";
+import {
+  FALLBACK_MODEL_ID,
+  FALLBACK_PRIMARY_ID,
+  aiModel,
+  assertOpenAIConfigured,
+  generateWithCircuitBreaker,
+  generateWithFailover,
+} from "@/lib/ai";
 import { prisma } from "@/lib/prisma";
 import {
   getAuthedPrismaUser,
@@ -15,18 +22,20 @@ import {
 } from "@/lib/ai-route-schemas";
 import { buildCopyPrompt } from "@/lib/prompts";
 import { checklistItemSchema } from "@/lib/checklist-schema";
-import { classifyIntegrationError } from "@/lib/error-classify";
+import { classifyIntegrationError, classifyIntegrationErrorClass } from "@/lib/error-classify";
+import { withRequestLogging } from "@/lib/api-logging";
+import { logger } from "@/lib/logger";
 import { describeNoObjectGeneratedError } from "@/lib/no-object-error";
 import { sanitizePromptValue } from "@/lib/sanitize-prompt";
 import {
   DEFAULT_DAILY_COPY_LIMIT,
   DAILY_LIMIT_ENV_VAR,
   dailyQuotaExceededPayload,
-  evaluateDailyQuota,
-  getDailyUsage,
-  recordDailyUsage,
+  claimDailyQuota,
+  refundDailyQuota,
   resolveDailyLimit,
 } from "@/lib/api-quota";
+import type { QuotaClaim } from "@/lib/api-quota";
 import { saveRoomCopy, type GeneratedCopy } from "@/app/actions/room";
 import {
   API_ERROR_UNAUTHORIZED,
@@ -62,10 +71,18 @@ const CopyOutputSchema = z.object({
   checklist: z.array(checklistItemSchema),
 });
 
-export async function POST(request: NextRequest) {
+async function postGenerateCopy(request: NextRequest) {
   // Hoisted so the catch block can correlate failures with the room even
   // when the error fires before/after the request body is parsed.
   let roomId: string | undefined;
+  // Issue #1132: per-request record of the atomic quota claim and whether
+  // the provider call resolved, so the catch below refunds the claim only
+  // when the paid call itself failed (a failure after it resolved, e.g.
+  // persisting the copy, keeps the count — the same accounting as the old
+  // charge-after-resolve).
+  let copyUserId: string | undefined;
+  let copyClaim: QuotaClaim | null = null;
+  let copyGenerationResolved = false;
   try {
     const user = await getAuthedPrismaUser();
     if (!user) {
@@ -80,36 +97,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Issue #201: daily per-user OpenAI cost guardrail, checked BEFORE any
-    // validation or DB work — a user at their cap never reaches gpt-4o-mini.
-    // Usage lives in the in-process daily counter (lib/api-quota.ts), which
-    // resets on cold start; that under-count limitation is documented there.
+    copyUserId = user.id;
+
+    // Issue #201: daily per-user OpenAI cost guardrail. Usage lives in the
+    // `DailyApiUsage` Postgres table, so it survives serverless cold starts
+    // and multi-instance traffic splitting (issues #784, #1131). #1132: the
+    // unit is claimed ATOMICALLY just before the paid call (below), not
+    // gate-read up front — the old check-then-charge let a concurrent burst
+    // all read the same pre-spend count and overshoot the cap. A user at
+    // their cap still never reaches gpt-4o-mini.
     const copyLimit = resolveDailyLimit(
       process.env[DAILY_LIMIT_ENV_VAR.copy],
       DEFAULT_DAILY_COPY_LIMIT
     );
-    const copyQuota = evaluateDailyQuota(
-      await getDailyUsage("copy", user.id),
-      copyLimit
-    );
-    if (!copyQuota.allowed) {
-      console.warn(
-        JSON.stringify({
-          event: "generate_copy_daily_quota_exceeded",
-          userId: user.id,
-          used: copyQuota.used,
-          limit: copyQuota.limit,
-        })
-      );
-      return NextResponse.json(
-        {
-          success: false,
-          ...dailyQuotaExceededPayload(copyQuota, "Please try again tomorrow."),
-          code: API_ERROR_RATE_LIMIT_EXCEEDED,
-        },
-        { status: 429 }
-      );
-    }
 
     const { roomId: parsedRoomId } = generateCopyRequestSchema.parse(
       await request.json()
@@ -187,10 +187,40 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { object: copy, finishReason, usage } = await generateWithCircuitBreaker(async () =>
-      generateObject({
-        model: aiModel,
-        schema: CopyOutputSchema,
+    // Issue #201/#1132: claim one copy unit ATOMICALLY here, on the eve of
+    // the paid call. The conditional increment (UPDATE ... WHERE count <=
+    // limit - N) is serialized by Postgres, so a concurrent burst can no
+    // longer all read the same pre-spend count and all reach gpt-4o-mini;
+    // losers get 429 with the same payload shape as before.
+    copyClaim = await claimDailyQuota("copy", user.id, copyLimit);
+    if (!copyClaim.claimed) {
+      console.warn(
+        JSON.stringify({
+          event: "generate_copy_daily_quota_exceeded",
+          userId: user.id,
+          used: copyClaim.used,
+          limit: copyClaim.limit,
+        })
+      );
+      return NextResponse.json(
+        {
+          success: false,
+          ...dailyQuotaExceededPayload(copyClaim, "Please try again tomorrow."),
+          code: API_ERROR_RATE_LIMIT_EXCEEDED,
+        },
+        { status: 429 }
+      );
+    }
+
+    // Issue #1224: the generation call runs through the failover wrapper —
+    // a vendor-availability failure on the primary (rate limit, timeout,
+    // network) gets exactly one attempt on the fallback model. The quality
+    // gate below deliberately stays on the primary via the breaker.
+    const { result: generation, modelId, failedOver } = await generateWithFailover(
+      (model) =>
+        generateObject({
+          model,
+          schema: CopyOutputSchema,
         prompt: buildCopyPrompt({
           roomName: room.name,
           aesthetic: room.project.stagingAesthetic,
@@ -224,58 +254,76 @@ export async function POST(request: NextRequest) {
         },
       })
     );
+    const { object: copy, finishReason, usage } = generation;
+    copyGenerationResolved = true;
 
-    // Count the billable generation only after the provider call resolves:
-    // a failed/timeout attempt costs at most a few rejected tokens and does
-    // not count against the user's daily cap.
-    await recordDailyUsage("copy", user.id);
+    // No charge is written here: the unit was claimed atomically before
+    // the call (issue #1132), and a failed/timeout attempt is refunded in
+    // the catch below, so it still costs nothing against the daily cap.
 
     // Issue #600: copy quality gate — evaluate generated copy quality before
     // persisting. Advisory only; warnings ride along with the saved copy.
     const qualityWarnings: string[] = [];
     assertOpenAIConfigured();
-    const { object: qg } = await generateWithCircuitBreaker(async () =>
-      generateObject({
-        model: aiModel,
-        schema: copyQualityGateSchema,
-        messages: [
-          {
-            role: "user",
-            content: [
-              `You are a staging copy quality auditor. Evaluate the generated copy for room "${sanitizePromptValue(room.name)}".`,
-              "",
-              `Staging aesthetic: "${sanitizePromptValue(room.project.stagingAesthetic)}"`,
-              `Target buyer: "${sanitizePromptValue(room.project.targetBuyer)}"`,
-              `Raw directives: "${sanitizePromptValue(room.rawDirectives ?? "")}"`,
-              "",
-              `Generated copy:`,
-              `  Observed challenge: "${copy.observedChallenge}"`,
-              `  Recommendation: "${copy.recommendation}"`,
-              `  Buyer psychology: "${copy.buyerPsychology}"`,
-              `  Checklist: ${copy.checklist.map((c) => `"${c.item}"`).join(", ")}`,
-              "",
-              "Evaluate:",
-              "1. specificity (0–3): 0=generic/filler like 'Attention to detail ensures lasting impressions', 3=highly specific and concrete",
-              "2. buyer_aligned: if the copy doesn't speak to the target buyer persona, explain how",
-              "3. checklist_actionable: if any checklist item is vague, non-actionable, or generic",
-              "4. aesthetic_consistent: if copy contradicts or misaligns with the staging aesthetic",
-              "",
-              "Return JSON with: specificity (0-3), buyer_aligned (string only if misaligned), checklist_actionable (string only if vague items), aesthetic_consistent (string only if inconsistent), qualityWarnings (array of distinct warning strings).",
-            ].join("\n"),
-          },
-        ],
-      })
-    );
-    if (qg.buyer_aligned) {
+    // Issue #1224: the gate is advisory, so a gate failure must never turn
+    // an already-generated copy (including one the fallback just produced
+    // during an availability incident) into a failed request.
+    let qg: z.infer<typeof copyQualityGateSchema> | null = null;
+    try {
+      qg = (
+        await generateWithCircuitBreaker(async () =>
+        generateObject({
+          model: aiModel,
+          schema: copyQualityGateSchema,
+          messages: [
+            {
+              role: "user",
+              content: [
+                `You are a staging copy quality auditor. Evaluate the generated copy for room "${sanitizePromptValue(room.name)}".`,
+                "",
+                `Staging aesthetic: "${sanitizePromptValue(room.project.stagingAesthetic)}"`,
+                `Target buyer: "${sanitizePromptValue(room.project.targetBuyer)}"`,
+                `Raw directives: "${sanitizePromptValue(room.rawDirectives ?? "")}"`,
+                "",
+                `Generated copy:`,
+                `  Observed challenge: "${copy.observedChallenge}"`,
+                `  Recommendation: "${copy.recommendation}"`,
+                `  Buyer psychology: "${copy.buyerPsychology}"`,
+                `  Checklist: ${copy.checklist.map((c) => `"${c.item}"`).join(", ")}`,
+                "",
+                "Evaluate:",
+                "1. specificity (0–3): 0=generic/filler like 'Attention to detail ensures lasting impressions', 3=highly specific and concrete",
+                "2. buyer_aligned: if the copy doesn't speak to the target buyer persona, explain how",
+                "3. checklist_actionable: if any checklist item is vague, non-actionable, or generic",
+                "4. aesthetic_consistent: if copy contradicts or misaligns with the staging aesthetic",
+                "",
+                "Return JSON with: specificity (0-3), buyer_aligned (string only if misaligned), checklist_actionable (string only if vague items), aesthetic_consistent (string only if inconsistent), qualityWarnings (array of distinct warning strings).",
+              ].join("\n"),
+            },
+          ],
+        })
+        )
+      ).object;
+    } catch (gateError) {
+      logger.warn(
+        {
+          event: "generate_copy_quality_gate_failed",
+          roomId,
+          errorClass: classifyIntegrationErrorClass(gateError),
+        },
+        `[generate-copy] quality gate skipped: ${gateError instanceof Error ? gateError.message : String(gateError)}`
+      );
+    }
+    if (qg?.buyer_aligned) {
       qualityWarnings.push(qg.buyer_aligned);
     }
-    if (qg.checklist_actionable) {
+    if (qg?.checklist_actionable) {
       qualityWarnings.push(qg.checklist_actionable);
     }
-    if (qg.aesthetic_consistent) {
+    if (qg?.aesthetic_consistent) {
       qualityWarnings.push(qg.aesthetic_consistent);
     }
-    if (qg.qualityWarnings) {
+    if (qg?.qualityWarnings) {
       qualityWarnings.push(...qg.qualityWarnings);
     }
 
@@ -312,17 +360,38 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Issue #1224: `model` names the tier that produced the copy (primary
+    // or fallback) so per-model spend can be attributed from the response;
+    // `usage` is that model's own usage object.
+    if (failedOver) {
+      console.warn(
+        JSON.stringify({
+          event: "generate_copy_failover",
+          roomId,
+          primaryModel: FALLBACK_PRIMARY_ID,
+          fallbackModel: FALLBACK_MODEL_ID,
+        })
+      );
+    }
     return NextResponse.json(
       {
         success: true,
         data: generatedCopy,
         finishReason,
         usage,
+        model: modelId,
         qualityWarnings,
       },
       { status: 200 }
     );
   } catch (error) {
+    // Issue #1132: give the claimed unit back when the paid call itself
+    // failed. Once it resolved, the count stands even if a later step
+    // (persisting the copy) throws — the vision/generation work was
+    // consumed.
+    if (!copyGenerationResolved && copyUserId && copyClaim?.claimed) {
+      await refundDailyQuota("copy", copyUserId);
+    }
     console.error(
       JSON.stringify({ event: "generate_copy_failed", roomId: roomId ?? null }),
       error
@@ -370,3 +439,6 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+// Issue #1116: wire the request logger so this route actually logs.
+export const POST = withRequestLogging(postGenerateCopy);

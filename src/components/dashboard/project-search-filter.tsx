@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Search, SlidersHorizontal, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
@@ -43,10 +43,19 @@ export function ProjectSearchFilter({
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const [query, setQuery] = useState(defaultQuery);
-  const [status, setStatus] = useState<StatusFilter>(defaultStatus);
-  const [sortField, setSortField] = useState<SortField>(defaultSortField);
-  const [sortOrder, setSortOrder] = useState<SortOrder>(defaultSortOrder);
+  // Derive the current filter state from the URL on every render, instead
+  // of mirroring it into local state and resyncing via a setState-in-effect
+  // (which is what the `react/set-state-in-effect` rule flagged). The
+  // `defaultXxx` props act as the SSR fallback for the first render
+  // before `useSearchParams` is hydrated; once the URL params are
+  // available they win. This keeps a single source of truth.
+  const query = searchParams.get("q") ?? defaultQuery;
+  const status =
+    (searchParams.get("status") as StatusFilter | null) ?? defaultStatus;
+  const sortField =
+    (searchParams.get("sort") as SortField | null) ?? defaultSortField;
+  const sortOrder =
+    (searchParams.get("order") as SortOrder | null) ?? defaultSortOrder;
   const [isFilterOpen, setIsFilterOpen] = useState(false);
 
   const updateURL = useCallback(
@@ -62,49 +71,30 @@ export function ProjectSearchFilter({
     [pathname, router]
   );
 
-  useEffect(() => {
-    const q = searchParams.get("q") ?? "";
-    const s = (searchParams.get("status") as StatusFilter) ?? "all";
-    const sf = (searchParams.get("sort") as SortField) ?? "updatedAt";
-    const so = (searchParams.get("order") as SortOrder) ?? "desc";
-    setQuery(q);
-    setStatus(s);
-    setSortField(sf);
-    setSortOrder(so);
-  }, [searchParams]);
-
   const handleQueryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newQuery = e.target.value;
-    setQuery(newQuery);
     updateURL(newQuery, status, sortField, sortOrder);
   };
 
   const handleStatusChange = (value: string | null) => {
     if (!value) return;
     const v = value as StatusFilter;
-    setStatus(v);
     updateURL(query, v, sortField, sortOrder);
   };
 
   const handleSortFieldChange = (value: string | null) => {
     if (!value) return;
     const v = value as SortField;
-    setSortField(v);
     updateURL(query, status, v, sortOrder);
   };
 
   const handleSortOrderChange = (value: string | null) => {
     if (!value) return;
     const v = value as SortOrder;
-    setSortOrder(v);
     updateURL(query, status, sortField, v);
   };
 
   const clearFilters = () => {
-    setQuery("");
-    setStatus("all");
-    setSortField("updatedAt");
-    setSortOrder("desc");
     router.push(pathname, { scroll: false });
   };
 

@@ -1,22 +1,31 @@
 import { z } from "zod";
-import { falQueueSubmitWithCircuitBreaker } from "@/lib/fal";
 import { prisma } from "@/lib/prisma";
 import { inpaintRequestSchema } from "@/lib/ai-route-schemas";
 import { evaluateInpaintQualityGate } from "@/lib/inpaint-quality-gate";
 import { classifyIntegrationError } from "@/lib/error-classify";
 import {
-  buildFalFillPayload,
+  buildInpaintPayloadForActiveProvider,
   buildInpaintPrompt,
-  FAL_FLUX_FILL_MODEL,
 } from "@/lib/prompts";
+import {
+  getInferenceClient,
+  InferenceRequestGoneError,
+  LOGICAL_MODEL,
+  type LogicalInpaintInput,
+  type LogicalModel,
+} from "@/lib/inference";
 import {
   DEFAULT_DAILY_INPAINT_LIMIT,
   DAILY_LIMIT_ENV_VAR,
+  claimDailyQuota,
   dailyQuotaExceededPayload,
   evaluateDailyQuota,
-  inpaintDailyUsageWhere,
+  getDailyUsage,
+  recordDailyUsage,
+  refundDailyQuota,
   resolveDailyLimit,
   type DailyQuotaExceededPayload,
+  type QuotaClaim,
 } from "@/lib/api-quota";
 import { API_ERROR_INPAINT_SUBMIT_FAILED } from "@/lib/api-errors";
 
@@ -76,16 +85,39 @@ type FalQueueSubmitFunction = (
  * transient errors (network failures, timeouts, 5xx HTTP responses).
  * Auth errors (401/403) are not retried — they indicate a config problem
  * that subsequent attempts will not resolve.
+ *
+ * Issue #1201: an `InferenceRequestGoneError` (a 404 from the provider's
+ * submit endpoint) is retried exactly once, immediately, with the same
+ * payload. The 404 reflects transient queue/routing state, not the
+ * input, and no InpaintRequest row exists yet, so a resend cannot
+ * double-bill. A second 404 propagates as-is. This one-shot retry is
+ * separate from the 5xx backoff budget.
  */
 export async function submitWithRetry(
   falQueueSubmit: FalQueueSubmitFunction,
   model: string,
   payload: { input: Record<string, unknown> }
 ): Promise<{ request_id: string }> {
+  let goneRetried = false;
   for (let attempt = 1; attempt <= FAL_SUBMIT_ATTEMPTS; attempt += 1) {
     try {
       return await falQueueSubmit(model, payload);
     } catch (error) {
+      if (error instanceof InferenceRequestGoneError) {
+        if (goneRetried) throw error;
+        goneRetried = true;
+        console.warn(
+          JSON.stringify({ event: "inference_submit_gone_retry", provider: error.provider }),
+          error
+        );
+        try {
+          return await falQueueSubmit(model, payload);
+        } catch (retryError) {
+          if (retryError instanceof InferenceRequestGoneError) throw retryError;
+          error = retryError;
+        }
+      }
+
       const isLastAttempt = attempt === FAL_SUBMIT_ATTEMPTS;
       const isAuthError =
         error != null &&
@@ -123,7 +155,17 @@ export interface InpaintRecordCreateData {
   roomId: string;
   variantSlot: number;
   sourceSlot: number | null;
-  status: "IN_QUEUE";
+  /** "IN_QUEUE" for async providers (fal queue, Replicate); "COMPLETED"
+   *  for synchronous providers that returned the durable result URL
+   *  inline (#1240 multi-instance fix). */
+  status: "IN_QUEUE" | "COMPLETED";
+  /** Provider job id for webhook matching (issue #1221); equals `id`. */
+  providerJobId?: string;
+  /** Durable result URL for synchronous providers; the poller's
+   *  decideInpaintPersistence() short-circuits to return-stored when
+   *  status="COMPLETED" + resultUrl is set, so the route's first poll
+   *  on a different Vercel instance still finds the result. */
+  resultUrl?: string;
 }
 
 /**
@@ -162,6 +204,94 @@ export async function createInpaintRequestWithRetry(
   }
 }
 
+// ─── Quota Charge (Issue #1131) ──────────────────────────────────────────────
+
+const INPAINT_QUOTA_CHARGE_ATTEMPTS = 3;
+const INPAINT_QUOTA_CHARGE_RETRY_DELAY_MS = 200;
+
+/**
+ * Records one billable unit against today's `inpaint` quota row.
+ *
+ * Called once the fal.ai job is already queued and billed (issue #1131):
+ * before the counter table existed, the only record of the spend was the
+ * `InpaintRequest` row, which a room delete could remove. The counter is
+ * written with bounded retry for the same reason the record write is
+ * (#688) — a transient DB failure must not discard the charge for work
+ * that was already paid for. Throws after all attempts so the caller can
+ * log it; the caller must NOT convert that into a failed response, because
+ * the client's retry would queue a SECOND billable job (#1111 tracks
+ * closing the window between the submit and this write).
+ *
+ * Note: issue #1111 replaced the call site in `src/app/api/inpaint/route.ts`
+ * with `reserveInpaintQuota` (atomic pre-submit claim), so this helper is
+ * only exercised by the dead `submitInpaintRequest` orchestrator. Kept so
+ * the orchestrator and its tests still compile.
+ */
+export async function recordInpaintQuotaWithRetry(userId: string): Promise<void> {
+  for (let attempt = 1; attempt <= INPAINT_QUOTA_CHARGE_ATTEMPTS; attempt += 1) {
+    try {
+      await recordDailyUsage("inpaint", userId);
+      return;
+    } catch (error) {
+      if (attempt === INPAINT_QUOTA_CHARGE_ATTEMPTS) {
+        throw error;
+      }
+      console.error(
+        JSON.stringify({
+          event: "inpaint_quota_charge_retry",
+          userId,
+          attempt,
+          attempts: INPAINT_QUOTA_CHARGE_ATTEMPTS,
+        }),
+        error
+      );
+      await new Promise((resolve) =>
+        setTimeout(resolve, INPAINT_QUOTA_CHARGE_RETRY_DELAY_MS)
+      );
+    }
+  }
+}
+
+/**
+ * Atomically reserves one inpaint unit BEFORE the paid provider call
+ * (issue #1111). Mirrors the four other paid surfaces
+ * (`copy`/`export`/`segment`/`label`): the conditional increment in
+ * `claimDailyQuota` (`UPDATE ... WHERE count <= limit - N`) is serialized
+ * by Postgres, so a concurrent burst can no longer all read the same
+ * pre-spend count and all reach the provider; losers get 429. On success
+ * the caller is responsible for either keeping the unit (the billed
+ * provider call ran) or refunding it via `refundInpaintQuota` (the
+ * provider call did NOT run — e.g. the InpaintRequest pre-write failed).
+ *
+ * Wraps the surface-specific env lookup so the route does not have to
+ * reach into `lib/api-quota` for the inpaint defaults.
+ */
+export async function reserveInpaintQuota(
+  userId: string,
+  now: Date = new Date()
+): Promise<QuotaClaim> {
+  const limit =
+    resolveDailyLimit(process.env[DAILY_LIMIT_ENV_VAR.inpaint], DEFAULT_DAILY_INPAINT_LIMIT) ?? 0;
+  return claimDailyQuota("inpaint", userId, limit, 1, now);
+}
+
+/**
+ * Best-effort refund of one previously reserved inpaint unit
+ * (issue #1111). Called when the InpaintRequest pre-write (#1262) fails
+ * so the provider call never runs — without this, a transient DB failure
+ * on the row write would still bill the user for work that was not done.
+ * The background submit failure path does NOT call this: a paid provider
+ * call DID run, so the unit stays charged. The underlying
+ * `refundDailyQuota` never throws, so this is safe to call from a 500
+ * response path.
+ */
+export async function refundInpaintQuota(
+  userId: string,
+  now: Date = new Date()
+): Promise<void> {
+  await refundDailyQuota("inpaint", userId, 1, now);
+}
+
 // ─── Quality Gate ─────────────────────────────────────────────────────────────
 
 export interface QualityGateResult {
@@ -191,44 +321,86 @@ export async function evaluateQualityGate(
 
 // ─── Fal Submit ───────────────────────────────────────────────────────────────
 
-export interface FalSubmitOptions {
+/**
+ * Provider-neutral input for `submitInpaintToActiveProvider`. The
+ * fields map 1:1 to the route's `inpaintRequestSchema` (#1362b) so
+ * the call site in `submitInpaintRequest` is unchanged after the
+ * Alibaba migration; the provider adapter decides which fields it
+ * actually consumes (e.g. Alibaba ignores `maskUrl` because its
+ * endpoint is instruction-mode only).
+ *
+ * Issue #1362b: `promptStrength` was renamed to `strength` to match
+ * DashScope's `parameters.strength` wire field. The legacy
+ * `maskBlur` (FineTune's "expand" slider) is gone from this surface
+ * entirely — feathering is now a browser-side pre-upload pass
+ * (`src/lib/mask-feather.ts`), not a provider parameter. The legacy
+ * `creativeMode` and `lockSeed` were removed in the same stage
+ * (no surviving UI control after #1362a's adherence + shadows
+ * removal).
+ */
+export interface InpaintSubmitOptions {
   imageUrl: string;
   maskUrl: string;
   aesthetic: string;
   promptDirectives: string;
   negativePrompt?: string;
-  promptStrength?: number;
-  maskBlur?: number;
+  /** Issue #1362b: DashScope `parameters.strength` (0..1, default 0.5). */
+  strength?: number;
+  /** Issue #1362b: user's typed seed (digits-only, parsed to int). */
   seed?: number;
-  creativeMode?: boolean;
 }
 
 /**
- * Fire-and-forget submit: returns as soon as the job is queued (~2s),
- * instead of holding the request open for the full generation.
- * submitWithRetry handles transient errors; the circuit breaker wrapper
- * (falQueueSubmitWithCircuitBreaker) prevents cascading failures when
- * the service is degraded.
+ * Fire-and-forget submit: returns as soon as the job is queued (or, for
+ * the synchronous Alibaba adapter, as soon as the response comes back —
+ * the route's status-poll then sees COMPLETED on the first call).
+ * `submitWithRetry` handles transient errors; the abstraction's
+ * circuit breaker wrapper (per provider) prevents cascading failures
+ * when the service is degraded.
  */
-export async function submitInpaintToFal(
-  options: FalSubmitOptions
-): Promise<{ request_id: string }> {
-  const { imageUrl, maskUrl, aesthetic, promptDirectives, negativePrompt, promptStrength, maskBlur, seed, creativeMode } = options;
+export async function submitInpaintToActiveProvider(
+  options: InpaintSubmitOptions
+): Promise<{
+  request_id: string;
+  result?: { imageUrl: string; width: number | null; height: number | null };
+}> {
+  const { imageUrl, maskUrl, aesthetic, promptDirectives, negativePrompt, strength, seed } = options;
   const prompt = buildInpaintPrompt(aesthetic, promptDirectives);
 
-  return submitWithRetry(falQueueSubmitWithCircuitBreaker, FAL_FLUX_FILL_MODEL, {
-    input: buildFalFillPayload({
-      imageUrl,
-      maskUrl,
-      prompt,
-      negativePrompt,
-      promptStrength,
-      maskBlur,
-      seed,
-      creativeMode,
-    }),
-  });
+  // Resolve the active provider once. The submit call goes through
+  // the abstraction's `submit` method, which routes to the right
+  // client. The payload schema differs per provider (fal expects
+  // snake_case `image_url`/`mask_url`; Replicate expects `image`/
+  // `mask`) so the payload builder is selected by the abstraction's
+  // provider name, not the call site.
+  const client = await getInferenceClient();
+  const logicalInput: LogicalInpaintInput = {
+    imageUrl,
+    maskUrl,
+    prompt,
+    negativePrompt,
+    strength,
+    seed,
+  };
+  const input = buildInpaintPayloadForActiveProvider(logicalInput);
+
+  // Reuse the existing retry wrapper, but pass the abstraction's
+  // `submit` shape. The retry policy (transient 5xx retry, no
+  // retry on auth 401/403) is provider-agnostic and lives here.
+  // `submitWithRetry` types the first arg as `string`; the
+  // `LogicalModel` union is a string-literal, so the cast is safe.
+  // The return type carries the optional `result` field for
+  // synchronous providers (see InferenceClient.submit, #1240).
+  const submit: (
+    id: string,
+    options: { input: Record<string, unknown> },
+  ) => Promise<{
+    request_id: string;
+    result?: { imageUrl: string; width: number | null; height: number | null };
+  }> = (id, options) => client.submit(id as LogicalModel, options);
+  return submitWithRetry(submit, LOGICAL_MODEL.FLUX_FILL, { input });
 }
+
 
 // ─── Error Classification ─────────────────────────────────────────────────────
 
@@ -258,6 +430,12 @@ export interface QuotaCheckResult {
 
 /**
  * Checks the daily inpaint quota for a user.
+ *
+ * Usage is read from the `DailyApiUsage` counter row, NOT derived by
+ * counting `InpaintRequest` rows (issue #1131): those rows cascade-delete
+ * with their room, so a user who deleted the rooms staged today had the
+ * count — and therefore the whole cap — restored at zero cost. The counter
+ * row is not a child of any user content, so no delete refunds it.
  */
 export async function checkDailyQuota(
   userId: string
@@ -265,9 +443,7 @@ export async function checkDailyQuota(
   const dailyLimit =
     resolveDailyLimit(process.env[DAILY_LIMIT_ENV_VAR.inpaint], DEFAULT_DAILY_INPAINT_LIMIT) ?? 0;
 
-  const inpaintCount = await prisma.inpaintRequest.count({
-    where: inpaintDailyUsageWhere(userId),
-  });
+  const inpaintCount = await getDailyUsage("inpaint", userId);
 
   const decision = evaluateDailyQuota(inpaintCount, dailyLimit);
 
@@ -334,25 +510,30 @@ export interface SubmitInpaintResult {
   requestId: string;
   qualityWarnings: string[];
   recordDegraded: boolean;
+  /** True when the quota counter could not be written for a billed job (#1131). */
+  quotaChargeDegraded: boolean;
 }
 
 /**
- * Combines fal submission, quality gate evaluation, and persistence in a
- * single orchestrating function. Returns submission result and degraded flag
- * if record creation failed (issue #688 — graceful degradation).
+ * Combines fal submission, quality gate evaluation, quota charge, and
+ * persistence in a single orchestrating function. Returns the submission
+ * result plus degraded flags if the record write (#688) or the quota
+ * charge (#1131) failed after the job was already billed — both are logged
+ * and tolerated rather than surfaced as a failure, because the client's
+ * retry would queue a second billable job.
  */
 export async function submitInpaintRequest(
   room: ValidatedRoom,
   params: {
+    userId: string;
     imageUrl: string;
     maskUrl: string;
     aesthetic: string;
     promptDirectives: string;
     negativePrompt?: string;
-    promptStrength?: number;
-    maskBlur?: number;
+    /** Issue #1362b: renamed from `promptStrength`. */
+    strength?: number;
     seed?: number;
-    creativeMode?: boolean;
     maskCoverageRatio?: number;
     variantSlot: number;
     sourceSlot: number | null;
@@ -364,26 +545,57 @@ export async function submitInpaintRequest(
     params.promptDirectives
   );
 
-  const submission = await submitInpaintToFal({
+  const submission = await submitInpaintToActiveProvider({
     imageUrl: params.imageUrl,
     maskUrl: params.maskUrl,
     aesthetic: params.aesthetic,
     promptDirectives: params.promptDirectives,
     negativePrompt: params.negativePrompt,
-    promptStrength: params.promptStrength,
-    maskBlur: params.maskBlur,
+    strength: params.strength,
     seed: params.seed,
-    creativeMode: params.creativeMode,
   });
+
+  // The fal job is queued and billed at this point, so the quota unit is
+  // charged BEFORE anything else can fail (#1131). Deliberately still after
+  // the submit, not a reservation before it: reserving first is #1111/#1132
+  // and depends on an atomic claim, which this write is not.
+  let quotaChargeDegraded = false;
+  try {
+    await recordInpaintQuotaWithRetry(params.userId);
+  } catch (chargeError) {
+    quotaChargeDegraded = true;
+    console.error(
+      JSON.stringify({
+        event: "inpaint_quota_charge_failed",
+        requestId: submission.request_id,
+        roomId: room.id,
+        userId: params.userId,
+        attempts: INPAINT_QUOTA_CHARGE_ATTEMPTS,
+        degraded: true,
+      }),
+      chargeError
+    );
+  }
 
   let recordDegraded = false;
   try {
+    // #1240 multi-instance fix: for synchronous providers (Alibaba
+    // DashScope today), `submit()` returns the durable result URL
+    // inline. Persist the URL alongside the row write so a Vercel
+    // multi-instance deploy doesn't lose the result when the POST lands
+    // on instance A and the first poll lands on instance B (B's
+    // module-local cache is empty). Async providers (fal queue,
+    // Replicate) leave `submission.result` undefined and the poller
+    // fills the URL on a later poll — unchanged behavior.
+    const syncResult = submission.result;
     await createInpaintRequestWithRetry({
       id: submission.request_id,
       roomId: room.id,
       variantSlot: params.variantSlot,
       sourceSlot: params.sourceSlot,
-      status: "IN_QUEUE",
+      status: syncResult ? "COMPLETED" : "IN_QUEUE",
+      providerJobId: submission.request_id,
+      ...(syncResult ? { resultUrl: syncResult.imageUrl } : {}),
     });
   } catch (recordError) {
     recordDegraded = true;
@@ -403,5 +615,6 @@ export async function submitInpaintRequest(
     requestId: submission.request_id,
     qualityWarnings,
     recordDegraded,
+    quotaChargeDegraded,
   };
 }

@@ -6,13 +6,19 @@
  *
  * POST /api/v1/generate-copy
  *
- * Version header: API-Version: v1
+ * Version header: X-Supabase-API-Version: v1
  */
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { buildVersionHeaders } from "@/lib/api-version";
 import { prisma } from "@/lib/prisma";
+import { generateCopyRequestSchema } from "@/lib/ai-route-schemas";
+import {
+  API_ERROR_INVALID_REQUEST,
+  API_ERROR_RATE_LIMIT_EXCEEDED,
+  API_ERROR_ROOM_NOT_FOUND,
+  API_ERROR_UNAUTHORIZED,
+} from "@/lib/api-errors";
 import {
   DEFAULT_DAILY_COPY_LIMIT,
   DAILY_LIMIT_ENV_VAR,
@@ -22,12 +28,6 @@ import {
   resolveDailyLimit,
 } from "@/lib/api-quota";
 
-const GenerateCopyRequestBodySchema = z.object({
-  roomId: z.string().min(1),
-  tone: z.enum(["persuasive", "descriptive", "emotional", "luxury"]).optional(),
-  focus: z.enum(["features", "lifestyle", "investment", "emotional"]).optional(),
-});
-
 export const dynamic = "force-dynamic";
 
 /** POST /api/v1/generate-copy – submit a copy generation request. */
@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
   const user = await getAuthedPrismaUser();
   if (!user) {
     return NextResponse.json(
-      { error: "Unauthorized", message: "You must be signed in to generate copy." },
+      { error: "Unauthorized", code: API_ERROR_UNAUTHORIZED, message: "You must be signed in to generate copy." },
       { status: 401 }
     );
   }
@@ -56,17 +56,18 @@ export async function POST(request: NextRequest) {
         limit: copyQuota.limit,
       })
     );
-    return NextResponse.json(dailyQuotaExceededPayload(copyQuota, "Generating copy"), {
-      status: 429,
-    });
+    return NextResponse.json(
+      { ...dailyQuotaExceededPayload(copyQuota, "Generating copy"), code: API_ERROR_RATE_LIMIT_EXCEEDED },
+      { status: 429 }
+    );
   }
 
   // Parse and validate request body
   const body = await request.json().catch(() => null);
-  const parsed = GenerateCopyRequestBodySchema.safeParse(body);
+  const parsed = generateCopyRequestSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "Invalid request", message: "Request body is invalid." },
+      { error: "Invalid request", code: API_ERROR_INVALID_REQUEST, message: "Request body is invalid." },
       { status: 400 }
     );
   }
@@ -78,11 +79,15 @@ export async function POST(request: NextRequest) {
   });
   if (!room) {
     return NextResponse.json(
-      { error: "Forbidden", message: "Room not found or access denied." },
+      { error: "Forbidden", code: API_ERROR_ROOM_NOT_FOUND, message: "Room not found or access denied." },
       { status: 403 }
     );
   }
 
+  // IMPLEMENTATION NOTE (issue #1125): this stub does no work, so the quota
+  // check above only READS today's counter and nothing is charged. When this
+  // stub is implemented, claimDailyQuota(...) (issue #1132) must run before
+  // the provider call, or this route becomes a silent cap bypass.
   return NextResponse.json(
     {
       message: "v1 generate-copy endpoint stub",

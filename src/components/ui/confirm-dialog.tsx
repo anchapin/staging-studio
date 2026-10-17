@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 
 interface ConfirmDialogProps {
@@ -29,17 +29,18 @@ export function ConfirmDialog({
   cancelLabel = "Cancel",
   confirmLabel = "Delete",
 }: ConfirmDialogProps) {
-  const [mounted, setMounted] = useState(false);
+  // Removed the previous `mounted` "useState + setState-in-effect" gate:
+  // the `open` prop already controls whether the dialog renders anything
+  // visible, and the initial `open` is `false` in every caller (the
+  // dialog only appears in response to a user action). The `mounted`
+  // state was redundant — the lint rule (`react/set-state-in-effect`)
+  // caught a real cleanup opportunity.
   const dialogRef = useRef<HTMLDivElement>(null);
   const previousActiveElement = useRef<HTMLElement | null>(null);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
   // Focus management and keyboard handling
   useEffect(() => {
-    if (!mounted || !open) return;
+    if (!open) return;
 
     // Save current focus and trap focus inside dialog
     previousActiveElement.current = document.activeElement as HTMLElement;
@@ -50,7 +51,7 @@ export function ConfirmDialog({
     }, 0);
 
     return () => clearTimeout(timer);
-  }, [open, mounted]);
+  }, [open]);
 
   // Restore focus when dialog closes
   useEffect(() => {
@@ -59,7 +60,7 @@ export function ConfirmDialog({
     }
   }, [open]);
 
-  if (!mounted || !open) return null;
+  if (!open) return null;
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {

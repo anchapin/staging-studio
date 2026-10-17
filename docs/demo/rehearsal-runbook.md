@@ -44,26 +44,27 @@ Helper assertions: `bash scripts/rehearsal-drill.sh` (see §6).
 ## 2. Rehearsal run 1 — full script end-to-end, no intervention
 
 Execute every beat of `docs/DEMO_SCRIPT.md` in order, **as if Lauren were watching**.
-The pass condition: all 10 beats complete without intervention. Check off as you go.
+The pass condition: all 11 beats complete without intervention. Check off as you go.
 
 - [ ] **Beat 1 — Login.** Typed the password live (no saved form fill), landed on `/projects`
 - [ ] **Beat 2 — Open project.** "1506 Porters Mill Ter" open; narrated client profile + **Vintage Modern** aesthetic
 - [ ] **Beat 3 — 5A hero beat.** Opened **Edit staging**; typed staging directives (as Lauren will dictate); clicked **Stage entire room**, narrated during the queue wait; **result appeared (live or pre-generated variant)**
-- [ ] **Beat 4 — Brush touch-ups + variant strip.** Painted a touch-up zone with the brush; flipped **Original / Variant A / Variant B**; selected state landed on the chosen take
-- [ ] **Beat 5 — Generate Copy.** Read **Challenge → Recommendation → Psychology** aloud
-- [ ] **Beat 6 — Second room reveal.** Bedroom/second room shown; "document, not a one-off" line delivered
-- [ ] **Beat 7 — Preview Lookbook.** Cover → philosophy → room spread → sign-off scrolled
-- [ ] **Beat 8 — Export PDF.** Export completed; file saved + opened
-- [ ] **Beat 9 — Print.** Sent to printer; **physical page in hand**
-- [ ] **Beat 10 — Closing beat.** Password-handoff line delivered
+- [ ] **Beat 4 — Find & replace (SAM 3.1 concept pass).** Clicked the **sofa** concept chip and the tinted sofa on the photo; **Batch staging** panel opened with the concept pre-fill; chose **A separate prompt per region**; **Run batch** swapped the sofa inside the same variant
+- [ ] **Beat 5 — Brush touch-ups + variant strip.** Painted a touch-up zone with the brush; flipped **Original / Variant A / Variant B**; selected state landed on the chosen take
+- [ ] **Beat 6 — Generate Copy.** Read **Challenge → Recommendation → Psychology** aloud
+- [ ] **Beat 7 — Second room reveal.** Bedroom/second room shown; "document, not a one-off" line delivered
+- [ ] **Beat 8 — Preview Lookbook.** Cover → philosophy → room spread → sign-off scrolled
+- [ ] **Beat 9 — Export PDF.** Export completed; file saved + opened
+- [ ] **Beat 10 — Print.** Sent to printer; **physical page in hand**
+- [ ] **Beat 11 — Closing beat.** Password-handoff line delivered
 
 Notes from run 1 (timing per beat, anything rough):
 
 ```
 beat 1: ___s   beat 2: ___s   beat 3: ___s (queue: ___s — live / fallback)
-beat 4: ___s
-beat 5: ___s   beat 6: ___s   beat 7: ___s
-beat 8: ___s   beat 9: ___s   beat 10: ___s
+beat 4: ___s   beat 5: ___s
+beat 6: ___s   beat 7: ___s   beat 8: ___s
+beat 9: ___s   beat 10: ___s  beat 11: ___s
 rough spots:
 ```
 
@@ -72,7 +73,7 @@ rough spots:
 ## 3. Rehearsal run 2 — second pass, same rules
 
 Reset anything run 1 changed (e.g. re-select the before-image, clear the copy field
-if the flow allows — otherwise narrate the delta). Run all 10 beats again.
+if the flow allows — otherwise narrate the delta). Run all 11 beats again.
 
 - [ ] **Run 2 complete, all beats, without intervention**
 
@@ -94,7 +95,7 @@ narration, whether or not the live queue is actually slow.
 
 1. [ ] Rehearse the **reveal action itself** (deterministic, no API needed): open the Living Room, click through to the **variant** holding the pre-generated after-image (same directive as the live one), and say the line — "let me show you the finished version" / "same pipeline, pre-warmed for today." You should be able to do this in < 5 s of dead air.
 2. [ ] **Live-fire attempt:** click **Stage entire room** and let the queue run. If it returns ≤ 90 s, note the timing and treat step 1 as the drill (the production queue is warm; a real stall may not reproduce on demand). If it stalls > 90 s: **do not cancel** — execute the fallback reveal exactly as in step 1, leave the live result to land in the background.
-3. [ ] Confirm: after the fallback reveal, the demo continues (Beat 5) without waiting on the spinner; if the live result lands later, the selected after-image is still correct.
+3. [ ] Confirm: after the fallback reveal, the demo continues (Beat 4) without waiting on the spinner; if the live result lands later, the selected after-image is still correct.
 4. [ ] Rule check: at no point did you wait on a spinner in silence.
 
 ```
@@ -110,7 +111,7 @@ drill A: reveal < 5s? __   live queue timing: ___s (live / stalled → fallback 
 2. [ ] **Rehearse the human fallback, timed:** the moment export fails, open `demo-assets/fallback-lookbook.pdf` from disk, and deliver the honest one-liner — "rendering hiccup on the demo account — here's the document it produces." Dead air < 5 s.
 3. [ ] Send the fallback PDF to the printer. Confirm the printed page is the real Lookbook (cover, room spread, sign-off).
 4. [ ] **Restore:** revert `BROWSERLESS_API_KEY` in `.env.local` (or restore from `.env.example` conventions) and `rm` nothing else. Verify `git status` shows no stray changes from the drill.
-5. [ ] On production: confirm one **successful** live export still works after the drill (Beat 8 pass) so you know the real path is healthy.
+5. [ ] On production: confirm one **successful** live export still works after the drill so you know the real path is healthy (Beat 9 pass).
 
 ```
 drill B: fallback open < 5s? __   printed page correct? __   env restored? __

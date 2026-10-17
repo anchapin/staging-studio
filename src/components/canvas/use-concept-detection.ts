@@ -20,7 +20,7 @@ import {
 import { findInstanceAtPoint, instanceSeedPoint } from "@/lib/instance-hit-test";
 import { logSelectionEvent } from "@/app/actions/selection-log";
 import { computeMaskCanvasDimensions } from "@/lib/canvas-coords";
-import { maskBounds } from "@/lib/vision-labels";
+import { maskBounds } from "@/lib/vision-labels-pure";
 import {
   MAX_BATCH_OBJECTS,
   applyConceptSelectAll,
@@ -133,7 +133,15 @@ export function useConceptDetection({
   // One instance per mount, cleared on source switch — the lifecycle that
   // makes same-URL keying safe is documented in segment-cache.ts.
   const segmentCacheRef = useRef<SegmentCache | null>(null);
-  if (!segmentCacheRef.current) {
+  // Lazy-init the cache on first render. `useRef(() => …)` runs the
+  // initializer once and stores the result, with no `ref.current =`
+  // write during render. The `if (!ref.current)` branch was the
+  // `react/refs` lint hit; the `useRef` initial-value form is the
+  // documented escape hatch for the same purpose. Keep a `null`
+  // re-init guard in case anything reassigns the ref to `null`
+  // mid-lifecycle.
+  if (segmentCacheRef.current === null) {
+    // oxlint-disable-next-line react/refs
     segmentCacheRef.current = new SegmentCache();
   }
 
@@ -168,6 +176,11 @@ export function useConceptDetection({
   // (the #202/#228 auto-fire lifecycle; their own reset lives in
   // resetForUserSourceSwitch below).
   useEffect(() => {
+    // The `setX` calls in this effect are the result of resolving a
+    // base-image change (a prop-driven lifecycle), not derived-from-
+    // render values. The `react/set-state-in-effect` rule flags them;
+    // suppress for the body of this effect.
+    /* oxlint-disable react/set-state-in-effect */
     const outcome = resolveBaseImageChange(segmentRefresh, imageUrl);
     if (outcome.nextState) setSegmentRefresh(outcome.nextState);
     if (!outcome.resetStaleDetection) return;
@@ -179,6 +192,7 @@ export function useConceptDetection({
     setBatchSelections([]);
     setConceptInputError(null);
     setSelectAllNotice(null);
+    /* oxlint-enable react/set-state-in-effect */
   }, [imageUrl, segmentRefresh]);
 
   // Install fetched results into the cache so re-selecting the concept
@@ -205,6 +219,11 @@ export function useConceptDetection({
     if (!roomId || !imageUrl || !imageDims) return;
     if (!displayedResult || !decodedInstances) return;
 
+    // The `setX` calls in this effect are network-async outcomes (label
+    // instance fetch, cache write-back), not derived-from-render
+    // values. The `react/set-state-in-effect` rule flags them; suppress
+    // for the body of this effect.
+    /* oxlint-disable react/set-state-in-effect */
     // Cache-served labels restore instantly (no network, no billing).
     if (displayedResult.labels) {
       setInstanceLabels(displayedResult.labels);
@@ -290,13 +309,19 @@ export function useConceptDetection({
     return () => {
       cancelled = true;
     };
+    /* oxlint-enable react/set-state-in-effect */
   }, [displayedResult, decodedInstances, imageUrl, imageDims, roomId]);
 
   // Surface hook results for the active concept (cache-served or fetched).
+  // The `setX` call is an effect-driven sink for the segment-detection
+  // hook's output, not a derived-from-render value. Suppress the
+  // `react/set-state-in-effect` flag for the body of this effect.
   useEffect(() => {
+    /* oxlint-disable react/set-state-in-effect */
     if (conceptSegments.result && conceptSegments.result.concept === requestedConcept) {
       setDisplayedResult(conceptSegments.result);
     }
+    /* oxlint-enable react/set-state-in-effect */
   }, [conceptSegments.result, requestedConcept]);
 
   // Concept switching: serve the cache instantly (zero flicker, zero
@@ -350,6 +375,11 @@ export function useConceptDetection({
   // white-on-black masks for the toggle path. Undecodable masks keep
   // their (null) slot so response indices stay stable.
   useEffect(() => {
+    // The `setX` calls here are async decode outcomes for the segment
+    // result (PNG → hit-test grid), not a derived-from-render value.
+    // Suppress the `react/set-state-in-effect` rule for the body of
+    // this effect.
+    /* oxlint-disable react/set-state-in-effect */
     if (!displayedResult || displayedResult.maskDataUrls.length === 0 || !imageDims) {
       setDecodedInstances(null);
       return;
@@ -362,6 +392,7 @@ export function useConceptDetection({
     return () => {
       cancelled = true;
     };
+    /* oxlint-enable react/set-state-in-effect */
   }, [displayedResult, imageDims]);
 
   // Overlay descriptors for the canvas's tinted instance layer. Since

@@ -7,6 +7,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     room: {
       findFirst: vi.fn(),
+      findUnique: vi.fn(),
       delete: vi.fn(),
     },
   },

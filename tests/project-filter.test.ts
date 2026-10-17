@@ -12,7 +12,14 @@ type Project = {
   stagingAesthetic: string;
   createdAt: Date;
   updatedAt: Date;
-  rooms: { id: string; name: string; afterImageUrl: string | null; afterImageUrl2: string | null }[];
+  rooms: {
+    id: string;
+    name: string;
+    afterImageUrl: string | null;
+    afterImageUrl2: string | null;
+    beforeImageUrl: string | null;
+    beforeImageUrl2: string | null;
+  }[];
 };
 
 const BASE_PROJECTS: Project[] = [
@@ -23,7 +30,7 @@ const BASE_PROJECTS: Project[] = [
     stagingAesthetic: "Modern",
     createdAt: new Date("2024-01-15"),
     updatedAt: new Date("2024-06-01"),
-    rooms: [{ id: "r1", name: "Living Room", afterImageUrl: null, afterImageUrl2: null }],
+    rooms: [{ id: "r1", name: "Living Room", beforeImageUrl: null, beforeImageUrl2: null, afterImageUrl: null, afterImageUrl2: null }],
   },
   {
     id: "2",
@@ -33,7 +40,7 @@ const BASE_PROJECTS: Project[] = [
     createdAt: new Date("2024-02-20"),
     updatedAt: new Date("2024-03-10"),
     rooms: [
-      { id: "r2", name: "Kitchen", afterImageUrl: "https://example.com/kitchen.jpg", afterImageUrl2: null },
+      { id: "r2", name: "Kitchen", beforeImageUrl: null, beforeImageUrl2: null, afterImageUrl: "https://example.com/kitchen.jpg", afterImageUrl2: null },
     ],
   },
   {
@@ -44,8 +51,8 @@ const BASE_PROJECTS: Project[] = [
     createdAt: new Date("2024-03-25"),
     updatedAt: new Date("2024-01-05"),
     rooms: [
-      { id: "r3", name: "Bedroom", afterImageUrl: null, afterImageUrl2: null },
-      { id: "r4", name: "Bathroom", afterImageUrl: null, afterImageUrl2: null },
+      { id: "r3", name: "Bedroom", beforeImageUrl: null, beforeImageUrl2: null, afterImageUrl: null, afterImageUrl2: null },
+      { id: "r4", name: "Bathroom", beforeImageUrl: null, beforeImageUrl2: null, afterImageUrl: null, afterImageUrl2: null },
     ],
   },
   {
@@ -56,7 +63,7 @@ const BASE_PROJECTS: Project[] = [
     createdAt: new Date("2024-04-10"),
     updatedAt: new Date("2024-07-20"),
     rooms: [
-      { id: "r5", name: "Office", afterImageUrl: "https://example.com/office.jpg", afterImageUrl2: "https://example.com/office2.jpg" },
+      { id: "r5", name: "Office", beforeImageUrl: null, beforeImageUrl2: null, afterImageUrl: "https://example.com/office.jpg", afterImageUrl2: "https://example.com/office2.jpg" },
     ],
   },
 ];

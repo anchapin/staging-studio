@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { setActiveVariant } from "@/lib/room-variant-service";
@@ -51,14 +52,24 @@ export async function saveVariantSelection(
 export async function getVariantTouchUpCounts(
   roomId: string
 ): Promise<{ success: boolean; counts?: { 0: number; 1: number }; error?: string }> {
-  const ownershipWhere = await getOwnedRoomWhere(roomId);
-  if (!ownershipWhere) {
+  const user = await getAuthedPrismaUser();
+  if (!user) {
     return failure("Not authenticated");
   }
 
   try {
+    // Issue #1133: filter on statuses that are actually written
+    // (IN_QUEUE | IN_PROGRESS | COMPLETED). "succeeded" never appears in
+    // the data, so the old filter matched nothing. ERROR rows changed
+    // nothing and are excluded by countVariantTouchUps itself;
+    // PERSISTENCE_FAILED rows never landed durably (issue #1136), so
+    // they do not count as a landed touch-up either.
     const rows = await prisma.inpaintRequest.findMany({
-      where: { roomId, status: "succeeded" },
+      where: {
+        roomId,
+        status: { in: ["IN_QUEUE", "IN_PROGRESS", "COMPLETED"] },
+        room: { project: { userId: user.id } },
+      },
       select: { id: true, status: true, variantSlot: true, sourceSlot: true },
       orderBy: { createdAt: "asc" },
     });
@@ -87,6 +98,7 @@ export async function deleteVariantAfterImage(
     const room = await prisma.room.findUnique({
       where: ownershipWhere,
       select: {
+        projectId: true,
         beforeImageUrl: true,
         afterImageUrl: true,
         beforeImageUrl2: true,
@@ -112,7 +124,7 @@ export async function deleteVariantAfterImage(
 
     const nextSelection = resolveSelectionAfterDelete(
       pairs,
-      room.selectedVariantIndex ?? 0,
+      room.selectedVariantIndex,
       variantSlot
     );
 
@@ -123,6 +135,19 @@ export async function deleteVariantAfterImage(
           ? { afterImageUrl: null, selectedVariantIndex: nextSelection }
           : { afterImageUrl2: null, selectedVariantIndex: nextSelection },
     });
+
+    // Issue #1149: every other mutating action pairs its write with
+    // revalidatePath. Without it, a deleted variant keeps rendering in the
+    // report, lookbook, and preview caches until an unrelated mutation
+    // invalidates those routes. revalidatePath with default type "page"
+    // invalidates only the exact URL given, so each consumer page from the
+    // issue's impact list is invalidated individually.
+    revalidatePath(`/projects/${room.projectId}`);
+    revalidatePath(`/projects/${room.projectId}/rooms`);
+    revalidatePath(`/projects/${room.projectId}/lookbook`);
+    revalidatePath(`/projects/${room.projectId}/refine`);
+    revalidatePath(`/projects/${room.projectId}/report`);
+    revalidatePath(`/preview/${room.projectId}`);
 
     return { success: true };
   } catch (err) {

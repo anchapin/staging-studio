@@ -222,15 +222,14 @@ export default function SplitComparisonCanvas({
             <span className="text-xs font-semibold uppercase tracking-wider text-taupe">
               Passes:
             </span>
-            <div className="flex items-center gap-1" role="tablist" aria-label="Version passes">
+            <div className="flex items-center gap-1" role="group" aria-label="Version passes">
               {pills.map(({ item, label }) => {
                 const isActive = item.id === activeVersionId;
                 return (
                   <button
                     key={item.id}
                     type="button"
-                    role="tab"
-                    aria-selected={isActive}
+                    aria-pressed={isActive}
                     onClick={() => onSelectVersion?.(item.id)}
                     className={cn(
                       "rounded-full px-2.5 py-0.5 text-xs font-semibold transition-colors",

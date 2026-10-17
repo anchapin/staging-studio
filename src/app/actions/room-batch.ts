@@ -5,6 +5,13 @@ import { getAuthedPrismaUser, requireProjectOwnershipSafe } from "@/lib/api-auth
 import { revalidatePath } from "next/cache";
 import { createSupabaseRequestClient } from "@/lib/supabase";
 import { withRetry } from "@/lib/retry";
+import {
+  MAX_ROOM_PHOTO_BYTES,
+  ROOM_PHOTOS_BUCKET,
+  extractStoragePathFromUrl,
+  readUploadedObjectSize,
+  removeStorageObjects,
+} from "@/lib/storage-cleanup";
 import { batchRoomTypesRequestSchema } from "@/lib/ai-route-schemas";
 import {
   batchRoomUploadUrlsRequestSchema,
@@ -14,7 +21,7 @@ import {
   DEFAULT_DAILY_LABEL_LIMIT,
   DAILY_LIMIT_ENV_VAR,
   dailyQuotaExceededPayload,
-  evaluateDailyQuota,
+  evaluateDailyBatchQuota,
   getDailyUsage,
   recordDailyUsage,
   resolveDailyLimit,
@@ -97,6 +104,44 @@ export async function createRoomsBatch(
 
   const maxSortOrder = project.rooms[0]?.sortOrder ?? -1;
 
+  // #1145: confirm-time size gate — each entry's uploaded object must
+  // fit MAX_ROOM_PHOTO_BYTES before it is linked into a Room row.
+  // Oversized objects are deleted; the whole batch is rejected (the
+  // client's own compression already targets the same ceiling, so this
+  // only fires on raw oversized PUTs). Unreadable sizes pass.
+  const supabase = await createSupabaseRequestClient();
+  const uploadedPaths = parsed.data.entries
+    .map((entry) => extractStoragePathFromUrl(entry.beforeImageUrl))
+    .filter((p): p is string => Boolean(p));
+  for (const storagePath of uploadedPaths) {
+    const uploadedSize = await readUploadedObjectSize(
+      supabase as never,
+      ROOM_PHOTOS_BUCKET,
+      storagePath
+    );
+    if (uploadedSize !== null && uploadedSize > MAX_ROOM_PHOTO_BYTES) {
+      console.warn(
+        JSON.stringify({
+          event: "batch_room_upload_oversized",
+          projectId: parsed.data.projectId,
+          storagePath,
+          size: uploadedSize,
+          max: MAX_ROOM_PHOTO_BYTES,
+        })
+      );
+      // The batch will never commit, so none of the uploaded objects
+      // are referenced anymore. Reclaim all of them, not just the
+      // oversized one: a client retry mints fresh random paths, so
+      // these would otherwise be unrecoverable orphans (issue #1145).
+      await removeStorageObjects(uploadedPaths);
+      return {
+        success: false,
+        error:
+          "One or more uploaded images are too large. Please use images under 10 MB.",
+      };
+    }
+  }
+
   try {
     const rooms = await prisma.$transaction(
       parsed.data.entries.map((entry, index) =>
@@ -113,6 +158,7 @@ export async function createRoomsBatch(
     );
 
     revalidatePath(`/projects/${parsed.data.projectId}`);
+    revalidatePath(`/preview/${parsed.data.projectId}`);
     return { success: true, rooms };
   } catch (error) {
     console.error("Failed to create rooms batch:", error);
@@ -234,16 +280,23 @@ export async function detectBatchRoomTypes(
     };
   }
 
-  // Issue #681: daily label quota (in-process counter — see
-  // lib/api-quota.ts for the mechanism and its multi-instance
-  // limitation). Checked BEFORE any AI work so a user at their cap
-  // never reaches gpt-4o-mini; the whole batch must fit in headroom.
+  // Issue #681 + #1110: daily label quota — tracked in the `DailyApiUsage`
+  // Postgres table via atomic upserts, so usage survives serverless
+  // cold starts and multi-instance traffic splitting (issue #784).
+  // Checked BEFORE any AI work so a user at their cap never reaches
+  // gpt-4o-mini. Issue #1110: the batch rides the `evaluateDailyBatchQuota`
+  // semantic (whole batch fits entirely in headroom — `used + count <= limit`)
+  // rather than per-unit `evaluateDailyQuota` (`used < limit`); a batch that
+  // would straddle the cap used to pass the per-unit gate and overshoot
+  // by `count - 1` once `recordDailyUsage` ran per entry.
   const labelLimit = resolveDailyLimit(
     process.env[DAILY_LIMIT_ENV_VAR.label],
     DEFAULT_DAILY_LABEL_LIMIT
   );
-  const labelQuota = evaluateDailyQuota(
+  const batchSize = parsed.data.imageUrls.length;
+  const labelQuota = evaluateDailyBatchQuota(
     await getDailyUsage("label", user.id),
+    batchSize,
     labelLimit
   );
   if (!labelQuota.allowed) {
@@ -253,7 +306,7 @@ export async function detectBatchRoomTypes(
         userId: user.id,
         used: labelQuota.used,
         limit: labelQuota.limit,
-        requested: parsed.data.imageUrls.length,
+        requested: batchSize,
       })
     );
     return {
@@ -300,55 +353,3 @@ export async function detectBatchRoomTypes(
     };
   }
 }
-
-/**
- * Server action: bulk updates the staging aesthetic for multiple rooms at once.
- *
- * @param roomIds   IDs of rooms to update.
- * @param aesthetic  New aesthetic value to set.
- */
-export async function bulkUpdateRoomAesthetic(
-  roomIds: string[],
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _aesthetic: string
-): Promise<{ success: boolean; error?: string }> {
-  if (!Array.isArray(roomIds) || roomIds.length === 0) {
-    return { success: false, error: "No rooms provided" };
-  }
-
-  const user = await getAuthedPrismaUser();
-  if (!user) {
-    return { success: false, error: "Not authenticated" };
-  }
-
-  try {
-    // Ownership check: all rooms must belong to projects owned by this user
-    const rooms = await prisma.room.findMany({
-      where: { id: { in: roomIds } },
-      select: { id: true, project: { select: { userId: true } } },
-    });
-
-    const invalid = rooms.filter((r) => r.project.userId !== user.id);
-    if (invalid.length > 0) {
-      return { success: false, error: "Some rooms are not owned by you" };
-    }
-
-    await prisma.room.updateMany({
-      where: { id: { in: roomIds } },
-      data: { /* aesthetic is per-project; rooms themselves don't store aesthetic */ },
-    });
-
-    // Actually rooms don't have an aesthetic field — that's on Project.
-    // For per-room aesthetic override, we'd need a per-room field.
-    // For now, this action is a no-op for rooms — the aesthetic is project-level.
-    // Return success; bulk aesthetic is applied at project level via saveProjectMetadata.
-    return { success: true };
-  } catch (error) {
-    console.error("Bulk update room failed:", error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "Unknown error",
-    };
-  }
-}
-// Placeholder to close #788

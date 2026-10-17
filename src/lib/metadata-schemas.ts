@@ -46,18 +46,20 @@ export type ProjectMetadataInput = z.infer<typeof projectMetadataSchema>;
  * `saveRoomMetadata` server action (issue #682).
  *
  * Purpose: validates the client-controlled room-data object before it
- * reaches Prisma so only the two editable room fields (`name`,
- * `rawDirectives`) are ever written. Both fields are optional (autosave
- * sends only what changed); `.strict()` rejects unknown keys outright,
- * so a crafted payload carrying `projectId` (re-parenting outside the
- * ownership chain), `selectedVariantIndex`, or image URLs can never
- * ride this path.
+ * reaches Prisma so only the five editable room fields (`name`,
+ * `rawDirectives`, `fineTuneStrength`, `fineTuneExpand`, `fineTuneSeed`)
+ * are ever written. All five are optional (autosave sends only what
+ * changed); `.strict()` rejects unknown keys outright, so a crafted
+ * payload carrying `projectId` (re-parenting outside the ownership
+ * chain), `selectedVariantIndex`, or image URLs can never ride this
+ * path.
  *
- * Contract: every present field must be a string of at most 2,000
- * characters (matching the client textarea caps). Empty strings parse
- * (an autosave may clear the directives) and an entirely empty object
- * parses — Prisma ignores absent/undefined keys and `update` tolerates
- * empty `data`.
+ * Contract: the two text fields must be strings of at most 2,000
+ * characters (matching the client textarea caps); the three FineTune
+ * fields use the FineTune UI's natural constraints (0..100, 0..40,
+ * digits-only 6 chars max). Empty strings parse (an autosave may clear
+ * the directives) and an entirely empty object parses — Prisma ignores
+ * absent/undefined keys and `update` tolerates empty `data`.
  *
  * Side effects: none — pure validation.
  */
@@ -65,9 +67,71 @@ export const roomMetadataSchema = z
   .object({
     name: metadataTextField("Room name"),
     rawDirectives: metadataTextField("Raw directives"),
+    // Issue #1362a — FineTune persistence. The same AutosaveController
+    // shape that backs `rawDirectives` (issue #496) is now reused for
+    // the three surviving FineTune controls. Bounds mirror the UI:
+    //   - strength: 0..100 (UI percent; DashScope `parameters.strength`
+    //     is 0..1, divided by 100 at the route layer in #1362b).
+    //   - expand:   0..40 (pre-upload mask feathering radius in px;
+    //     Stage B's `mask-feather.ts` reads this and feathers the mask
+    //     data URL before submit).
+    //   - seed:     digits-only, max 6 chars. Matches FineTune.tsx's
+    //     `e.target.value.replace(/\D/g, "")` constraint.
+    fineTuneStrength: z
+      .number()
+      .int({ message: "FineTune strength must be a whole number" })
+      .min(0, { message: "FineTune strength must be between 0 and 100" })
+      .max(100, { message: "FineTune strength must be between 0 and 100" }),
+    fineTuneExpand: z
+      .number()
+      .int({ message: "FineTune expand must be a whole number" })
+      .min(0, { message: "FineTune expand must be between 0 and 40 pixels" })
+      .max(40, { message: "FineTune expand must be between 0 and 40 pixels" }),
+    fineTuneSeed: z
+      .string()
+      .regex(/^\d*$/, { message: "FineTune seed must contain only digits" })
+      .max(6, { message: "FineTune seed must be 6 digits or fewer" }),
   })
   .partial()
   .strict();
 
 /** The validated shape of a {@link roomMetadataSchema} parse. */
 export type RoomMetadataInput = z.infer<typeof roomMetadataSchema>;
+
+/**
+ * Zod schema for the "Virtually staged" disclosure toggle accepted by the
+ * `saveVirtuallyStagedLabelEnabled` server action (issue #1186).
+ *
+ * Purpose: validates the client-controlled payload before it reaches
+ * Prisma so only the two allowed fields can ever be written —
+ * `projectId` (string) and `enabled` (boolean). `.strict()` rejects
+ * unknown keys outright, so a crafted payload carrying `userId`
+ * (ownership transfer) or any other persisted column cannot ride this
+ * path. The boolean is required (not `.optional()`) so a missing or
+ * `undefined` value — which would otherwise null-out the persisted
+ * Boolean? column via Prisma — is rejected at the parse step.
+ *
+ * Contract: `projectId` is a non-empty string (so an update can never
+ * target `""` and silently match nothing); `enabled` is a strict boolean
+ * (so a `null` or string-coerced value cannot reach Prisma).
+ *
+ * Side effects: none — pure validation.
+ */
+export const virtuallyStagedLabelEnabledSchema = z
+  .object({
+    projectId: z.string().min(1, {
+      message: "projectId must be a non-empty string",
+    }),
+    enabled: z.boolean({
+      // Required, not optional: an undefined would Prisma-null the
+      // column (Boolean? accepts null) and quietly hide the disclosure
+      // mark, which is the unsafe direction. Force a deliberate choice.
+      message: "enabled must be a boolean",
+    }),
+  })
+  .strict();
+
+/** The validated shape of a {@link virtuallyStagedLabelEnabledSchema} parse. */
+export type VirtuallyStagedLabelEnabledInput = z.infer<
+  typeof virtuallyStagedLabelEnabledSchema
+>;

@@ -37,7 +37,15 @@ if [ -z "$remaining" ]; then
     echo "check-tsconfig-flip: FAIL — the only tsconfig.json change is the Next.js build flip"
     echo '  ("jsx": "preserve" -> "react-jsx" and/or .next include entries).'
     echo "  This is generated on every next build/next dev and must NOT be committed."
-    echo "  Revert it before committing:  git checkout -- tsconfig.json"
+    echo ""
+    echo "  Revert it before committing:"
+    echo "    git checkout HEAD -- tsconfig.json"
+    echo ""
+    echo "  Use the HEAD form, not the bare form. 'git checkout -- <file>'"
+    echo "  restores the working tree FROM THE INDEX, so if the flip is already"
+    echo "  staged it is restored straight back and the commit stays blocked."
+    echo "  (git restore --staged --worktree tsconfig.json also works, git >= 2.23.)"
+    echo ""
     echo "  See AGENTS.md \"Toolchain quirks\" (root cause #193, guard #219)."
   } >&2
   exit 1

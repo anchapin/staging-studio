@@ -1,11 +1,16 @@
 import Image from "next/image";
 import { parseChecklistItems } from "@/lib/checklist-schema";
 import { extractPillars } from "@/lib/lookbook-pillars";
+import { resolveListingCopy } from "@/lib/listing-copy";
 import { ProposalFooter } from "./proposal-footer";
+import { VirtuallyStagedBadge } from "./virtually-staged-badge";
 import {
   resolveStagedResultDisplay,
   type StagedVariantPair,
 } from "@/lib/staged-result";
+import {
+  shouldRenderVirtuallyStagedBadge,
+} from "@/lib/virtually-staged-label";
 import { LookbookRoomData, ChecklistItem } from "./types";
 import { ComparisonPill } from "@/components/canvas/comparison-pill";
 import ComparisonSlider from "@/components/canvas/comparison-slider";
@@ -49,6 +54,16 @@ export function RoomSpread({ room, project }: RoomSpreadProps) {
     : room.beforeImageUrl;
   const afterImageUrl = display?.afterImageUrl ?? room.afterImageUrl;
 
+  // Issue #1186: the disclosure mark only renders when the project toggle
+  // is on AND the after image in view is actually AI-staged (a complete
+  // variant pair). The toggle defaults to enabled via
+  // shouldRenderVirtuallyStagedBadge's null-handling.
+  const showVirtuallyStagedBadge = shouldRenderVirtuallyStagedBadge({
+    projectEnabled: project.virtuallyStagedLabelEnabled,
+    beforeImageUrl,
+    afterImageUrl,
+  });
+
   return (
     <div className="lookbook-page min-h-screen flex flex-col bg-stone-50">
       <div className="p-8 border-b border-border">
@@ -60,6 +75,42 @@ export function RoomSpread({ room, project }: RoomSpreadProps) {
             {project.stagingAesthetic}
           </p>
         </div>
+        {/* Issue #1343 — listing-copy strip. The Magic Patterns
+            CopyPanel writes a Headline + Description pair onto
+            `Room.lookbookHeadline` / `Room.lookbookBody`; the
+            fallback resolver (`resolveListingCopy`) prefers those
+            and falls back to `room.recommendation` (the consultation
+            prose) for unpinned rooms. Rendered between the title and
+            the photo so a buyer reads the room's name, then its
+            narrative, then sees the staging. `data-testid` on the
+            wrapper lets the e2e spec pin the new-vs-legacy behaviour
+            (see `tests/e2e/specs/lookbook-edit.spec.ts`). */}
+        {(() => {
+          const listingCopy = resolveListingCopy({
+            lookbookHeadline: room.lookbookHeadline ?? null,
+            lookbookBody: room.lookbookBody ?? null,
+            recommendation: room.recommendation ?? null,
+          });
+          if (!listingCopy.headline && !listingCopy.body) return null;
+          return (
+            <div
+              data-testid="room-listing-copy"
+              data-source={room.lookbookHeadline || room.lookbookBody ? "new" : "legacy"}
+              className="avoid-break mt-6 border-l-2 border-primary pl-4"
+            >
+              {listingCopy.headline && (
+                <h3 className="font-playfair text-xl font-semibold text-foreground leading-tight">
+                  {listingCopy.headline}
+                </h3>
+              )}
+              {listingCopy.body && (
+                <p className="mt-2 font-jakarta text-sm leading-relaxed text-muted-foreground">
+                  {listingCopy.body}
+                </p>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       <div className="avoid-break flex-1">
@@ -75,6 +126,12 @@ export function RoomSpread({ room, project }: RoomSpreadProps) {
               afterLabel="After"
               report
             />
+            {/* Issue #1186: "Virtually staged" disclosure mark on AI
+                after-images — overlays the slider from outside so its
+                own DOM (handles, pills, tooltip, progress bar) is
+                untouched. pointer-events-none so it never blocks the
+                slider's drag/hover surface. */}
+            {showVirtuallyStagedBadge && <VirtuallyStagedBadge />}
           </div>
         ) : (
           // Fallback: static before/after when one image is missing
@@ -117,6 +174,10 @@ export function RoomSpread({ room, project }: RoomSpreadProps) {
               <div className="absolute right-3 top-3 pointer-events-none">
                 <ComparisonPill variant="after">After</ComparisonPill>
               </div>
+              {/* Issue #1186: same disclosure mark on the static after
+                  path. Only the after-image container carries it — the
+                  before image (left) is never marked. */}
+              {showVirtuallyStagedBadge && <VirtuallyStagedBadge />}
             </div>
           </div>
         )}

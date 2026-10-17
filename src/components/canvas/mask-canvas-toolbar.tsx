@@ -16,11 +16,17 @@ export interface MaskCanvasToolbarProps {
   /** Brush size slider (external value when Zen Mode lifts it). */
   brushSize: number;
   onBrushSizeChange: (size: number) => void;
-  /** Clear Mask + Undo (issue #378/#694). */
+  /** Clear Mask + Undo/Redo (issue #378/#694, redo per #1223). */
   onClearMask: () => void;
   canUndo: boolean;
   undoCount: number;
   onUndo: () => void;
+  canRedo: boolean;
+  redoCount: number;
+  onRedo: () => void;
+  /** Issue #1223: view zoom indicator; hidden at 1.0x, click resets. */
+  zoom: number;
+  onResetZoom: () => void;
   /** Keyboard-shortcut legend toggle. */
   showLegend: boolean;
   onToggleLegend: () => void;
@@ -44,6 +50,11 @@ export default function MaskCanvasToolbar({
   canUndo,
   undoCount,
   onUndo,
+  canRedo,
+  redoCount,
+  onRedo,
+  zoom,
+  onResetZoom,
   showLegend,
   onToggleLegend,
 }: MaskCanvasToolbarProps) {
@@ -145,6 +156,30 @@ export default function MaskCanvasToolbar({
           Undo {undoCount > 0 && `(${undoCount})`}
         </button>
 
+        {/* Issue #1223: Redo mirrors Undo — disabled when the redo stack is
+            empty, count badge when not. */}
+        <button
+          onClick={onRedo}
+          disabled={!canRedo}
+          title="Redo (Cmd/Ctrl+Shift+Z)"
+          className="px-3 py-2 text-sm rounded-md border border-atelier-taupe/40 bg-white hover:bg-atelier-canvas transition-colors disabled:cursor-not-allowed disabled:opacity-50 md:min-h-[44px]"
+        >
+          Redo {redoCount > 0 && `(${redoCount})`}
+        </button>
+
+        {/* Issue #1223: zoom indicator, hidden at 1.0x; click resets to 1:1. */}
+        {zoom !== 1 && (
+          <button
+            type="button"
+            onClick={onResetZoom}
+            title="Reset zoom to 1:1"
+            aria-label={`Zoom ${zoom.toFixed(1)}x, click to reset to 1:1`}
+            className="px-3 py-2 text-sm rounded-md border border-atelier-taupe/40 bg-white font-mono tabular-nums hover:bg-atelier-canvas transition-colors md:min-h-[44px]"
+          >
+            {zoom.toFixed(1)}&times;
+          </button>
+        )}
+
         <button
           onClick={onToggleLegend}
           title="Keyboard shortcuts"
@@ -179,6 +214,18 @@ export default function MaskCanvasToolbar({
             <div className="flex items-center gap-2">
               <dt className="font-mono text-atelier-taupe">Cmd / Ctrl + Z</dt>
               <dd>Undo</dd>
+            </div>
+            <div className="flex items-center gap-2">
+              <dt className="font-mono text-atelier-taupe">Cmd / Ctrl + Shift + Z</dt>
+              <dd>Redo</dd>
+            </div>
+            <div className="flex items-center gap-2">
+              <dt className="font-mono text-atelier-taupe">Wheel / pinch</dt>
+              <dd>Zoom the canvas</dd>
+            </div>
+            <div className="flex items-center gap-2">
+              <dt className="font-mono text-atelier-taupe">Middle-drag</dt>
+              <dd>Pan the canvas</dd>
             </div>
             <div className="flex items-center gap-2">
               <dt className="font-mono text-atelier-taupe">+ / -</dt>

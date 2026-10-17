@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { ProjectsGridSkeleton } from "@/components/ui/skeleton";
 import { ProjectSearchFilter } from "@/components/dashboard/project-search-filter";
 import { filterProjects, isRecent } from "@/lib/project-filter";
+import { projectCoverUrl, roomCoverUrl } from "@/lib/room-cover";
 import type { StatusFilter, SortField, SortOrder } from "@/lib/project-filter";
 
 function hasStagedResults(
@@ -70,6 +71,7 @@ async function ProjectsGrid({ query, status, sortField, sortOrder }: ProjectsGri
         const staged = hasStagedResults(project);
         const recent = isRecent(new Date(project.updatedAt));
         const isFeatured = index === 0;
+        const coverUrl = projectCoverUrl(project.rooms);
 
         return (
           <Link
@@ -104,6 +106,18 @@ async function ProjectsGrid({ query, status, sortField, sortOrder }: ProjectsGri
               </div>
             )}
 
+            {!isFeatured && coverUrl && (
+              <div className="relative -mx-5 -mt-5 mb-4 aspect-video overflow-hidden rounded-t-lg bg-secondary">
+                <Image
+                  src={coverUrl}
+                  alt={`${project.propertyAddress} cover photo`}
+                  fill
+                  sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
+                  className="object-cover"
+                />
+              </div>
+            )}
+
             <h2 className={`font-playfair font-semibold text-foreground ${isFeatured ? "text-lg md:text-xl lg:text-2xl" : "text-lg"}`}>
               {project.propertyAddress}
             </h2>
@@ -122,32 +136,45 @@ async function ProjectsGrid({ query, status, sortField, sortOrder }: ProjectsGri
                   </Badge>
                 )}
               </div>
-              <span className="text-xs text-muted-foreground">
+              <span className="text-sm font-medium text-foreground/80">
                 {project.rooms.length} room{project.rooms.length !== 1 ? "s" : ""}
               </span>
             </div>
 
             {isFeatured && project.rooms.length > 0 && (
               <div className="mt-4 grid grid-cols-2 gap-2">
-                {project.rooms.slice(0, 4).map((room) => (
-                  <div
-                    key={room.id}
-                    className="aspect-video overflow-hidden rounded-md bg-secondary"
-                  >
-                    {room.afterImageUrl ? (
-                      <Image
-                        src={room.afterImageUrl}
-                        alt={room.name}
-                        fill
-                        className="object-cover"
-                      />
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                        {room.name}
-                      </div>
-                    )}
-                  </div>
-                ))}
+                {project.rooms.slice(0, 4).map((room) => {
+                  const tileUrl = roomCoverUrl(room);
+                  return (
+                    <div
+                      key={room.id}
+                      className="relative aspect-video overflow-hidden rounded-md bg-secondary"
+                    >
+                      {tileUrl ? (
+                        <>
+                          <Image
+                            src={tileUrl}
+                            alt={room.name}
+                            fill
+                            sizes="(min-width: 1024px) 33vw, 50vw"
+                            className="object-cover"
+                          />
+                          {/* Issue #1194: scrim keeps the name readable (WCAG AA)
+                              over bright and dark photos alike. */}
+                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 via-black/40 to-transparent px-3 pb-2 pt-6">
+                            <span className="block truncate text-sm font-medium text-white" title={room.name}>
+                              {room.name}
+                            </span>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex h-full items-center justify-center px-2 text-center text-sm font-medium text-foreground">
+                          {room.name}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </Link>

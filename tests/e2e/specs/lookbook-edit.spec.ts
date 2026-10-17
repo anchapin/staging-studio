@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
 
-import { E2E_REHEARSAL_PROJECT_ID, nextEnv } from "../env";
+import {
+  E2E_LOOKBOOK_ROOM_ID,
+  E2E_REHEARSAL_PROJECT_ID,
+  E2E_REHEARSAL_ROOM_ID,
+  nextEnv,
+} from "../env";
 import { interceptExportPdf, interceptGenerateCopy, login } from "../helpers";
 import { signPreviewToken } from "../../../src/lib/preview-token";
 
@@ -145,6 +150,51 @@ test.describe("lookbook export (issue #250)", () => {
     await page.reload();
     await page.getByRole("button", { name: "Edit" }).click();
     await expect(recommendationBox).toHaveValue(revised);
+  });
+});
+
+test.describe("lookbook listing-copy render (issue #1343)", () => {
+  const URL = `/projects/${E2E_REHEARSAL_PROJECT_ID}/lookbook`;
+
+  test("renders the new lookbookHeadline + lookbookBody strip when both columns are set", async ({
+    page,
+  }) => {
+    await login(page);
+    await page.goto(URL);
+
+    // The seeded Lookbook Suite has distinct lookbookHeadline / lookbookBody
+    // values; the lookbook room spread renders them between the room
+    // title and the photo (data-testid="room-listing-copy", data-source="new").
+    const roomSpread = page
+      .locator(`#lookbook-room-${E2E_LOOKBOOK_ROOM_ID}`)
+      .first();
+    const listingStrip = roomSpread.locator('[data-testid="room-listing-copy"]');
+    await expect(listingStrip).toBeVisible();
+    await expect(listingStrip).toHaveAttribute("data-source", "new");
+    await expect(
+      roomSpread.getByText("A brighter, lighter showpiece")
+    ).toBeVisible();
+    await expect(
+      roomSpread.getByText("Refreshed lighting and softened textiles")
+    ).toBeVisible();
+  });
+
+  test("falls back to the legacy recommendation column when the new columns are null", async ({
+    page,
+  }) => {
+    await login(page);
+    await page.goto(URL);
+
+    // The seeded Rehearsal Room has lookbookHeadline = null and
+    // lookbookBody = null (no CopyPanel edits yet). The render must
+    // hide the listing-copy strip entirely so the room spread falls
+    // back to the consultation prose via the existing pillar render.
+    const roomSpread = page
+      .locator(`#lookbook-room-${E2E_REHEARSAL_ROOM_ID}`)
+      .first();
+    await expect(
+      roomSpread.locator('[data-testid="room-listing-copy"]')
+    ).toHaveCount(0);
   });
 });
 

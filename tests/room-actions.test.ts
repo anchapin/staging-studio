@@ -10,6 +10,7 @@ vi.mock("@/lib/prisma", () => ({
       update: vi.fn(),
       updateMany: vi.fn(),
     },
+    $transaction: vi.fn(),
   },
 }));
 
@@ -52,6 +53,18 @@ beforeEach(() => {
     recommendation: null,
     buyerPsychology: null,
     checklistItems: null,
+    // issue #1182 room-finish fields (always null in fixture)
+    materialFinishId: null,
+    materialFinishDirectives: null,
+    materialFinishConceptLabel: null,
+    // Issue #1343 — listing-copy columns.
+    lookbookHeadline: null,
+    lookbookBody: null,
+    // Issue #1362a — FineTune persistence columns. `prisma.room.findFirst`'s
+    // generated return type now requires these fields on the mock.
+    fineTuneStrength: null,
+    fineTuneExpand: null,
+    fineTuneSeed: null,
     createdAt: new Date(),
   });
 });
@@ -92,6 +105,17 @@ describe("saveRoomMetadata", () => {
       recommendation: null,
       buyerPsychology: null,
       checklistItems: null,
+      // issue #1182 room-finish fields (always null in fixture)
+      materialFinishId: null,
+      materialFinishDirectives: null,
+      materialFinishConceptLabel: null,
+      // Issue #1343 — listing-copy columns.
+      lookbookHeadline: null,
+      lookbookBody: null,
+      // Issue #1362a — FineTune persistence columns.
+      fineTuneStrength: null,
+      fineTuneExpand: null,
+      fineTuneSeed: null,
       createdAt: new Date(),
     });
 
@@ -138,17 +162,23 @@ describe("reorderRooms", () => {
   it("reorders rooms on success", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
     vi.mocked(requireProjectOwnershipSafe).mockResolvedValue({ project: { id: "proj-1" } as any });
-    vi.mocked(prisma.room.updateMany).mockResolvedValue({ count: 1 });
+    // Issue #1147: reorderRooms commits its writes inside prisma.$transaction
+    // against a tx client whose room.update is the same mock.
+    vi.mocked(prisma.$transaction).mockImplementation(async (fn) => {
+      const tx = { room: { update: prisma.room.update } } as never;
+      return (fn as (t: never) => Promise<unknown>)(tx);
+    });
+    vi.mocked(prisma.room.update).mockResolvedValue({ id: "room-1" } as never);
 
     const result = await reorderRooms("proj-1", ["room-2", "room-1"]);
 
     expect(result).toEqual({ success: true });
-    expect(prisma.room.updateMany).toHaveBeenCalledTimes(2);
-    expect(prisma.room.updateMany).toHaveBeenCalledWith({
+    expect(prisma.room.update).toHaveBeenCalledTimes(2);
+    expect(prisma.room.update).toHaveBeenCalledWith({
       where: { id: "room-2", projectId: "proj-1" },
       data: { sortOrder: 0 },
     });
-    expect(prisma.room.updateMany).toHaveBeenCalledWith({
+    expect(prisma.room.update).toHaveBeenCalledWith({
       where: { id: "room-1", projectId: "proj-1" },
       data: { sortOrder: 1 },
     });
@@ -157,7 +187,11 @@ describe("reorderRooms", () => {
   it("propagates database errors", async () => {
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser);
     vi.mocked(requireProjectOwnershipSafe).mockResolvedValue({ project: { id: "proj-1" } as any });
-    vi.mocked(prisma.room.updateMany).mockRejectedValue(new Error("DB error"));
+    vi.mocked(prisma.$transaction).mockImplementation(async (fn) => {
+      const tx = { room: { update: prisma.room.update } } as never;
+      return (fn as (t: never) => Promise<unknown>)(tx);
+    });
+    vi.mocked(prisma.room.update).mockRejectedValue(new Error("DB error"));
 
     const result = await reorderRooms("proj-1", ["room-2", "room-1"]);
 

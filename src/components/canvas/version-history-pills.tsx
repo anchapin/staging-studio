@@ -1,11 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import {
-  MoreHorizontal,
-  Undo2,
-  Redo2,
-} from "lucide-react";
+import { useEffect, useState } from "react";
+import { Undo2, Redo2 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { formatRelativeTime } from "@/lib/relative-time";
@@ -45,14 +41,11 @@ export default function VersionHistoryPills({
     redoStack: [], // Stack of resultUrls for redo
     currentIndex: 0, // Index into versions array
   });
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [animatingPill, setAnimatingPill] = useState(false);
   const [pendingRestore, setPendingRestore] = useState<{
     plan: VersionRestorePlan;
     version: InpaintVersion;
   } | null>(null);
   const { showSuccess, showError } = useToast();
-  const menuRef = useRef<HTMLDivElement>(null);
 
   // Load versions from the shared hook; refetch when the room/slot (via
   // loadVersions' identity) or the active result changes, mirroring the
@@ -66,27 +59,17 @@ export default function VersionHistoryPills({
     });
   }, [activeResultUrl, loadVersions]);
 
-  // Close menu on outside click
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    if (menuOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [menuOpen]);
-
-  // Watch for new versions: if activeResultUrl is not in versions, it's new → animate
+  // Watch for new versions: if activeResultUrl is not in versions, it's new
+  // → refetch. The "new pill animation" is no longer state-driven: the
+  // <button> for the new version gets `key={version.id}`, so it remounts
+  // when a fresh version lands, and the CSS `animation` plays once on
+  // mount (`.animate-new-pill`). The previous implementation toggled a
+  // boolean via `setState`-in-effect, which the `react/set-state-in-effect`
+  // rule flags.
   useEffect(() => {
     if (!activeResultUrl) return;
     const exists = versions.some((v) => v.resultUrl === activeResultUrl);
     if (!exists && versions.length > 0) {
-      // New version was added - trigger animation and reload
-      setAnimatingPill(true);
-      setTimeout(() => setAnimatingPill(false), 400);
       void loadVersions();
     }
   }, [activeResultUrl, versions, loadVersions]);
@@ -203,6 +186,7 @@ export default function VersionHistoryPills({
                 key={version.id}
                 type="button"
                 onClick={() => handlePillClick(version, actualIndex)}
+                aria-pressed={isActive}
                 title={`Pass ${actualIndex + 1} — ${formatRelativeTime(version.createdAt)}`}
                 className={`
                   relative h-7 px-2.5 rounded-full font-mono text-xs font-semibold transition-all
@@ -210,7 +194,7 @@ export default function VersionHistoryPills({
                     ? "bg-primary text-primary-foreground"
                     : "bg-transparent text-muted-foreground hover:bg-muted"
                   }
-                  ${animatingPill && i === visibleVersions.length - 1 ? "animate-new-pill" : ""}
+                  ${i === visibleVersions.length - 1 ? "animate-new-pill" : ""}
                 `}
               >
                 v{actualIndex + 1}
@@ -250,72 +234,10 @@ export default function VersionHistoryPills({
         <Redo2 className="w-4 h-4 text-muted-foreground" />
       </button>
 
-      {/* Vertical divider */}
-      <div
-        className="w-px h-4 shrink-0"
-        style={{ backgroundColor: "oklch(0.708 0 0 / 0.4)" }}
-      />
-
-      {/* More options menu */}
-      <div className="relative" ref={menuRef}>
-        <button
-          type="button"
-          onClick={() => setMenuOpen((prev) => !prev)}
-          className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-muted transition-colors"
-          title="More options"
-          aria-label="More options"
-          aria-expanded={menuOpen}
-        >
-          <MoreHorizontal className="w-4 h-4 text-muted-foreground" />
-        </button>
-
-        {menuOpen && (
-          <div
-            className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 py-1 w-44 rounded-md border shadow-md"
-            style={{
-              backgroundColor: "hsl(var(--card))",
-              borderColor: "oklch(0.708 0 0 / 0.2)",
-            }}
-          >
-            <button
-              type="button"
-              className="w-full cursor-not-allowed px-3 py-1.5 text-left text-xs text-muted-foreground/70 transition-colors"
-              disabled
-              title="View all versions — coming soon"
-              aria-label="View all versions (coming soon)"
-            >
-              View All Versions
-              <span className="ml-1 text-[10px] uppercase tracking-wide text-muted-foreground/60">
-                Soon
-              </span>
-            </button>
-            <button
-              type="button"
-              className="w-full cursor-not-allowed px-3 py-1.5 text-left text-xs text-muted-foreground/70 transition-colors"
-              disabled
-              title="Compare versions — coming soon"
-              aria-label="Compare versions (coming soon)"
-            >
-              Compare Versions
-              <span className="ml-1 text-[10px] uppercase tracking-wide text-muted-foreground/60">
-                Soon
-              </span>
-            </button>
-            <button
-              type="button"
-              className="w-full cursor-not-allowed px-3 py-1.5 text-left text-xs text-destructive/60 transition-colors"
-              disabled
-              title="Clear history — coming soon"
-              aria-label="Clear history (coming soon)"
-            >
-              Clear History
-              <span className="ml-1 text-[10px] uppercase tracking-wide text-muted-foreground/60">
-                Soon
-              </span>
-            </button>
-          </div>
-        )}
-      </div>
+      {/* Issue #1129: the "More options" menu was removed: all three
+          items were permanently disabled "coming soon" placeholders, so the
+          control advertised three actions and delivered none. It returns
+          when the actions ship. */}
 
       <style jsx>{`
         @keyframes newPill {

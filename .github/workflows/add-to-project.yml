@@ -1,0 +1,55 @@
+name: Add new issues to the project board
+
+# Adds every newly opened or reopened issue to
+# "StagingStudio: road to 1.0" (https://github.com/users/anchapin/projects/10)
+# and sets its Status to Todo.
+#
+# Requires a repo secret ADD_TO_PROJECT_PAT: a PAT with the `project` scope
+# (classic) or read/write access to the owner's Projects (fine-grained).
+# The default GITHUB_TOKEN cannot write to a USER-owned project board, which
+# is why this needs its own token. Without the secret the job no-ops with a
+# notice instead of failing, so a missing token never shows up as a red X.
+
+on:
+  issues:
+    types: [opened, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  add-to-project:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for the project token
+        id: token
+        env:
+          PAT: ${{ secrets.ADD_TO_PROJECT_PAT }}
+        run: |
+          if [ -n "$PAT" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::ADD_TO_PROJECT_PAT is not set - skipping the board add."
+          fi
+
+      - name: Add the issue to the board
+        id: add
+        if: steps.token.outputs.ready == 'true'
+        uses: actions/add-to-project@v1.0.2
+        with:
+          project-url: https://github.com/users/anchapin/projects/10
+          github-token: ${{ secrets.ADD_TO_PROJECT_PAT }}
+
+      - name: Set Status to Todo
+        if: steps.token.outputs.ready == 'true' && steps.add.outputs.itemId != ''
+        env:
+          GH_TOKEN: ${{ secrets.ADD_TO_PROJECT_PAT }}
+          ITEM_ID: ${{ steps.add.outputs.itemId }}
+          PROJECT_ID: PVT_kwHOAGCIFs4BlUUb
+          STATUS_FIELD_ID: PVTSSF_lAHOAGCIFs4BlUUbzhkBqEI
+          TODO_OPTION_ID: f75ad846
+        run: |
+          gh api graphql \
+            -f query='mutation($p:ID!,$i:ID!,$f:ID!,$v:String!){updateProjectV2ItemFieldValue(input:{projectId:$p,itemId:$i,fieldId:$f,value:{singleSelectOptionId:$v}}){projectV2Item{id}}}' \
+            -f p="$PROJECT_ID" -f i="$ITEM_ID" -f f="$STATUS_FIELD_ID" -f v="$TODO_OPTION_ID"

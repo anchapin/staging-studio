@@ -24,6 +24,13 @@ export interface PreviewRoom {
   recommendation: string | null;
   buyerPsychology: string | null;
   checklistItems: { item: string; category: string; priority: string }[] | null;
+  /** Issue #1343 — listing-copy columns. May be null on rooms that
+   *  pre-date the redesigned CopyPanel; the render falls back to the
+   *  legacy `recommendation` column (see `resolveListingCopy`). */
+  lookbookHeadline: string | null;
+  /** Issue #1343 — listing-copy body column. Falls back to
+   *  `recommendation` when null/empty. */
+  lookbookBody: string | null;
 }
 
 export interface PreviewProject {
@@ -40,6 +47,10 @@ export interface PreviewProject {
   clientSignature?: string | null;
   clientSignatureStatus?: string | null;
   clientSignatureTimestamp?: string | null;
+  /** Issue #1186: project-scoped disclosure toggle for AI-staged
+   *  after-images in the lookbook preview. Null/undefined reads as
+   *  enabled (the conservative default). */
+  virtuallyStagedLabelEnabled?: boolean | null;
   /** Buyer Demographics (issue #589) */
   buyerDemographics?: BuyerDemographics | null;
   user: {
@@ -95,6 +106,9 @@ export function LookbookPreviewView({ project, previewToken }: LookbookPreviewVi
     clientSignatureTimestamp: project.clientSignatureTimestamp
       ? String(project.clientSignatureTimestamp)
       : null,
+    // Issue #1186: pass through so the room spread can decide whether to
+    // overlay the disclosure mark on each AI after-image.
+    virtuallyStagedLabelEnabled: project.virtuallyStagedLabelEnabled,
   };
 
   const signoffRooms: LookbookRoomData[] = project.rooms.map((room) => ({
@@ -167,6 +181,11 @@ export function LookbookPreviewView({ project, previewToken }: LookbookPreviewVi
               observedChallenge: room.observedChallenge,
               recommendation: room.recommendation,
               buyerPsychology: room.buyerPsychology,
+              // Issue #1343 — new columns thread through to the
+              // RoomSpread so the render can use `resolveListingCopy`
+              // for the new→legacy fallback.
+              lookbookHeadline: room.lookbookHeadline,
+              lookbookBody: room.lookbookBody,
               checklistItems: parseChecklistItems(room.checklistItems, {
                 roomId: room.id,
               }),

@@ -7,6 +7,7 @@ import {
   computeBackingStoreDimensions,
   computeMaskCanvasDimensions,
   logicalPointToBackingStore,
+  objectBoxToStyle,
 } from "@/lib/canvas-coords";
 
 // A 448x336 display rect (4:3) mapped onto a 1024x768 canvas: both scale by 16/7.
@@ -236,5 +237,53 @@ describe("canvasPointToNatural", () => {
 
   it("returns the origin when the canvas is degenerate", () => {
     expect(canvasPointToNatural({ x: 50, y: 50 }, 0, 0, 4096, 3072)).toEqual({ x: 0, y: 0 });
+  });
+});
+
+// Issue #1339: objectBoxToStyle maps a percent-based detection box to
+// the CSS positioning the on-canvas object overlay uses. Reused by
+// #1340's inspector preview so it lives next to the other pure
+// canvas-coord helpers.
+describe("objectBoxToStyle", () => {
+  it("maps a percent-based box to % strings for left/top/width/height", () => {
+    expect(objectBoxToStyle({ x: 49, y: 57, w: 31, h: 42 })).toEqual({
+      left: "49%",
+      top: "57%",
+      width: "31%",
+      height: "42%",
+    });
+  });
+
+  it("supports fractional percentages without rounding (the inspector preview reads these)", () => {
+    expect(objectBoxToStyle({ x: 12.5, y: 33.25, w: 0.5, h: 100 })).toEqual({
+      left: "12.5%",
+      top: "33.25%",
+      width: "0.5%",
+      height: "100%",
+    });
+  });
+
+  it("clamps negative or NaN coordinates to 0% (defensive — the provider may emit invalid boxes)", () => {
+    expect(objectBoxToStyle({ x: -5, y: NaN, w: 10, h: 20 })).toEqual({
+      left: "0%",
+      top: "0%",
+      width: "10%",
+      height: "20%",
+    });
+  });
+
+  it("clamps width/height to 0% when negative or zero so the CSS button collapses cleanly", () => {
+    expect(objectBoxToStyle({ x: 0, y: 0, w: 0, h: 0 })).toEqual({
+      left: "0%",
+      top: "0%",
+      width: "0%",
+      height: "0%",
+    });
+    expect(objectBoxToStyle({ x: 10, y: 10, w: -5, h: -5 })).toEqual({
+      left: "10%",
+      top: "10%",
+      width: "0%",
+      height: "0%",
+    });
   });
 });

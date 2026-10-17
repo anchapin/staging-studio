@@ -1,7 +1,9 @@
-# PoC Demo Script — Lauren Chapin (Sep 26–27)
+# PoC Demo Script — Lauren Chapin
+
+> **Status (see #1175):** Demo date is **TBD** — to be re-dated when the schedule is confirmed. The original Sep 26–27 date is stale. Code blockers 2-5 on the demo gate are now closed (#1176, #1218 + related); remaining items on #1175 are external to this repo (demo date confirmation, fallback PDF regenerated from production on the demo laptop, and a rehearsal-runbook §7 re-run). This doc is the canonical beat-by-beat script; touch the date/URL only after #1175 is updated.
 
 Total planned content: **~12.5 minutes** (under the 15-minute cap). Driver: Alex. Lauren art-directs.
-URL: `https://staging-studio-kappa.vercel.app` (bookmarked; exact URL, no trailing slash).
+URL: **TBD — re-date when schedule is confirmed.** Check #1175 for the current production URL and demo date.
 
 ## Pre-flight (before she arrives — see T10)
 
@@ -22,7 +24,9 @@ Narrate during the queue wait (~35s measured): "it's reading her intent and stag
 - **≤90s:** live result appears as the after-image.
 - **>90s:** click the variant — reveal the **pre-generated** after-image (identical directive). Line: "same pipeline, pre-warmed for today."
 
-**4. Find & replace — SAM 3.1 concept pass (1.5 min).** Still in the Living Room editor: the room's furnishings were **detected the moment the editor opened** — no waiting. Click the **sofa** concept chip, then click the tinted sofa on the photo to select it (second click un-selects — every click after detection is free). The **Batch staging** panel appears with the prompt **pre-filled: "Replace the sofa with "** — she just finishes the sentence ("a warm oatmeal boucle"). Switch to **A separate prompt per object**, click **Run batch**, and the sofa is swapped inside the same variant. Line: "she names the object, the AI replaces it — no Photoshop lasso, no hand-masking."
+**4. Find & replace — SAM 3.1 concept pass (1.5 min).** Still in the Living Room editor: the room's furnishings were **detected the moment the editor opened** — no waiting. Click the **sofa** concept chip, then click the tinted sofa on the photo to select it (second click un-selects — every click after detection is free). The **Batch staging** panel appears with the prompt **pre-filled from the concept the detector labelled** — for the sofa chip it reads `Replace the sofa with `, and the seed is editable, so if the detector called it a couch just fix the word. She finishes the sentence ("a warm oatmeal boucle"). The two prompt modes are **One theme for all regions** and **A separate prompt per region** — pick **A separate prompt per region**, click **Run batch**, and the sofa is swapped inside the same variant. Line: "she names the object, the AI replaces it — no Photoshop lasso, no hand-masking."
+
+> Label check (verified against the merged code, Sep 30): the radio is worded *per region*, not *per object*, and an unlabeled selection ("Object 2") starts with an **empty** prompt field rather than a pre-fill. If the field comes up blank, type the whole sentence — the beat is unaffected.
 
 **5. Brush touch-ups + variant strip (2 min).** Precision pass on top of the find-and-replace result: paint one small zone with the **brush** for a targeted touch-up — "the room came back whole; now we fine-tune, like a highlighter." Then the **variant strip — Original / Variant A / Variant B**: flip between takes; the selected state follows the toggle. Ask HER to call the winner. "Three takes of her room, one click apart."
 

@@ -4,6 +4,13 @@ import { useCallback, useEffect, useState, useRef } from "react";
 import { X, RefreshCw } from "lucide-react";
 import { applyDismissErrorOnSuccess } from "@/lib/toast-stale-error-dismiss";
 
+// Slide-in duration must match the dismiss wait below (see handleDismiss
+// and the auto-dismiss setTimeout) — the keyframe animation runs once on
+// mount and the dismiss path schedules onDismiss after the same duration.
+const TOAST_SLIDE_DURATION_MS = 300;
+// Non-error toasts auto-dismiss at 4s; errors persist until manually dismissed
+const TOAST_AUTO_DISMISS_DEFAULT_MS = 4000;
+
 export interface Toast {
   id: string;
   type: "success" | "error" | "info";
@@ -21,7 +28,12 @@ interface ToastItemProps {
 }
 
 function ToastItem({ toast, onDismiss }: ToastItemProps) {
-  const [isVisible, setIsVisible] = useState(false);
+  // Initialize to true so the slide-in CSS animation (`data-state=open` +
+  // `animate-in slide-in-from-right-full`) starts at the visible end state.
+  // Issue #1288: avoid setState-in-effect by removing the previous
+  // `useEffect` that flipped this on mount — the keyframe animation
+  // drives the entrance without a React render cycle.
+  const [isVisible, setIsVisible] = useState(true);
   const dismissButtonRef = useRef<HTMLButtonElement>(null);
 
   /** Restore focus to the trigger element that opened the toast */
@@ -33,16 +45,18 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
   }, [toast.triggerSelector]);
 
   useEffect(() => {
-    setIsVisible(true);
-    // Non-error toasts auto-dismiss at 4s; errors persist until manually dismissed
-    const timeout = toast.type === "error" ? 8000 : 4000;
+    // Auto-dismiss timer for non-error toasts; errors persist until manually
+    // dismissed. Issue #1288: removed the `setIsVisible(true)` mount call —
+    // the initial state already starts visible, and the slide-in plays via
+    // CSS keyframes (`animate-in slide-in-from-right-full`).
+    if (toast.type === "error") return;
     const timer = setTimeout(() => {
       setIsVisible(false);
       setTimeout(() => {
         onDismiss(toast.id);
         returnFocusToTrigger();
-      }, 300);
-    }, timeout);
+      }, TOAST_SLIDE_DURATION_MS);
+    }, TOAST_AUTO_DISMISS_DEFAULT_MS);
     return () => clearTimeout(timer);
   }, [toast.id, toast.type, onDismiss, returnFocusToTrigger]);
 
@@ -51,7 +65,7 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
     setTimeout(() => {
       onDismiss(toast.id);
       returnFocusToTrigger();
-    }, 300);
+    }, TOAST_SLIDE_DURATION_MS);
   };
 
   const colorMap = {
@@ -76,11 +90,13 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
     <div
       role={toast.type === "error" ? "alert" : "status"}
       aria-live={toast.type === "error" ? "assertive" : "polite"}
+      data-state={isVisible ? "open" : "closed"}
       className={`
         flex items-center gap-3 px-4 py-3 rounded-lg border shadow-lg
         ${colorMap.bg} ${colorMap.text}
-        transition-all duration-300 ease-out
-        ${isVisible ? "translate-x-0 opacity-100" : "translate-x-full opacity-0"}
+        duration-300 ease-out
+        data-[state=open]:animate-in data-[state=open]:slide-in-from-right-full
+        data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right-full
       `}
     >
       {toast.type === "success" && (

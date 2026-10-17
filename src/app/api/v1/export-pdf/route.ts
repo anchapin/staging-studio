@@ -3,7 +3,13 @@
  *
  * Rate-limited and ownership-checked PDF lookbook export endpoint.
  *
- * GET /api/v1/export-pdf?projectId=xxx
+ * POST /api/v1/export-pdf  { projectId: string }
+ *
+ * Mirrors the unversioned /api/export-pdf POST route.  Using POST with a
+ * JSON body closes the cross-site GET navigation attack vector (issue #1158):
+ * a SameSite=Lax auth cookie is NOT sent on cross-origin form POSTs, so a
+ * victim's browser cannot be walked to a crafted link that burns the export
+ * quota and real Browserless spend.
  */
 import { NextRequest, NextResponse } from "next/server";
 
@@ -18,9 +24,7 @@ import {
   DEFAULT_DAILY_EXPORT_LIMIT,
   DAILY_LIMIT_ENV_VAR,
   dailyQuotaExceededPayload,
-  evaluateDailyQuota,
-  getDailyUsage,
-  recordDailyUsage,
+  claimDailyQuota,
   resolveDailyLimit,
 } from "@/lib/api-quota";
 import {
@@ -41,10 +45,16 @@ import { signPreviewToken } from "@/lib/preview-token";
 
 const PROJECT_ID_PATTERN = /^c[a-z0-9]{24}$/;
 const PREVIEW_TOKEN_QUERY_PARAM = "token";
+// Issue #1222: the capture path marks itself so the print CSS keeps the
+// render full-bleed. Local copy (the test mocks `@/lib/preview-token` and
+// only re-exports `signPreviewToken`); mirror the values from
+// `lib/preview-token.ts` so the v1 path matches the unversioned path.
+const PREVIEW_CAPTURE_QUERY_PARAM = "capture";
+const PREVIEW_CAPTURE_QUERY_VALUE = "pdf";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: NextRequest) {
+export async function POST(req: NextRequest) {
   const versionInfo = buildVersionHeaders("v1");
 
   try {
@@ -61,8 +71,40 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const { searchParams } = new URL(request.url);
-    const projectId = searchParams.get("projectId");
+    // Shape-validate the JSON body BEFORE projectId is interpolated into the
+    // preview URL handed to an external service. Issue #1109: a malformed
+    // body (truncated upload, wrong content-type, empty payload) used to
+    // throw here and surface as a 500 internal error; a missing or
+    // malformed request payload is a client-side mistake and must answer
+    // 400 so the user can retry.
+    let payload: unknown;
+    try {
+      payload = await req.json();
+    } catch {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Invalid request",
+          message: "Request body must be valid JSON.",
+          code: API_ERROR_INVALID_REQUEST,
+        },
+        { status: 400, headers: versionInfo }
+      );
+    }
+
+    if (typeof payload !== "object" || payload === null) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Invalid request",
+          message: "Request body must be a JSON object.",
+          code: API_ERROR_INVALID_REQUEST,
+        },
+        { status: 400, headers: versionInfo }
+      );
+    }
+
+    const { projectId } = payload as { projectId?: unknown };
 
     if (typeof projectId !== "string" || !PROJECT_ID_PATTERN.test(projectId)) {
       return NextResponse.json(
@@ -76,33 +118,15 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Check daily export quota
+    // Issue #201: daily per-user Browserless cost guardrail. #1132: the
+    // unit is claimed ATOMICALLY just before the render (below), not
+    // gate-read up front — the old check-then-charge let a concurrent
+    // burst all read the same pre-spend count and overshoot the cap. A
+    // user at their cap still never reaches the paid renderer.
     const exportLimit = resolveDailyLimit(
       process.env[DAILY_LIMIT_ENV_VAR.export],
       DEFAULT_DAILY_EXPORT_LIMIT
     );
-    const exportQuota = evaluateDailyQuota(
-      await getDailyUsage("export", user.id),
-      exportLimit
-    );
-    if (!exportQuota.allowed) {
-      console.warn(
-        JSON.stringify({
-          event: "export_pdf_daily_quota_exceeded",
-          userId: user.id,
-          used: exportQuota.used,
-          limit: exportQuota.limit,
-        })
-      );
-      return NextResponse.json(
-        {
-          success: false,
-          ...dailyQuotaExceededPayload(exportQuota, "Please try again tomorrow."),
-          code: API_ERROR_RATE_LIMIT_EXCEEDED,
-        },
-        { status: 429, headers: versionInfo }
-      );
-    }
 
     // Fetch project and verify ownership
     try {
@@ -169,9 +193,40 @@ export async function GET(request: NextRequest) {
 
     // Signed, short-lived, projectId-scoped token for cookie-less access
     const token = await signPreviewToken(projectId);
-    const previewUrl = `${appUrl}/preview/${projectId}?${PREVIEW_TOKEN_QUERY_PARAM}=${encodeURIComponent(token)}`;
+    // Mirror the unversioned route's `capture=pdf` marker (issue #1222)
+    // so the v1 path renders the same full-bleed print CSS as the
+    // unversioned path. Without it the lookbook-print-baseline spec's
+    // `expect(body.url).toContain("capture=pdf")` matches the wrong
+    // request when the v1 spec sorts first in the suite's run order.
+    const previewUrl = `${appUrl}/preview/${projectId}?${PREVIEW_TOKEN_QUERY_PARAM}=${encodeURIComponent(token)}&${PREVIEW_CAPTURE_QUERY_PARAM}=${PREVIEW_CAPTURE_QUERY_VALUE}`;
 
     // Fetch PDF with circuit breaker and timeout
+    // Issue #201/#1132: claim one export unit ATOMICALLY here, on the
+    // eve of the Browserless call. The conditional increment (UPDATE ...
+    // WHERE count <= limit - N) is serialized by Postgres, so a
+    // concurrent burst can no longer all read the same pre-spend count
+    // and all reach the paid renderer; losers get 429 with the same
+    // payload shape as before.
+    const exportClaim = await claimDailyQuota("export", user.id, exportLimit);
+    if (!exportClaim.claimed) {
+      console.warn(
+        JSON.stringify({
+          event: "export_pdf_daily_quota_exceeded",
+          userId: user.id,
+          used: exportClaim.used,
+          limit: exportClaim.limit,
+        })
+      );
+      return NextResponse.json(
+        {
+          success: false,
+          ...dailyQuotaExceededPayload(exportClaim, "Please try again tomorrow."),
+          code: API_ERROR_RATE_LIMIT_EXCEEDED,
+        },
+        { status: 429, headers: versionInfo }
+      );
+    }
+
     const controller = new AbortController();
     const timeoutId = setTimeout(
       () => controller.abort(),
@@ -207,6 +262,10 @@ export async function GET(request: NextRequest) {
     }
 
     if (!chromeResponse.ok) {
+    // Issue #1124: the unit stays claimed. This failed render still
+    // consumed Browserless compute, and the failure response invites
+    // retries, so the daily cap must bound dispatches, not just
+    // successes.
       const errorText = await chromeResponse.text();
       console.error(
         JSON.stringify({
@@ -240,8 +299,10 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Record usage
-    await recordDailyUsage("export", user.id);
+    // No charge is written here: the unit was claimed atomically before
+    // the render (issue #1132) and stays claimed on every post-dispatch
+    // outcome (issue #1124): failed renders consumed Browserless compute
+    // and count toward the user's daily cap.
 
     return new NextResponse(await chromeResponse.arrayBuffer(), {
       status: 200,
@@ -252,6 +313,9 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
+    // Issue #1124: a dispatch that dies here (timeout abort, network
+    // error) keeps its claim; it consumed or attempted Browserless
+    // compute and counts toward the user's daily cap.
     console.error("Export PDF error:", error);
     return NextResponse.json(
       {

@@ -19,6 +19,7 @@ describe("signProjectRequestSchema", () => {
       projectId: VALID_PROJECT_ID,
       signatureDataUrl: VALID_SIGNATURE,
       token: VALID_TOKEN,
+      consentAttested: true,
     });
     expect(parsed.success).toBe(true);
     if (parsed.success) {
@@ -26,6 +27,7 @@ describe("signProjectRequestSchema", () => {
         projectId: VALID_PROJECT_ID,
         signatureDataUrl: VALID_SIGNATURE,
         token: VALID_TOKEN,
+        consentAttested: true,
       });
     }
   });
@@ -46,6 +48,7 @@ describe("signProjectRequestSchema", () => {
         projectId: bad,
         signatureDataUrl: VALID_SIGNATURE,
         token: VALID_TOKEN,
+        consentAttested: true,
       });
       expect(parsed.success, `projectId=${String(bad)}`).toBe(false);
       if (!parsed.success) {
@@ -69,6 +72,7 @@ describe("signProjectRequestSchema", () => {
         projectId: VALID_PROJECT_ID,
         signatureDataUrl: bad,
         token: VALID_TOKEN,
+        consentAttested: true,
       });
       expect(parsed.success, `signatureDataUrl=${String(bad)}`).toBe(false);
       if (!parsed.success) {
@@ -83,10 +87,44 @@ describe("signProjectRequestSchema", () => {
         projectId: VALID_PROJECT_ID,
         signatureDataUrl: VALID_SIGNATURE,
         token: bad,
+        consentAttested: true,
       });
       expect(parsed.success, `token=${String(bad)}`).toBe(false);
       if (!parsed.success) {
         expect(parsed.error.issues[0]?.path).toContain("token");
+      }
+    }
+  });
+
+  // Issue #1113: the legally-worded approval checkbox is no longer
+  // decorative. The schema enforces `consentAttested: true` — a
+  // missing, false, or non-boolean value must fail validation before
+  // either write path (the API route and `saveProjectSignature`).
+  it("rejects consentAttested: false (issue #1113)", () => {
+    const parsed = signProjectRequestSchema.safeParse({
+      projectId: VALID_PROJECT_ID,
+      signatureDataUrl: VALID_SIGNATURE,
+      token: VALID_TOKEN,
+      consentAttested: false,
+    });
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues[0]?.path).toContain("consentAttested");
+      expect(parsed.error.issues[0]?.message).toContain("must attest consent");
+    }
+  });
+
+  it("rejects a missing consentAttested (issue #1113)", () => {
+    for (const bad of [undefined, null, "yes", 1, 0]) {
+      const parsed = signProjectRequestSchema.safeParse({
+        projectId: VALID_PROJECT_ID,
+        signatureDataUrl: VALID_SIGNATURE,
+        token: VALID_TOKEN,
+        consentAttested: bad,
+      });
+      expect(parsed.success, `consentAttested=${String(bad)}`).toBe(false);
+      if (!parsed.success) {
+        expect(parsed.error.issues[0]?.path).toContain("consentAttested");
       }
     }
   });
@@ -98,6 +136,7 @@ describe("signProjectRequestSchema", () => {
         MAX_SIGNATURE_DATA_URL_LENGTH - SIGNATURE_DATA_URL_PREFIX.length
       )}`,
       token: VALID_TOKEN,
+      consentAttested: true,
     });
     expect(atLimit.success).toBe(true);
 
@@ -107,6 +146,7 @@ describe("signProjectRequestSchema", () => {
         MAX_SIGNATURE_DATA_URL_LENGTH - SIGNATURE_DATA_URL_PREFIX.length + 1
       )}`,
       token: VALID_TOKEN,
+      consentAttested: true,
     });
     expect(overLimit.success).toBe(false);
     if (!overLimit.success) {
@@ -119,6 +159,7 @@ describe("signProjectRequestSchema", () => {
       projectId: VALID_PROJECT_ID,
       signatureDataUrl: VALID_SIGNATURE,
       token: VALID_TOKEN,
+      consentAttested: true,
       userId: "cmaliciousownershiptransfer",
     });
     expect(parsed.success).toBe(false);
@@ -130,6 +171,7 @@ describe("signProjectPayloadSchema", () => {
     const parsed = signProjectPayloadSchema.safeParse({
       projectId: VALID_PROJECT_ID,
       signatureDataUrl: VALID_SIGNATURE,
+      consentAttested: true,
     });
     expect(parsed.success).toBe(true);
   });
@@ -138,8 +180,32 @@ describe("signProjectPayloadSchema", () => {
     const parsed = signProjectPayloadSchema.safeParse({
       projectId: "../../etc/passwd",
       signatureDataUrl: VALID_SIGNATURE,
+      consentAttested: true,
     });
     expect(parsed.success).toBe(false);
+  });
+
+  it("rejects consentAttested: false in the shared payload (issue #1113)", () => {
+    const parsed = signProjectPayloadSchema.safeParse({
+      projectId: VALID_PROJECT_ID,
+      signatureDataUrl: VALID_SIGNATURE,
+      consentAttested: false,
+    });
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues[0]?.path).toContain("consentAttested");
+    }
+  });
+
+  it("rejects a missing consentAttested in the shared payload (issue #1113)", () => {
+    const parsed = signProjectPayloadSchema.safeParse({
+      projectId: VALID_PROJECT_ID,
+      signatureDataUrl: VALID_SIGNATURE,
+    });
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues[0]?.path).toContain("consentAttested");
+    }
   });
 });
 

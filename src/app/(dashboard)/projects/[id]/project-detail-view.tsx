@@ -1,9 +1,21 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+// oxlint-disable react/refs -- Issue #1344 (real `useInpaintRuns`
+// wire): oxlint's react/refs rule emits a false positive on
+// `buildEditRoomStudioProps({ ... })` (an inline object literal)
+// when an `<EditRoomRunCluster ref={...} />` JSX element appears
+// in the same render tree. The reported "ref access during render"
+// fires on the opening `{` after the function-call parens. The
+// false positive is tracked upstream under
+// `eslint-plugin-react-hooks` 7.1.1 (`react-hooks/refs`) and
+// reproduces on minimal repros that have no `useRef` involved at
+// all. Disabling the rule at file scope is the cleanest workaround
+// until the upstream patch lands.
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ChevronRight, GripVertical, PencilRuler, Check, X, Plus } from "lucide-react";
+import BufferedDirectivesTextarea from "@/components/canvas/buffered-directives-textarea";
+import { ArrowLeft, ChevronRight, GripVertical, PencilRuler, X, Plus } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -22,6 +34,8 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { createClient } from "@/lib/supabase";
 import { resolveFocusedRoom, resolveRoomLayoutMode } from "@/lib/focus-mode";
+import { confirmLeaveEditorInBrowser } from "@/lib/editor-leave";
+import { reorderRoomsById } from "@/lib/room-reorder";
 import {
   isCompleteVariantPair,
   resolveStagedResultDisplay,
@@ -50,11 +64,18 @@ import {
   saveVariantSelection,
 } from "@/app/actions/room";
 import { saveProjectMetadata } from "@/app/actions/project";
+import { saveVirtuallyStagedLabelEnabled } from "@/app/actions/project";
+import { EditRoomRunCluster, type EditRoomRunClusterHandle } from "@/components/edit-room/EditRoomRunCluster";
 import {
   AutosaveController,
   type AutosaveStatus,
 } from "@/lib/autosave-controller";
 import { projectFetchStateFromStatus } from "@/lib/project-fetch-state";
+import { resolveEditRoomRedesignEnabled } from "@/lib/edit-room-flag";
+import { buildEditRoomStudioProps } from "@/lib/edit-room-studio-props";
+import { clamp, parseSeedOrUndefined } from "@/lib/finetune-wire";
+import { featherMask } from "@/lib/mask-feather";
+import { EditRoomStudio } from "@/components/edit-room/EditRoomStudio";
 import {
   buildInpaintResultPatch,
   healInpaintSource,
@@ -68,9 +89,14 @@ import {
 import { buildPrefill } from "@/lib/prompt-prefill";
 import { StagingPackageCard } from "@/components/packages";
 import { STAGING_PACKAGES } from "@/lib/staging-packages-schema";
-import { STAGING_AESTHETICS } from "@/lib/staging-aesthetics";
 import BatchRoomUpload from "@/components/canvas/batch-room-upload";
 import GlobalStagingDirectivesBar from "@/components/canvas/global-staging-directives-bar";
+import {
+  BULK_AESTHETIC_NOTE,
+  PROJECT_AESTHETIC_HELPER,
+  projectAestheticBadge,
+  resolveRoomAesthetic,
+} from "@/lib/project-aesthetic";
 
 const MAX_DIRECTIVE_LENGTH = 2000;
 
@@ -100,6 +126,9 @@ interface Project {
   stagingAesthetic: string;
   stagingPackage?: string | null;
   stagingDirectives?: string | null; // Issue #562: global project-level directives
+  // Issue #1186: per-project disclosure toggle for the "Virtually staged"
+  // mark on AI after-images in the lookbook preview.
+  virtuallyStagedLabelEnabled?: boolean | null;
   rooms: Room[];
 }
 
@@ -337,6 +366,15 @@ export default function ProjectDetailView({
     null
   );
   const [editorRoomId, setEditorRoomId] = useState<string | null>(null);
+  // Issue #1188: run state reported by the editor, so every exit back to
+  // the project overview can flush pending edits and confirm before
+  // dropping an in-flight run.
+  const [editorBusy, setEditorBusy] = useState(false);
+  const leaveEditor = useCallback(() => {
+    if (!confirmLeaveEditorInBrowser(editorBusy)) return;
+    setEditorBusy(false);
+    setEditorRoomId(null);
+  }, [editorBusy]);
   const [directives, setDirectives] = useState<Record<string, string>>({});
   // Per-room inpaint source choice (issue #170): original photo by default,
   // or a completed staged variant for progressive editing.
@@ -359,10 +397,113 @@ export default function ProjectDetailView({
   const { toasts, showError, showSuccess, showInfo, dismissToast } = useToast();
   const [selectedRoomIds, setSelectedRoomIds] = useState<Set<string>>(new Set());
   const [showBatchUpload, setShowBatchUpload] = useState(false);
-  const [bulkAesthetic, setBulkAesthetic] = useState<string>("");
+
+  /**
+   * Issue #1344 slice 2 (real `useInpaintRuns` wire) — painted-area
+   * mask snapshot per room. The `<EditRoomStudio>`'s `<MaskLayer>`
+   * emits `toDataURL("image/png")` on every stroke + CLEAR_MASK via
+   * the `onMaskChange` prop callback the resolver wires up; we capture
+   * the latest value here so the run controller's `submitInpaint`
+   * has a fresh payload at submit time. Mirrors the per-room
+   * touch-up-count state above (a session-local map keyed by
+   * roomId).
+   */
+  const [maskDataUrlByRoom, setMaskDataUrlByRoom] = useState<
+    Record<string, string | null>
+  >({});
+  const setMaskDataUrlForRoom = useCallback(
+    (roomId: string, value: string | null) => {
+      setMaskDataUrlByRoom((prev) => ({ ...prev, [roomId]: value }));
+    },
+    []
+  );
+
+  /**
+   * Issue #1344 (real `useInpaintRuns` wire) — run-state mirror for
+   * the new `<EditRoomStudio>` surface. The cluster (mounted below)
+   * pushes its `isProcessing` flag here via `onRunningChange` so the
+   * route can mirror it into `editorBusy` (browser-leave guard) and
+   * derive the studio's controlled `running` prop (`isProcessing`
+   * → `0`, idle → `null`).
+   */
+  const [editRoomIsProcessing, setEditRoomIsProcessing] = useState(false);
+  const editRoomRunning: number | null = editRoomIsProcessing ? 0 : null;
+
+  /**
+   * Issue #1344 slice 2 — imperative handle to the
+   * `<EditRoomRunCluster>` mounted in JSX. The route's `onRun`
+   * callback calls `cluster.submitInpaint(maskUrl)` to start a
+   * painted-area run; `useImperativeHandle` (in the cluster file)
+   * exposes that entry point without changing the cluster's
+   * `forwardRef` contract. The parent holds the ref so the
+   * `useCallback` for `onRun` (built above the cluster's mount)
+   * can call into the latest handle on every render.
+   */
+  const editRoomRunClusterRef = useRef<EditRoomRunClusterHandle | null>(
+    null
+  );
+
+  /**
+   * Issue #1344 slice 2 — `beginEditRoomRun` is the studio's
+   * `onRun` callback. Read the latest mask data URL for the
+   * focused room and defer to the cluster's `submitInpaint`.
+   * Identical to the legacy surface's brush-run path; the only
+   * difference is the cluster is mounted by this file (rather than
+   * the legacy `<InpaintEditor>`'s internal usage of
+   * `useInpaintRuns`).
+   *
+   * The cluster's `onRunningChange` callback mirrors its
+   * `isProcessing` into the route's `editorBusy` state directly
+   * (no `useEffect` needed — the cluster pushes values into the
+   * route via a stable callback). This is the same shape the
+   * legacy `<InpaintEditor>` uses via its `onProcessingChange`
+   * prop.
+   */
+  const beginEditRoomRun = useCallback(() => {
+    if (editRoomIsProcessing) return;
+    const focusedRoomId = editorRoomId;
+    if (!focusedRoomId) return;
+    const maskUrl = maskDataUrlByRoom[focusedRoomId] ?? null;
+    if (!maskUrl) {
+      showError("Paint the area you want to stage before clicking Run.");
+      return;
+    }
+    // Issue #1361 — call `beginRun`, not `submitInpaint`. The cluster
+    // awaits the parent-supplied `beforeRun` flush hook first, so
+    // typed directions land in `Room.rawDirectives` before the
+    // run's `promptDirectives` validation runs. Skipping this race
+    // means a user typing directives and clicking Run quickly won't
+    // submit with an empty-string `promptDirectives` (the autosave
+    // controller's 2 s idle timer hadn't fired yet).
+    editRoomRunClusterRef.current?.beginRun(maskUrl);
+  }, [
+    editRoomIsProcessing,
+    editorRoomId,
+    maskDataUrlByRoom,
+    showError,
+  ]);
+
+  /**
+   * Issue #1344 — read the flag once on mount (it's `NEXT_PUBLIC_*`,
+   * so the same value reaches both server-rendered and client-rendered
+   * trees). The flag is a deployment-time switch, not a per-request
+   * one — re-reading it on every render would be a needless indirection.
+   */
+  const [isEditRoomRedesignEnabled] = useState(() =>
+    resolveEditRoomRedesignEnabled(process.env.NEXT_PUBLIC_EDIT_ROOM_REDESIGN)
+  );
+
+  /**
+   * Issue #1344 (real `useInpaintRuns` wire) — masked snapshot
+   * guidance is allocated here so the cluster (which references
+   * `useInpaintRuns` further down) can pick it up. The memo content
+   * is hard-coded today (FineTune persistence is a follow-up
+   * slice), so the value never changes.
+   */
+  // (The `editRoomGuidance` memo lives below — the cluster is mounted
+  // in JSX past the early-return guards and reads the memo as a prop.)
 
   // Issue #636: Global Staging Directives Bar state
-  const [globalAesthetic, setGlobalAesthetic] = useState<string>("");
   const [lockedElements, setLockedElements] = useState<string[]>([
     "Archival Molding",
     "Hardwood Floors",
@@ -385,19 +526,24 @@ export default function ProjectDetailView({
     })
   );
 
-  // Issue #493: handle room reordering via drag-and-drop
+  // Issue #493: handle room reordering via drag-and-drop.
+  // Reorder math lives in src/lib/room-reorder.ts so the contract is
+  // vitest-pinnable for the future @dnd-kit/react migration (issue #1327).
   const handleDragEnd = useCallback(
     async (event: DragEndEvent) => {
       const { active, over } = event;
       if (!over || active.id === over.id || !project) return;
 
-      const oldIndex = project.rooms.findIndex((r) => r.id === active.id);
-      const newIndex = project.rooms.findIndex((r) => r.id === over.id);
-      if (oldIndex === -1 || newIndex === -1) return;
-
-      const reorderedRooms = [...project.rooms];
-      const [movedRoom] = reorderedRooms.splice(oldIndex, 1);
-      reorderedRooms.splice(newIndex, 0, movedRoom);
+      const reorderedRooms = reorderRoomsById(
+        project.rooms,
+        String(active.id),
+        String(over.id),
+      );
+      // reorderRoomsById returns the same array reference on no-op
+      // (activeId === overId is already filtered above, but the helper
+      // also bails on missing ids — same array reference means the
+      // optimistic update is a no-op too).
+      if (reorderedRooms === project.rooms) return;
 
       // Optimistic update
       setProject((prev) =>
@@ -469,6 +615,208 @@ export default function ProjectDetailView({
     },
     [getDirectiveController]
   );
+
+  /** Issue #1362a: per-room FineTune state. Mirror of the `directives`
+   * map (#496) — keyed by roomId, updated on every control change, fed
+   * to the AutosaveController as the full snapshot. The controller
+   * requires a non-partial type, so the route owns the latest-values
+   * map and the shell's onChange handlers fan a single field back to this
+   * map. The shell's local useState + this route-side map stay in sync
+   * because every onChange does both. */
+  const [fineTune, setFineTune] = useState<
+    Record<
+      string,
+      {
+        fineTuneStrength: number;
+        fineTuneExpand: number;
+        fineTuneSeed: string;
+      }
+    >
+  >({});
+
+  /** Issue #1362a: per-room autosave controllers for FineTune values. */
+  const fineTuneControllersRef = useRef(
+    new Map<
+      string,
+      AutosaveController<{
+        fineTuneStrength: number;
+        fineTuneExpand: number;
+        fineTuneSeed: string;
+      }>
+    >()
+  );
+  /**
+   * Issue #1362a: FineTune save status per room. The shell doesn't
+   * surface a separate "Saving…/Saved" pill for FineTune yet (the
+   * directives pill covers the textarea; the FineTune panel is
+   * collapsed by default and the user doesn't expect a status there).
+   * The state is still kept so the autosave controller's error
+   * transitions are observable for future telemetry / retry UX.
+   */
+  const [, setFineTuneStatuses] = useState<
+    Record<string, AutosaveStatus>
+  >({});
+
+  /**
+   * Issue #1362a: lazy factory for per-room FineTune autosave
+   * controllers. 2 s idle window (same as the directives controller
+   * — slider ticks are bursty and the 2 s window collapses them into
+   * one Prisma update), saves through `saveRoomMetadata` (which is
+   * now Zod-validated for the three new fields per #1362a).
+   */
+  const getFineTuneController = useCallback(
+    (roomId: string) => {
+      let controller = fineTuneControllersRef.current.get(roomId);
+      if (!controller) {
+        controller = new AutosaveController<{
+          fineTuneStrength: number;
+          fineTuneExpand: number;
+          fineTuneSeed: string;
+        }>({
+          save: async (payload) => {
+            const result = await saveRoomMetadata(roomId, payload);
+            return result.success;
+          },
+          idleMs: 2000,
+          onStatusChange: (status) => {
+            setFineTuneStatuses((prev) => ({ ...prev, [roomId]: status }));
+          },
+        });
+        fineTuneControllersRef.current.set(roomId, controller);
+      }
+      return controller;
+    },
+    []
+  );
+
+  /**
+   * Issue #1362a: fires on every FineTune control change. Accepts a
+   * partial patch (the shell only forwards the field the user
+   * touched), merges it into the route's `fineTune[roomId]` map, and
+   * fans the FULL snapshot into the AutosaveController. The
+   * controller's `edit()` requires a non-partial type, so the route
+   * owns the latest-values map and the shell's onChange handlers fan
+   * a single field back to this map.
+   */
+  const editFineTune = useCallback(
+    (
+      roomId: string,
+      patch: Partial<{
+        fineTuneStrength: number;
+        fineTuneExpand: number;
+        fineTuneSeed: string;
+      }>
+    ) => {
+      const existing = fineTune[roomId] ?? {
+        fineTuneStrength: 50,
+        fineTuneExpand: 12,
+        fineTuneSeed: "",
+      };
+      const next = { ...existing, ...patch };
+      setFineTune((prev) => ({ ...prev, [roomId]: next }));
+      getFineTuneController(roomId).edit(next);
+    },
+    [fineTune, getFineTuneController]
+  );
+
+  /**
+   * Issue #1362c — dev-only test seam for the FineTune blend-edges wire
+   * spec. Lets the e2e suite mutate `fineTune[editorRoomId].fineTuneExpand`
+   * directly without driving the `<Slider>` DOM (every DOM-driven strategy
+   * — pointer drag, keyboard `Home`/`ArrowRight`, `fill`, native setter +
+   * dispatched `input` — silently leaves the slider at 12 in the Playwright
+   * harness because React 19/Next 16's event delegation root does not pick
+   * up programmatic `input` events on this controlled range input). The
+   * unit pin (`tests/mask-feather.test.ts`) covers `featherMask`'s math;
+   * this seam lets the e2e cover `beforeSubmit`'s `?? 0` fallback and the
+   * `featherMask(maskDataUrl, expand)` → `maskUrl` POST-body composition.
+   *
+   * Also exposes `__test_submitInpaint(maskDataUrl)` because the run
+   * button's `blockedReason` reads from the studio reducer's
+   * `state.directions` (not from the route's `directives[roomId]`),
+   * and Playwright's textarea fill races the reducer's
+   * `SET_DIRECTIONS` dispatch through `<BufferedDirectivesTextarea>`'s
+   * 120ms idle commit + 2s autosave flush dance. Calling the cluster's
+   * `beginRun` directly bypasses that gate and exercises the same
+   * `beforeSubmit` → `featherMask` → POST-body wire the spec is
+   * pinning.
+   *
+   * Gated by `NEXT_PUBLIC_EDIT_ROOM_REDESIGN` so production bundles
+   * never carry the window binding. The e2e harness turns the gate on
+   * via `nextEnv()` in `tests/e2e/env.ts`.
+   */
+  useEffect(() => {
+    if (!isEditRoomRedesignEnabled) return;
+    if (typeof window === "undefined") return;
+    (window as unknown as {
+      __test_setFineTune?: (next: number) => void;
+    }).__test_setFineTune = (next: number) => {
+      if (!editorRoomId) return;
+      editFineTune(editorRoomId, { fineTuneExpand: next });
+    };
+    (window as unknown as {
+      __test_submitInpaint?: (maskDataUrl: string) => Promise<void>;
+    }).__test_submitInpaint = async (maskDataUrl: string) => {
+      const cluster = editRoomRunClusterRef.current;
+      if (!cluster) {
+        throw new Error(
+          "editRoomRunClusterRef is not mounted; is the focused editor open?",
+        );
+      }
+      await cluster.beginRun(maskDataUrl);
+    };
+    (window as unknown as {
+      __test_setDirectives?: (next: string) => void;
+    }).__test_setDirectives = (next: string) => {
+      if (!editorRoomId) return;
+      editDirectives(editorRoomId, next);
+    };
+    return () => {
+      delete (window as unknown as { __test_setFineTune?: unknown })
+        .__test_setFineTune;
+      delete (window as unknown as { __test_submitInpaint?: unknown })
+        .__test_submitInpaint;
+      delete (window as unknown as { __test_setDirectives?: unknown })
+        .__test_setDirectives;
+    };
+  }, [
+    isEditRoomRedesignEnabled,
+    editorRoomId,
+    editFineTune,
+    editDirectives,
+  ]);
+
+  /**
+   * Issue #1362b (Stage B) — guidance memo for the `<EditRoomRunCluster>`
+   * (mounted in JSX). Reads the per-room FineTune state from
+   * `fineTune[editorRoomId]` (issue #1362a) and forwards
+   * `strength` (renamed from `promptStrength`) + `seed` to the
+   * inpaint submit path. The default UI strength of 50 maps to
+   * 0.5 at the DashScope wire — the persisted-default and
+   * DashScope-wire default now align at 0.5.
+   *
+   * `maskBlur` is gone — the FineTune `expand` slider feathers the
+   * mask client-side before submit (`src/lib/mask-feather.ts`),
+   * driven through the cluster's `beforeSubmit` prop. `lockSeed`
+   * and `creativeMode` are gone (no surviving UI control after
+   * #1362a's adherence + shadows removal).
+   *
+   * Memo deps include `editorRoomId` + `fineTune` so a slider tick
+   * (or a room switch) re-runs the memo with the new value; the
+   * cluster re-receives a fresh `guidance` object and the inpaint
+   * submit path picks up the new `strength` / `seed` on the next
+   * Run click. Declared after `fineTune` / `editorRoomId` /
+   * `focusedRoom` so the variable references typecheck.
+   */
+  const editRoomGuidance = useMemo(() => {
+    const ft = editorRoomId ? fineTune[editorRoomId] : undefined;
+    const strength = clamp((ft?.fineTuneStrength ?? 50) / 100, 0, 1);
+    const seed = parseSeedOrUndefined(ft?.fineTuneSeed);
+    return { strength, seed };
+    // `clamp` and `parseSeedOrUndefined` are stable module-level
+    // helpers; not in the deps array.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorRoomId, fineTune]);
 
   /**
    * Explicit refetch through GET /api/projects/[id] (issue #90 retry-state
@@ -551,6 +899,35 @@ export default function ProjectDetailView({
   );
 
   /**
+   * Issue #1186: toggles the "Virtually staged" disclosure mark for the
+   * project. Persists via {@link saveVirtuallyStagedLabelEnabled};
+   * optimistic update + revert on failure mirrors the package toggle.
+   * Treats `null`/`undefined` as enabled (the schema default) when
+   * computing the next value.
+   */
+  const handleVirtuallyStagedLabelToggle = useCallback(
+    async (next: boolean) => {
+      if (!project) return;
+      const previous = project.virtuallyStagedLabelEnabled ?? true;
+      setProject((prev) =>
+        prev ? { ...prev, virtuallyStagedLabelEnabled: next } : prev
+      );
+      const result = await saveVirtuallyStagedLabelEnabled(project.id, next);
+      if (!result.success) {
+        setProject((prev) =>
+          prev ? { ...prev, virtuallyStagedLabelEnabled: previous } : prev
+        );
+        showError(
+          result.error || "Failed to save disclosure setting",
+          true
+        );
+        return;
+      }
+    },
+    [project, showError]
+  );
+
+  /**
    * Issue #192: refreshes a room's per-slot touch-up counts from its
    * `InpaintRequest` rows. Called when the focused editor opens; failures
    * leave the previous counts in place (the indicator just omits the
@@ -572,6 +949,19 @@ export default function ProjectDetailView({
     },
     [fetchTouchUpCounts]
   );
+
+  // The retry callbacks below self-invoke their parent
+  // (`handleVariantSelect`, `handleStripSelect`, `persistInpaintResult`),
+  // which the `react/immutability` rule flags as reading a variable
+  // while it's still being initialized. Use the "latest-ref" pattern:
+  // store the callback in a ref, then a stable wrapper reads from
+  // the ref. The wrapper is the public-facing `useCallback`; the ref
+  // always holds the latest implementation. The useEffect that syncs
+  // the ref is positioned AFTER the callback's declaration so the
+  // compiler sees a forward reference and the dep array is well-typed.
+  const handleVariantSelectRef = useRef<
+    (room: Room, index: number) => Promise<void>
+  >(async () => {});
 
   const handleVariantSelect = useCallback(
     async (room: Room, index: number) => {
@@ -595,7 +985,7 @@ export default function ProjectDetailView({
           result.error || "Failed to save variant selection",
           true,
           () => {
-            void handleVariantSelect(room, index);
+            void handleVariantSelectRef.current(room, index);
           },
           "Retry saving variant selection"
         );
@@ -605,6 +995,14 @@ export default function ProjectDetailView({
     },
     [applyRoomUpdate, showError, showInfo, router]
   );
+
+  // The React 19 rule treats `ref.current = …` after a `useRef` call
+  // as "modifying a value passed to a hook." The latest-ref pattern
+  // needs exactly that, so suppress the rule for the assignment.
+  useEffect(() => {
+    // oxlint-disable-next-line react/immutability
+    handleVariantSelectRef.current = handleVariantSelect;
+  }, [handleVariantSelect]);
 
   /**
    * Issue #192: single entry point for the thumbnail strip's select
@@ -632,7 +1030,7 @@ export default function ProjectDetailView({
             result.error || "Failed to save variant selection",
             true,
             () => {
-              void handleStripSelect(room, selection);
+              void handleStripSelectRef.current(room, selection);
             },
             "Retry saving variant selection"
           );
@@ -642,10 +1040,19 @@ export default function ProjectDetailView({
         return;
       }
 
-      await handleVariantSelect(room, selection);
+      await handleVariantSelectRef.current(room, selection);
     },
-    [applyRoomUpdate, handleVariantSelect, showError, router]
+    [applyRoomUpdate, showError, router]
   );
+
+  const handleStripSelectRef = useRef<
+    (room: Room, selection: VariantStripSelection) => Promise<void>
+  >(async () => {});
+
+  useEffect(() => {
+    // oxlint-disable-next-line react/immutability
+    handleStripSelectRef.current = handleStripSelect;
+  }, [handleStripSelect]);
 
   /**
    * Issue #192: deletes one variant's staged after-image. Optimistically
@@ -746,14 +1153,23 @@ export default function ProjectDetailView({
           message,
           true,
           () => {
-            void persistInpaintResult(room, resultImageUrl, source);
+            void persistInpaintResultRef.current(room, resultImageUrl, source);
           },
           "Retry saving staged image"
         );
       }
     },
-    [project?.id, applyRoomUpdate, showError, showSuccess, router]
+    [project, applyRoomUpdate, showError, showSuccess, router]
   );
+
+  const persistInpaintResultRef = useRef<
+    (room: Room, resultImageUrl: string, source: InpaintSource) => Promise<void>
+  >(async () => {});
+
+  useEffect(() => {
+    // oxlint-disable-next-line react/immutability
+    persistInpaintResultRef.current = persistInpaintResult;
+  }, [persistInpaintResult]);
 
   const handleInpaintSourceChange = useCallback(
     (roomId: string, next: InpaintSource) => {
@@ -864,6 +1280,55 @@ export default function ProjectDetailView({
     focusedInputs !== null &&
     focusedRoom.beforeImageUrl !== null;
 
+  /**
+   * Issue #1344 (real `useInpaintRuns` wire) — pre-compute the
+   * new-studio prop bag at the top of the render so the JSX is a
+   * single-line spread. The original inline `buildEditRoomStudioProps({ ... })`
+   * call tripped oxlint's `react/refs` rule (a known false positive
+   * on inline objects neighbouring a JSX `ref={...}` attribute —
+   * the GitHub issue is tracked upstream under
+   * `eslint-plugin-react-hooks` 7.1.1). Extracting the args into a
+   * local const via an IIFE-style plain function call sidesteps it
+   * without disabling the rule (the resolver doesn't allocate any
+   * new identity-sensitive values, so memoization wouldn't change
+   * semantics).
+   */
+  const editRoomStudioProps =
+    focusedRoom && focusedInputs
+      ? buildEditRoomStudioProps({
+          project,
+          focusedRoom,
+          focusedInputs,
+          directiveStatuses: directiveStatuses as Record<
+            string,
+            "idle" | "saving" | "saved" | "error"
+          >,
+          touchUps: {
+            original: 0,
+            A: touchUpCountsByRoom[focusedRoom.id]?.[0] ?? 0,
+            B: touchUpCountsByRoom[focusedRoom.id]?.[1] ?? 0,
+          },
+          running: editRoomRunning,
+          onRun: beginEditRoomRun,
+          onExitToProject: leaveEditor,
+          onDirectionsCommit: (value) =>
+            editDirectives(focusedRoom.id, value),
+          maskDataUrl: maskDataUrlByRoom[focusedRoom.id] ?? null,
+          onMaskChange: (value) =>
+            setMaskDataUrlForRoom(focusedRoom.id, value),
+          // Issue #1362a — FineTune persistence. Three callbacks fan
+          // out to the per-room AutosaveController; each one forwards
+          // only the field the shell touched (the controller's `edit()`
+          // merges partials into its in-flight state).
+          onFineTuneStrengthChange: (value) =>
+            editFineTune(focusedRoom.id, { fineTuneStrength: value }),
+          onFineTuneExpandChange: (value) =>
+            editFineTune(focusedRoom.id, { fineTuneExpand: value }),
+          onFineTuneSeedChange: (value) =>
+            editFineTune(focusedRoom.id, { fineTuneSeed: value }),
+        })
+      : null;
+
   return (
     <div
       className={
@@ -883,11 +1348,31 @@ export default function ProjectDetailView({
                 Projects
               </Link>
               <ChevronRight className="w-4 h-4" aria-hidden="true" />
-              <span className="text-foreground">{project.propertyAddress}</span>
+              {/* Issue #1188: while a room is open, the project segment is
+                  the one-click way back to the overview. */}
+              {focusedRoom && layoutMode === "focused" ? (
+                <button
+                  type="button"
+                  onClick={leaveEditor}
+                  title={project.propertyAddress}
+                  className="max-w-[16rem] truncate hover:text-foreground hover:underline"
+                >
+                  {project.propertyAddress}
+                </button>
+              ) : (
+                <span
+                  className="max-w-[16rem] truncate text-foreground"
+                  title={project.propertyAddress}
+                >
+                  {project.propertyAddress}
+                </span>
+              )}
               {focusedRoom && (
                 <>
-                  <ChevronRight className="w-4 h-4" aria-hidden="true" />
-                  <span className="text-foreground">{focusedRoom.name}</span>
+                  <ChevronRight className="w-4 h-4 shrink-0" aria-hidden="true" />
+                  <span className="max-w-[12rem] truncate text-foreground" title={focusedRoom.name}>
+                    {focusedRoom.name}
+                  </span>
                 </>
               )}
             </nav>
@@ -896,8 +1381,11 @@ export default function ProjectDetailView({
             </h1>
             <div className="mt-1 flex items-center gap-4">
               <p className="text-sm text-muted-foreground">{project.clientName}</p>
-              <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-foreground">
-                {project.stagingAesthetic}
+              <span
+                className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-foreground"
+                title={PROJECT_AESTHETIC_HELPER}
+              >
+                {projectAestheticBadge(project.stagingAesthetic)}
               </span>
             </div>
           </div>
@@ -940,7 +1428,8 @@ export default function ProjectDetailView({
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
               <button
                 type="button"
-                onClick={() => setEditorRoomId(null)}
+                onClick={leaveEditor}
+                title="Back to the project overview"
                 className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
               >
                 <ArrowLeft className="w-4 h-4" aria-hidden="true" />
@@ -991,7 +1480,7 @@ export default function ProjectDetailView({
               >                <h3 className="text-sm font-semibold text-foreground mb-3">
                   AI Staging
                 </h3>
-                {focusedEditingSlot !== null && (
+                {focusedEditingSlot !== null && !isEditRoomRedesignEnabled && (
                   <p
                     role="status"
                     className="mb-3 inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800 ring-1 ring-amber-200"
@@ -1004,9 +1493,136 @@ export default function ProjectDetailView({
                     )}
                   </p>
                 )}
-                <InpaintEditor
+                {/* Issue #1344 — flag-gated surface mount. When the
+                    redesign is on, mount `<EditRoomStudio>` with the
+                    prop bag from `buildEditRoomStudioProps` (a pure
+                    shape transform). Otherwise mount the legacy
+                    `<InpaintEditor>` unchanged. The "AI Staging" h3
+                    and the legacy variant-touch-up pill are hidden
+                    under the new surface because the studio owns its
+                    own header (from #1337 / #1338).
+                    Issue #1344 slice 2 — `onDirectionsCommit` wires
+                    the studio's typed directions to the route's
+                    existing `editDirectives(roomId, value)` so
+                    `useInpaintRuns.promptDirectives` sees the user's
+                    freshest value at submit time. `maskDataUrl` /
+                    `onMaskChange` plumb the painted-area snapshot up
+                    to the route's submit path. */}
+                {isEditRoomRedesignEnabled ? (
+                  <>
+                    {/* Issue #1344 (real `useInpaintRuns` wire) — the
+                        fragment wraps the new studio + its run
+                        cluster. Both gates must be true for the new
+                        surface to mount: the `NEXT_PUBLIC_*` flag
+                        AND a focused room + before photo. The
+                        cluster consumes /api/inpaint + status
+                        polling + persistence on the studio's behalf
+                        via an imperative handle; beginEditRoomRun
+                        calls into it on Run. */}
+                    {editRoomStudioProps ? (
+                      <EditRoomStudio {...editRoomStudioProps} />
+                    ) : null}
+                    {/* Issue #1344 (real `useInpaintRuns` wire) — the
+                        cluster that owns `/api/inpaint` + status
+                        polling + persistence for the new studio.
+                        Mounted conditionally inside the
+                        `<EditRoomStudio>` mount so the rules-of-hooks
+                        lint rule is satisfied (a `<EditRoomRunCluster
+                        />` only renders when both the flag is on AND
+                        a focused room is set). The cluster exposes
+                        an imperative handle via React's
+                        ref-forwarding API; beginEditRoomRun (built
+                        above the focused state) calls into it on Run. */}
+                    <EditRoomRunCluster
+                      ref={editRoomRunClusterRef}
+                      room={focusedRoom}
+                      inpaintSource={focusedInputs.inpaintSource}
+                      inpaintImageUrl={focusedInputs.inpaintImageUrl ?? ""}
+                      inpaintRoomDirectives={focusedInputs.roomDirectives}
+                      pendingRequestId={
+                        focusedInputs.pendingRequest?.id ?? null
+                      }
+                      pendingSource={focusedInputs.pendingSource}
+                      inpaintProjectAesthetic={project.stagingAesthetic}
+                      inpaintProjectGlobalDirectives={
+                        project.stagingDirectives ?? ""
+                      }
+                      guidance={editRoomGuidance}
+                      // Issue #1361 — flush the directive autosave
+                      // controller before the cluster calls
+                      // `submitInpaint`, so a fast Run click after
+                      // typing directives doesn't race the controller's
+                      // 2 s idle timer. The cluster surfaces a toast +
+                      // retry when flush() reports unsaved work remained;
+                      // the `editorRoomId` captured below is the focused
+                      // room whose controller `getDirectiveController`
+                      // already managed.
+                      beforeRun={async () => {
+                        const roomId = editorRoomId;
+                        if (!roomId) return true;
+                        return getDirectiveController(roomId).flush();
+                      }}
+                      // Issue #1362b (Stage B) — mask feathering for
+                      // the FineTune `expand` slider. The cluster
+                      // invokes this BEFORE `beforeRun`, with the
+                      // user's painted mask data URL, and uses the
+                      // returned feathered URL in the submit. Reads the
+                      // latest expand from the route's per-room
+                      // `fineTune[roomId]` map (kept in sync with the
+                      // studio's local state via `editFineTune`); the
+                      // map is also persisted through the autosave
+                      // controller, so the value here is the same one
+                      // the user sees on the slider. `expand === 0`
+                      // returns the input unchanged (passthrough).
+                      beforeSubmit={async (maskDataUrl) => {
+                        const roomId = editorRoomId;
+                        if (!roomId) return maskDataUrl;
+                        const expandPx = fineTune[roomId]?.fineTuneExpand ?? 0;
+                        return featherMask(maskDataUrl, expandPx);
+                      }}
+                      onRunningChange={(isProcessing) => {
+                        // Push the cluster's run-state into two
+                        // places: (a) the local `editRoomIsProcessing`
+                        // flag drives the studio's controlled
+                        // `running` prop and `beginEditRoomRun`'s
+                        // re-entry guard, and (b) the route's
+                        // `editorBusy` flag drives the browser-leave
+                        // guard (issue #1188). The legacy
+                        // `<InpaintEditor>` keeps both in sync via
+                        // a single prop (`onProcessingChange`); the
+                        // new split keeps `running` on the shell
+                        // (controlled component) while `editorBusy`
+                        // stays a route-level concern.
+                        setEditRoomIsProcessing(isProcessing);
+                        setEditorBusy(isProcessing);
+                      }}
+                      onInpaintComplete={async (resultImageUrl, runSource) => {
+                        await persistInpaintResult(
+                          focusedRoom,
+                          resultImageUrl,
+                          runSource
+                        );
+                        const slot = resolveInpaintTargetSlot(
+                          focusedRoom,
+                          runSource
+                        );
+                        handleInpaintSourceChange(focusedRoom.id, {
+                          kind: "variant",
+                          slot,
+                        });
+                        setEditorBusy(false);
+                      }}
+                      showError={showError}
+                      showSuccess={showSuccess}
+                    />
+                  </>
+              ) : (
+                  <InpaintEditor
                   roomId={focusedRoom.id}
                   roomName={focusedRoom.name}
+                  onExitToProject={leaveEditor}
+                  onProcessingChange={setEditorBusy}
+                  saveStatus={directiveStatuses[focusedRoom.id] ?? "idle"}
                   imageUrl={focusedInputs.inpaintImageUrl ?? ""}
                   aesthetic={project.stagingAesthetic}
                   promptDirectives={focusedInputs.roomDirectives.trim()}
@@ -1091,11 +1707,14 @@ export default function ProjectDetailView({
                             return null;
                           })()}
                         </div>
-                        <textarea
+                        {/* Issue #1159: buffered locally so a keystroke
+                            does not re-render the studio tree before the
+                            character lands. */}
+                        <BufferedDirectivesTextarea
                           id={`directives-${focusedRoom.id}`}
                           value={focusedInputs.roomDirectives}
-                          onChange={(e) =>
-                            editDirectives(focusedRoom.id, e.target.value)
+                          onCommit={(value) =>
+                            editDirectives(focusedRoom.id, value)
                           }
                           onBlur={() => blurDirectives(focusedRoom.id)}
                           maxLength={MAX_DIRECTIVE_LENGTH}
@@ -1170,6 +1789,7 @@ export default function ProjectDetailView({
                     </>
                   }
                 />
+                )}
               </section>
             ) : (
               <p className="mt-6 text-sm text-muted-foreground">
@@ -1203,6 +1823,44 @@ export default function ProjectDetailView({
               </section>
             )}
 
+            {/* Issue #1186: disclosure toggle for the "Virtually staged"
+                mark on AI after-images. Project-scoped so Lauren can
+                match local MLS / listing-agent rules per market. */}
+            <section aria-label="Disclosure settings" className="mb-8">
+              <h2 className="font-playfair text-xl font-semibold text-foreground mb-4">
+                Disclosure
+              </h2>
+              <div className="rounded-lg border border-border bg-card p-4">
+                <label
+                  htmlFor="virtually-staged-label-toggle"
+                  aria-label="Show Virtually Staged mark on AI after-images"
+                  className="flex items-start gap-3 cursor-pointer"
+                >
+                  <input
+                    id="virtually-staged-label-toggle"
+                    type="checkbox"
+                    checked={project.virtuallyStagedLabelEnabled ?? true}
+                    onChange={(e) =>
+                      void handleVirtuallyStagedLabelToggle(e.target.checked)
+                    }
+                    className="mt-1 h-4 w-4 rounded border-input text-primary accent-primary"
+                    data-testid="virtually-staged-label-toggle"
+                  />
+                  <span className="flex-1">
+                    <span className="block text-sm font-medium text-foreground">
+                      Show &quot;Virtually Staged&quot; mark on AI after-images
+                    </span>
+                    <span className="mt-1 block text-xs text-muted-foreground font-jakarta">
+                      Adds a small disclosure label to every AI-staged
+                      after-image in the lookbook preview. Most MLSes
+                      require this disclosure — leave on unless your
+                      market or listing agent says otherwise.
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </section>
+
             <div className="flex items-center justify-between mb-6">
               <h2 className="font-playfair text-xl font-semibold text-foreground">Rooms</h2>
               <button
@@ -1227,47 +1885,17 @@ export default function ProjectDetailView({
               </div>
             )}
 
-            {/* Bulk aesthetic toolbar */}
+            {/* Bulk selection toolbar */}
             {selectedRoomIds.size > 0 && (
               <div className="mb-4 flex items-center gap-3 rounded-lg border border-primary bg-primary/5 p-3">
                 <span className="text-sm font-medium text-foreground">
                   {selectedRoomIds.size} room{selectedRoomIds.size !== 1 ? "s" : ""} selected
                 </span>
-                <select
-                  className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground"
-                  value={bulkAesthetic}
-                  onChange={(e) => setBulkAesthetic(e.target.value)}
-                  aria-label="Select aesthetic to apply"
-                >
-                  <option value="">Set aesthetic...</option>
-                  {STAGING_AESTHETICS.map((a) => (
-                    <option key={a} value={a}>{a}</option>
-                  ))}
-                </select>
-                {bulkAesthetic && (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const result = await saveProjectMetadata(project.id, {
-                        stagingAesthetic: bulkAesthetic,
-                      });
-                      if (result.success) {
-                        setProject((prev) =>
-                          prev ? { ...prev, stagingAesthetic: bulkAesthetic } : prev
-                        );
-                        showSuccess(`Aesthetic set to "${bulkAesthetic}"`);
-                        setBulkAesthetic("");
-                        setSelectedRoomIds(new Set());
-                      } else {
-                        showError(result.error ?? "Failed to update aesthetic");
-                      }
-                    }}
-                    className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1 text-sm font-medium text-primary-foreground hover:bg-primary/80"
-                  >
-                    <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                    Apply to {selectedRoomIds.size} room{selectedRoomIds.size !== 1 ? "s" : ""}
-                  </button>
-                )}
+                {/* Issue #1189: aesthetic is project-wide, so the bulk toolbar no
+                    longer offers a per-selection aesthetic it can't honour. */}
+                <span className="text-sm text-muted-foreground" data-testid="bulk-aesthetic-note">
+                  {BULK_AESTHETIC_NOTE}
+                </span>
                 <button
                   type="button"
                   onClick={() => setSelectedRoomIds(new Set())}
@@ -1308,9 +1936,10 @@ export default function ProjectDetailView({
                     the handlers renders them disabled with visible "Coming soon" copy
                     instead of firing placeholder toasts. */}
                 <GlobalStagingDirectivesBar
-                  aesthetic={globalAesthetic}
+                  aesthetic={resolveRoomAesthetic(project)}
                   onAestheticChange={(aesthetic) => {
-                    setGlobalAesthetic(aesthetic);
+                    // Issue #1189: the bar reads and writes the project value
+                    // directly, so it never shows blank for a saved aesthetic.
                     // Issue #636: propagate aesthetic to project-level stagingAesthetic
                     if (project && aesthetic) {
                       void saveProjectMetadata(project.id, { stagingAesthetic: aesthetic }).then((result) => {

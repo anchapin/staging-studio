@@ -60,29 +60,49 @@ export const aiMaskUrlSchema = z
  * the holistic full-room path sends `HOLISTIC_NEGATIVE_PROMPT` there;
  * omitted ⇒ the route keeps the single-object `NEGATIVE_PROMPT`.
  *
- * AI Guidance (issue #558):
- * - `promptStrength`: how closely AI follows the text prompt (0.1–1.0, default 0.8)
- * - `maskBlur`: feather edges of the mask for softer transitions (0–20, default 5)
- * - `seed`: reproducible results for iteration (0–999999, optional = random)
- * - `creativeMode`: higher variation (boolean, default false)
- * - `lockSeed`: reproduce exact results (boolean, default false)
+ * AI Guidance (issue #1362b, Stage B):
+ * - `strength`: how closely AI follows the text prompt (0.0–1.0,
+ *   default 0.5 — DashScope's wire default). Renamed from the legacy
+ *   `promptStrength` (issue #558) to match DashScope's
+ *   `parameters.strength` field name on the alibaba adapter. Stale
+ *   clients still sending `promptStrength` fail loudly because the
+ *   schema is `.strict()` (see below).
+ * - `seed`: reproducible results for iteration (0–999999, optional =
+ *   random). The persisted FineTune `fineTuneSeed` (issue #1362a)
+ *   flows through here once, then the next rerun rolls fresh unless
+ *   the user types a new one.
+ * - `maskBlur`, `creativeMode`, `lockSeed`: removed in #1362b. The
+ *   FineTune `expand` slider replaces `maskBlur` with a browser-side
+ *   mask-feather pre-upload pass (`src/lib/mask-feather.ts`); the
+ *   `creativeMode` / `lockSeed` toggles had no surviving UI control
+ *   after #1362a's adherence + shadows removal. Sending any of these
+ *   three will fail validation.
  *
- * Side effects: none (pure validation); the fal.ai call happens in the
- * route, gated by `assertFalConfigured()`/`FAL_KEY`.
+ * `.strict()` rejects unknown keys so a stale client fails loudly
+ * instead of silently dropping the user's choice on the floor (the
+ * pre-#1362b bug: `promptStrength` was the route's documented field,
+ * the alibaba adapter ignored it, and the user got a default
+ * strength with no warning).
+ *
+ * Side effects: none (pure validation); the DashScope call happens
+ * in the route, gated by `assertAlibabaConfigured()` /
+ * `ALIBABA_DASHSCOPE_API_KEY` (issue #1240).
  */
-export const inpaintRequestSchema = z.object({
-  imageUrl: aiImageUrlSchema,
-  maskUrl: aiMaskUrlSchema,
-  promptDirectives: z.string().min(1).max(2000),
-  aesthetic: z.string().min(1).max(200),
-  negativePrompt: z.string().min(1).max(2000).optional(),
-  // Issue #558: AI Guidance controls
-  promptStrength: z.number().min(0.1).max(1.0).optional(),
-  maskBlur: z.number().int().min(0).max(20).optional(),
-  seed: z.number().int().min(0).max(999999).optional(),
-  creativeMode: z.boolean().optional(),
-  lockSeed: z.boolean().optional(),
-});
+export const inpaintRequestSchema = z
+  .object({
+    imageUrl: aiImageUrlSchema,
+    maskUrl: aiMaskUrlSchema,
+    promptDirectives: z.string().min(1).max(2000),
+    aesthetic: z.string().min(1).max(200),
+    negativePrompt: z.string().min(1).max(2000).optional(),
+    // Issue #1362b: `strength` (renamed from `promptStrength`). The
+    // schema is `.strict()` so a legacy client sending the old name
+    // fails with a clear "unrecognized key" error instead of
+    // silently generating with the default.
+    strength: z.number().min(0).max(1.0).optional(),
+    seed: z.number().int().min(0).max(999999).optional(),
+  })
+  .strict();
 
 /**
  * Zod schema for the `POST /api/generate-copy` request body.
@@ -105,51 +125,58 @@ export const generateCopyRequestSchema = z
   .strict();
 
 /**
- * Zod schema for a click-to-segment point in the source image's natural
- * pixel space (origin top-left). Coordinates must be finite and
- * non-negative; upper bounds are enforced against the image dimensions by
- * {@link segmentRequestSchema}'s cross-field refinement.
- * Side effects: none (pure validation).
- */
-export const segmentPointSchema = z.object({
-  x: z.number().finite().min(0),
-  y: z.number().finite().min(0),
-});
-
-/**
- * Zod schema for the `POST /api/segment` request body (issue #183).
+ * Zod schema for the `POST /api/v1/listing-copy` request body (issue
+ * #1343).
  *
- * Contract: `roomId` scopes the click to a room the caller owns (the
- * route re-checks ownership server-side); `imageUrl`
- * ({@link aiImageUrlSchema}) is the room photo fal will segment;
- * `point` ({@link segmentPointSchema}) is the clicked point in the
- * image's natural pixel space; `imageWidth`/`imageHeight` are the
- * natural dimensions the client measured for the same image, and the
- * point must fall within them. `.strict()` rejects unknown keys so
- * stale clients fail loudly.
+ * Contract: `roomId` alone identifies the room — the route reads every
+ * prompt input (`Room.name`, `Room.rawDirectives`, and the parent
+ * project's `stagingAesthetic` / `targetBuyer`) server-side from the
+ * persisted record, mirroring {@link generateCopyRequestSchema}. The
+ * request body carries no prompt context so a client cannot spoof
+ * project context per request. `.strict()` rejects unknown keys so a
+ * stale client fails loudly instead of silently generating copy for a
+ * room other than the one they edited.
  *
- * `warm` (issue #202) marks an editor-open pre-warm ping: the route runs
- * only the auth + room-ownership path and returns `{ warmed: true }`
- * WITHOUT calling fal (zero provider cost). The body still validates as
- * a full click — the probe point exercises the identical schema path a
- * real click takes — but the point is never executed.
- * Side effects: none (pure validation); the fal.ai SAM call happens in
- * the route, gated by `assertFalConfigured()`/`FAL_KEY`.
+ * The output schema is a separate {@link listingCopyOutputSchema} —
+ * the route writes the OpenAI structured response through it before
+ * returning, so a malformed model output is caught at the API edge,
+ * not at lookbook render time.
+ *
+ * Side effects: none (pure validation); the OpenAI call happens in
+ * the route, gated by `assertOpenAIConfigured()`/`OPENAI_API_KEY` and
+ * the daily `copy` quota (`DAILY_COPY_LIMIT`).
  */
-export const segmentRequestSchema = z
+export const listingCopyRequestSchema = z
   .object({
     roomId: z.string().min(1),
-    imageUrl: aiImageUrlSchema,
-    point: segmentPointSchema,
-    imageWidth: z.number().int().positive().max(20_000),
-    imageHeight: z.number().int().positive().max(20_000),
-    warm: z.boolean().optional(),
   })
-  .strict()
-  .refine(
-    (data) => data.point.x <= data.imageWidth && data.point.y <= data.imageHeight,
-    { message: "Point must fall within the image bounds" }
-  );
+  .strict();
+
+/** Hard cap on the rewritten headline, mirrors `listingCopySchema`. */
+export const LISTING_COPY_HEADLINE_MAX = 200;
+/** Hard cap on the rewritten body, mirrors `listingCopySchema`. */
+export const LISTING_COPY_BODY_MAX = 600;
+
+/**
+ * Zod schema for the gpt-4o-mini structured output of
+ * `POST /api/v1/listing-copy` (issue #1343): one short headline
+ * (1–{@link LISTING_COPY_HEADLINE_MAX} chars) and one body paragraph
+ * (1–{@link LISTING_COPY_BODY_MAX} chars), both trimmed to non-blank.
+ *
+ * The caps mirror `listingCopySchema` (`src/lib/room-copy-edit-schema.ts`)
+ * exactly so the route can hand the response straight to the
+ * `saveListingCopy` server action without re-validating. The model's
+ * output is sometimes empty/whitespace on a stuck call — a
+ * `string().min(1)` rejects that loudly so the catch block falls
+ * through to the standard `no-object-generated` branch instead of
+ * persisting blanks.
+ *
+ * Side effects: none (pure validation).
+ */
+export const listingCopyOutputSchema = z.object({
+  headline: z.string().trim().min(1).max(LISTING_COPY_HEADLINE_MAX),
+  body: z.string().trim().min(1).max(LISTING_COPY_BODY_MAX),
+});
 
 /**
  * Zod schema for a SAM 3.1 detection concept (issue #227).
