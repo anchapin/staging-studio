@@ -720,51 +720,45 @@ export default function ProjectDetailView({
   );
 
   /**
-   * Issue #1362c — dev-only test seam for the FineTune blend-edges wire
-   * spec. Lets the e2e suite mutate `fineTune[editorRoomId].fineTuneExpand`
-   * directly without driving the `<Slider>` DOM (every DOM-driven strategy
-   * — pointer drag, keyboard `Home`/`ArrowRight`, `fill`, native setter +
-   * dispatched `input` — silently leaves the slider at 12 in the Playwright
-   * harness because React 19/Next 16's event delegation root does not pick
-   * up programmatic `input` events on this controlled range input). The
-   * unit pin (`tests/mask-feather.test.ts`) covers `featherMask`'s math;
-   * this seam lets the e2e cover `beforeSubmit`'s `?? 0` fallback and the
-   * `featherMask(maskDataUrl, expand)` → `maskUrl` POST-body composition.
+   * Issue #1362c — dev-only test seam for the FineTune blend-edges
+   * wire spec. Lets the e2e suite mutate
+   * `fineTune[editorRoomId].fineTuneExpand` directly without driving
+   * the `<Slider>` DOM (every DOM-driven strategy — pointer drag,
+   * keyboard `Home`/`ArrowRight`, `fill`, native setter + dispatched
+   * `input` — silently leaves the slider at 12 in the Playwright
+   * harness because React 19/Next 16's event delegation root does not
+   * pick up programmatic `input` events on this controlled range
+   * input). The unit pin (`tests/mask-feather.test.ts`) covers
+   * `featherMask`'s math; this seam lets the e2e cover `beforeSubmit`'s
+   * `?? 0` fallback and the `featherMask(maskDataUrl, expand)` → `maskUrl`
+   * POST-body composition.
    *
-   * Also exposes `__test_submitInpaint(maskDataUrl)` because the run
-   * button's `blockedReason` (historically) read from the studio
-   * reducer's `state.directions` (not from the route's
-   * `directives[roomId]`), and Playwright's textarea fill raced the
-   * reducer's `SET_DIRECTIONS` dispatch through
-   * `<BufferedDirectivesTextarea>`'s 120ms idle commit + 2s autosave
-   * flush dance. Calling the cluster's `beginRun` directly bypasses
-   * that gate and exercises the same `beforeSubmit` → `featherMask`
-   * → POST-body wire the spec is pinning.
+   * Also exposes `__test_submitInpaint(maskDataUrl)` because calling
+   * the cluster's `beginRun` directly pins the `beforeSubmit` →
+   * `featherMask` → POST-body wire without DOM-driving the run
+   * button — the run button's `blockedReason` is gate-by-the-textarea
+   * in this build, and DOM-driving the textarea is subject to the
+   * React 19/Next 16 delegation-root issue described above and below.
    *
-   * #1365 — the reducer-buffered `state.directions` race that this
-   * comment originally described no longer exists: the shell lifted
-   * the textarea's source of truth to the parent route map and the
-   * reducer no longer holds a `directions` slice. The
-   * `__test_setDirectives` binding is kept (NOT retired in #1365)
-   * because the underlying React 19/Next 16 event-delegation issue
-   * that motivated the original seam was independent of where the
-   * textarea's `value` lives: the route lift moved the *destination*
-   * of `onChange` (route map instead of reducer), but did not fix the
-   * *trigger* of `onChange` (`page.fill`'s dispatched `input` event
-   * reportedly does not reach React 19's event delegation root on
-   * this controlled textarea — see the spec's doc-comment for the
-   * reproduced failure modes). DOM-driven replacement (Path A in
-   * the #1365 next-session handoff) was therefore not retired; the
-   * e2e suite would re-flake if the seam were dropped without a
-   * separately verified DOM strategy. Future tests MAY attempt the
-   * replacement once the delegation issue is root-caused; until
-   * then, this seam pins the FineTune blend-edges wire (#1362c)
-   * reproducibly and `__test_submitInpaint` pins the same wire
-   * regardless of how the textarea is populated.
+   * #1365 post-merge — the reducer-buffered `state.directions` race
+   * described in the original `__test_setDirectives` rationale no
+   * longer exists: the textarea's source of truth lives on the parent
+   * route map, so no reducer slice proxies the value. The seam is
+   * retained (deferred-retirement, per the post-#1365 followup) because
+   * the original motivation — React 19/Next 16's event-delegation root
+   * reportedly not receiving `page.fill`'s dispatched `input` on this
+   * controlled textarea — is independent of where the `value` lives:
+   * the route lift moved the *destination* of `onChange` (route map
+   * instead of reducer), but did not repair the *trigger* of `onChange`.
+   * `__test_submitInpaint` therefore still pins the POST-body wire
+   * without DOM-driving the textarea. A DOM-only replacement (Path A
+   * in the post-#1365 next-session handoff) remains blocked until the
+   * delegation issue is root-caused; until then this seam continues
+   * to pin the FineTune blend-edges wire (#1362c) reproducibly.
    *
-   * `__test_submitInpaint` remains useful because the cluster's
-   * `beginRun` orchestrates `beforeSubmit` + `featherMask` + the
-   * POST-body composition regardless of how the textarea is
+   * `__test_submitInpaint` is additionally useful because the
+   * cluster's `beginRun` orchestrates `beforeSubmit` + `featherMask` +
+   * the POST-body composition regardless of how the textarea is
    * populated, so it pins the same wire.
    *
    * Gated by `NEXT_PUBLIC_EDIT_ROOM_REDESIGN` so production bundles
