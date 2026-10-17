@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Cinzel, Playfair_Display, Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
+import { AgentationProvider } from "@/components/agentation-provider";
 
 const cinzel = Cinzel({
   subsets: ["latin"],
@@ -51,7 +52,10 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        {children}
+        <AgentationProvider />
+      </body>
     </html>
   );
 }
