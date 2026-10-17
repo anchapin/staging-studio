@@ -71,32 +71,34 @@ jobs:
   # (`API-Version` → `X-Supabase-API-Version`) was caught by this suite
   # while `develop` was still stale — vitest was green throughout.
   #
-  # Scoped to `push` on the long-lived branches ON PURPOSE. The suite is
-  # hermetic but not cheap: it builds the app, starts Postgres in Docker,
-  # and runs 62 specs on a single worker (workers: 1 is required — the mock
-  # Browserless's request log is process-wide).
+  # Fires on BOTH `push` and `pull_request` as of #1370. The earlier
+  # `push`-only scoping defended its decision on a process claim that
+  # turned out to be false: hotfix PRs off `develop` ARE merged via PR
+  # (rebase-the-branch-onto-`develop`), and a `pull_request`-scoped e2e
+  # check is what would have caught the #1345 stale-Inspector regressions
+  # before they reached `develop`. Scope widened symmetrically to the rest
+  # of ci.yml (`pull_request` for feature branches + `push` for long-lived
+  # branches). See handoff `.handoffs/2026-10-17-1370-flake-and-pr-e2e-plan.md`
+  # for the full reasoning chain.
   #
-  # Push is not a compromise between "on PRs" and "on branches" here, it is
-  # the only scope that would ever fire: `develop` is UNPROTECTED and
-  # ordinary work is pushed to it directly. PRs exist only for the
-  # develop→main release. A `pull_request`-scoped e2e job would therefore
-  # run once per release and never for the work it is meant to cover.
-  # Charging that to every PR push buys little either way, because a PR's
-  # commits are what land on develop, and this job fires on that push.
-  # The regression is caught at the branch tip instead of before merge.
+  # The suite is hermetic but not cheap: it builds the app, starts
+  # Postgres in Docker, and runs the specs on a single worker
+  # (`workers: 1` is required — the mock Browserless's request log is
+  # process-wide and shared across the run).
   #
-  # Consequences of push-only, stated so nobody is surprised:
-  #   - A red e2e run does NOT block the merge that caused it. It reports
-  #     on the branch, and fixing it is a follow-up commit.
-  #   - It therefore cannot be a required check (a required check must
-  #     report on the PR). Do not add it to branch protection unless the
-  #     `if` is widened to cover pull_request.
-  #   - `main` gets its own run on release, so a release-merge regression
-  #     is visible in the same place a production deploy is.
+  # Consequences of the wider scope:
+  #   - A red e2e run on a PR is a blocking signal in the PR-conversation
+  #     style; combined with `strict` branch protection a red e2e
+  #     required-check blocks the merge. (`E2E (Playwright)` is NOT a
+  #     required check on `main` today — only `fast-checks` is — and the
+  #     AGENTS.md guidance on widening that further remains the same.)
+  #   - A red e2e run on a develop/main push fires AFTER the regression
+  #     lands; fixing it is a follow-up commit (same as before).
   e2e:
     name: E2E (Playwright)
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
+    # Fires on both `push` (ordinary develop/main work) and `pull_request`
+    # (release PRs + #1386 hotfix PRs off `develop`). See issue #1370.
     # The markdown-only filter lives on `on.push.paths-ignore` (above),
     # not here — `paths-ignore` is not a valid job-level key and placing
     # it here is the schema error GitHub was rejecting the whole file
