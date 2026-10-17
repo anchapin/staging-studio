@@ -61,6 +61,11 @@ const baseFocusedRoom = {
 
 const baseFocusedInputs: FocusedRoomInputs = {
   inpaintImageUrl: "https://example.test/source.jpg",
+  // #1365 — live route-mapped value the studio's textarea
+  // renders. Tests that don't care about the live mapping leave
+  // it empty; tests pinning the redirect supply an explicit
+  // string.
+  roomDirectives: "",
 };
 
 /**
@@ -83,7 +88,7 @@ function withRunArgs(
   args: Partial<Parameters<typeof buildEditRoomStudioProps>[0]>
 ): Parameters<typeof buildEditRoomStudioProps>[0] {
   return {
-    onDirectionsCommit: () => {},
+    onDirectivesChange: () => {},
     maskDataUrl: null,
     onMaskChange: () => {},
     onFineTuneStrengthChange: () => {},
@@ -133,6 +138,7 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
       focusedRoom: baseFocusedRoom,
       focusedInputs: {
         inpaintImageUrl: "https://example.test/variant-a-as-source.jpg",
+        roomDirectives: "",
       },
       directiveStatuses: {},
       touchUps: { original: 0, A: 0, B: 0 },
@@ -497,13 +503,13 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
   });
 
   // Issue #1344 (real `useInpaintRuns` wire) — three new fields.
-  // The resolver used to fill `onDirectionsCommit` with a no-op;
-  // the slice-2 wire-up forwards the route's `editDirectives`
-  // closure so typed directions land in `directives[roomId]` before
-  // the next submit. The `maskDataUrl`/`onMaskChange` pair plumbs
-  // the painted-area snapshot up to the submit path.
-  it("forwards `onDirectionsCommit` through verbatim (slice 2 wires the real editDirectives closure)", () => {
-    const onDirectionsCommit = () => {};
+  // #1365 — `onDirectionsCommit` was removed; the shell no longer
+  // schedules its own 900ms debounce. The parent route forwards
+  // `editDirectives(roomId, value)` directly as
+  // `onDirectivesChange`. The `maskDataUrl`/`onMaskChange` pair
+  // plumbs the painted-area snapshot up to the submit path.
+  it("forwards `onDirectivesChange` through verbatim (the parent route's editDirectives closure)", () => {
+    const onDirectivesChange = () => {};
     const props = buildEditRoomStudioProps(withRunArgs({
       project: baseProject,
       focusedRoom: baseFocusedRoom,
@@ -513,11 +519,30 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
       running: null,
       onRun: () => {},
       onExitToProject: () => {},
-      onDirectionsCommit,
+      onDirectivesChange,
       maskDataUrl: null,
       onMaskChange: () => {},
     }));
-    expect(props.onDirectionsCommit).toBe(onDirectionsCommit);
+    expect(props.onDirectivesChange).toBe(onDirectivesChange);
+  });
+
+  // #1365 — `directions` is the live route-mapped value the studio's
+  // textarea renders; the resolver pulls it from `focusedInputs.roomDirectives`.
+  it("forwards `directions` (live route-mapped value) from `focusedInputs.roomDirectives`", () => {
+    const props = buildEditRoomStudioProps(withRunArgs({
+      project: baseProject,
+      focusedRoom: baseFocusedRoom,
+      focusedInputs: { ...baseFocusedInputs, roomDirectives: "warm walnut sofa" },
+      directiveStatuses: {},
+      touchUps: { original: 0, A: 0, B: 0 },
+      running: null,
+      onRun: () => {},
+      onExitToProject: () => {},
+      onDirectivesChange: () => {},
+      maskDataUrl: null,
+      onMaskChange: () => {},
+    }));
+    expect(props.directions).toBe("warm walnut sofa");
   });
 
   it("forwards `maskDataUrl` through verbatim (slice 2 wires the painted-area snapshot)", () => {
@@ -531,7 +556,7 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
       running: null,
       onRun: () => {},
       onExitToProject: () => {},
-      onDirectionsCommit: () => {},
+      onDirectivesChange: () => {},
       maskDataUrl,
       onMaskChange: () => {},
     }));
@@ -549,7 +574,7 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
       running: null,
       onRun: () => {},
       onExitToProject: () => {},
-      onDirectionsCommit: () => {},
+      onDirectivesChange: () => {},
       maskDataUrl: null,
       onMaskChange,
     }));

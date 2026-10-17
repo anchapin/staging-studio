@@ -732,14 +732,28 @@ export default function ProjectDetailView({
    * `featherMask(maskDataUrl, expand)` → `maskUrl` POST-body composition.
    *
    * Also exposes `__test_submitInpaint(maskDataUrl)` because the run
-   * button's `blockedReason` reads from the studio reducer's
-   * `state.directions` (not from the route's `directives[roomId]`),
-   * and Playwright's textarea fill races the reducer's
-   * `SET_DIRECTIONS` dispatch through `<BufferedDirectivesTextarea>`'s
-   * 120ms idle commit + 2s autosave flush dance. Calling the cluster's
-   * `beginRun` directly bypasses that gate and exercises the same
-   * `beforeSubmit` → `featherMask` → POST-body wire the spec is
-   * pinning.
+   * button's `blockedReason` (historically) read from the studio
+   * reducer's `state.directions` (not from the route's
+   * `directives[roomId]`), and Playwright's textarea fill raced the
+   * reducer's `SET_DIRECTIONS` dispatch through
+   * `<BufferedDirectivesTextarea>`'s 120ms idle commit + 2s autosave
+   * flush dance. Calling the cluster's `beginRun` directly bypasses
+   * that gate and exercises the same `beforeSubmit` → `featherMask`
+   * → POST-body wire the spec is pinning.
+   *
+   * #1365 — the reducer-buffered `state.directions` race that this
+   * comment originally described no longer exists: the shell lifted
+   * the textarea's source of truth to the parent route map and the
+   * reducer no longer holds a `directions` slice. The
+   * `__test_setDirectives` binding is kept as a backward-compat
+   * shim behind the `NEXT_PUBLIC_EDIT_ROOM_REDESIGN` gate while DOM-
+   * driven replacement decisions land in a follow-up; new tests
+   * should drive the textarea via `userEvent` (`page.fill` +
+   * `page.locator(...).press("Tab")`) rather than call this seam.
+   * `__test_submitInpaint` remains useful because the cluster's
+   * `beginRun` orchestrates `beforeSubmit` + `featherMask` + the
+   * POST-body composition regardless of how the textarea is
+   * populated, so it pins the same wire.
    *
    * Gated by `NEXT_PUBLIC_EDIT_ROOM_REDESIGN` so production bundles
    * never carry the window binding. The e2e harness turns the gate on
@@ -1311,8 +1325,20 @@ export default function ProjectDetailView({
           running: editRoomRunning,
           onRun: beginEditRoomRun,
           onExitToProject: leaveEditor,
-          onDirectionsCommit: (value) =>
+          // #1365 — per-keystroke callback. The parent's
+          // `editDirectives` already wraps persistence in the
+          // AutosaveController; the shell no longer holds its own
+          // 900ms debounce (the previous path raced the cluster's
+          // submit-time prompt capture, missing the user's last
+          // keystrokes on first render — see #1365).
+          onDirectivesChange: (value) =>
             editDirectives(focusedRoom.id, value),
+          // #1365 — live route-mapped value the studio's textarea
+          // renders. `focusedInputs.roomDirectives` mirrors the
+          // parent's `directives[roomId]` map; the shell's
+          // `liveDirections` derivation uses this when supplied,
+          // falling back to `initialDirections` for legacy fixtures.
+          directions: focusedInputs.roomDirectives,
           maskDataUrl: maskDataUrlByRoom[focusedRoom.id] ?? null,
           onMaskChange: (value) =>
             setMaskDataUrlForRoom(focusedRoom.id, value),

@@ -46,8 +46,6 @@ export interface Version {
 export interface EditRoomStudioProps {
   /** Auto-save status mirrored from the parent route's AutosaveController. */
   saveStatus: SaveStatus;
-  /** Fired 900ms after the user stops typing in the directions textarea. */
-  onDirectionsCommit: (value: string) => void;
   /**
    * Issue #1340 — Required by the version strip's "Use in lookbook" CTA.
    * Passed through to the `setLookbookVariant` server action so the
@@ -116,6 +114,41 @@ export interface EditRoomStudioProps {
    */
   initialDirections?: string;
   /**
+   * Issue #1365 — Live route-mapped directives value. The parent
+   * route's `directives[roomId]` map (see `project-detail-view.tsx`
+   * `editDirectives` callback) is the source of truth: every
+   * keystroke in the Directions textarea reaches here via the
+   * `onDirectivesChange` callback, and the shell re-renders the
+   * textarea with this prop. The shell's reducer no longer stores
+   * `directions` (the previous reducer-buffered path made the run
+   * button's `blockedReason` race `SET_DIRECTIONS` and missed the
+   * cluster's submit-time prompt capture — this prop is what
+   * unblocks that, by removing the reducer-buffered step entirely).
+   *
+   * Falls back to `initialDirections` for test fixtures written
+   * before #1365 (the studio's preview/demo surface hasn't been
+   * updated to thread the route map yet — that lands in #1365
+   * follow-up once the test fixture convention is decided). When
+   * neither is supplied, the textarea starts empty (the
+   * uncontrolled-empty default the reducer used to provide).
+   */
+  directions?: string;
+  /**
+   * Issue #1365 — Callback wired from the parent route's
+   * `editDirectives(roomId, value)`. Fires on every textarea
+   * `onChange`. The parent already debounces persistence via its
+   * `AutosaveController` (the shell's pre-#1365 900ms
+   * `DIRECTIONS_DEBOUNCE_MS` debounce has been removed — the
+   * controlled-value pattern means there is no race to debounce;
+   * the parent's controller schedules the server write).
+   *
+   * The shell still needs to mirror the parent's route map locally
+   * so the prop-driven re-render happens; the parent already does
+   * this in its `setDirectives({[roomId]: value})` call site, and
+   * the new render reads from `props.directions` directly.
+   */
+  onDirectivesChange?: (value: string) => void;
+  /**
    * Issue #1362a — Initial persisted FineTune values from
    * `Room.fineTuneStrength` / `Room.fineTuneExpand` / `Room.fineTuneSeed`.
    * Pre-populates the FineTune panel's three surviving controls
@@ -146,8 +179,12 @@ export interface EditRoomStudioProps {
    * relevant one on every control change; the route's
    * `editFineTune(roomId, patch)` translates that into a
    * `AutosaveController.edit()` call that debounces to `saveRoomMetadata`.
-   * Mirrors `onDirectionsCommit` (#1344 slice 2): the parent route owns
-   * the per-room controller map, the shell is a thin pass-through.
+   * Mirrors `onDirectivesChange` (#1365 — per-keystroke, no shell
+   * debounce; the parent's `editDirectives` already wraps persistence
+   * in the AutosaveController, so the shell is now a thin
+   * pass-through rather than debouncing its own callback): the
+   * parent route owns the per-room controller map, the shell is a
+   * thin pass-through.
    *
    * Each callback receives only the field it owns so the parent's
    * `editFineTune` can decide whether to send a partial patch or a

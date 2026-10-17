@@ -39,7 +39,11 @@ export function baseProps(
     overrides;
   return {
     saveStatus: "saved",
-    onDirectionsCommit: () => {},
+    // Issue #1365 — the shell is a thin pass-through to the parent
+    // route's `editDirectives`; every keystroke fires this callback
+    // (no shell-side debounce; the parent wraps persistence in the
+    // AutosaveController).
+    onDirectivesChange: () => {},
     projectId: "project-1",
     roomId: "room-1",
     roomName: "Living Room",

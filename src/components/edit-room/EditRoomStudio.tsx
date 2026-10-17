@@ -50,7 +50,6 @@ import { AutosaveController } from "@/lib/autosave-controller";
 import { saveListingCopy } from "@/app/actions/room-copy";
 
 const TOAST_AUTO_DISMISS_MS = 3200;
-const DIRECTIONS_DEBOUNCE_MS = 900;
 
 /** Fixed labels per the Magic Patterns design (Original photo / Variant A / Variant B). */
 const SLOT_LABELS: Record<SlotId, string> = {
@@ -61,7 +60,6 @@ const SLOT_LABELS: Record<SlotId, string> = {
 
 export function EditRoomStudio({
   saveStatus: _saveStatus,
-  onDirectionsCommit,
   projectId,
   roomId,
   roomName,
@@ -70,6 +68,8 @@ export function EditRoomStudio({
   initialCopyHeadline,
   initialCopyBody,
   initialDirections,
+  directions,
+  onDirectivesChange,
   initialFineTune,
   onFineTuneStrengthChange,
   onFineTuneExpandChange,
@@ -94,33 +94,39 @@ export function EditRoomStudio({
   // `initialDirections ?? ""` lets the prop stay optional (existing
   // pre-#1359 fixtures don't pass it) while still coercing undefined
   // to the canonical empty-string default the reducer expects.
-  const seededDirections = initialDirections ?? "";
+  // #1365 — the source of truth for the directives textarea is
+  // `props.directions ?? initialDirections ?? ""` (the parent route's
+  // `directives[roomId]` map), not the reducer. The reducer no
+  // longer holds a `directions` slice, so there is no seed step to
+  // perform here. The lazy `useReducer` initializer is retained for
+  // the other reducer slots (mask, fineTune, scope, viewing, …)
+  // whose initial values are still derived from props.
   const [state, dispatch] = useReducer(
     editRoomReducer,
     null,
-    () => createInitialEditRoomState({ directions: seededDirections })
+    () => createInitialEditRoomState()
   );
+  // #1365 — single derivation for every read site that used to read
+  // `state.directions`. Cached here so each consumer reads the same
+  // snapshot on a given render (no risk of `initialDirections` and
+  // `props.directions` disagreeing mid-tree). Test fixtures that
+  // only pass `initialDirections` keep working; the parent route's
+  // live-mapped `props.directions` overrides the seed whenever it
+  // is supplied.
+  const liveDirections = directions ?? initialDirections ?? "";
   const router = useRouter();
   const [isLookbookPending, startLookbookTransition] = useTransition();
 
-  // Room-switch reset — if the parent re-passes a different
-  // `initialDirections` (the studio stays mounted across room switches,
-  // no `key=` remounts it today), reset the reducer so the textarea
-  // reflects the new room's saved value. Mirrors the
-  // `initialLookbookSlot` reset pattern above. The `dispatch` and
-  // `lastCommittedValue` (declared further below, near the debounce
-  // effect) are captured by closure; refs and dispatchers stay
-  // referentially stable across renders so this effect is safe to
-  // bind once. `seededDirections` is the canonical empty-string
-  // version of the optional prop, matching the initializer above.
-  // The dep list tracks `seededDirections` (not `initialDirections`)
-  // so an absent-to-empty transition on a re-render doesn't reset
-  // the seeded reducer state to the wrong value.
-  useEffect(() => {
-    dispatch({ type: "SET_DIRECTIONS", value: seededDirections });
-    lastCommittedValue.current = seededDirections;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seededDirections]);
+  // Room-switch reset — REMOVED in #1365. Pre-#1365 this effect
+  // dispatched `SET_DIRECTIONS` and reset `lastCommittedValue` when
+  // the parent re-passed a different `initialDirections` on a room
+  // switch. #1365 reads the textarea value from `props.directions`
+  // (which the parent updates via its route map on every keystroke,
+  // including the room switch case), so the room-switch reset now
+  // happens at the route level — there is nothing to mirror into
+  // the reducer for the directions field. The other reducer slots
+  // (mask, fineTune, scope, viewing, …) keep their own state, so
+  // this effect's removal is local to the directions field.
 
   // #1344 (real `useInpaintRuns` wire) — mirror the parent route's
   // `maskDataUrlByRoom[roomId]` into the shell's reducer on every
@@ -207,14 +213,14 @@ export function EditRoomStudio({
         viewing: state.viewing,
         hasMask: state.hasMask,
         selectedCount: state.selected.length,
-        hasDirections: state.directions.trim().length > 0,
+        hasDirections: liveDirections.trim().length > 0,
       }),
     [
       state.scope,
       state.viewing,
       state.hasMask,
       state.selected.length,
-      state.directions,
+      liveDirections,
     ]
   );
 
@@ -341,7 +347,7 @@ export function EditRoomStudio({
   // onClick ref is stable across renders (matches #1343's contract).
   const handleCopyRewrite = useCallback(async () => {
     if (isCopyRewriting) return;
-    if (state.directions.trim().length === 0) return;
+    if (liveDirections.trim().length === 0) return;
     setIsCopyRewriting(true);
     try {
       const response = await fetch("/api/v1/listing-copy", {
@@ -404,7 +410,7 @@ export function EditRoomStudio({
     } finally {
       setIsCopyRewriting(false);
     }
-  }, [isCopyRewriting, state.directions, roomId]);
+  }, [isCopyRewriting, liveDirections, roomId]);
 
   // #1344 — Run button: the inspector is dumb, the SHELL owns the
   // button's loading state (it just forwards the parent's `running`
@@ -478,44 +484,26 @@ export function EditRoomStudio({
     });
   };
 
-  // 2. Directions debounce — the issue spec calls for 900ms. The
-  //    reducer stores the verbatim text; this effect fires
-  // `onDirectionsCommit` 900ms after the user stops typing. The
-  //    parent route is responsible for the real persistence (#1344
-  //    wires it to the existing AutosaveController).
-  //
-  // The `onDirectionsCommit` callback is held in a ref so a referentially
-  // unstable parent (an inline lambda) does not reset the debounce timer
-  // on every render — that would push the commit indefinitely into the
-  // future. The `lastCommittedValue` guard makes the effect a no-op when
-  // the value hasn't actually changed (mount + parent re-renders).
-  //
-  // Issue #1359 — initialise `lastCommittedValue.current` to the
-  // seeded `seededDirections` (canonical `initialDirections ?? ""`)
-  // so a mount-with-persisted-data doesn't fire a redundant 900ms
-  // debounce → autosave round trip on every page load. `useRef`
-  // only captures the first render's value, and `seededDirections`
-  // is stable for the studio's lifetime (the parent re-seeds only
-  // on room switch, which the `SET_DIRECTIONS` reset effect above
-  // handles symmetrically).
-  const directionsTimer = useRef<number | undefined>(undefined);
-  const lastCommittedValue = useRef<string>(seededDirections);
-  const onCommitRef = useRef(onDirectionsCommit);
-  // Refs-as-latest-callback pattern (per React docs): keep the ref's
-  // `.current` fresh in an effect, never during render. oxlint's
-  // `react/refs` rule will flag the in-render assignment.
-  useEffect(() => {
-    onCommitRef.current = onDirectionsCommit;
-  });
-  useEffect(() => {
-    if (state.directions === lastCommittedValue.current) return;
-    window.clearTimeout(directionsTimer.current);
-    directionsTimer.current = window.setTimeout(() => {
-      lastCommittedValue.current = state.directions;
-      onCommitRef.current(state.directions);
-    }, DIRECTIONS_DEBOUNCE_MS);
-    return () => window.clearTimeout(directionsTimer.current);
-  }, [state.directions]);
+  // 2. Directions debounce — REMOVED in #1365. Pre-#1365 this
+  //    effect held a 900ms debounce that wrapped `onDirectionsCommit`
+  //    (the parent's callback). #1365 lifted the source of truth
+  //    for the textarea value out of the reducer and into the
+  //    parent route's `directives[roomId]` map, so the controlled
+  //    textarea reads `props.directions ?? initialDirections ?? ""`
+  //    and fires `props.onDirectivesChange(value)` on every
+  //    keystroke. The parent already wraps that in the same
+  //    `AutosaveController` debounce that the old effect did, and
+  //    the double-debounce was a small but real source of the
+  //    cluster's first-render prompt capture missing the user's
+  //    last keystrokes (the reducer-buffered `state.directions` was
+  //    one tick behind the textarea at submit time).
+// No replacement needed for the old debounce: pre-#1365 the textarea
+  // value lived in `state.directions`, debounced into the parent's
+  // commit callback via this effect. #1365 lifted the source of truth
+  // to the parent route map (`props.directions`), and the parent
+  // already debounces its persistence there. The shell is now a
+  // pure pass-through: read the prop, write the prop on every
+  // keystroke; the parent owns the autosave timing.
 
   // The magic patterns layout: TopBar (breadcrumb+save), main column
   // (CanvasStage + VersionStrip), right column (Inspector), Toast.
@@ -636,8 +624,8 @@ export function EditRoomStudio({
           viewing={state.viewing}
           onViewOriginal={() => dispatch({ type: "SET_VIEWING", viewing: "original" })}
           targetSlot={targetSlot}
-          directions={state.directions}
-          onDirectionsChange={(v) => dispatch({ type: "SET_DIRECTIONS", value: v })}
+          directions={liveDirections}
+          onDirectionsChange={(v) => onDirectivesChange?.(v)}
           concept={state.concept}
           onConceptChange={(c) => dispatch({ type: "SET_CONCEPT", concept: c })}
           onConceptSubmit={(c) => {

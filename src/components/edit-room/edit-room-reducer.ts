@@ -27,7 +27,14 @@ export interface EditRoomState {
   scope: EditRoomScope;
   viewing: SlotId;
   lookbookSlot: SlotId;
-  directions: string;
+  /**
+   * Source of truth for directives now lives in the parent route
+   * map as `directives[roomId]`, not in the reducer. The run
+   * button's `blockedReason` and the cluster's submit-time
+   * `inpaintRoomDirectives` read from there directly.
+   * See `EditRoomStudio.tsx` → `EditRoomRunCluster.tsx`'s
+   * `props.inpaintRoomDirectives` wiring.
+   */
   concept: string | null;
   selected: string[];
   maskVersion: number;
@@ -51,7 +58,6 @@ export type EditRoomAction =
   | { type: "SET_SCOPE"; scope: EditRoomScope }
   | { type: "SET_VIEWING"; viewing: SlotId }
   | { type: "SET_LOOKBOOK_SLOT"; slot: SlotId }
-  | { type: "SET_DIRECTIONS"; value: string }
   | { type: "SET_CONCEPT"; concept: string | null }
   | { type: "TOGGLE_OBJECT"; objectId: string }
   | { type: "CLEAR_SELECTION" }
@@ -73,8 +79,7 @@ export const initialEditRoomState: EditRoomState = {
   scope: "whole-room",
   viewing: "original",
   lookbookSlot: "A",
-  directions: "",
-  concept: null,
+    concept: null,
   selected: [],
   maskVersion: 0,
   hasMask: false,
@@ -89,16 +94,21 @@ export const initialEditRoomState: EditRoomState = {
 /**
  * Build a shell state with optional overrides — used by the shell's
  * lazy `useReducer(reducer, initialArg, init)` form (see
- * `EditRoomStudio.tsx`) so a parent route can seed a reducer slot
- * from a server-supplied value without mutating the canonical
+ * `EditRoomStudio.tsx`) so a parent route can seed reducer slots
+ * from server-supplied values without mutating the canonical
  * `initialEditRoomState` (which the reducer test pins as a frozen
  * default).
  *
- * Issue #1359 — the seed use case is `directions`, supplied from
- * `Room.rawDirectives` so the textarea restores on remount. The
- * factory takes a partial so future seed fields (copy headline /
- * body, lookbook slot, etc.) compose without a `Partial<…>` cast
- * at the call site.
+ * Issue #1359 / #1365 — pre-#1365 the seed use case was `directions`,
+ * supplied from `Room.rawDirectives` so the textarea restored on
+ * remount. #1365 lifted `directions` out of the reducer (the run
+ * button's `blockedReason` and the cluster submit-time prompt capture
+ * now read from the parent route's `directives[roomId]` map directly,
+ * not from a reducer slot), so `createInitialEditRoomState` no longer
+ * seeds it. The factory still takes a partial so future seed fields
+ * (for example lookbook slot, brush mode, fineTune overrides set
+ * before slider mount) compose without a `Partial<…>` cast at the
+ * call site.
  */
 export function createInitialEditRoomState(
   overrides: Partial<EditRoomState> = {}
@@ -138,12 +148,6 @@ export function editRoomReducer(
 
     case "SET_LOOKBOOK_SLOT":
       return { ...state, lookbookSlot: action.slot };
-
-    case "SET_DIRECTIONS":
-      // Debouncing is the hook's job, not the reducer's; the reducer
-      // just stores the latest value verbatim (whitespace preserved —
-      // the form-field contract is "what you typed is what gets saved").
-      return { ...state, directions: action.value };
 
     case "SET_CONCEPT":
       // Mirrors onConceptChange: changing the concept drops the prior
