@@ -9,9 +9,36 @@ export interface CanvasLogicalPoint {
   y: number;
 }
 
+// Issue #1223: pure shortcut classification, extracted so the wiring can be
+// pinned by unit tests (vitest runs in node — no DOM events). Redo is
+// checked BEFORE undo so Cmd/Ctrl+Shift+Z never falls through to undo.
+export function isMaskUndoShortcut(e: {
+  metaKey: boolean;
+  ctrlKey: boolean;
+  key: string;
+  shiftKey: boolean;
+}): boolean {
+  return (
+    (e.metaKey || e.ctrlKey) && !e.shiftKey && (e.key === "z" || e.key === "Z")
+  );
+}
+
+export function isMaskRedoShortcut(e: {
+  metaKey: boolean;
+  ctrlKey: boolean;
+  key: string;
+  shiftKey: boolean;
+}): boolean {
+  if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "z" || e.key === "Z")) {
+    return true;
+  }
+  return e.ctrlKey && !e.metaKey && (e.key === "y" || e.key === "Y");
+}
+
 export interface UseMaskKeyboardPaintingInput {
   /** The interactive mask canvas (toggle paints only when it exists). */
-  canvasRef: React.RefObject<HTMLCanvasElement>;
+  // React 19: see inpaint-mask-canvas.tsx for context.
+  canvasRef: React.RefObject<HTMLCanvasElement | null>;
   /** Logical canvas grid dimensions (issue #181 space). */
   dims: { width: number; height: number };
   activeTool: MaskTool;
@@ -31,6 +58,8 @@ export interface UseMaskKeyboardPaintingInput {
   performPaste: (mirrored: boolean) => void;
   /** Issue #378/#694: undo executor (owns the mask undo stack). */
   handleUndo: () => void;
+  /** Issue #1223: redo executor (restores the latest redo target). */
+  handleRedo: () => void;
   /** Issue #560: brush-size stepping writes through (external or internal). */
   getBrushSize: () => number;
   setBrushSize: (size: number) => void;
@@ -43,7 +72,8 @@ export interface UseMaskKeyboardPaintingInput {
  * pixels — issue #181), P/Space/Enter toggles painting (or fills /
  * toggles the instance under the cursor with the Fill / Select tools),
  * Cmd/Ctrl+C/V/Shift+V drive the #591 copy-paste cluster, Cmd/Ctrl+Z
- * undoes, and +/- steps the brush size.
+ * undoes, Cmd/Ctrl+Shift+Z (Ctrl+Y) redoes (issue #1223), and +/- steps
+ * the brush size.
  */
 export function useMaskKeyboardPainting({
   canvasRef,
@@ -58,6 +88,7 @@ export function useMaskKeyboardPainting({
   performCopy,
   performPaste,
   handleUndo,
+  handleRedo,
   getBrushSize,
   setBrushSize,
 }: UseMaskKeyboardPaintingInput) {
@@ -156,8 +187,16 @@ export function useMaskKeyboardPainting({
         return;
       }
 
+      // Issue #1223: Cmd/Ctrl+Shift+Z (or Ctrl+Y) for redo — checked before
+      // undo so the shifted chord never falls through to undo.
+      if (isMaskRedoShortcut(e)) {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
+
       // Issue #378: Cmd/Ctrl+Z for undo
-      if ((e.metaKey || e.ctrlKey) && e.key === "z") {
+      if (isMaskUndoShortcut(e)) {
         e.preventDefault();
         handleUndo();
         return;
@@ -202,7 +241,7 @@ export function useMaskKeyboardPainting({
         return;
       }
     },
-    [centerOf, dims.width, dims.height, getBrushSize, handleUndo, moveCursorTo, performCopy, performPaste, setBrushSize, toggleKeyboardPaint]
+    [centerOf, dims.width, dims.height, getBrushSize, handleRedo, handleUndo, moveCursorTo, performCopy, performPaste, setBrushSize, toggleKeyboardPaint]
   );
 
   const handleCanvasFocus = useCallback(() => {

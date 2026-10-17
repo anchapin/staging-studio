@@ -14,7 +14,7 @@ import {
   type PerObjectBatchPlan,
 } from "@/lib/multi-select-batch";
 import { buildPrefill } from "@/lib/prompt-prefill";
-import { resolveRegionLabel } from "@/lib/vision-labels";
+import { resolveRegionLabel } from "@/lib/vision-labels-pure";
 import { sliderFillStyle } from "@/lib/precision-slider";
 import { paletteCssColor } from "./inpaint-mask-canvas";
 import { getAestheticChips } from "@/lib/aesthetic-chips";

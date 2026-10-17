@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 
 import { POST } from "@/app/api/export-pdf/route";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
 // Use vi.hoisted so the mock is fresh for each test run and doesn't retain
@@ -60,7 +61,7 @@ vi.mock("@/lib/api-auth", () => ({
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     project: { findUnique: vi.fn() },
-    dailyApiUsage: { upsert: vi.fn(), findUnique: vi.fn() },
+    dailyApiUsage: { upsert: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn(), create: vi.fn() },
   },
 }));
 
@@ -77,6 +78,8 @@ const authedUser = getAuthedPrismaUser as unknown as Mock;
 const projectFindUnique = prisma.project.findUnique as unknown as Mock;
 const dailyApiUsageUpsert = prisma.dailyApiUsage.upsert as unknown as Mock;
 const dailyApiUsageFindUnique = prisma.dailyApiUsage.findUnique as unknown as Mock;
+const dailyApiUsageUpdateMany = prisma.dailyApiUsage.updateMany as unknown as Mock;
+const dailyApiUsageCreate = prisma.dailyApiUsage.create as unknown as Mock;
 
 const USER_ID = "user-1";
 // Exactly 25 chars: c + 24 lowercase alphanumerics (matches PROJECT_ID_PATTERN /^c[a-z0-9]{24}$/)
@@ -96,6 +99,8 @@ beforeEach(() => {
     requireProjectOwnershipOrThrow.mockResolvedValue({ ok: true, projectId: PROJECT_ID });
     dailyApiUsageFindUnique.mockResolvedValue({ count: 0 });
   dailyApiUsageUpsert.mockResolvedValue({ count: 1 });
+  dailyApiUsageUpdateMany.mockResolvedValue({ count: 1 });
+  dailyApiUsageCreate.mockResolvedValue({ count: 1 });
   // Reset hoisted mock and delegate to global.fetch so per-test overrides work
   vi.mocked(fetchBrowserlessPdfWithCircuitBreaker).mockReset().mockImplementation(
     (url: string, opts?: RequestInit) => global.fetch(url, opts) as Promise<Response>,
@@ -121,6 +126,8 @@ beforeEach(() => {
   projectFindUnique.mockResolvedValue({ id: PROJECT_ID, userId: USER_ID });
   dailyApiUsageFindUnique.mockResolvedValue({ count: 0 });
   dailyApiUsageUpsert.mockResolvedValue({ count: 1 });
+  dailyApiUsageUpdateMany.mockResolvedValue({ count: 1 });
+  dailyApiUsageCreate.mockResolvedValue({ count: 1 });
   vi.mocked(fetchBrowserlessPdfWithCircuitBreaker).mockReset().mockImplementation(
     (url: string, opts?: RequestInit) => global.fetch(url, opts) as Promise<Response>,
   );
@@ -193,6 +200,17 @@ describe("POST /api/export-pdf — auth", () => {
 
 describe("POST /api/export-pdf — quota", () => {
   it("returns 429 when daily export limit is exceeded", async () => {
+    // Issue #1132: the claim is a conditional increment. A full counter
+    // loses it (0 rows updated), the first-of-day create hits the unique
+    // key (P2002), the retry increment loses again, and the route reads
+    // today's count and denies — no charge, no provider call.
+    dailyApiUsageUpdateMany.mockResolvedValue({ count: 0 });
+    dailyApiUsageCreate.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+        code: "P2002",
+        clientVersion: "5.22.0",
+      })
+    );
     dailyApiUsageFindUnique.mockResolvedValue({ count: 20 });
 
     const response = await callExportRoute(validBody());
@@ -285,5 +303,111 @@ describe("POST /api/export-pdf — PDF generation", () => {
     expect(callArgs).toBeDefined();
     const [url] = callArgs as [string, RequestInit];
     expect(url).toBe("https://chrome.browserless.io/pdf");
+  });
+});
+
+/**
+ * Issue #1124: a failed Browserless render still consumed Browserless
+ * compute, and its retryable response invites retries. The unit claimed
+ * atomically before the dispatch (issue #1132) therefore STAYS claimed on
+ * every post-dispatch outcome, so the daily cap bounds failing dispatches
+ * too, not just successes. No refund call site may exist after dispatch.
+ */
+describe("POST /api/export-pdf — failed exports consume quota (issue #1124)", () => {
+  interface CounterArgs {
+    where?: { count?: { lte?: number } };
+    data?: { count?: { increment?: number; decrement?: number } };
+  }
+
+  /** Stateful fake of the atomic conditional increment / refund writes. */
+  function wireUsageCounter() {
+    let counter = 0;
+    const increments: number[] = [];
+    const decrements: number[] = [];
+    dailyApiUsageUpdateMany.mockImplementation(async (args: CounterArgs) => {
+      if (args?.data?.count?.increment !== undefined) {
+        // Mirrors claimDailyQuota's UPDATE ... WHERE count <= limit - N guard.
+        const lte = args?.where?.count?.lte;
+        if (typeof lte === "number" && counter > lte) return { count: 0 };
+        increments.push(args.data.count.increment);
+        counter += args.data.count.increment;
+        return { count: 1 };
+      }
+      if (args?.data?.count?.decrement !== undefined) {
+        // Mirrors refundDailyQuota's decrement. A decrement here means a
+        // refund call site sneaked back into the route after dispatch.
+        decrements.push(args.data.count.decrement);
+        return { count: 1 };
+      }
+      return { count: 0 };
+    });
+    dailyApiUsageFindUnique.mockImplementation(async () => ({ count: counter }));
+    return { increments, decrements };
+  }
+
+  function p2002Rejection() {
+    return new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+      code: "P2002",
+      clientVersion: "5.22.0",
+    });
+  }
+
+  it("counts N failing exports against the daily cap: 3 failures consume 3 units, the 4th is denied", async () => {
+    process.env.DAILY_EXPORT_LIMIT = "3";
+    const { increments, decrements } = wireUsageCounter();
+    // First-of-day create loses the unique key, so the cap-exhausted path
+    // re-reads today's count and denies (same flow the existing 429 test pins).
+    dailyApiUsageCreate.mockRejectedValue(p2002Rejection());
+    vi.mocked(fetchBrowserlessPdfWithCircuitBreaker).mockRejectedValue(
+      new Error("network down")
+    );
+
+    for (let i = 0; i < 3; i++) {
+      const response = await callExportRoute(validBody());
+      expect(response.status).toBeGreaterThanOrEqual(500);
+    }
+
+    expect(increments).toEqual([1, 1, 1]);
+    expect(decrements).toEqual([]);
+
+    const denied = await callExportRoute(validBody());
+    expect(denied.status).toBe(429);
+    const body = await denied.json();
+    expect(body.error).toBe("Daily limit reached");
+    expect(body.retryable).toBe(true);
+    expect(increments).toEqual([1, 1, 1]);
+    expect(decrements).toEqual([]);
+  });
+
+  it("keeps the claim when Browserless returns non-PDF content", async () => {
+    const { increments, decrements } = wireUsageCounter();
+    vi.mocked(fetchBrowserlessPdfWithCircuitBreaker).mockResolvedValue(
+      new Response("not a pdf", {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+      })
+    );
+
+    const response = await callExportRoute(validBody());
+
+    expect(response.status).toBe(502);
+    expect(increments).toEqual([1]);
+    expect(decrements).toEqual([]);
+  });
+
+  it("keeps the claim when Browserless returns an error status", async () => {
+    const { increments, decrements } = wireUsageCounter();
+    vi.mocked(fetchBrowserlessPdfWithCircuitBreaker).mockResolvedValue(
+      new Response("Browserless error", {
+        status: 500,
+        headers: { "Content-Type": "text/plain" },
+      })
+    );
+
+    const response = await callExportRoute(validBody());
+
+    expect(response.status).toBe(500);
+    expect(increments).toEqual([1]);
+    expect(decrements).toEqual([]);
   });
 });

@@ -76,14 +76,6 @@ export default function GeneratedVariationGrid({
 }: GeneratedVariationGridProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
 
-  const handleUseClick = (
-    e: React.MouseEvent,
-    variation: GeneratedVariation
-  ) => {
-    e.stopPropagation();
-    onUse(variation);
-  };
-
   return (
     <div className={cn("flex flex-col gap-3", className)}>
       {/* 4-column variation grid */}
@@ -99,10 +91,9 @@ export default function GeneratedVariationGrid({
         {variations.map((variation) => {
           const isSelected = selectedId === variation.id;
           const isHovered = hoveredId === variation.id;
-          const showOverlay = isHovered && !isSelected;
 
           return (
-            <div key={variation.id} className="relative">
+            <div key={variation.id} className="group/row relative">
               {/* Skeleton shimmer while loading */}
               {isGenerating && (
                 <div
@@ -134,8 +125,6 @@ export default function GeneratedVariationGrid({
                   onClick={() => onSelect(variation.id)}
                   onMouseEnter={() => setHoveredId(variation.id)}
                   onMouseLeave={() => setHoveredId(null)}
-                  onFocus={() => setHoveredId(variation.id)}
-                  onBlur={() => setHoveredId(null)}
                   className={cn(
                     "group/var relative block aspect-square w-full overflow-hidden rounded-lg border bg-muted transition-all",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
@@ -165,24 +154,38 @@ export default function GeneratedVariationGrid({
                     </span>
                   )}
 
-                  {/* Hover overlay — "Use This" button */}
-                  {showOverlay && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-                      <button
-                        type="button"
-                        onClick={(e) => handleUseClick(e, variation)}
-                        className={cn(
-                          "flex items-center gap-1.5 rounded-full px-3 py-1.5",
-                          "bg-primary text-primary-foreground",
-                          "label-sm font-medium",
-                          "transition-colors hover:bg-primary/80"
-                        )}
-                      >
-                        Use This
-                      </button>
-                    </div>
-                  )}
                 </button>
+              )}
+
+              {/* "Use This" overlay — a SIBLING of the thumbnail button, never
+                  nested inside it (issue #1115). Rendered only when the
+                  variation is neither selected nor loading; hidden and
+                  pointer-inert by default, shown on wrapper hover or
+                  :focus-within, so Tab + Enter reaches it. */}
+              {!isGenerating && !isSelected && (
+                <div
+                  className={cn(
+                    "absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-black/40 transition-opacity",
+                    "opacity-0 pointer-events-none",
+                    "group-hover/row:opacity-100 group-hover/row:pointer-events-auto",
+                    "group-focus-within/row:opacity-100 group-focus-within/row:pointer-events-auto"
+                  )}
+                >
+                  <button
+                    type="button"
+                    aria-label={`Use this ${roomName} variation`}
+                    onClick={() => onUse(variation)}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-full px-3 py-1.5",
+                      "bg-primary text-primary-foreground",
+                      "label-sm font-medium",
+                      "transition-colors hover:bg-primary/80",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    )}
+                  >
+                    Use This
+                  </button>
+                </div>
               )}
 
               {/* Metadata tooltip — visible below thumbnail on hover */}

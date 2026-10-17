@@ -4,6 +4,7 @@ import InpaintOperationModeTabs, {
   type InpaintOperationModeId,
 } from "./inpaint-operation-mode-tabs";
 import { editorTabId, editorTabPanelId } from "./editor-tab-bar";
+import BufferedDirectivesTextarea from "./buffered-directives-textarea";
 
 export interface ManualTabPanelProps {
   tabIdBase: string;
@@ -76,10 +77,12 @@ export default function ManualTabPanel({
           >
             Manual paint directives (required)
           </label>
-          <textarea
+          {/* Issue #1159: buffered locally so a keystroke does not
+              re-render the canvas tree before the character lands. */}
+          <BufferedDirectivesTextarea
             id={`inpaint-directives-${roomId}`}
             value={directivesValue ?? promptDirectives}
-            onChange={(e) => onDirectivesChange?.(e.target.value)}
+            onCommit={(value) => onDirectivesChange?.(value)}
             rows={3}
             placeholder="e.g., Modern coastal furniture, light neutrals, natural textures, minimal accessories..."
             className="w-full px-3 py-2 rounded-md border border-border text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"

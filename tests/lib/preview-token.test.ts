@@ -2,17 +2,17 @@ import { test, expect, afterEach, describe, it } from "vitest";
 import {
   signPreviewToken,
   verifyPreviewToken,
+  getSecret,
   PREVIEW_TOKEN_QUERY_PARAM,
   PREVIEW_TOKEN_TTL_SECONDS,
 } from "@/lib/preview-token";
 
 // Save originals for restoration
-const ORIG = {
-  PREVIEW_TOKEN_SECRET: process.env.PREVIEW_TOKEN_SECRET,
-} as const;
+const ORIG = process.env.PREVIEW_TOKEN_SECRET;
 
 afterEach(() => {
-  process.env.PREVIEW_TOKEN_SECRET = ORIG.PREVIEW_TOKEN_SECRET;
+  if (ORIG === undefined) delete process.env.PREVIEW_TOKEN_SECRET;
+  else process.env.PREVIEW_TOKEN_SECRET = ORIG;
 });
 
 // ---------------------------------------------------------------------------
@@ -24,8 +24,8 @@ describe("exports", () => {
     expect(PREVIEW_TOKEN_QUERY_PARAM).toBe("token");
   });
 
-  test("PREVIEW_TOKEN_TTL_SECONDS is 300 (5 minutes)", () => {
-    expect(PREVIEW_TOKEN_TTL_SECONDS).toBe(300);
+  test("PREVIEW_TOKEN_TTL_SECONDS is 1800 (30 minutes, issue #1109)", () => {
+    expect(PREVIEW_TOKEN_TTL_SECONDS).toBe(30 * 60);
   });
 });
 
@@ -333,5 +333,28 @@ describe("signPreviewToken + verifyPreviewToken round-trip", () => {
       const result = await verifyPreviewToken(token);
       expect(result).toEqual({ valid: true, projectId: id });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dev fallback
+// ---------------------------------------------------------------------------
+
+const DEV_FALLBACK_SECRET =
+  "staging-studio-dev-only-preview-token-secret-do-not-use-in-production";
+
+describe("dev fallback is exercised when PREVIEW_TOKEN_SECRET is unset", () => {
+  it("getSecret() returns the documented dev fallback when the env var is absent", () => {
+    // Ensure the env var is genuinely absent (not the string "undefined")
+    delete process.env.PREVIEW_TOKEN_SECRET;
+    expect(process.env.PREVIEW_TOKEN_SECRET).toBeUndefined();
+    expect(getSecret()).toBe(DEV_FALLBACK_SECRET);
+  });
+
+  it("sign + verify round-trip works with the dev fallback secret", async () => {
+    delete process.env.PREVIEW_TOKEN_SECRET;
+    const token = await signPreviewToken("fallback-test");
+    const result = await verifyPreviewToken(token);
+    expect(result).toEqual({ valid: true, projectId: "fallback-test" });
   });
 });

@@ -6,18 +6,28 @@
  *
  * GET /api/v1/inpaint/[requestId]
  *
- * Version header: API-Version: v1
+ * Version header: X-Supabase-API-Version: v1
  */
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { buildVersionHeaders } from "@/lib/api-version";
 import { prisma } from "@/lib/prisma";
 import {
+  API_ERROR_RATE_LIMIT_EXCEEDED,
+  API_ERROR_REQUEST_NOT_FOUND,
+  API_ERROR_TOO_MANY_REQUESTS,
+  API_ERROR_UNAUTHORIZED,
+} from "@/lib/api-errors";
+import {
+  INPAINT_STATUS_RATE_LIMIT,
+  checkInpaintStatusRateLimit,
+} from "@/lib/inpaint-status";
+import {
   DEFAULT_DAILY_INPAINT_LIMIT,
   DAILY_LIMIT_ENV_VAR,
   dailyQuotaExceededPayload,
   evaluateDailyQuota,
-  inpaintDailyUsageWhere,
+  getDailyUsage,
   resolveDailyLimit,
 } from "@/lib/api-quota";
 
@@ -31,21 +41,46 @@ export async function GET(
   const user = await getAuthedPrismaUser();
   if (!user) {
     return NextResponse.json(
-      { error: "Unauthorized", message: "You must be signed in to check inpaint status." },
+      { error: "Unauthorized", code: API_ERROR_UNAUTHORIZED, message: "You must be signed in to check inpaint status." },
       { status: 401 }
     );
   }
 
   const { requestId } = await params;
 
-  // Rate limit: count InpaintRequest rows via exact Postgres query (#985)
+  // Poll-rate limit (issue #1123): the unversioned twin caps status checks
+  // at 10/min per user and request; this route skipped the cap entirely,
+  // so v1 was the one path where a client could hammer the fal queue
+  // unbounded. Postgres-backed sliding window, shared across instances.
+  const statusRateLimit = await checkInpaintStatusRateLimit(user.id, requestId);
+  if (!statusRateLimit.allowed) {
+    return NextResponse.json(
+      {
+        error: "Too many requests",
+        message: `Rate limit exceeded. Please wait ${statusRateLimit.retryAfterSeconds} seconds before trying again.`,
+        retryable: true,
+        code: API_ERROR_TOO_MANY_REQUESTS,
+      },
+      {
+        status: 429,
+        headers: {
+          ...buildVersionHeaders("v1"),
+          "Retry-After": String(statusRateLimit.retryAfterSeconds),
+          "X-RateLimit-Limit": String(INPAINT_STATUS_RATE_LIMIT),
+          "X-RateLimit-Remaining": "0",
+        },
+      }
+    );
+  }
+
+  // Daily-quota visibility: today's charged inpaint units from the
+  // DailyApiUsage counter row (#985 counted InpaintRequest rows, which a
+  // room delete refunded — #1131).
   const inpaintLimit = resolveDailyLimit(
     process.env[DAILY_LIMIT_ENV_VAR.inpaint],
     DEFAULT_DAILY_INPAINT_LIMIT
   );
-  const inpaintCount = await prisma.inpaintRequest.count({
-    where: inpaintDailyUsageWhere(user.id),
-  });
+  const inpaintCount = await getDailyUsage("inpaint", user.id);
   const inpaintQuota = evaluateDailyQuota(inpaintCount, inpaintLimit);
   if (!inpaintQuota.allowed) {
     console.warn(
@@ -56,9 +91,10 @@ export async function GET(
         limit: inpaintQuota.limit,
       })
     );
-    return NextResponse.json(dailyQuotaExceededPayload(inpaintQuota, "Checking inpaint status"), {
-      status: 429,
-    });
+    return NextResponse.json(
+      { ...dailyQuotaExceededPayload(inpaintQuota, "Checking inpaint status"), code: API_ERROR_RATE_LIMIT_EXCEEDED },
+      { status: 429 }
+    );
   }
 
   // Ownership check: verify user owns the inpaint request via room→project
@@ -68,11 +104,14 @@ export async function GET(
   });
   if (!inpaintRequest) {
     return NextResponse.json(
-      { error: "Forbidden", message: "Inpaint request not found or access denied." },
+      { error: "Forbidden", code: API_ERROR_REQUEST_NOT_FOUND, message: "Inpaint request not found or access denied." },
       { status: 403 }
     );
   }
-
+  // IMPLEMENTATION NOTE (issue #1125): this stub does no work, so the quota
+  // check above only READS today's counter and nothing is charged. When this
+  // stub is implemented, claimDailyQuota(...) (issue #1132) must run before
+  // the provider call, or this route becomes a silent cap bypass.
   return NextResponse.json(
     {
       message: "v1 inpaint status endpoint stub",

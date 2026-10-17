@@ -27,7 +27,7 @@ Every API response includes a version header:
 
 | Header | Value | Notes |
 |--------|-------|-------|
-| `API-Version` | `v1` or `unversioned` | Identifies the API version |
+| `X-Supabase-API-Version` | `v1` or `unversioned` | Identifies the API version |
 | `Deprecation` | `true; rel="deprecation"` | Present on deprecated (unversioned) endpoints |
 | `Sunset` | RFC 7231 date | When the endpoint will be removed |
 | `Link` | `</api/v1>; rel="successor-version"` | Migration path on deprecated endpoints |
@@ -35,14 +35,14 @@ Every API response includes a version header:
 ### Example: v1 Response Headers
 
 ```
-API-Version: v1
+X-Supabase-API-Version: v1
 Content-Type: application/json
 ```
 
 ### Example: Deprecated Response Headers
 
 ```
-API-Version: unversioned
+X-Supabase-API-Version: unversioned
 Deprecation: true; rel="deprecation"
 Sunset: Sat, 24 Mar 2027 00:00:00 GMT
 Link: </api/v1>; rel="successor-version"
@@ -61,6 +61,7 @@ The following endpoints have v1 implementations:
 | `/api/v1/segment` | POST | SAM 3.1 segmentation (single click) |
 | `/api/v1/segment/furnishings` | POST | SAM 3.1 bulk furnishing detection |
 | `/api/v1/export-pdf` | POST | Generate lookbook PDF (Browserless) |
+| `/api/v1/sign-project` | POST | Record the client signature (proxy to `/api/sign-project`) |
 
 ## Deprecation Lifecycle
 
@@ -98,7 +99,7 @@ When a client without a versioned path calls a v1-required endpoint:
 ```http
 HTTP/1.1 426 Upgrade Required
 Content-Type: application/json
-API-Version: unversioned
+X-Supabase-API-Version: unversioned
 Deprecation: true; rel="deprecation"
 Sunset: Sat, 24 Mar 2027 00:00:00 GMT
 Link: </api/v1>; rel="successor-version"
@@ -109,6 +110,36 @@ Link: </api/v1>; rel="successor-version"
   "code": "api-version-required"
 }
 ```
+
+## Request/Response Parity (issue #1125)
+
+A v1 route must be a faithful copy of the route it versions. Concretely:
+
+### Shared request schemas
+
+Each v1 stub imports the exact Zod schema its unversioned twin enforces instead of declaring a local one, so a client written against the v1 contract works against the twin and vice versa:
+
+| v1 route | Twin | Shared schema |
+|----------|------|---------------|
+| `/api/v1/inpaint` (POST) | `/api/inpaint` | `inpaintSubmitSchema` (`imageUrl`, `maskUrl`, `promptDirectives`, `aesthetic`, `roomId`, `variantSlot`, ...) |
+| `/api/v1/inpaint/[requestId]` (GET) | `/api/inpaint/[requestId]` | no request body; same path params |
+| `/api/v1/generate-copy` (POST) | `/api/generate-copy` | `generateCopyRequestSchema` (`roomId`) |
+| `/api/v1/segment` (POST) | `/api/segment/furnishings` | `furnishingsSegmentRequestSchema` (`roomId`, `imageUrl`, `concept`) |
+| `/api/v1/segment/furnishings` (POST) | `/api/segment/furnishings` | `furnishingsSegmentRequestSchema` |
+
+The stubs stay stubs (they return 200 note bodies without doing work), but their validation is already the real contract. A client that migrated to v1 based on this document cannot be broken by the day a stub becomes an implementation.
+
+### Error codes
+
+Every v1 error response carries a machine-readable `code` from `src/lib/api-errors.ts`: 401 -> `unauthorized`, 400 -> `invalid-request`, 403 -> `room-not-found` (or `request-not-found` on the status GET), 429 -> `rate-limit-exceeded`. The v1 429 body wraps the shared `dailyQuotaExceededPayload` with this code; unversioned 429 bodies are intentionally left untouched.
+
+### Deliberate divergences (pinned, not bugs)
+
+`/api/v1/export-pdf` flattens a 503 from the PDF provider to 500, while the unversioned `/api/export-pdf` propagates the provider status. This is intentional and covered by route tests. Any *other* v1-vs-twin divergence is a bug (file it against parity).
+
+### Quota recording
+
+No v1 route does real work today, so nothing charges. A v1 stub that becomes an implementation MUST claim quota through `claimDailyQuota(...)` (issue #1132) immediately before the provider call; the read-only daily-limit check that stubs perform does NOT record usage, and relying on it alone makes the route a silent cap bypass. Each stub's success note carries an implementation note saying the same.
 
 ## Version Detection Utility
 
@@ -129,7 +160,7 @@ const info = parseApiVersion(request);
 
 // Build response headers for a v1 response
 const headers = buildVersionHeaders("v1");
-// → { "API-Version": "v1" }
+// → { "X-Supabase-API-Version": "v1" }
 
 // Enforce minimum version (returns 426 on failure)
 const result = enforceMinVersion(request, "v1");

@@ -2,10 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/label-instances/route";
 import {
-  getDailyUsage,
-  recordDailyUsage,
-  evaluateDailyQuota,
-  type QuotaDecision,
+  claimDailyQuota,
+  refundDailyQuota,
+  type QuotaClaim,
 } from "@/lib/api-quota";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
@@ -47,9 +46,8 @@ vi.mock("ai", () => ({
 }));
 
 vi.mock("@/lib/api-quota", () => ({
-  getDailyUsage: vi.fn(),
-  recordDailyUsage: vi.fn(),
-  evaluateDailyQuota: vi.fn(),
+  claimDailyQuota: vi.fn(),
+  refundDailyQuota: vi.fn(),
   resolveDailyLimit: vi.fn(() => 50),
   DEFAULT_DAILY_LABEL_LIMIT: 50,
   DAILY_LIMIT_ENV_VAR: { label: "DAILY_LABEL_LIMIT" },
@@ -94,18 +92,18 @@ describe("POST /api/label-instances", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.mocked(getAuthedPrismaUser).mockResolvedValue(mockUser as never);
-    vi.mocked(getDailyUsage).mockResolvedValue(0);
-    vi.mocked(evaluateDailyQuota).mockReturnValue({
+    vi.mocked(claimDailyQuota).mockResolvedValue({
+      claimed: true,
       allowed: true,
-      used: 0,
+      used: 1,
       limit: 50,
-      remaining: 50,
-    } as QuotaDecision);
+      remaining: 49,
+    } as QuotaClaim);
+    vi.mocked(refundDailyQuota).mockResolvedValue(undefined);
     vi.mocked(prisma.room.findFirst).mockResolvedValue({ id: MOCK_ROOM_ID } as never);
     vi.mocked(assertOpenAIConfigured).mockReturnValue(undefined);
     vi.mocked(getCachedVisionLabels).mockResolvedValue([]);
     vi.mocked(upsertVisionLabels).mockResolvedValue(undefined);
-    vi.mocked(recordDailyUsage).mockResolvedValue(0 as never);
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -119,18 +117,47 @@ describe("POST /api/label-instances", () => {
   });
 
   it("returns 429 when daily label quota exceeded", async () => {
-    vi.mocked(evaluateDailyQuota).mockReturnValue({
+    vi.mocked(claimDailyQuota).mockResolvedValue({
+      claimed: false,
       allowed: false,
       used: 50,
       limit: 50,
       resetsAt: new Date(Date.now() + 86400000).toISOString(),
-    } as never);
+    } as QuotaClaim);
 
     const response = await POST(buildNextRequest(validBody()));
 
     expect(response.status).toBe(429);
     const json = await response.json();
     expect(json.error.code).toBe("rate-limit-exceeded");
+  });
+
+  it("gates the batch by crop count and rejects a batch that would straddle the limit (issue #1144)", async () => {
+    // Issue #1132: the route claims the batch atomically; a straddling
+    // batch is denied by the conditional increment (modeled here by the
+    // claim returning the denied decision for used=48 + 5 > 50).
+    vi.mocked(claimDailyQuota).mockResolvedValue({
+      claimed: false,
+      allowed: false,
+      used: 48,
+      limit: 50,
+      resetsAt: new Date(Date.now() + 86400000).toISOString(),
+    } as QuotaClaim);
+    const body = validBody();
+    body.crops = [0, 1, 2, 3, 4].map((i) => ({
+      instanceIndex: i,
+      cropDataUrl:
+        "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMCwsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCwAB//2Q==",
+    }));
+
+    const response = await POST(buildNextRequest(body));
+
+    // 48 used + 5 crops > 50 limit: the whole batch is refused
+    expect(response.status).toBe(429);
+    const json = await response.json();
+    expect(json.error.code).toBe("rate-limit-exceeded");
+    expect(claimDailyQuota).toHaveBeenCalledWith("label", MOCK_USER_ID, 50, 5);
+    expect(refundDailyQuota).not.toHaveBeenCalled();
   });
 
   it("does not consume quota on cache hit", async () => {
@@ -141,7 +168,7 @@ describe("POST /api/label-instances", () => {
     const response = await POST(buildNextRequest(validBody()));
 
     expect(response.status).toBe(200);
-    expect(recordDailyUsage).not.toHaveBeenCalled();
+    expect(claimDailyQuota).not.toHaveBeenCalled();
     expect(generateObject).not.toHaveBeenCalled();
   });
 
@@ -159,15 +186,36 @@ describe("POST /api/label-instances", () => {
     const response = await POST(buildNextRequest(validBody()));
 
     expect(response.status).toBe(200);
-    expect(recordDailyUsage).toHaveBeenCalledTimes(1);
-    expect(recordDailyUsage).toHaveBeenCalledWith("label", MOCK_USER_ID);
+    expect(claimDailyQuota).toHaveBeenCalledTimes(1);
+    expect(claimDailyQuota).toHaveBeenCalledWith("label", MOCK_USER_ID, 50, 1);
   });
 
-  it("does not consume quota when API call fails", async () => {
-    // This is the key test: if quota were consumed BEFORE the API call,
-    // recordDailyUsage would still be called even when the API call fails.
-    // With the correct pattern (consume AFTER success), recordDailyUsage
-    // should NOT be called when the API call throws.
+  it("charges one quota unit per vision crop (issue #1144)", async () => {
+    vi.mocked(generateWithCircuitBreaker).mockImplementation(async (fn: () => Promise<unknown>) => {
+      return fn();
+    });
+    vi.mocked(generateObject).mockResolvedValue({
+      object: {
+        labels: [0, 1, 2].map((i) => ({ instanceIndex: i, label: `item ${i}` })),
+      },
+    } as never);
+    const body = validBody();
+    body.crops = [0, 1, 2].map((i) => ({
+      instanceIndex: i,
+      cropDataUrl:
+        "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMCwsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCwAB//2Q==",
+    }));
+
+    const response = await POST(buildNextRequest(body));
+
+    expect(response.status).toBe(200);
+    expect(claimDailyQuota).toHaveBeenCalledWith("label", MOCK_USER_ID, 50, 3);
+  });
+
+  it("refunds the claimed quota when the API call fails (issue #1132)", async () => {
+    // With the atomic-claim pattern (issue #1132) the units ARE held
+    // before the call; the route must refund them when the call throws,
+    // so a failed attempt still costs nothing against the daily cap.
     vi.mocked(generateWithCircuitBreaker).mockImplementation(async (fn: () => Promise<unknown>) => {
       return fn();
     });
@@ -176,6 +224,7 @@ describe("POST /api/label-instances", () => {
     const response = await POST(buildNextRequest(validBody()));
 
     expect(response.status).toBe(500);
-    expect(recordDailyUsage).not.toHaveBeenCalled();
+    expect(claimDailyQuota).toHaveBeenCalledTimes(1);
+    expect(refundDailyQuota).toHaveBeenCalledWith("label", MOCK_USER_ID, 1);
   });
 });

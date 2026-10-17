@@ -42,6 +42,21 @@ const mockRoom = {
   buyerPsychology: null,
   checklistItems: null,
   sortOrder: 0,
+  // issue #1182 room-finish fields (always null in fixture)
+  materialFinishId: null,
+  materialFinishDirectives: null,
+  materialFinishConceptLabel: null,
+  // Issue #1343 — listing-copy columns.
+  lookbookHeadline: null,
+  lookbookBody: null,
+  // Issue #1362a — FineTune persistence columns (issue #1362a).
+  // The label-instances route does not read or write these fields,
+  // but `prisma.room.findFirst`'s generated return type now requires
+  // them on the mock — null matches a legacy row that has never had
+  // any FineTune column written.
+  fineTuneStrength: null,
+  fineTuneExpand: null,
+  fineTuneSeed: null,
   createdAt: new Date(),
 };
 
@@ -71,7 +86,10 @@ vi.mock("@/lib/api-quota", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api-quota")>();
   return {
     ...actual,
-    getDailyUsage: vi.fn(() => Promise.resolve(0)),
+    claimDailyQuota: vi.fn(() =>
+      Promise.resolve({ claimed: true, allowed: true, used: 1, limit: 50, remaining: 49 })
+    ),
+    refundDailyQuota: vi.fn(() => Promise.resolve(undefined)),
     resolveDailyLimit: vi.fn(() => 50),
   };
 });

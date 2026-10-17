@@ -54,8 +54,9 @@ Respond with ONLY the room type name. If uncertain, respond with the most likely
 // FLUX.1 Fill [dev] with LoRAs — the live fal endpoint (the old
 // "fal-ai/flux/1/fill" route was removed from fal's queue; submit
 // succeeded but execution 404'd with "Path /1/fill not found").
-// Requires @fal-ai/serverless-client >= 0.15 — older 0.6.x mangles
-// multi-segment ids into "https://fal-ai/<model>.<host>/..." (ENOTFOUND).
+// Requires @fal-ai/client >= 1.x — older @fal-ai/serverless-client
+// 0.6.x mangles multi-segment ids into "https://fal-ai/<model>.<host>/..."
+// (ENOTFOUND).
 export const FAL_FLUX_FILL_MODEL = "fal-ai/flux-lora-fill";
 
 export interface FalFillPayloadInput {
@@ -69,24 +70,18 @@ export interface FalFillPayloadInput {
    */
   negativePrompt?: string;
   /**
-   * Issue #558: AI guidance controls.
-   * `promptStrength` (0.1–1.0): how closely AI follows the text prompt.
-   * Defaults to 0.8.
+   * Issue #1362b: AI guidance strength (0.0–1.0). Renamed from the
+   * legacy `promptStrength` (#558) to match DashScope's wire field.
+   * The numeric scaling is unchanged (`strength * 10` ⇒ fal's 1..10
+   * `guidance`), so the output payload bytes are equivalent to the
+   * pre-rename form for any input in 0..1.
    */
-  promptStrength?: number;
+  strength?: number;
   /**
-   * Issue #558: feather edges of the mask for softer transitions (0–20).
-   * Defaults to 5.
-   */
-  maskBlur?: number;
-  /**
-   * Issue #558: reproducible seed for iteration (0–999999). Omit for random.
+   * Issue #558: reproducible seed for iteration (0–999999). Omit for
+   * random. Carried into the wire payload as `seed`.
    */
   seed?: number;
-  /**
-   * Issue #558: when true, use a lower guidance value for higher variation.
-   */
-  creativeMode?: boolean;
 }
 
 // Type alias (not interface) so the payload stays assignable to the
@@ -98,9 +93,7 @@ export type FalFillPayload = {
   negative_prompt: string;
   guidance: number;
   num_inference_steps: number;
-  /** Issue #558: feather edges of the mask. */
-  mask_blur?: number;
-  /** Issue #558: reproducible seed. */
+  /** Issue #558 / #1362b: reproducible seed. */
   seed?: number;
 }
 
@@ -241,6 +234,100 @@ Based on the room details and staging directives, generate:
 Be specific, professional, and focused on maximizing the room's appeal to ${targetBuyer}.`;
 }
 
+export interface ListingCopyPromptInput {
+  roomName: string;
+  aesthetic: string;
+  targetBuyer: string;
+  /** Room-specific staging directives (override or supplement global directives). */
+  rawDirectives: string;
+  /** Issue #562: project-wide directives applied to every room. */
+  globalDirectives?: string;
+  /**
+   * Optional lookbook headline already on the room — feeds the model
+   * so a re-rewrite doesn't drift to a different angle. The legacy
+   * {@link buildCopyPrompt} carries `buyerDemographics` because the
+   * staging-copy fields (observed challenge, recommendation, …) read
+   * better with the buyer detail in view; the listing-copy fields
+   * stay short enough that a 200-char headline is more useful as a
+   * tone anchor than another 200 tokens of demographics.
+   */
+  priorHeadline?: string;
+}
+
+/**
+ * Builds the gpt-4o-mini prompt for the CopyPanel's "Rewrite from
+ * directions" CTA (issue #1343) sent to `generateObject` in
+ * `api/v1/listing-copy`.
+ *
+ * Output shape is exactly two fields (`headline` + `body`); both are
+ * sized to fit the `<CopyPanel>`'s `<input>` (200) and `<textarea
+ * maxLength={600}>` contracts (cf. `listingCopySchema` in
+ * `src/lib/room-copy-edit-schema.ts`). The prompt deliberately asks
+ * for two short fields and forbids bullets/JSON-in-prose so the
+ * structured-output schema stays easy to validate server-side — a
+ * stuck call that produces a 2000-character essay would blow past
+ * the body cap and the `saveListingCopy` write would reject the
+ * payload with a 422.
+ *
+ * Contract: pure string composition; the exact bytes are pinned by
+ * `tests/prompts.test.ts` — output quality of the paid model is
+ * sensitive to these strings, so edits here should be deliberate and
+ * re-pinned. Side effects: none (pure).
+ */
+export function buildListingCopyPrompt(input: ListingCopyPromptInput): string {
+  const {
+    roomName: rawRoomName,
+    aesthetic: rawAesthetic,
+    targetBuyer: rawTargetBuyer,
+    rawDirectives: rawRawDirectives,
+    globalDirectives: rawGlobalDirectives,
+    priorHeadline: rawPriorHeadline,
+  } = input;
+
+  const roomName = sanitizePromptValue(rawRoomName);
+  const aesthetic = sanitizePromptValue(rawAesthetic);
+  const targetBuyer = sanitizePromptValue(rawTargetBuyer);
+  const rawDirectives = sanitizePromptValue(rawRawDirectives);
+  const globalDirectives = sanitizePromptValue(rawGlobalDirectives);
+  const priorHeadline = rawPriorHeadline ? sanitizePromptValue(rawPriorHeadline) : "";
+
+  // Issue #562: merge global + room directives, same rule as
+  // `buildCopyPrompt` so the listing copy stays consistent with the
+  // staging copy when both are generated from the same project.
+  const mergedDirectives = mergeDirectives(globalDirectives, rawDirectives);
+
+  const priorBlock = priorHeadline
+    ? `\nThe previous headline on this room was: "${priorHeadline}".\nIf the staging directives still apply, prefer to keep the same framing; if the directives have changed, write a fresh headline from the new directives.`
+    : "";
+
+  return `You are a professional home staging copywriter for a staging company.
+
+Write the listing copy for a single room shown in the lookbook next to its before/after photos.
+- Room: ${roomName}
+- Design Aesthetic: ${aesthetic}
+- Target Buyer: ${targetBuyer}
+- Staging Directives: ${mergedDirectives}${priorBlock}
+
+Return exactly two fields, both written for the lookbook reader (a real-estate shopper scanning photos, not a stager reading notes):
+1. **headline** — a one-line, concrete headline (5–12 words, up to ${LISTING_COPY_HEADLINE_MAX} characters) that names a specific feature or mood of the staged room. Never generic ("Beautiful room!", "Stunning space!"). Avoid punctuation like a marketing slogan; this is descriptive.
+2. **body** — a one- or two-sentence paragraph (up to ${LISTING_COPY_BODY_MAX} characters) that brings the room to life for the target buyer. Mention a concrete staging choice the buyer would notice (light, palette, layout, focal point), not "Attention to detail".
+
+Do not include bullets, JSON, or any field other than the two above. Keep the prose specific to ${targetBuyer}; avoid filler words that could describe any room.`;
+}
+
+// Issue #1343 — the CopyPanel's `<input maxLength=…>` and `<textarea
+// maxLength=…>` are pinned to 200 and 600. The persisted schema
+// (`listingCopySchema` in `src/lib/room-copy-edit-schema.ts`) and the
+// rewrite-output schema (`listingCopyOutputSchema` in
+// `src/lib/ai-route-schemas.ts`) mirror these caps; the prompt asks
+// for output UNDER these caps so a borderline long headline still
+// fits through the body cap. Kept as locals (not imported) so
+// `prompts.ts` stays a leaf module — `ai-route-schemas.ts` already
+// imports from it via the buildCopyPrompt callers, and pulling
+// prompts in the other direction would risk a circular dependency.
+const LISTING_COPY_HEADLINE_MAX = 200;
+const LISTING_COPY_BODY_MAX = 600;
+
 /**
  * Builds the FLUX.1 Fill prompt from the room's aesthetic and staging
  * directives, appending {@link FRAMING_CONTEXT} so masked replacements
@@ -270,25 +357,26 @@ export function buildInpaintPrompt(
  * Contract: `guidance` defaults to 7.5 and `num_inference_steps` to 28;
  * `negative_prompt` is {@link NEGATIVE_PROMPT} unless the caller passes
  * `negativePrompt` (the holistic full-room path does); image/mask/prompt
- * fields pass through unchanged. When `promptStrength` is provided (issue #558),
- * it overrides the default guidance (scaled to fal.ai's 1–10 range). When
- * `creativeMode` is true, a lower guidance (~4.0) enables higher variation.
- * `mask_blur` feathers mask edges for softer transitions. `seed` enables
- * reproducible results when `lockSeed` is set. The exact shape is pinned by
- * `tests/prompts.test.ts` — changing it alters paid generation output.
- * Side effects: none (pure).
+ * fields pass through unchanged. When `strength` is provided (issue
+ * #1362b, renamed from the legacy `promptStrength` in #558), it
+ * overrides the default guidance (scaled to fal.ai's 1–10 range).
+ * `seed` enables reproducible results; mask blur is now a browser-side
+ * pre-upload pass (`src/lib/mask-feather.ts`) and is not in the wire
+ * payload. The exact shape is pinned by `tests/prompts.test.ts` —
+ * changing it alters paid generation output. Side effects: none
+ * (pure).
  */
 export function buildFalFillPayload(
   input: FalFillPayloadInput
 ): FalFillPayload {
-  // Issue #558: compute effective guidance. Creative mode uses a lower
-  // guidance for more variation; otherwise use promptStrength (scaled from
-  // the 0.1–1.0 UI range to fal.ai's 1–10 scale), falling back to 7.5.
+  // Issue #1362b: compute effective guidance. With `strength`
+  // (renamed from `promptStrength` in #558) in the 0.0–1.0 range
+  // (DashScope's wire default), the numeric mapping to fal's 1..10
+  // guidance is byte-equivalent to the legacy `promptStrength * 10`
+  // expression. Default 7.5 when neither field is set.
   let guidance = 7.5;
-  if (input.creativeMode) {
-    guidance = 4.0;
-  } else if (input.promptStrength !== undefined) {
-    guidance = input.promptStrength * 10;
+  if (input.strength !== undefined) {
+    guidance = input.strength * 10;
   }
 
   const payload: FalFillPayload = {
@@ -300,13 +388,167 @@ export function buildFalFillPayload(
     num_inference_steps: 28,
   };
 
-  // Issue #558: optional AI guidance params
-  if (input.maskBlur !== undefined) {
-    payload.mask_blur = input.maskBlur;
-  }
+  // Issue #558: optional seed (carried forward into the wire payload).
   if (input.seed !== undefined) {
     payload.seed = input.seed;
   }
 
   return payload;
+}
+
+// ─── Alibaba (DashScope multimodal-conversation) payload ───────────────
+
+/**
+ * Alibaba Cloud's DashScope multimodal-conversation endpoint
+ * (`/v1/services/aigc/multimodal-generation/generation`) takes a much
+ * smaller payload than fal or Replicate: `image_url` + `prompt` are
+ * the only call-shape fields used today. Provider-specific knobs
+ * (`guidance`, `num_inference_steps`, `negative_prompt`) are not
+ * exposed — DashScope accepts a single `seed` and `strength` at the
+ * top level of `parameters`, and the alibaba-adapter threads the
+ * caller's values through. Mask feathering is now a browser-side
+ * pre-upload pass (`src/lib/mask-feather.ts`); it is not in the wire
+ * payload. Documenting the dropped fields here so a future operator
+ * who tries to wire one through is pointed at the right place.
+ */
+export interface AlibabaFillPayloadInput {
+  imageUrl: string;
+  /** Alibaba is instruction-mode; mask_url is ignored by the model. */
+  maskUrl: string;
+  prompt: string;
+  /** Issue #1362b: forwarded to the alibaba adapter as
+   * `parameters.strength` (0.0..1.0, default 0.5 = DashScope wire
+   * default). Held in this builder's input for API parity with the
+   * fal / Replicate builders; the alibaba-adapter reads it. */
+  strength?: number;
+  /** Issue #1362b: forwarded to the alibaba adapter as
+   * `parameters.seed`. The legacy "held for parity" note is
+   * removed — DashScope accepts a seed at the top of `parameters`,
+   * and the adapter threads the caller's value through. */
+  seed?: number;
+}
+
+/**
+ * The DashScope multimodal-conversation payload shape THIS BUILDER
+ * produces — only `image_url` + `prompt`. The alibaba-adapter
+ * constructs the final DashScope request body and folds `strength`
+ * + `seed` into the `parameters` block; see
+ * `src/lib/alibaba-adapter.ts:dashscopeGenerate`.
+ *
+ * Only the fields the model actually consumes are populated; the
+ * `strength` / `seed` input fields are intentionally NOT in this
+ * payload shape because they belong to the `parameters` block, not
+ * the input messages — that's the adapter's job.
+ */
+export type AlibabaFillPayload = {
+  image_url: string;
+  prompt: string;
+};
+
+export function buildAlibabaFillPayload(
+  input: AlibabaFillPayloadInput
+): AlibabaFillPayload {
+  return {
+    image_url: input.imageUrl,
+    prompt: input.prompt,
+  };
+}
+
+// ─── Replicate payload ─────────────────────────────────────────────────────
+
+/**
+ * `black-forest-labs/flux-fill-pro` (Replicate) expects snake_case
+ * keys too but a different schema than fal. `prompt_strength` and
+ * `num_inference_steps` are the closest analogs. We map the same
+ * UI inputs to the Replicate field names; the negative prompt uses
+ * the same default since the architecture-no-touch invariant is
+ * provider-agnostic.
+ *
+ * Issue #1362b: `promptStrength` renamed to `strength` (DashScope
+ * wire name parity); `creativeMode` removed (no surviving UI control
+ * after #1362a's adherence + shadows removal; the wire default
+ * prompt_strength of 1.0 takes its place); `maskBlur` removed
+ * (browser-side feathering pre-upload). The Replicate adapter is
+ * dormant (INFERENCE_PROVIDER=replicate throws on configure), but
+ * the builder is kept type-correct in case it gets revived.
+ */
+export interface ReplicateFillPayloadInput {
+  imageUrl: string;
+  maskUrl: string;
+  prompt: string;
+  negativePrompt?: string;
+  /** Issue #1362b: AI guidance (0.0–1.0, scaled to 1..10 at the wire). */
+  strength?: number;
+  seed?: number;
+}
+
+export type ReplicateFillPayload = {
+  image: string;
+  mask: string;
+  prompt: string;
+  // Replicate uses a single `prompt_strength` parameter on this model.
+  prompt_strength: number;
+  num_inference_steps: number;
+  // Replicate's `output_format` is a post-process control; we keep
+  // it pinned so the result is deterministic.
+  output_format: "png";
+  // Replicate's API requires `safety_tolerance` as an INTEGER (the
+  // #1200 probe caught a string-typed-as-string regression here:
+  // Replicate returned "Invalid type. Expected: integer, given: string").
+  // Range is 0..6 per the model card; 2 is the v1 default.
+  safety_tolerance: number;
+} & Record<string, unknown>;
+
+export function buildReplicateFillPayload(
+  input: ReplicateFillPayloadInput
+): ReplicateFillPayload {
+  // Issue #1362b: same guidance logic as the fal payload — scale
+  // `strength` from 0..1 to Replicate's 1..10 range. Default 1.0
+  // when `strength` is omitted.
+  let promptStrength = 1.0;
+  if (input.strength !== undefined) {
+    promptStrength = input.strength * 10;
+  }
+
+  const payload: ReplicateFillPayload = {
+    image: input.imageUrl,
+    mask: input.maskUrl,
+    prompt: input.prompt,
+    prompt_strength: promptStrength,
+    num_inference_steps: 28,
+    output_format: "png",
+    safety_tolerance: 2,
+  };
+  return payload;
+}
+
+/**
+ * Picks the right provider-specific payload builder based on the
+ * active provider. Call sites that have already translated their
+ * UI input into the logical shape can hand it to this and get the
+ * correct wire format back, without importing provider-specific
+ * modules. Side effects: reads `process.env.INFERENCE_PROVIDER`.
+ *
+ * Provider dispatch is done by reading `INFERENCE_PROVIDER`
+ * directly (rather than calling `resolveProvider()` from
+ * `@/lib/inference`) to keep `prompts.ts` independent of the
+ * abstraction module — that avoids a circular import (the
+ * abstraction's clients may import the payload builders for their
+ * submit shapes, and prompts is the natural home for those).
+ */
+export function buildInpaintPayloadForActiveProvider(
+  input:
+    | FalFillPayloadInput
+    | ReplicateFillPayloadInput
+    | AlibabaFillPayloadInput
+): Record<string, unknown> {
+  const provider = process.env.INFERENCE_PROVIDER?.trim().toLowerCase();
+  if (provider === "replicate") {
+    return buildReplicateFillPayload(input as ReplicateFillPayloadInput) as unknown as Record<string, unknown>;
+  }
+  if (provider === "fal") {
+    return buildFalFillPayload(input as FalFillPayloadInput) as unknown as Record<string, unknown>;
+  }
+  // alibaba (default), or any unknown value
+  return buildAlibabaFillPayload(input as AlibabaFillPayloadInput) as unknown as Record<string, unknown>;
 }

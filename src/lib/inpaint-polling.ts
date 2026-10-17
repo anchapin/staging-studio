@@ -195,8 +195,15 @@ export function classifyStatusResponse(
     body.message || body.error || `Inpainting status check failed (HTTP ${httpStatus}).`;
 
   const explicitlyRetryable = body.retryable === true;
+  // Issue #1142: 429 is always transient — the status route sends
+  // Retry-After with it. Treated as retryable regardless of the body
+  // flag so an older deploy, or any proxy that rewrites the body,
+  // cannot push the client onto the resubmit path and bill a second
+  // fal job for a run that is still in flight.
   const retryable =
-    explicitlyRetryable || (httpStatus >= 500 && body.retryable !== false);
+    explicitlyRetryable ||
+    httpStatus === 429 ||
+    (httpStatus >= 500 && body.retryable !== false);
 
   return retryable
     ? { kind: "retryable", message }

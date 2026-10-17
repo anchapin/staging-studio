@@ -6,6 +6,8 @@ import {
   buildCopyPrompt,
   buildFalFillPayload,
   buildInpaintPrompt,
+  buildListingCopyPrompt,
+  buildReplicateFillPayload,
 } from "@/lib/prompts";
 
 const REPRESENTATIVE_ROOM = {
@@ -52,6 +54,85 @@ Be specific, professional, and focused on maximizing the room's appeal to Young 
     expect(prompt).toContain("- Target Buyer: \n");
     expect(prompt).toContain("- Staging Directives: \n");
     expect(prompt.endsWith("appeal to .")).toBe(true);
+  });
+});
+
+describe("buildListingCopyPrompt (issue #1343)", () => {
+  it("composes the exact listing-copy prompt for a representative room", () => {
+    expect(
+      buildListingCopyPrompt({
+        roomName: "Primary Bedroom",
+        aesthetic: "Modern Farmhouse",
+        targetBuyer: "Young families",
+        rawDirectives: "King bed centered on the accent wall; add two nightstands.",
+        priorHeadline: "Calm bedroom with restored crown molding",
+      })
+    ).toBe(
+      `You are a professional home staging copywriter for a staging company.
+
+Write the listing copy for a single room shown in the lookbook next to its before/after photos.
+- Room: Primary Bedroom
+- Design Aesthetic: Modern Farmhouse
+- Target Buyer: Young families
+- Staging Directives: King bed centered on the accent wall; add two nightstands.
+The previous headline on this room was: "Calm bedroom with restored crown molding".
+If the staging directives still apply, prefer to keep the same framing; if the directives have changed, write a fresh headline from the new directives.
+
+Return exactly two fields, both written for the lookbook reader (a real-estate shopper scanning photos, not a stager reading notes):
+1. **headline** — a one-line, concrete headline (5–12 words, up to 200 characters) that names a specific feature or mood of the staged room. Never generic ("Beautiful room!", "Stunning space!"). Avoid punctuation like a marketing slogan; this is descriptive.
+2. **body** — a one- or two-sentence paragraph (up to 600 characters) that brings the room to life for the target buyer. Mention a concrete staging choice the buyer would notice (light, palette, layout, focal point), not "Attention to detail".
+
+Do not include bullets, JSON, or any field other than the two above. Keep the prose specific to Young families; avoid filler words that could describe any room.`
+    );
+  });
+
+  it("omits the prior-headline block when priorHeadline is not provided", () => {
+    const prompt = buildListingCopyPrompt({
+      roomName: "Kitchen",
+      aesthetic: "Coastal",
+      targetBuyer: "First-time homebuyers",
+      rawDirectives: "Bring in a runner, swap to brushed-brass pulls.",
+    });
+    expect(prompt).not.toContain("previous headline");
+    expect(prompt).not.toContain('"Calm bedroom');
+  });
+
+  it("merges global and room directives the same way buildCopyPrompt does (#562)", () => {
+    const roomScoped = buildListingCopyPrompt({
+      roomName: "Kitchen",
+      aesthetic: "Coastal",
+      targetBuyer: "First-time homebuyers",
+      rawDirectives: "Bring in a runner.",
+      globalDirectives: "Lean into natural materials.",
+    });
+    expect(roomScoped).toContain(
+      "- Staging Directives: Lean into natural materials.\n\nRoom-specific: Bring in a runner."
+    );
+    // When only global directives exist, the merge still surfaces them
+    // (the listing-copy rewrite is still brief-able from project-level
+    // staging intent alone).
+    const globalOnly = buildListingCopyPrompt({
+      roomName: "Kitchen",
+      aesthetic: "Coastal",
+      targetBuyer: "First-time homebuyers",
+      rawDirectives: "",
+      globalDirectives: "Lean into natural materials.",
+    });
+    expect(globalOnly).toContain("- Staging Directives: Lean into natural materials.");
+  });
+
+  it("includes the headline/body cap copy so the model picks fields that fit listingCopySchema", () => {
+    const prompt = buildListingCopyPrompt({
+      roomName: "Kitchen",
+      aesthetic: "Coastal",
+      targetBuyer: "First-time homebuyers",
+      rawDirectives: "Light palette, brass hardware.",
+    });
+    // The caps here mirror the schema-side ones (200/600). Drift
+    // between prompt and schema would let a borderline-long output
+    // blow past `saveListingCopy`'s validation.
+    expect(prompt).toContain("up to 200 characters");
+    expect(prompt).toContain("up to 600 characters");
   });
 });
 
@@ -151,6 +232,81 @@ describe("buildFalFillPayload", () => {
       "negative_prompt",
       "num_inference_steps",
       "prompt",
+    ]);
+  });
+});
+
+describe("buildReplicateFillPayload", () => {
+  it("pins the Replicate wire shape: image/mask/prompt, prompt_strength 1.0, 28 steps, png output, integer safety_tolerance", () => {
+    // The #1200 probe caught `safety_tolerance: "2"` (string literal)
+    // being sent as a JSON string; Replicate rejected it with
+    // "Invalid type. Expected: integer, given: string". This test
+    // pins both the value and the type so a future regression is
+    // caught without a real network call.
+    const payload = buildReplicateFillPayload({
+      imageUrl: "https://example.supabase.co/storage/v1/object/public/before.png",
+      maskUrl: "data:image/png;base64,abc123",
+      prompt: "Mid-century modern armchair in walnut and cream boucle",
+    });
+    expect(payload).toEqual({
+      image: "https://example.supabase.co/storage/v1/object/public/before.png",
+      mask: "data:image/png;base64,abc123",
+      prompt: "Mid-century modern armchair in walnut and cream boucle",
+      prompt_strength: 1.0,
+      num_inference_steps: 28,
+      output_format: "png",
+      safety_tolerance: 2,
+    });
+    // Belt and braces: also assert the JSON-serialized type so a
+    // future regression to a string literal is caught even if the
+    // structural equality above somehow still passes.
+    const serialized = JSON.parse(JSON.stringify(payload));
+    expect(typeof serialized.safety_tolerance).toBe("number");
+    expect(serialized.safety_tolerance).toBe(2);
+  });
+
+  it("scales strength 0.0–1.0 up to Replicate's 1–10 range (#1362b)", () => {
+    // Issue #1362b: `promptStrength` was renamed to `strength` to
+    // match DashScope's wire field. The numeric mapping
+    // (`strength * 10`) is unchanged, so the output payload byte
+    // for any input in 0..1 is equivalent to the pre-rename form.
+    const payload = buildReplicateFillPayload({
+      imageUrl: "i",
+      maskUrl: "m",
+      prompt: "p",
+      strength: 0.7,
+    });
+    expect(payload.prompt_strength).toBe(7);
+  });
+
+  it("uses the default prompt_strength of 1.0 when neither strength nor creativeMode is set (#1362b)", () => {
+    // Issue #1362b: `creativeMode` was removed (no surviving UI
+    // control after #1362a's adherence + shadows removal). The
+    // previous creative-mode behavior (prompt_strength = 0.5) is
+    // now expressed as `strength: 0.05` (which scales to 0.5 at the
+    // wire), or simply omitted to get the 1.0 default.
+    const payload = buildReplicateFillPayload({
+      imageUrl: "i",
+      maskUrl: "m",
+      prompt: "p",
+    });
+    expect(payload.prompt_strength).toBe(1);
+  });
+
+  it("carries exactly the seven documented keys — no payload drift", () => {
+    const payload = buildReplicateFillPayload({
+      imageUrl: "https://example.supabase.co/a.png",
+      maskUrl: "https://example.supabase.co/b.png",
+      prompt: "x style. y",
+    });
+    expect(Object.keys(payload).sort()).toEqual([
+      "image",
+      "mask",
+      "num_inference_steps",
+      "output_format",
+      "prompt",
+      "prompt_strength",
+      "safety_tolerance",
     ]);
   });
 });

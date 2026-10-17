@@ -14,7 +14,10 @@ import type { PrismaClient, Project, User } from "@prisma/client";
  *
  * Contract:
  * - Validates the real JWT via `supabase.auth.getUser()` (fails closed),
- *   then looks the user up in Postgres by verified email. A valid
+ *   then looks the user up in Postgres by the session's email, rejecting
+ *   sessions whose `email_confirmed_at` is null (issue #1152: without this
+ *   check, an unconfirmed signup for a firm's address inherits its User row
+ *   whenever the Supabase project has "Confirm email" off). A valid
  *   Supabase session with no matching Prisma `User` row returns `null`.
  * - `DATABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, and
  *   `NEXT_PUBLIC_SUPABASE_ANON_KEY` must be set — `requireEnvVars`
@@ -49,6 +52,12 @@ export async function getAuthedPrismaUser() {
   } = await supabase.auth.getUser();
 
   if (!user?.email) return null;
+
+  // Fail closed on unconfirmed emails (issue #1152): when the Supabase
+  // project's "Confirm email" setting is off, a signup with any email
+  // address yields a valid session; without this check that session would
+  // inherit the Prisma `User` row keyed on that email.
+  if (!user.email_confirmed_at) return null;
 
   return prisma.user.findUnique({
     where: { email: user.email },

@@ -5,9 +5,11 @@
  * browser, so it cannot authenticate with a session and the printable
  * lookbook page (`/preview/:id`) would deny it access (it grants access
  * only to an owning session or a valid token). The export route instead
- * mints a token scoped to one projectId with a 5-minute TTL, appends it
- * to the preview URL, and the preview page verifies it (via
- * src/lib/preview-access.ts) before granting access.
+ * mints a token scoped to one projectId with a 30-minute TTL (see
+ * {@link PREVIEW_TOKEN_TTL_SECONDS}; #1109 bumped it from 5 to handle
+ * slow Browserless queueing), appends it to the preview URL, and the
+ * preview page verifies it (via src/lib/preview-access.ts) before
+ * granting access.
  *
  * Runtime note: sign/verify use the Web Crypto API (`crypto.subtle`) rather
  * than `node:crypto`, keeping the module runtime-agnostic — Web Crypto
@@ -22,8 +24,16 @@
  *
  * Security properties:
  * - Forgery requires the secret (HMAC-SHA256 over the exact payload text).
- * - Tokens expire (embedded `exp`, default 5 minutes) — `verify` rejects
- *   expired tokens and never throws on malformed input.
+ * - Tokens expire (embedded `exp`, default 30 minutes via
+ *   {@link PREVIEW_TOKEN_TTL_SECONDS}) — `verify` rejects expired tokens
+ *   and never throws on malformed input.
+ * Revalidation contract (issue #1225): tokens control WHO can see the page,
+ * not whether the page is fresh. Every server action that mutates a
+ * lookbook-rendered field must revalidate `/preview/{projectId}` alongside
+ * its dashboard path; that contract is pinned statically by
+ * tests/revalidate-preview.test.ts and backed by `force-dynamic` on the
+ * preview page itself.
+ *
  * - Tokens are scoped: `verify` returns the signed projectId; callers
  *   (the preview page, via src/lib/preview-access.ts) MUST compare it to
  *   the URL's own projectId, so a token minted for project A cannot
@@ -33,8 +43,30 @@
 /** Query param the signed token travels in on the preview URL. */
 export const PREVIEW_TOKEN_QUERY_PARAM = "token";
 
-/** Default token lifetime: 5 minutes, in seconds. */
-export const PREVIEW_TOKEN_TTL_SECONDS = 5 * 60;
+/**
+ * Marks a preview load as the Browserless PDF capture path (issue #1222).
+ * The export route appends `capture=pdf` to the signed preview URL it
+ * hands the cloud browser; the preview page turns that into a
+ * `pdf-capture` class on `<html>`, which the print CSS uses to keep the
+ * capture full-bleed (`--print-margin: 0mm`) while a human printing from
+ * a browser gets the safe-area margin. Exported so the route, the page,
+ * and the tests pin the same literal.
+ */
+export const PREVIEW_CAPTURE_QUERY_PARAM = "capture";
+export const PREVIEW_CAPTURE_QUERY_VALUE = "pdf";
+
+/**
+ * Default token lifetime: 30 minutes, in seconds.
+ *
+ * Long enough to cover a slow Browserless fetch + render — Browserless
+ * queueing has been observed to exceed the original 5-minute TTL in
+ * production (issue #1109), causing the cloud browser to reach the
+ * `/preview/[id]` page with a token the server already rejected, which
+ * surfaces to the user as a generic export failure. Short enough to keep
+ * the preview URL scoped: a leaked URL is only usable for one project for
+ * this window. Pinned by `tests/preview-token.test.ts`.
+ */
+export const PREVIEW_TOKEN_TTL_SECONDS = 30 * 60;
 
 /**
  * DEV-ONLY fallback. Public on purpose; documented here and in .env.example.

@@ -2,12 +2,26 @@ import { cache } from "react";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 
+// Issue #1225: this page is fully data-driven (Prisma fetch per request) and
+// is read both by co-workers' browsers and by Browserless, which has no
+// session. A cached render would show one visitor a previous visitor's data.
+// Route freshness is also enforced by the revalidation contract: every server
+// action that mutates lookbook-rendered data must revalidate /preview/{id}
+// alongside the dashboard path (pinned by tests/revalidate-preview.test.ts).
+export const dynamic = "force-dynamic";
+
 import { prisma } from "@/lib/prisma";
-import { PREVIEW_TOKEN_QUERY_PARAM } from "@/lib/preview-token";
+import {
+  PREVIEW_CAPTURE_QUERY_PARAM,
+  PREVIEW_CAPTURE_QUERY_VALUE,
+  PREVIEW_TOKEN_QUERY_PARAM,
+} from "@/lib/preview-token";
+import { parseBuyerDemographics } from "@/lib/project-create-schema";
 import {
   extractPreviewToken,
   getPreviewAccess as resolvePreviewAccessRequest,
 } from "@/lib/preview-access";
+import { decryptSignature } from "@/lib/signature-encryption";
 
 import {
   LookbookPreviewView,
@@ -49,6 +63,9 @@ const getPreviewProject = cache(async (id: string) =>
       clientSignatureStatus: true,
       clientSignatureTimestamp: true,
       buyerDemographics: true,
+      // Issue #1186: surface the disclosure toggle so the lookbook
+      // preview can render the "Virtually staged" mark on AI after-images.
+      virtuallyStagedLabelEnabled: true,
       user: {
         select: {
           firmName: true,
@@ -58,7 +75,24 @@ const getPreviewProject = cache(async (id: string) =>
           signoffContent: true,
         },
       },
-      rooms: true,
+      rooms: {
+        select: {
+          id: true,
+          name: true,
+          beforeImageUrl: true,
+          afterImageUrl: true,
+          beforeImageUrl2: true,
+          afterImageUrl2: true,
+          selectedVariantIndex: true,
+          observedChallenge: true,
+          recommendation: true,
+          buyerPsychology: true,
+          checklistItems: true,
+          // Issue #1343 — listing-copy columns (CopyPanel).
+          lookbookHeadline: true,
+          lookbookBody: true,
+        },
+      },
       materialSwatches: {
         orderBy: { sortOrder: "asc" },
       },
@@ -179,20 +213,44 @@ export default async function LookbookPreviewPage({
     notFound();
   }
 
+  // Issue #1106: `clientSignature` is stored encrypted at rest. Decrypt
+  // here so every downstream consumer (LookbookPreviewView → SignoffPage,
+  // the Browserless PDF capture) sees plaintext. A missing or empty
+  // stored value is allowed (unsigned project) and is passed through
+  // as null without touching the crypto path.
+  const decryptedSignature =
+    project.clientSignature && project.clientSignature.length > 0
+      ? await decryptSignature(project.clientSignature)
+      : null;
+
   const previewProject: PreviewProject = {
     id: project.id,
     propertyAddress: project.propertyAddress,
     clientName: project.clientName,
     targetBuyer: project.targetBuyer,
     stagingAesthetic: project.stagingAesthetic,
+    // Issue #1186: thread the disclosure toggle into the preview render.
+    virtuallyStagedLabelEnabled: project.virtuallyStagedLabelEnabled,
     roiMetrics: buildROIMetrics(project),
     stagingPackage: project.stagingPackage,
-    clientSignature: project.clientSignature,
+    clientSignature: decryptedSignature,
     clientSignatureStatus: project.clientSignatureStatus,
     clientSignatureTimestamp: project.clientSignatureTimestamp
       ? project.clientSignatureTimestamp.toISOString()
       : null,
-    buyerDemographics: (project.buyerDemographics as PreviewProject["buyerDemographics"]) ?? null,
+    // Issue #1134: validated on read, not cast. A row whose
+    // `buyerDemographics` JSON does not match the shape
+    // `BuyerPersonaPage` destructures would otherwise throw inside this
+    // print render — the one Browserless fetches — and fail the export
+    // for the entire lookbook. Degrading to null drops one optional
+    // page instead.
+    // The enum members stay a cast: the persona page already falls back
+    // to the raw value for an unrecognised one
+    // (`BUYER_TYPE_LABELS[buyerType] ?? buyerType`). What the parse
+    // guarantees is the SHAPE, which is what the render depends on.
+    buyerDemographics: parseBuyerDemographics(
+      project.buyerDemographics
+    ) as PreviewProject["buyerDemographics"],
     user: {
       firmName: project.user.firmName,
       ownerName: project.user.ownerName,
@@ -211,6 +269,12 @@ export default async function LookbookPreviewPage({
       observedChallenge: room.observedChallenge,
       recommendation: room.recommendation,
       buyerPsychology: room.buyerPsychology,
+      // Issue #1343 — listing-copy columns. Null on rooms that
+      // pre-date the redesigned CopyPanel; `resolveListingCopy` in
+      // `RoomSpread` falls back to `recommendation` for the body
+      // slot when both columns are unset.
+      lookbookHeadline: room.lookbookHeadline,
+      lookbookBody: room.lookbookBody,
       // Already parsed/validated by parseChecklistItems in the view.
       checklistItems: room.checklistItems as PreviewProject["rooms"][number]["checklistItems"],
     })),
@@ -240,6 +304,18 @@ export default async function LookbookPreviewPage({
           />
         </div>
       )}
+      {/* Issue #1222: the Browserless capture path marks itself
+          (?capture=pdf, appended by src/app/api/export-pdf) so the print
+          CSS can keep that render full-bleed (--print-margin: 0mm) while
+          a human printing from a browser gets the safe-area margin. The
+          class must land on <html> because @page resolves var() against
+          the root element, and an inline script is the only way to get
+          there from a server component. */}
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `if (new URLSearchParams(location.search).get("${PREVIEW_CAPTURE_QUERY_PARAM}") === "${PREVIEW_CAPTURE_QUERY_VALUE}") document.documentElement.classList.add("pdf-capture");`,
+        }}
+      />
       <LookbookPreviewView project={previewProject} previewToken={token ?? undefined} />
     </div>
   );

@@ -1,7 +1,17 @@
 import { test, expect } from "@playwright/test";
 
-import { login, mockBrowserlessRequests, setMockBrowserlessOutcome } from "../helpers";
-import { E2E_UPLOAD_PROJECT_ID } from "../env";
+import {
+  login,
+  loginAs,
+  mockBrowserlessRequests,
+  setMockBrowserlessOutcome,
+} from "../helpers";
+import type { CapturedBrowserlessRequest } from "../mock-browserless";
+import {
+  E2E_OTHER_EMAIL,
+  E2E_OTHER_PASSWORD,
+  E2E_UPLOAD_PROJECT_ID,
+} from "../env";
 
 const EXPORT_PDF_URL = "/api/export-pdf";
 
@@ -35,6 +45,11 @@ test.describe("export-pdf API route", () => {
     await login(page);
     await setMockBrowserlessOutcome("success");
 
+    // Issue #1139: the mock's captured-request log is process-wide and
+    // shared across specs, so snapshot it BEFORE the request and slice
+    // after — indexing from 0 would assert against an earlier spec's
+    // record (the v1 export spec sorts first and also calls the provider).
+    const before = await mockBrowserlessRequests();
     const response = await page.request.post(EXPORT_PDF_URL, {
       data: { projectId: E2E_UPLOAD_PROJECT_ID },
     });
@@ -50,7 +65,7 @@ test.describe("export-pdf API route", () => {
     // The real handler reached the (mock) provider, sending the API key
     // in the Authorization header and a signed, project-scoped preview
     // URL in the body — never in the query string.
-    const [captured] = await mockBrowserlessRequests();
+    const [captured] = await freshBrowserlessRequests(before);
     expect(captured?.method).toBe("POST");
     expect(captured?.authorization).toBe(
       `Basic ${Buffer.from("e2e-dummy-browserless-key:").toString("base64")}`
@@ -100,6 +115,30 @@ test.describe("export-pdf API route", () => {
     expect(body.code).toBe("unauthorized");
   });
 
+  // Issue #1101: the 403 ownership branch was uncovered on this route
+  // for the same reason as the v1 route — every project belongs to
+  // E2E_USER_ID. The second seeded identity in mock-supabase lets us
+  // drive it: sign in as E2E_OTHER_EMAIL (no projects) and POST
+  // E2E_UPLOAD_PROJECT_ID (owned by E2E_USER_ID). Ownership rejects
+  // before Browserless, so the provider log must be unchanged.
+  test("forbidden when another user owns the project returns 403 without calling the provider", async ({
+    page,
+  }) => {
+    await loginAs(page, E2E_OTHER_EMAIL, E2E_OTHER_PASSWORD);
+    const before = await mockBrowserlessRequests();
+
+    const response = await page.request.post(EXPORT_PDF_URL, {
+      data: { projectId: E2E_UPLOAD_PROJECT_ID },
+    });
+
+    expect(response.status()).toBe(403);
+    const body = await response.json();
+    expect(body.message).toContain("permission");
+    expect(body.code).toBeUndefined();
+
+    expect(await freshBrowserlessRequests(before)).toHaveLength(0);
+  });
+
   test("Browserless outage propagates the upstream status from the route", async ({
     page,
   }) => {
@@ -122,3 +161,18 @@ test.describe("export-pdf API route", () => {
     expect(body.retryable).toBe(true);
   });
 });
+
+/**
+ * The mock's captured-request log is process-wide and persists for the
+ * whole suite run, and `workers: 1` makes specs sequential — so this
+ * spec's own provider calls are exactly the ones appended after
+ * `before`. Indexing the log from 0 would pick up an earlier spec's
+ * calls (issue #1139); taking the last element would work but would
+ * not catch a handler that fired the provider twice.
+ */
+async function freshBrowserlessRequests(
+  before: CapturedBrowserlessRequest[]
+): Promise<CapturedBrowserlessRequest[]> {
+  const after = await mockBrowserlessRequests();
+  return after.slice(before.length);
+}

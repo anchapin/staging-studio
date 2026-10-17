@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useInpaintStatus } from "./use-inpaint-status";
+import { InpaintJobLostError } from "@/lib/inpaint-retry";
 import {
   shouldPersistResult,
   INPAINT_NOT_PERSISTED_WARNING,
@@ -21,13 +22,18 @@ import { type DeclutterIntensity } from "@/lib/holistic-prompt";
 import { generateThumbnailFromUrl } from "./version-history-panel";
 import { saveInpaintVersion } from "@/app/actions/inpaint-versions";
 
-/** Issue #558: AI guidance parameters shared by every run path. */
+/** Issue #1362b (Stage B): AI guidance parameters shared by every
+ * run path. Renamed from the legacy #558 shape — `promptStrength`
+ * is now `strength` (DashScope wire name) and `maskBlur` /
+ * `creativeMode` / `lockSeed` are gone (mask feathering moved to a
+ * browser-side pre-upload pass; creativeMode/lockSeed had no
+ * surviving UI control after #1362a's adherence + shadows
+ * removal). Only `strength` + `seed` reach the provider. */
 export interface InpaintRunGuidance {
-  promptStrength: number;
-  maskBlur: number;
+  /** DashScope `parameters.strength` (0..1). */
+  strength: number;
+  /** DashScope `parameters.seed` (0..999999, optional). */
   seed: number | undefined;
-  creativeMode: boolean;
-  lockSeed: boolean;
 }
 
 export interface UseInpaintRunsInput {
@@ -201,6 +207,10 @@ export function useInpaintRuns({
   // previous step's persisted result) so per-object results stack into the
   // same variant slot; omitted = the editor's current source image.
   // Issue #562: globalDirectives are merged with room directives for AI prompts.
+  // Issue #1362b: the AI-guidance params were renamed (`promptStrength`
+  // → `strength`, DashScope wire name) and the legacy fields
+  // (`maskBlur`, `creativeMode`, `lockSeed`) were removed. The
+  // submit body only carries `strength` + `seed` now.
   const beginInpaintRun = useCallback(
     async (run: {
       maskUrl: string;
@@ -208,12 +218,10 @@ export function useInpaintRuns({
       negativePrompt?: string;
       sourceUrl?: string;
       globalDirectives?: string;
-      // Issue #558: AI guidance
-      promptStrength?: number;
-      maskBlur?: number;
+      /** Issue #1362b: DashScope `parameters.strength` (0..1). */
+      strength?: number;
+      /** Issue #1362b: DashScope `parameters.seed` (0..999999). */
       seed?: number;
-      creativeMode?: boolean;
-      lockSeed?: boolean;
     }) => {
       // Issue #562: merge global + room directives for AI (same merge the
       // server-side prompt builders use — lib/prompts.mergeDirectives).
@@ -238,9 +246,6 @@ export function useInpaintRuns({
       batchOutcomeRef.current = null;
       batchFailureRef.current = null;
 
-      // Issue #558: resolve effective seed — use explicit seed only when lockSeed is true
-      const effectiveSeed = run.lockSeed ? run.seed : undefined;
-
       await start(async (signal) => {
         const startResponse = await fetch("/api/inpaint", {
           method: "POST",
@@ -254,11 +259,11 @@ export function useInpaintRuns({
             roomId,
             variantSlot,
             sourceSlot: source.kind === "variant" ? source.slot : null,
-            // Issue #558: AI guidance params
-            promptStrength: run.promptStrength,
-            maskBlur: run.maskBlur,
-            seed: effectiveSeed,
-            creativeMode: run.creativeMode,
+            // Issue #1362b: `strength` + `seed` only. The route's
+            // inpaintRequestSchema is `.strict()` (issue #1362b) so
+            // any legacy field names would 400 the request.
+            strength: run.strength,
+            seed: run.seed,
           }),
           signal,
         });
@@ -267,6 +272,17 @@ export function useInpaintRuns({
 
         if (!startResponse.ok) {
           throw new Error(startData.message || startData.error || "Failed to start inpainting");
+        }
+
+        // Issue #1135: the submit path returns `degraded: true` when the
+        // fal job was accepted but its durable InpaintRequest row could
+        // not be written. Polling that requestId 404s, the poller reads
+        // 404 as terminal, and the terminal path offers "Retry
+        // inpainting" — billing a second fal job for a run whose result
+        // is already unrecoverable. Fail here instead, non-retryably, so
+        // the user is billed once and told plainly.
+        if (startData.degraded === true) {
+          throw new InpaintJobLostError();
         }
 
         return startData.requestId as string;
@@ -311,11 +327,10 @@ export function useInpaintRuns({
             promptDirectives: plan.steps[index].promptDirectives,
             sourceUrl,
             globalDirectives,
-            promptStrength: guidance.promptStrength,
-            maskBlur: guidance.maskBlur,
+            // Issue #1362b: guidance renamed; `maskBlur` /
+            // `creativeMode` / `lockSeed` are gone.
+            strength: guidance.strength,
             seed: guidance.seed,
-            creativeMode: guidance.creativeMode,
-            lockSeed: guidance.lockSeed,
           });
 
           const outcome = batchOutcomeRef.current;
@@ -386,11 +401,10 @@ export function useInpaintRuns({
           maskUrl: plan.maskDataUrl,
           promptDirectives: plan.promptDirectives,
           globalDirectives,
-          promptStrength: guidance.promptStrength,
-          maskBlur: guidance.maskBlur,
+          // Issue #1362b: guidance renamed; `maskBlur` /
+          // `creativeMode` / `lockSeed` are gone.
+          strength: guidance.strength,
           seed: guidance.seed,
-          creativeMode: guidance.creativeMode,
-          lockSeed: guidance.lockSeed,
         }).then(() => {
           // A thematic batch is one ordinary run — consume the selection
           // set only when it actually completed (outcome ref is set by
@@ -434,34 +448,28 @@ export function useInpaintRuns({
   );
 
   // Issue #846: extracted from inpaint-editor.tsx — just forwards params
-  // since beginInpaintRun already accepts holistic guidance fields.
+  // since beginInpaintRun already accepts the AI guidance fields.
+  // Issue #1362b: `promptStrength` → `strength`; the legacy fields
+  // (`maskBlur` / `creativeMode` / `lockSeed`) are gone. Default
+  // `strength` is 0.6 — the documented whole-room default, mirroring
+  // the legacy pre-Stage-B behavior. (The route's persisted default
+  // is 50 UI = 0.5 at the wire; 0.6 here is the holistic spike
+  // caller's default.)
   const submitHolisticRun = useCallback(
     (run: {
       maskDataUrl: string;
       promptDirectives: string;
       negativePrompt?: string;
-      promptStrength?: number;
-      maskBlur?: number;
+      strength?: number;
       seed?: number;
-      creativeMode?: boolean;
-      lockSeed?: boolean;
     }) => {
-      const {
-        promptStrength = 0.6,
-        maskBlur = 0,
-        seed,
-        creativeMode = false,
-        lockSeed = false,
-      } = run;
+      const { strength = 0.6, seed } = run;
       beginInpaintRun({
         maskUrl: run.maskDataUrl,
         promptDirectives: run.promptDirectives,
         negativePrompt: run.negativePrompt,
-        promptStrength,
-        maskBlur,
+        strength,
         seed,
-        creativeMode,
-        lockSeed,
       });
     },
     [beginInpaintRun]

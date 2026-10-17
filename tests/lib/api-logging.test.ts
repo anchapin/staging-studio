@@ -18,7 +18,8 @@ import { withActionLogging, withRequestLogging } from "@/lib/api-logging";
  *   responsible for translating the thrown error into the response shape)
  * - thrown errors re-propagate (the wrappers never swallow)
  * - action wrapper attaches the supplied context on the throw path
- * - requestId comes from the x-request-id header when present
+ * - requestId comes from the x-request-id header when present, and is
+ *   minted otherwise (issue #1116)
  */
 
 function makeRequest(opts: {
@@ -72,11 +73,26 @@ describe("withRequestLogging (issue #1061)", () => {
     );
   });
 
-  it("omits requestId when the x-request-id header is absent", async () => {
+  it("generates a requestId when the x-request-id header is absent and echoes it on the response (issue #1116)", async () => {
     const handler = vi.fn(async () => new Response("ok", { status: 200 }));
-    await withRequestLogging(handler)(makeRequest());
+    const response = await withRequestLogging(handler)(makeRequest());
     const call = infoSpy.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(call.requestId).toBeUndefined();
+    expect(typeof call.requestId).toBe("string");
+    expect(call.requestId as string).toMatch(/^[0-9a-f-]{36}$/);
+    expect(response.headers.get("x-request-id")).toBe(call.requestId);
+  });
+
+  it("echoes and logs a route-set x-request-id without clobbering it (issue #1116)", async () => {
+    const handler = vi.fn(async () =>
+      new Response("ok", { status: 200, headers: { "x-request-id": "pipeline-1" } })
+    );
+    const response = await withRequestLogging(handler)(
+      makeRequest({ requestId: "req_abc123" })
+    );
+    expect(response.headers.get("x-request-id")).toBe("pipeline-1");
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: "pipeline-1" })
+    );
   });
 
   it("logs status 500 and re-throws when the handler throws", async () => {

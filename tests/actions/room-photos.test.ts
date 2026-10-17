@@ -48,6 +48,7 @@ function setupSupabaseSignedUrlMock(signedUrl: string, storagePath: string) {
   createSupabaseClient.mockResolvedValue({
     storage: {
       from: vi.fn().mockReturnValue({
+        list: vi.fn().mockResolvedValue({ data: [], error: null }),
         createSignedUploadUrl: vi
           .fn()
           .mockResolvedValue({ data: { signedUrl, storagePath }, error: null }),
@@ -180,6 +181,7 @@ describe("confirmRoomPhotoUpload", () => {
     createSupabaseClient.mockResolvedValue({
       storage: {
         from: vi.fn().mockReturnValue({
+          list: vi.fn().mockResolvedValue({ data: [], error: null }),
           getPublicUrl: vi.fn().mockReturnValue({ data: { publicUrl } }),
         }),
       },
@@ -207,6 +209,7 @@ describe("confirmRoomPhotoUpload", () => {
     createSupabaseClient.mockResolvedValue({
       storage: {
         from: vi.fn().mockReturnValue({
+          list: vi.fn().mockResolvedValue({ data: [], error: null }),
           getPublicUrl: vi.fn().mockReturnValue({ data: { publicUrl: slot1PublicUrl } }),
         }),
       },
@@ -276,6 +279,7 @@ describe("confirmRoomPhotoUpload", () => {
     createSupabaseClient.mockResolvedValue({
       storage: {
         from: vi.fn().mockReturnValue({
+          list: vi.fn().mockResolvedValue({ data: [], error: null }),
           getPublicUrl: vi.fn().mockReturnValue({ data: { publicUrl } }),
         }),
       },
@@ -300,6 +304,7 @@ describe("confirmRoomPhotoUpload", () => {
     createSupabaseClient.mockResolvedValue({
       storage: {
         from: vi.fn().mockReturnValue({
+          list: vi.fn().mockResolvedValue({ data: [], error: null }),
           getPublicUrl: vi.fn().mockReturnValue({
             data: { publicUrl: "https://example.supabase.co/storage/v1/object/public/room-photos/rooms/wrong-room/before-image.webp" },
           }),

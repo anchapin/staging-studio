@@ -2,6 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { projectMetadataSchema } from "@/lib/metadata-schemas";
 import { revalidatePath } from "next/cache";
 
 export async function bulkUpdateRoomAesthetic(
@@ -15,6 +16,23 @@ export async function bulkUpdateRoomAesthetic(
   const user = await getAuthedPrismaUser();
   if (!user) {
     return { success: false, error: "Not authenticated" };
+  }
+
+  // Issue #1126: `aesthetic` reaches Prisma unvalidated otherwise. The
+  // single-project metadata path (issue #682) caps every metadata field at
+  // 2,000 characters; the bulk path now enforces the same cap through the
+  // same schema. Empty string still parses: clearing is a legitimate
+  // update. A non-string at the runtime server-action boundary is
+  // rejected here too, instead of being written.
+  const aestheticCheck = projectMetadataSchema
+    .pick({ stagingAesthetic: true })
+    .safeParse({ stagingAesthetic: aesthetic });
+  if (!aestheticCheck.success) {
+    return {
+      success: false,
+      error:
+        aestheticCheck.error.issues[0]?.message ?? "Invalid staging aesthetic",
+    };
   }
 
   try {
@@ -37,6 +55,7 @@ export async function bulkUpdateRoomAesthetic(
 
     for (const room of rooms) {
       revalidatePath(`/projects/${room.projectId}`);
+      revalidatePath(`/preview/${room.projectId}`);
     }
 
     return { success: true };

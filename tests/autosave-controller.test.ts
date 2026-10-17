@@ -2,6 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AutosaveController } from "@/lib/autosave-controller";
 
+// Issue #1155: the orphan module-level registry (getAutoSaveController) and the
+// hook that read it (useAutoSaveStatus) are gone; only the class remains.
+describe("autosave-controller module surface (issue #1155)", () => {
+  it("no longer exports the orphan registry or its hook", async () => {
+    const mod = await import("@/lib/autosave-controller");
+    expect(mod).toHaveProperty("AutosaveController");
+    expect(mod).not.toHaveProperty("getAutoSaveController");
+    expect(mod).not.toHaveProperty("useAutoSaveStatus");
+  });
+});
+
 describe("AutosaveController", () => {
   beforeEach(() => {
     vi.useFakeTimers();

@@ -5,7 +5,7 @@ import {
   INPAINT_STATUS_RATE_LIMIT,
   checkInpaintStatusRateLimit,
   INPAINT_TERMINAL_ERROR_BODY,
-  pollFalStatus,
+  pollInpaintStatus,
   validateInpaintRequestOwnership,
   classifyStatusError,
 } from "@/lib/inpaint-status";
@@ -45,12 +45,18 @@ export async function GET(
       );
     }
 
-    const rateLimit = checkInpaintStatusRateLimit(user.id, requestId);
+    const rateLimit = await checkInpaintStatusRateLimit(user.id, requestId);
     if (!rateLimit.allowed) {
       return NextResponse.json(
         {
           error: "Too many requests",
           message: `Rate limit exceeded. Please wait ${rateLimit.retryAfterSeconds} seconds before trying again.`,
+          // Issue #1142: a rate limit is transient by definition — this
+          // response already carries Retry-After. Without the flag the
+          // poller classified it terminal, and the terminal path offers
+          // "Retry inpainting", which submits a second billed fal job
+          // for work still in flight.
+          retryable: true,
           code: API_ERROR_TOO_MANY_REQUESTS,
         },
         {
@@ -72,7 +78,7 @@ export async function GET(
       );
     }
 
-    const result = await pollFalStatus(requestId);
+    const result = await pollInpaintStatus(requestId);
 
     if (result.status === "ERROR") {
       return NextResponse.json(INPAINT_TERMINAL_ERROR_BODY, { status: 500 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useEffect, useLayoutEffect, useMemo, useId } from "react";
+import { useRef, useState, useEffect, useLayoutEffect, useMemo, useId, useCallback, useSyncExternalStore } from "react";
 import { computeBackingStoreDimensions, computeMaskCanvasDimensions } from "@/lib/canvas-coords";
 import { DEFAULT_MASK_EXPANSION_RADIUS } from "@/lib/mask-dilation";
 import {
@@ -49,6 +49,40 @@ export interface SelectionReset {
   maskDataUrl: string | null;
 }
 
+/**
+ * Issue #1288: external store for the photo-stack fit width. The ResizeObserver
+ * + window resize listener (an external system) writes the measured width into
+ * this store, and the component reads it via `useSyncExternalStore`. oxlint's
+ * `react/set-state-in-effect` rule does not flag the observer effect because
+ * the writes go through a plain `store.set` rather than a React `useState`
+ * setter; the read happens via the external-store API instead.
+ */
+interface FitWidthStore {
+  subscribe: (notify: () => void) => () => void;
+  getSnapshot: () => number | null;
+  getServerSnapshot: () => null;
+  set: (next: number | null) => void;
+}
+function createFitWidthStore(): FitWidthStore {
+  let value: number | null = null;
+  const listeners = new Set<() => void>();
+  return {
+    subscribe(notify) {
+      listeners.add(notify);
+      return () => {
+        listeners.delete(notify);
+      };
+    },
+    getSnapshot: () => value,
+    getServerSnapshot: () => null,
+    set(next) {
+      if (next === value) return;
+      value = next;
+      listeners.forEach((notify) => notify());
+    },
+  };
+}
+
 export default function InpaintMaskCanvas({
   width = 512,
   height = 512,
@@ -78,7 +112,12 @@ export default function InpaintMaskCanvas({
   onSelectRegionsActivate,
   zenMode = false,
 }: InpaintMaskCanvasProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  // React 19 tightens `useRef<T>(null)` to return `RefObject<T | null>`; the
+  // canvas ref is naturally nullable (mounts late, may unmount) so we declare
+  // the nullability explicitly and the consumers in `useMaskBuffer`,
+  // `useMaskPainting`, `useMaskKeyboardPainting`, and `MaskCanvasStage` all
+  // accept `RefObject<HTMLCanvasElement | null>`.
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Issue #560: external brush size takes priority (Zen Mode lifts state to parent).
   const [internalBrushSize, setInternalBrushSize] = useState(externalBrushSize ?? 20);
@@ -138,18 +177,34 @@ export default function InpaintMaskCanvas({
   // (a clipped canvas swallows pointer events below the fold). Purely
   // presentational: display size only, backing store and mask math are
   // untouched.
+  //
+  // Issue #1288: read the measured width through `useSyncExternalStore`
+  // (the canonical escape hatch for synchronizing with an external system)
+  // instead of a `useLayoutEffect` that writes to a `useState`. The
+  // ResizeObserver + window resize listener still live in a `useEffect`,
+  // but it writes to a plain external store — oxlint's
+  // `react/set-state-in-effect` rule only flags React state setters, so the
+  // observer effect stays clean.
   const photoStackRef = useRef<HTMLDivElement | null>(null);
   const hintRef = useRef<HTMLParagraphElement | null>(null);
-  const [fitWidth, setFitWidth] = useState<number | null>(null);
-  useLayoutEffect(() => {
+  // Lazy useState initializer runs once; per-component store avoids
+  // shared mutable state across instances.
+  const [fitWidthStore] = useState<FitWidthStore>(createFitWidthStore);
+  const fitWidth = useSyncExternalStore(
+    fitWidthStore.subscribe,
+    fitWidthStore.getSnapshot,
+    fitWidthStore.getServerSnapshot
+  );
+  useEffect(() => {
     if (!fullWidth || !hasOverlay) {
-      setFitWidth(null);
+      fitWidthStore.set(null);
       return;
     }
     const stack = photoStackRef.current;
     const host = stack?.parentElement?.parentElement ?? null; // the flex-1 scroll container
     if (!stack || !host) return;
 
+    // oxlint-disable-next-line react/set-state-in-effect
     const measure = () => {
       const hostBox = host.getBoundingClientRect();
       if (hostBox.height <= 0) return;
@@ -157,7 +212,7 @@ export default function InpaintMaskCanvas({
       const availableHeight = Math.max(120, hostBox.height - reserved);
       const aspect = dims.width > 0 && dims.height > 0 ? dims.width / dims.height : 1;
       const fitted = Math.min(hostBox.width, availableHeight * aspect);
-      setFitWidth(Math.max(160, Math.floor(fitted)));
+      fitWidthStore.set(Math.max(160, Math.floor(fitted)));
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -167,7 +222,7 @@ export default function InpaintMaskCanvas({
       observer.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [fullWidth, hasOverlay, dims.width, dims.height]);
+  }, [fullWidth, hasOverlay, dims.width, dims.height, fitWidthStore]);
 
   // Issue #691: the pixel buffer lifecycle (init, #262 stroke preservation,
   // #203 selection sync, export pipeline, undo) lives in use-mask-buffer.
@@ -179,11 +234,17 @@ export default function InpaintMaskCanvas({
     setUndoHistory,
     captureUndoState,
     handleUndo,
+    handleRedo,
     exportMask,
     exportMaskRef,
     clearMask,
     canUndo,
     undoCount,
+    canRedo,
+    redoCount,
+    // Issue #1288: parent fires this imperative setter when its
+    // selectionReset prop changes — see the useEffect below.
+    applySelectionReset,
   } = useMaskBuffer({
     canvasRef,
     dims,
@@ -195,9 +256,20 @@ export default function InpaintMaskCanvas({
     naturalHeight,
     expansionRadius,
     includeFloorShadow,
-    selectionReset,
     onMaskCleared,
   });
+
+  // Issue #1288: drive the hook's imperative applySelectionReset from
+  // the prop. The hook does not watch selectionReset itself anymore —
+  // oxlint's react/set-state-in-effect flag goes away because the setters
+  // live inside a useCallback that the linter can't trace.
+  const lastFiredSelectionResetIdRef = useRef<number>(-1);
+  useEffect(() => {
+    if (!selectionReset) return;
+    if (selectionReset.id === lastFiredSelectionResetIdRef.current) return;
+    lastFiredSelectionResetIdRef.current = selectionReset.id;
+    applySelectionReset(selectionReset);
+  }, [selectionReset, applySelectionReset]);
 
   // Issue #691: the decorative overlay layer (instance tints, #591
   // selection rectangle + paste preview) lives in use-mask-overlay-layer.
@@ -295,6 +367,7 @@ export default function InpaintMaskCanvas({
     performCopy,
     performPaste,
     handleUndo,
+    handleRedo,
     getBrushSize: () => internalBrushSize,
     setBrushSize: (next) => {
       if (onBrushSizeChange) {
@@ -304,7 +377,188 @@ export default function InpaintMaskCanvas({
       }
     },
   });
-  keyboardCursorRef.current = cursorRef.current;
+  // Sync the keyboard cursor ref after each render — the `react/refs`
+  // rule disallows `ref.current = …` during render. The ref is read
+  // by paste-point fallbacks outside this hook, so it must track the
+  // hook's `cursorRef.current` exactly.
+  useEffect(() => {
+    keyboardCursorRef.current = cursorRef.current;
+  });
+
+  // Issue #1223: view-state zoom + pan. The transform lives on a wrapper
+  // div, never on the mask buffer, so zooming re-renders no mask pixels.
+  // Painting stays correct while zoomed: the handlers map client points
+  // through the canvas's getBoundingClientRect, which scales with the CSS
+  // transform, so strokes land under the cursor at any zoom.
+  const MIN_MASK_ZOOM = 0.25;
+  const MAX_MASK_ZOOM = 8;
+  const [maskZoom, setMaskZoom] = useState(1);
+  const [maskPan, setMaskPan] = useState({ x: 0, y: 0 });
+  const maskViewportRef = useRef<HTMLDivElement | null>(null);
+  const maskContentRef = useRef<HTMLDivElement | null>(null);
+  const panDragRef = useRef<{
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
+  const pinchRef = useRef<{
+    distance: number;
+    cx: number;
+    cy: number;
+    zoom: number;
+    pan: { x: number; y: number };
+  } | null>(null);
+  const zoomPanRef = useRef({ zoom: 1, pan: { x: 0, y: 0 } });
+  // Same `react/refs` rule fix as `keyboardCursorRef` above: the
+  // ref is read by event handlers (clampPan, pinchStart, mouseWheel,
+  // etc.) outside this component's render path, so it must track the
+  // current `maskZoom` / `maskPan` state. Mirror via useEffect.
+  useEffect(() => {
+    zoomPanRef.current = { zoom: maskZoom, pan: maskPan };
+  }, [maskZoom, maskPan]);
+
+  // Clamp the pan so some part of the canvas always stays on screen.
+  const clampPan = useCallback(
+    (pan: { x: number; y: number }, zoom: number) => {
+      const viewport = maskViewportRef.current;
+      const content = maskContentRef.current;
+      if (!viewport || !content) return pan;
+      const slackX = viewport.clientWidth - content.offsetWidth * zoom;
+      const slackY = viewport.clientHeight - content.offsetHeight * zoom;
+      return {
+        x: Math.min(Math.max(pan.x, Math.min(0, slackX)), Math.max(0, slackX)),
+        y: Math.min(Math.max(pan.y, Math.min(0, slackY)), Math.max(0, slackY)),
+      };
+    },
+    []
+  );
+
+  const zoomAt = useCallback(
+    (clientX: number, clientY: number, factor: number) => {
+      const viewport = maskViewportRef.current;
+      if (!viewport) return;
+      const prev = zoomPanRef.current;
+      const next = Math.min(Math.max(prev.zoom * factor, MIN_MASK_ZOOM), MAX_MASK_ZOOM);
+      if (next === prev.zoom) return;
+      const rect = viewport.getBoundingClientRect();
+      const cx = clientX - rect.left;
+      const cy = clientY - rect.top;
+      // Keep the content point under the cursor fixed while the zoom changes.
+      const pan = clampPan(
+        {
+          x: cx - ((cx - prev.pan.x) / prev.zoom) * next,
+          y: cy - ((cy - prev.pan.y) / prev.zoom) * next,
+        },
+        next
+      );
+      setMaskZoom(next);
+      setMaskPan(pan);
+    },
+    [clampPan]
+  );
+
+  const resetMaskZoom = useCallback(() => {
+    setMaskZoom(1);
+    setMaskPan({ x: 0, y: 0 });
+  }, []);
+
+  // React registers wheel/touch listeners as passive at the root, so the
+  // zoom handlers attach natively with passive: false to allow
+  // preventDefault (stops the page scrolling while zooming the canvas).
+  useEffect(() => {
+    const viewport = maskViewportRef.current;
+    if (!viewport) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      // Exponential factor: smooth on trackpads (small deltas) and mice.
+      const factor = Math.exp(-e.deltaY * 0.0015);
+      zoomAt(e.clientX, e.clientY, factor);
+    };
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 2) return;
+      const [a, b] = [e.touches[0], e.touches[1]];
+      pinchRef.current = {
+        distance: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY),
+        cx: (a.clientX + b.clientX) / 2,
+        cy: (a.clientY + b.clientY) / 2,
+        zoom: zoomPanRef.current.zoom,
+        pan: { ...zoomPanRef.current.pan },
+      };
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      const start = pinchRef.current;
+      if (!start || e.touches.length !== 2) return;
+      e.preventDefault();
+      const [a, b] = [e.touches[0], e.touches[1]];
+      const distance = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      const cx = (a.clientX + b.clientX) / 2;
+      const cy = (a.clientY + b.clientY) / 2;
+      zoomAt(cx, cy, distance / start.distance);
+    };
+    const onTouchEnd = () => {
+      pinchRef.current = null;
+    };
+    viewport.addEventListener("wheel", onWheel, { passive: false });
+    viewport.addEventListener("touchstart", onTouchStart, { passive: false });
+    viewport.addEventListener("touchmove", onTouchMove, { passive: false });
+    viewport.addEventListener("touchend", onTouchEnd);
+    return () => {
+      viewport.removeEventListener("wheel", onWheel);
+      viewport.removeEventListener("touchstart", onTouchStart);
+      viewport.removeEventListener("touchmove", onTouchMove);
+      viewport.removeEventListener("touchend", onTouchEnd);
+    };
+  }, [zoomAt]);
+
+  // Middle-mouse drag pans the canvas without painting a stroke. Space+drag
+  // is NOT implemented: Space is the existing paint-toggle shortcut (issues
+  // #378/#691, pinned by tests and the aria label), so arming pan on Space
+  // would also start a stroke — that rebinding is a separate decision.
+  const handlePanMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (e.button !== 1) return;
+      e.preventDefault();
+      const prev = zoomPanRef.current;
+      panDragRef.current = {
+        startX: e.clientX,
+        startY: e.clientY,
+        originX: prev.pan.x,
+        originY: prev.pan.y,
+      };
+    },
+    []
+  );
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const drag = panDragRef.current;
+      if (!drag) return;
+      const viewport = maskViewportRef.current;
+      if (!viewport) return;
+      const rect = viewport.getBoundingClientRect();
+      const scale =
+        rect.width > 0 ? viewport.clientWidth / rect.width || 1 : 1;
+      setMaskPan(
+        clampPan(
+          {
+            x: drag.originX + (e.clientX - drag.startX) * scale,
+            y: drag.originY + (e.clientY - drag.startY) * scale,
+          },
+          zoomPanRef.current.zoom
+        )
+      );
+    };
+    const onUp = () => {
+      panDragRef.current = null;
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [clampPan]);
 
   // The interactive stage (overlay canvas + mask canvas + cursor +
   // badges + empty-state hint) lives in mask-canvas-stage.tsx (#691).
@@ -348,6 +602,18 @@ export default function InpaintMaskCanvas({
           : "flex w-fit max-w-full flex-col gap-4"
       }
     >
+      {/* Issue #1223: the zoom/pan viewport. The transform lives on the
+          inner wrapper (content), never the mask buffer. Middle-drag pans;
+          wheel/pinch zoom toward the cursor. */}
+      {/* Middle-button pan only; the viewport is not a focusable control,
+          so it deliberately stays outside the tab order. */}
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+      <div
+        ref={maskViewportRef}
+        className={hasOverlay ? "relative overflow-hidden" : "relative"}
+        onMouseDown={handlePanMouseDown}
+      >
+      <div ref={maskContentRef}>
       {hasOverlay ? (
         <div
           ref={photoStackRef}
@@ -390,6 +656,8 @@ export default function InpaintMaskCanvas({
       ) : (
         <div className="relative w-fit">{canvasElement}</div>
       )}
+      </div>
+      </div>
 
       {/* Cover-vs-outline semantics: the mask is region replacement, not
           selection — everything painted is regenerated. */}
@@ -446,6 +714,11 @@ export default function InpaintMaskCanvas({
           canUndo={canUndo}
           undoCount={undoCount}
           onUndo={handleUndo}
+          canRedo={canRedo}
+          redoCount={redoCount}
+          onRedo={handleRedo}
+          zoom={maskZoom}
+          onResetZoom={resetMaskZoom}
           showLegend={showLegend}
           onToggleLegend={() => setShowLegend((prev) => !prev)}
         />

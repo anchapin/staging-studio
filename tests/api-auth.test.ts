@@ -27,6 +27,7 @@ const mockSupabaseUser = {
   id: "user-1",
   email: "alex@example.com",
   role: "authenticated",
+  email_confirmed_at: "2026-10-01T00:00:00Z",
 };
 
 const mockDbUser = {
@@ -83,6 +84,34 @@ describe("getAuthedPrismaUser", () => {
 
     const result = await getAuthedPrismaUser();
     expect(result).toBeNull();
+  });
+
+  it("returns null and skips the DB lookup when the session email is unconfirmed", async () => {
+    mockCookies.mockReturnValue({
+      getAll: vi.fn().mockReturnValue([{ name: "sb-token", value: "valid" }]),
+    } as unknown as ReturnType<typeof cookies>);
+    mockCreateServerClient.mockReturnValue(
+      buildSupabaseClient({ id: "user-1", email: "alex@example.com" }) as unknown as ReturnType<typeof createServerClientSingleton>
+    );
+
+    const result = await getAuthedPrismaUser();
+
+    expect(result).toBeNull();
+    expect(mockFindUnique).not.toHaveBeenCalled();
+  });
+
+  it("returns null when email_confirmed_at is null", async () => {
+    mockCookies.mockReturnValue({
+      getAll: vi.fn().mockReturnValue([{ name: "sb-token", value: "valid" }]),
+    } as unknown as ReturnType<typeof cookies>);
+    mockCreateServerClient.mockReturnValue(
+      buildSupabaseClient({ id: "user-1", email: "alex@example.com", email_confirmed_at: null }) as unknown as ReturnType<typeof createServerClientSingleton>
+    );
+
+    const result = await getAuthedPrismaUser();
+
+    expect(result).toBeNull();
+    expect(mockFindUnique).not.toHaveBeenCalled();
   });
 
   it("returns null when Prisma has no matching user for the email", async () => {

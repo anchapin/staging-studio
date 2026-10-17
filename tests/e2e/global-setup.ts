@@ -1,5 +1,6 @@
 import { execSync, spawnSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 
 import {
   APP_URL,
@@ -9,6 +10,8 @@ import {
   E2E_EDITOR_PROJECT_ID,
   E2E_EDITOR_ROOM_ID,
   E2E_EMAIL,
+  E2E_OTHER_EMAIL,
+  E2E_OTHER_USER_ID,
   E2E_REHEARSAL_PROJECT_ID,
   E2E_REHEARSAL_ROOM_ID,
   E2E_LOOKBOOK_ROOM_ID,
@@ -29,6 +32,7 @@ import {
 import { MockSupabase } from "./mock-supabase";
 import { MockBrowserless } from "./mock-browserless";
 import { roomPhotoFixture, stagedResultFixture } from "./fixtures";
+import { assertEphemeralDatabaseUrl } from "./database-url-guard";
 
 /**
  * Playwright global setup (issue #165).
@@ -132,12 +136,35 @@ async function ensureDockerPostgres(): Promise<void> {
   console.log("[e2e] postgres ready");
 }
 
+/**
+ * Issue #1102 — fail fast unless `DATABASE_URL` is unmistakably the
+ * disposable, loopback container this helper brings up. The hermeticity
+ * contract (`tests/e2e/env.ts`) rests on the Prisma CLI not overriding
+ * an already-set `DATABASE_URL` when it reads `.env`/`prisma.config.ts`;
+ * dotenv is documented to leave existing `process.env` entries alone, but
+ * the harness should not depend on that behavior surviving a Prisma major
+ * bump. If a future Prisma version starts overwriting, this guard catches
+ * the misdirected push before any write reaches a real database. The
+ * guard itself lives in `database-url-guard.ts` so the unit test can
+ * pin it without importing the full setup module.
+ */
+
 async function pushSchema(): Promise<void> {
+  // Issue #1102: refuse to invoke the Prisma CLI unless DATABASE_URL is
+  // unmistakably the disposable container. The CLI re-reads `.env` /
+  // `prisma.config.ts` and could in principle override an already-set
+  // DATABASE_URL; an explicit check here fails fast before any push lands.
+  assertEphemeralDatabaseUrl(DATABASE_URL, POSTGRES_PORT);
+  assertEphemeralDatabaseUrl(process.env.DATABASE_URL, POSTGRES_PORT);
+
   // The published port can lag the in-container readiness moment by a
   // moment (bootstrap → restart cycle); retry a few times before giving up.
   let lastError: unknown = null;
   for (let attempt = 1; attempt <= 5; attempt += 1) {
-    const result = spawnSync("npx", ["prisma", "db", "push", "--skip-generate"], {
+    // Prisma 7: `--skip-generate` was removed (the new flag set is
+    // `--config`, `--schema`, `--url`, `--accept-data-loss`). The default
+    // is to generate as part of `db push`, which is what we want anyway.
+    const result = spawnSync("npx", ["prisma", "db", "push"], {
       stdio: "inherit",
       env: { ...process.env, DATABASE_URL },
     });
@@ -152,12 +179,32 @@ async function pushSchema(): Promise<void> {
 }
 
 async function seed(): Promise<void> {
-  const prisma = new PrismaClient({ datasources: { db: { url: DATABASE_URL } } });
+  // Issue #1102: refuse to construct a PrismaClient unless DATABASE_URL
+  // is unmistakably the disposable container. seed() builds its own client
+  // (separate from the runtime app), so this guard has to live alongside
+  // the constructor, not just at the top of main().
+  assertEphemeralDatabaseUrl(DATABASE_URL, POSTGRES_PORT);
+  assertEphemeralDatabaseUrl(process.env.DATABASE_URL, POSTGRES_PORT);
+
+  // Prisma 7: `datasources: { db: { url } }` is no longer accepted by the
+  // PrismaClient constructor; pass a driver adapter instead.
+  const prisma = new PrismaClient({
+    adapter: new PrismaPg({ connectionString: DATABASE_URL }),
+  });
   try {
     const beforePhotoUrl = roomPhotoPublicUrl(`rooms/${E2E_EDITOR_ROOM_ID}/before-image.png`);
     const conceptBeforePhotoUrl = roomPhotoPublicUrl(
       `rooms/${E2E_CONCEPT_ROOM_ID}/before-image.png`
     );
+
+    await prisma.user.create({
+      data: {
+        id: E2E_OTHER_USER_ID,
+        email: E2E_OTHER_EMAIL,
+        firmName: "Other Firm — E2E",
+        ownerName: "E2E Other Harness",
+      },
+    });
 
     await prisma.user.create({
       data: {
@@ -241,6 +288,14 @@ async function seed(): Promise<void> {
                       "Layer warm lamps and lighten textiles to lift the space.",
                     buyerPsychology:
                       "Empty nesters read brightness as low-maintenance comfort.",
+                    // Issue #1343 — listing-copy columns (CopyPanel).
+                    // Headline + body intentionally distinct from the
+                    // consultation prose above so the e2e can assert
+                    // the new→legacy resolution independently.
+                    lookbookHeadline:
+                      "A brighter, lighter showpiece for empty-nester buyers",
+                    lookbookBody:
+                      "Refreshed lighting and softened textiles turn a north-facing room into a warm, low-maintenance retreat.",
                     checklistItems: [
                       {
                         item: "Replace burnt-out bulbs with warm white",
@@ -289,6 +344,14 @@ async function seed(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  // Issue #1102: fail fast before any side effect (Docker pull, Prisma
+  // push, seed insert) unless DATABASE_URL points at the disposable
+  // container. pushSchema() and seed() re-check at their own call sites
+  // because each has its own write surface; this top-level guard exists
+  // so a misdirected URL never even starts the container.
+  assertEphemeralDatabaseUrl(DATABASE_URL, POSTGRES_PORT);
+  assertEphemeralDatabaseUrl(process.env.DATABASE_URL, POSTGRES_PORT);
+
   console.log("[e2e] app under test:", APP_URL);
   console.log(`[e2e] mock supabase:  http://${MOCK_SUPABASE_HOST}:${MOCK_SUPABASE_PORT}`);
   console.log(

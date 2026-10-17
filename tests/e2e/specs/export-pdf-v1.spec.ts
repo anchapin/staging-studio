@@ -1,9 +1,16 @@
 import { test, expect } from "@playwright/test";
 
-import { login, mockBrowserlessRequests, setMockBrowserlessOutcome } from "../helpers";
+import {
+  login,
+  loginAs,
+  mockBrowserlessRequests,
+  setMockBrowserlessOutcome,
+} from "../helpers";
 import {
   E2E_ABSENT_PROJECT_ID,
   E2E_DAILY_EXPORT_LIMIT,
+  E2E_OTHER_EMAIL,
+  E2E_OTHER_PASSWORD,
   E2E_UPLOAD_PROJECT_ID,
 } from "../env";
 import type { CapturedBrowserlessRequest } from "../mock-browserless";
@@ -12,11 +19,12 @@ import { withExportUsageAtLimit } from "../quota";
 const EXPORT_PDF_V1_URL = "/api/v1/export-pdf";
 
 /**
- * Direct-API suite for `GET /api/v1/export-pdf` (the v1 sibling of the
+ * Direct-API suite for `POST /api/v1/export-pdf` (the v1 sibling of the
  * suite in `export-pdf.spec.ts`).
  *
- * The versioned route is NOT a superset of the unversioned one: it is a
- * `GET` with a `?projectId=` query param, it adds a daily export quota
+ * The versioned route is NOT a superset of the unversioned one: it was
+ * converted from GET (query param) to POST (JSON body) in #1158 to close
+ * the cross-site GET navigation attack vector. It adds a daily export quota
  * (429) and a project-ownership check (403/404) that the unversioned
  * route does not perform, and it answers every response — success and
  * error alike — with an `X-Supabase-API-Version: v1` header (renamed from
@@ -35,10 +43,11 @@ const EXPORT_PDF_V1_URL = "/api/v1/export-pdf";
  * `resolveBrowserlessPdfUrl` provides. This spec is the first consumer
  * of that seam on the v1 route.
  *
- * Not covered here: the 403 branch. Every seeded project belongs to
- * E2E_USER_ID, so reaching it needs a second user with a matching GoTrue
- * identity the mock auth server does not issue. The 429 branch IS
- * covered — see the quota test at the bottom and `quota.ts`.
+ * The 403 (owned-by-another-user) branch IS covered — see the
+ * `forbidden when another user owns the project` test, which signs in
+ * as the second seeded user (E2E_OTHER_USER_ID) and asks to export a
+ * project that belongs to E2E_USER_ID. The 429 branch is also covered
+ * — see the quota test at the bottom and `quota.ts`.
  */
 test.describe("export-pdf v1 API route", () => {
   // The mock is process-wide and its outcome survives between tests, so
@@ -48,13 +57,14 @@ test.describe("export-pdf v1 API route", () => {
     await setMockBrowserlessOutcome("success");
   });
 
-  test("GET with valid projectId returns a PDF and version headers", async ({ page }) => {
+  test("POST with valid projectId returns a PDF and version headers", async ({ page }) => {
     await login(page);
     const before = await mockBrowserlessRequests();
 
-    const response = await page.request.get(
-      `${EXPORT_PDF_V1_URL}?projectId=${E2E_UPLOAD_PROJECT_ID}`
-    );
+    const response = await page.request.post(EXPORT_PDF_V1_URL, {
+      data: { projectId: E2E_UPLOAD_PROJECT_ID },
+      headers: { "Content-Type": "application/json" },
+    });
 
     expect(response.status()).toBe(200);
     expect(response.headers()["content-type"] ?? "").toContain("application/pdf");
@@ -83,10 +93,11 @@ test.describe("export-pdf v1 API route", () => {
     expect(body.url).toContain(`/preview/${E2E_UPLOAD_PROJECT_ID}?token=`);
   });
 
-  test("unauthenticated GET returns 401", async ({ page }) => {
-    const response = await page.request.get(
-      `${EXPORT_PDF_V1_URL}?projectId=${E2E_UPLOAD_PROJECT_ID}`
-    );
+  test("unauthenticated POST returns 401", async ({ page }) => {
+    const response = await page.request.post(EXPORT_PDF_V1_URL, {
+      data: { projectId: E2E_UPLOAD_PROJECT_ID },
+      headers: { "Content-Type": "application/json" },
+    });
 
     expect(response.status()).toBe(401);
     expect(response.headers()["x-supabase-api-version"]).toBe("v1");
@@ -94,10 +105,13 @@ test.describe("export-pdf v1 API route", () => {
     expect(body.code).toBe("unauthorized");
   });
 
-  test("GET with missing projectId returns 400", async ({ page }) => {
+  test("POST with missing projectId returns 400", async ({ page }) => {
     await login(page);
 
-    const response = await page.request.get(EXPORT_PDF_V1_URL);
+    const response = await page.request.post(EXPORT_PDF_V1_URL, {
+      data: {},
+      headers: { "Content-Type": "application/json" },
+    });
 
     expect(response.status()).toBe(400);
     const body = await response.json();
@@ -105,14 +119,15 @@ test.describe("export-pdf v1 API route", () => {
     expect(body.message).toContain("projectId must be a valid CUID");
   });
 
-  test("GET with malformed projectId returns 400 before the ownership lookup", async ({
+  test("POST with malformed projectId returns 400 before the ownership lookup", async ({
     page,
   }) => {
     await login(page);
 
-    const response = await page.request.get(
-      `${EXPORT_PDF_V1_URL}?projectId=not-a-cuid-format`
-    );
+    const response = await page.request.post(EXPORT_PDF_V1_URL, {
+      data: { projectId: "not-a-cuid-format" },
+      headers: { "Content-Type": "application/json" },
+    });
 
     expect(response.status()).toBe(400);
     const body = await response.json();
@@ -122,13 +137,14 @@ test.describe("export-pdf v1 API route", () => {
   // The cuid-shape guard is what keeps a malformed id out of the
   // ownership lookup, so this id is cuid-shaped too: it must fail as
   // "not found", not as a 400.
-  test("GET with a well-formed but unseeded projectId returns 404", async ({ page }) => {
+  test("POST with a well-formed but unseeded projectId returns 404", async ({ page }) => {
     await login(page);
     const before = await mockBrowserlessRequests();
 
-    const response = await page.request.get(
-      `${EXPORT_PDF_V1_URL}?projectId=${E2E_ABSENT_PROJECT_ID}`
-    );
+    const response = await page.request.post(EXPORT_PDF_V1_URL, {
+      data: { projectId: E2E_ABSENT_PROJECT_ID },
+      headers: { "Content-Type": "application/json" },
+    });
 
     expect(response.status()).toBe(404);
     const body = await response.json();
@@ -142,9 +158,10 @@ test.describe("export-pdf v1 API route", () => {
     await login(page);
     await setMockBrowserlessOutcome("outage");
 
-    const response = await page.request.get(
-      `${EXPORT_PDF_V1_URL}?projectId=${E2E_UPLOAD_PROJECT_ID}`
-    );
+    const response = await page.request.post(EXPORT_PDF_V1_URL, {
+      data: { projectId: E2E_UPLOAD_PROJECT_ID },
+      headers: { "Content-Type": "application/json" },
+    });
 
     // DIVERGENCE from the unversioned route, which propagates the
     // provider's status (its generic non-ok branch returns
@@ -156,6 +173,38 @@ test.describe("export-pdf v1 API route", () => {
     const body = await response.json();
     expect(body.code).toBe("invalid-request");
     expect(body.error).toBe("PDF generation failed");
+  });
+
+  // Issue #1101: the 403 (owned-by-another-user) branch was previously
+  // unreachable in a single-user seed (every project belongs to
+  // E2E_USER_ID). The second seeded user (`E2E_OTHER_USER_ID`, minted
+  // by `mock-supabase.ts` and persisted by `global-setup.ts`) owns no
+  // projects, so a POST against E2E_UPLOAD_PROJECT_ID under their
+  // session must hit `requireProjectOwnershipOrThrow` and surface as
+  // 403. The check fires BEFORE the daily-quota claim and BEFORE the
+  // Browserless fetch, so neither side-effect should be observable.
+  test("forbidden when another user owns the project returns 403 without calling the provider", async ({
+    page,
+  }) => {
+    await loginAs(page, E2E_OTHER_EMAIL, E2E_OTHER_PASSWORD);
+    const before = await mockBrowserlessRequests();
+
+    const response = await page.request.post(EXPORT_PDF_V1_URL, {
+      data: { projectId: E2E_UPLOAD_PROJECT_ID },
+      headers: { "Content-Type": "application/json" },
+    });
+
+    expect(response.status()).toBe(403);
+    expect(response.headers()["x-supabase-api-version"]).toBe("v1");
+    const body = await response.json();
+    expect(body.message).toContain("permission");
+    expect(body.code).toBeUndefined();
+
+    // Ownership was rejected before the token was minted and before
+    // the provider was called, so a 403 must not have cost a
+    // Browserless call (slicing by count delta — the log is
+    // process-wide and a former spec already drove the success path).
+    expect(await freshBrowserlessRequests(before)).toHaveLength(0);
   });
 
   // The daily-quota guard sits BEFORE the ownership lookup and before the
@@ -171,9 +220,10 @@ test.describe("export-pdf v1 API route", () => {
     const before = await mockBrowserlessRequests();
 
     const { status, apiVersion, body } = await withExportUsageAtLimit(async () => {
-      const response = await page.request.get(
-        `${EXPORT_PDF_V1_URL}?projectId=${E2E_UPLOAD_PROJECT_ID}`
-      );
+      const response = await page.request.post(EXPORT_PDF_V1_URL, {
+        data: { projectId: E2E_UPLOAD_PROJECT_ID },
+        headers: { "Content-Type": "application/json" },
+      });
       return {
         status: response.status(),
         apiVersion: response.headers()["x-supabase-api-version"],

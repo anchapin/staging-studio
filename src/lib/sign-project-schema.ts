@@ -46,11 +46,20 @@ const signatureDataUrlSchema = z
  * BOTH the API route and the `saveProjectSignature` server action.
  * `.strict()` rejects unknown keys, so only these client-controlled
  * values can ever be validated through this path.
+ *
+ * Issue #1113: `consentAttested` must be `true` — the legally-worded
+ * approval checkbox on the sign-off form is no longer decorative. The
+ * refine clause rejects `false`, missing, or non-boolean values so a
+ * client cannot burn a record to `Signed` without confirming they read
+ * and accepted the attestation.
  */
 export const signProjectPayloadSchema = z
   .object({
     projectId: projectIdSchema,
     signatureDataUrl: signatureDataUrlSchema,
+    consentAttested: z.literal(true, {
+      message: "Client must attest consent before signing.",
+    }),
   })
   .strict();
 

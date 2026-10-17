@@ -17,6 +17,7 @@ vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));
 
+import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import {
@@ -26,6 +27,7 @@ import {
 
 const MOCK_USER_ID = "cuser12345678901234567890";
 const MOCK_ROOM_ID = "croom12345678901234567890";
+const MOCK_PROJECT_ID = "cproj1234567890123456789";
 const mockUser = { id: MOCK_USER_ID, email: "test@example.com", name: "Test User" };
 
 const validGeneratedCopy = {
@@ -64,7 +66,7 @@ describe("room-copy actions", () => {
 
     it("saves copy and returns success for valid input", async () => {
       vi.mocked(prisma.room.findFirst).mockResolvedValue({ id: MOCK_ROOM_ID } as never);
-      vi.mocked(prisma.room.update).mockResolvedValue({ id: MOCK_ROOM_ID } as never);
+      vi.mocked(prisma.room.update).mockResolvedValue({ id: MOCK_ROOM_ID, projectId: MOCK_PROJECT_ID } as never);
 
       const result = await saveRoomCopy(MOCK_ROOM_ID, validGeneratedCopy);
 
@@ -77,7 +79,10 @@ describe("room-copy actions", () => {
           recommendation: "Declutter and stage",
           checklistItems: validGeneratedCopy.checklist,
         },
+        select: { projectId: true },
       });
+      // Issue #1225: the print page must be invalidated alongside the dashboard path.
+      expect(revalidatePath).toHaveBeenCalledWith(`/preview/${MOCK_PROJECT_ID}`);
     });
   });
 
@@ -100,7 +105,7 @@ describe("room-copy actions", () => {
 
     it("saves copy edits and returns success for valid input", async () => {
       vi.mocked(prisma.room.findFirst).mockResolvedValue({ id: MOCK_ROOM_ID } as never);
-      vi.mocked(prisma.room.update).mockResolvedValue({ id: MOCK_ROOM_ID } as never);
+      vi.mocked(prisma.room.update).mockResolvedValue({ id: MOCK_ROOM_ID, projectId: MOCK_PROJECT_ID } as never);
 
       const result = await saveRoomCopyEdits(MOCK_ROOM_ID, {
         observedChallenge: "Clutter",
@@ -122,7 +127,10 @@ describe("room-copy actions", () => {
             { item: "Remove personal items", category: "DIY/Declutter", priority: "High" },
           ],
         },
+        select: { projectId: true },
       });
+      // Issue #1225: the print page must be invalidated alongside the dashboard path.
+      expect(revalidatePath).toHaveBeenCalledWith(`/preview/${MOCK_PROJECT_ID}`);
     });
   });
 });

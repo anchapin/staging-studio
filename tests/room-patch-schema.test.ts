@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { roomPatchSchema } from "@/lib/room-patch-schema";
 
@@ -95,6 +95,55 @@ describe("roomPatchSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  // Issue #1112: loopback URL acceptance is gated on E2E_HERMETIC=1.
+  // In the production config (flag unset, the default for this test
+  // suite), the schema MUST reject http://127.0.0.1 and http://localhost
+  // URLs — otherwise an authenticated project owner could PATCH a
+  // loopback URL onto `Room.afterImageUrl` and the next/image optimizer
+  // would fetch the app's own loopback (SSRF surface). The `mock` host
+  // is unrelated to this gate (issue #413) and still accepts below.
+  it("rejects http://127.0.0.1 URLs in the production config (no E2E_HERMETIC)", () => {
+    const result = roomPatchSchema.safeParse({
+      ...validBody,
+      afterImageUrl: "http://127.0.0.1:1234/probe.png",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].message).toMatch(
+        /Image URL must be https/
+      );
+    }
+  });
+
+  it("rejects http://localhost URLs in the production config (no E2E_HERMETIC)", () => {
+    const result = roomPatchSchema.safeParse({
+      ...validBody,
+      beforeImageUrl: "http://localhost:5678/probe.png",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].message).toMatch(
+        /Image URL must be https/
+      );
+    }
+  });
+
+  it("rejects loopback URLs with non-loopback http hosts in the production config", () => {
+    // Even with no port, the http scheme hits the same rejection branch.
+    expect(
+      roomPatchSchema.safeParse({
+        ...validBody,
+        beforeImageUrl: "http://127.0.0.1/foo.png",
+      }).success
+    ).toBe(false);
+    expect(
+      roomPatchSchema.safeParse({
+        ...validBody,
+        afterImageUrl: "http://localhost/foo.png",
+      }).success
+    ).toBe(false);
+  });
+
   it("rejects selectedVariantIndex: -1 and non-integers", () => {
     expect(roomPatchSchema.safeParse({ ...validBody, selectedVariantIndex: -1 }).success).toBe(false);
     expect(roomPatchSchema.safeParse({ ...validBody, selectedVariantIndex: 1.5 }).success).toBe(false);
@@ -102,6 +151,66 @@ describe("roomPatchSchema", () => {
 
   it("rejects unknown fields (strict object)", () => {
     const result = roomPatchSchema.safeParse({ ...validBody, sneaky: true });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("roomPatchSchema under E2E_HERMETIC=1 (issue #1112)", () => {
+  // The schema reads `process.env.E2E_HERMETIC` at module-load time and
+  // freezes the resulting gate, so the only way to test the loopback
+  // *acceptance* branch is to set the env, reset the module cache, and
+  // re-import. Keep this block narrow — it's a single configuration
+  // exercise, not a fresh test of every URL shape (covered above and in
+  // the predicate's own tests).
+  const originalEnv = process.env.E2E_HERMETIC;
+
+  afterEach(() => {
+    if (originalEnv === undefined) {
+      delete process.env.E2E_HERMETIC;
+    } else {
+      process.env.E2E_HERMETIC = originalEnv;
+    }
+    vi.resetModules();
+  });
+
+  it("accepts http://127.0.0.1 with a non-default port when E2E_HERMETIC=1", async () => {
+    process.env.E2E_HERMETIC = "1";
+    vi.resetModules();
+    const { roomPatchSchema: hermeticSchema } = await import(
+      "@/lib/room-patch-schema"
+    );
+    const result = hermeticSchema.safeParse({
+      ...validBody,
+      afterImageUrl: "http://127.0.0.1:1234/probe.png",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts http://localhost with a non-default port when E2E_HERMETIC=1", async () => {
+    process.env.E2E_HERMETIC = "1";
+    vi.resetModules();
+    const { roomPatchSchema: hermeticSchema } = await import(
+      "@/lib/room-patch-schema"
+    );
+    const result = hermeticSchema.safeParse({
+      ...validBody,
+      beforeImageUrl: "http://localhost:5678/probe.png",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("does NOT widen to other http hosts even when E2E_HERMETIC=1 (loopback-only)", async () => {
+    process.env.E2E_HERMETIC = "1";
+    vi.resetModules();
+    const { roomPatchSchema: hermeticSchema } = await import(
+      "@/lib/room-patch-schema"
+    );
+    // http://example.com is neither supabase/fal nor a loopback host —
+    // the gate is loopback-specific, not a wholesale http allowance.
+    const result = hermeticSchema.safeParse({
+      ...validBody,
+      afterImageUrl: "http://example.com/probe.png",
+    });
     expect(result.success).toBe(false);
   });
 });

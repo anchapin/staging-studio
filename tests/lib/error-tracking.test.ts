@@ -39,7 +39,7 @@ describe("trackError (issue #1061)", () => {
           path: ["x"],
           message: "expected number",
           expected: "number",
-          received: "undefined",
+          input: undefined,
         },
       ]);
       trackError(zodError, {});

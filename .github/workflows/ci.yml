@@ -13,6 +13,17 @@ on:
     branches:
       - develop
       - main
+    # Issue #1104: markdown-only commits (docs, ops notes, spike writeups,
+    # handoff notes) don't touch the browser surface, the image build, or
+    # the lint/typecheck/test surface in a way fast-checks wouldn't already
+    # have caught when the change first landed. Skipping the whole run for
+    # those saves ~3min of hosted runner time per push during docs-heavy
+    # periods. `paths-ignore` MUST live here at the trigger level — it is
+    # NOT a valid job-level key, and placing it inside `e2e:` is a workflow
+    # schema error that causes GitHub to reject the entire file (which is
+    # why CI has been failing since PR #1313 first placed it there).
+    paths-ignore:
+      - '**.md'
   pull_request:
     types:
       - opened
@@ -35,7 +46,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies
@@ -49,3 +60,192 @@ jobs:
 
       - name: Unit tests (vitest)
         run: npm test
+
+  # Browser suite (Playwright). A sibling of fast-checks, not part of it.
+  #
+  # `fast-checks` covers lint + typecheck + vitest, which is what branch
+  # protection requires — but it cannot see anything that only exists in a
+  # real browser against a real server. That gap is not hypothetical: the
+  # `/api/v1/export-pdf` 429 branch was missing from this suite entirely,
+  # and a header rename that had already shipped to main
+  # (`API-Version` → `X-Supabase-API-Version`) was caught by this suite
+  # while `develop` was still stale — vitest was green throughout.
+  #
+  # Scoped to `push` on the long-lived branches ON PURPOSE. The suite is
+  # hermetic but not cheap: it builds the app, starts Postgres in Docker,
+  # and runs 62 specs on a single worker (workers: 1 is required — the mock
+  # Browserless's request log is process-wide).
+  #
+  # Push is not a compromise between "on PRs" and "on branches" here, it is
+  # the only scope that would ever fire: `develop` is UNPROTECTED and
+  # ordinary work is pushed to it directly. PRs exist only for the
+  # develop→main release. A `pull_request`-scoped e2e job would therefore
+  # run once per release and never for the work it is meant to cover.
+  # Charging that to every PR push buys little either way, because a PR's
+  # commits are what land on develop, and this job fires on that push.
+  # The regression is caught at the branch tip instead of before merge.
+  #
+  # Consequences of push-only, stated so nobody is surprised:
+  #   - A red e2e run does NOT block the merge that caused it. It reports
+  #     on the branch, and fixing it is a follow-up commit.
+  #   - It therefore cannot be a required check (a required check must
+  #     report on the PR). Do not add it to branch protection unless the
+  #     `if` is widened to cover pull_request.
+  #   - `main` gets its own run on release, so a release-merge regression
+  #     is visible in the same place a production deploy is.
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    # The markdown-only filter lives on `on.push.paths-ignore` (above),
+    # not here — `paths-ignore` is not a valid job-level key and placing
+    # it here is the schema error GitHub was rejecting the whole file
+    # with since PR #1313. See issue #1104.
+    timeout-minutes: 30
+    # The hermetic harness asserts `process.env.DATABASE_URL` in
+    # `tests/e2e/global-setup.ts:353` (defensive guard from issue #1102).
+    # Without this env block the assertion rejects the unset value and
+    # the suite fails before the first spec — every develop-branch push
+    # has been red since at least 2026-10-15 for this reason. The
+    # hardcoded `DATABASE_URL` constant in `tests/e2e/env.ts:198` already
+    # points at this same ephemeral URL; surfacing it here just makes it
+    # visible to `process.env` at job time. The container is brought up
+    # by `ensureDockerPostgres()` in the same global-setup script.
+    env:
+      DATABASE_URL: postgresql://e2e:e2e@127.0.0.1:39921/staging_studio_e2e
+    # Measured on a clean checkout with no env files (the closest thing to
+    # this runner available locally): `npm ci` ~20s, then ~4min for the
+    # production build inside the webServer plus all 62 specs. The 30min
+    # ceiling is deliberately slack rather than fitted — a cold runner with
+    # an empty browser cache is slower, and Playwright's own 90s per-test
+    # and 420s webServer timeouts already bound real hangs. This only stops
+    # a wedged job from holding a runner for hours.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      # Docker is preinstalled on ubuntu-latest, which is all the harness
+      # needs: it runs a disposable postgres:16-alpine and serves a local
+      # mock Supabase (GoTrue + Storage) and mock Browserless. No secrets
+      # and no paid provider are involved, so this job needs no
+      # environment: block and cannot leak one.
+      - name: Install dependencies
+        run: npm ci
+
+      # Keyed on the lockfile rather than the @playwright/test version
+      # alone: a Playwright upgrade also moves the bundled browser build,
+      # and a stale cached browser fails at launch with a far less obvious
+      # error than "out of date".
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: E2E tests (Playwright)
+        run: npm run e2e
+
+      # The HTML report and traces are the only real diagnostic for a
+      # browser failure, and both paths are gitignored — they exist solely
+      # in the runner, so without this they are discarded on job teardown.
+      - name: Upload Playwright report and traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_id }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # Container build (issue #1157).
+  #
+  # The Dockerfile is a deploy path nothing else in this repo exercises —
+  # Vercel builds from source — and it stayed broken for the life of the
+  # project: it copied a `public/` that does not exist (so `docker build`
+  # failed outright) and the runner stage shipped no `node_modules`, so
+  # `npx next start` resolved no local binary and downloaded a floating
+  # `next` from the registry at container boot. Nothing in vitest or
+  # Playwright can see either defect, because neither runs the image —
+  # `tests/dockerfile.test.ts` pins the *file*, this job proves the *image*.
+  #
+  # Runs on pushes and PRs (no `if`), because the rot it prevents is
+  # invisible until someone needs the image. Cheap next to `e2e`: no
+  # Postgres, no browser, no host `npm ci` — the build installs its own
+  # dependencies inside the image.
+  docker-image:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Docker is preinstalled on ubuntu-latest; no other setup is needed.
+      - name: Build the image
+        run: docker build -t staging-studio:ci .
+
+      # The build alone only proves the Dockerfile ASSEMBLES. This proves the
+      # runner is self-sufficient, which is the other half of #1157: with no
+      # local `next`, `npx` would have silently pulled one and served a
+      # version unrelated to the 16.3.5 that produced `.next/`.
+      - name: The runner resolves a local next binary
+        run: docker run --rm --entrypoint ./node_modules/.bin/next staging-studio:ci --version
+
+      # ...and that it actually STARTS. `docker compose up` could never work
+      # before, so a boot-and-serve check is the acceptance that matters.
+      # Env values are dummies: /login renders with no reachable Supabase or
+      # Postgres, and nothing here talks to a paid provider.
+      - name: The image boots and serves a page
+        run: |
+          docker run -d --name staging-studio-ci -p 3000:3000 \
+            -e NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:39911 \
+            -e NEXT_PUBLIC_SUPABASE_ANON_KEY=ci-anon-key \
+            -e DATABASE_URL=postgresql://ci:ci@127.0.0.1:5432/ci \
+            staging-studio:ci
+          for _ in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://127.0.0.1:3000/login; then
+              echo "container served /login"
+              docker rm -f staging-studio-ci
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "container never served /login"
+          docker logs staging-studio-ci
+          docker rm -f staging-studio-ci
+          exit 1
+
+  # Release guard: only fires on PRs that target main, i.e. release PRs.
+  #
+  # A commit that reaches main without reaching develop leaves develop
+  # self-consistent but stale, and that only shows up as test failures at
+  # merge time. This catches it while the release PR is still open, where
+  # the fix (back-merge main into develop) is cheap. Scoped to
+  # `base_ref == 'main'` so ordinary PRs pay nothing for it.
+  release-guard:
+    name: Release guard (develop caught up with main)
+    runs-on: ubuntu-latest
+    if: github.base_ref == 'main'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The ancestor check needs real history, not a shallow clone.
+          fetch-depth: 0
+
+      - name: Fail if the head lacks non-merge commits on main
+        run: scripts/check-develop-catchup.sh "origin/${{ github.base_ref }}" "${{ github.event.pull_request.head.sha }}"

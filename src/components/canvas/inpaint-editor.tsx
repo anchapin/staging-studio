@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
-import { useAutoSaveStatus } from "@/lib/autosave-controller";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { DEFAULT_MASK_EXPANSION_RADIUS } from "@/lib/mask-dilation";
 import {
   useCollapsiblePanel,
@@ -19,6 +18,7 @@ import { isOperationModeAvailable } from "@/lib/operation-mode-availability";
 import FocusRestorePill from "./focus-restore-pill";
 import EditorCanvasPane from "./editor-canvas-pane";
 import ZenToolRail from "./zen-tool-rail";
+import ZenFirstVisitHint from "./zen-first-visit-hint";
 import { useEditorTabs } from "./use-editor-tabs";
 import { useImageDimensions } from "./use-image-dimensions";
 import { useZenWorkspace } from "./use-zen-workspace";
@@ -31,6 +31,9 @@ import { useInpaintRuns } from "./use-inpaint-runs";
 import { type GeneratedVariation } from "./generated-variation-grid";
 import type { InpaintEditorProps } from "./inpaint-editor-props";
 import VersionHistoryPills from "./version-history-pills";
+import ExitToProjectButton from "./exit-to-project-button";
+import { confirmLeaveEditorInBrowser } from "@/lib/editor-leave";
+import { parseSeedOrUndefined } from "@/lib/finetune-wire";
 
 export default function InpaintEditor({
   roomId,
@@ -53,6 +56,9 @@ export default function InpaintEditor({
   directivesValue,
   currentResultUrl,
   projectName,
+  onExitToProject,
+  onProcessingChange,
+  saveStatus = "idle",
 }: InpaintEditorProps) {
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
   // Natural-dimension tracking for the base photo (issue #691 hook).
@@ -65,14 +71,26 @@ export default function InpaintEditor({
   // shadows cast by objects are swallowed by the regenerated region.
   const [includeFloorShadow, setIncludeFloorShadow] = useState(false);
 
-  // Issue #558: AI guidance controls for inpaint runs
-  const [promptStrength, setPromptStrength] = useState(0.8);
-  // maskBlur, creativeMode, lockSeed: controlled by the new operation-mode tabs in issue #629.
-  // The setters are unused (no UI for these in the Manual paint panel any more).
-  const [maskBlur] = useState(5);
-  const [creativeMode] = useState(false);
-  const [lockSeed] = useState(false);
-  const [seed, setSeed] = useState<number | undefined>(undefined);
+  // Issue #1362b (Stage B): AI guidance controls for inpaint runs.
+  // The legacy `promptStrength` (issue #558) is the LOCAL UX name for
+  // the Inpaint Operation Mode tabs' "Inpaint strength" slider — a
+  // 0..1 float in the legacy editor (vs the FineTune UI's 0..100
+  // int, mapped via `clamp((s ?? 50) / 100, 0, 1)` in the project
+  // route's `editRoomGuidance` memo). The wire shape was renamed
+  // `strength` in #1362b but the local variable name is preserved so
+  // `<ManualTabPanel>`'s prop surface (still named `promptStrength` in
+  // its interface, since this is the legacy non-redesign editor)
+  // stays typed. The default 0.5 matches DashScope's wire default.
+  // `maskBlur` / `creativeMode` / `lockSeed` were removed in the
+  // same stage (no surviving UI control after #1362a's adherence +
+  // shadows removal).
+  const [promptStrength, setPromptStrength] = useState(0.5);
+  // `seed` is the FineTune UI input — a digits-only string the user
+  // types. The route's `editRoomGuidance` memo parses it via
+  // `parseSeedOrUndefined` before forwarding to the provider. The
+  // legacy editor's `submitHolisticRun` accepts `number | undefined`,
+  // so the wire call site parses here.
+  const [seed, setSeed] = useState<string>("");
 
   // Issue #629: Inpaint Operation Mode — secondary tab strip inside Manual paint panel.
   // Issue #692: only Inpaint Zone is wired; the other tabs render disabled with a
@@ -201,20 +219,19 @@ export default function InpaintEditor({
 
   // Inpaint runs (issue #691 extraction): status-hook wiring, the shared
   // submit path, and the per-object batch runner live in use-inpaint-runs.ts.
-  // Issue #558 guidance memo: keeps the hook's callback identity stable
-  // across renders that don't touch the guidance params.
+  // Issue #1362b guidance memo: keeps the hook's callback identity
+  // stable across renders that don't touch the guidance params.
+  // `strength` (renamed from `promptStrength` at the wire) + `seed`
+  // are the only surviving fields; `maskBlur` / `creativeMode` /
+  // `lockSeed` were removed. The hook expects a `number |
+  // undefined` seed, so we parse the FineTune string here.
   const runGuidance = useMemo(
     () => ({
-      promptStrength,
-      maskBlur,
-      seed,
-      creativeMode,
-      lockSeed,
+      strength: promptStrength,
+      seed: parseSeedOrUndefined(seed),
     }),
-    [promptStrength, maskBlur, seed, creativeMode, lockSeed]
+    [promptStrength, seed]
   );
-  const saveStatus = useAutoSaveStatus(roomId);
-
   const {
     isProcessing,
     statusText,
@@ -244,6 +261,22 @@ export default function InpaintEditor({
     setBatchSelections,
     setSelectedInstanceIndices,
   });
+
+  // Issue #1188: let the page guard its own exits (header breadcrumb,
+  // "All rooms") while a run is in flight.
+  useEffect(() => {
+    onProcessingChange?.(isProcessing);
+  }, [isProcessing, onProcessingChange]);
+
+  // Issue #1188: Zen/Focus exit to the project overview. Flushes pending
+  // directive edits and confirms before dropping an in-flight run.
+  const handleExitToProject = useCallback(() => {
+    if (!onExitToProject) return;
+    if (!confirmLeaveEditorInBrowser(isProcessing)) return;
+    setZenMode(false);
+    setFocusMode(false);
+    onExitToProject();
+  }, [onExitToProject, isProcessing, setZenMode, setFocusMode]);
 
   // Issue #560/#588/#617/#638 workspace keyboard shortcuts (Z / Escape /
   // backtick / Cmd+B / F) — the listener lives in use-workspace-shortcuts.
@@ -283,12 +316,21 @@ export default function InpaintEditor({
   // mask + aesthetic-derived directives; this just forwards them into
   // the shared run launcher. The one-click preset (issue #191) reuses
   // the same shape and launcher.
-  // Issue #846: submitHolisticRun encapsulates the beginInpaintRun call.
+  // Issue #846 / #1362b: submitHolisticRun encapsulates the
+  // beginInpaintRun call. The legacy guidance fields (`maskBlur`,
+  // `creativeMode`, `lockSeed`) were removed in #1362b — only
+  // `strength` + `seed` are forwarded. The FineTune UI keeps
+  // `seed` as a digits-only string; `submitHolisticRun` accepts
+  // `number | undefined`, so we parse here.
   const handleHolisticRun = useCallback(
     (run: { maskDataUrl: string; promptDirectives: string; negativePrompt: string }) => {
-      submitHolisticRun({ ...run, promptStrength, maskBlur, seed, creativeMode, lockSeed });
+      submitHolisticRun({
+        ...run,
+        strength: promptStrength,
+        seed: parseSeedOrUndefined(seed),
+      });
     },
-    [submitHolisticRun, promptStrength, maskBlur, seed, creativeMode, lockSeed]
+    [submitHolisticRun, promptStrength, seed]
   );
 
   // Issue #252 D5: control-panel tab state (issue #691 hook) — purely
@@ -345,6 +387,7 @@ export default function InpaintEditor({
           projectName={projectName}
           roomName={roomName}
           onRestore={() => setFocusMode(false)}
+          onExitToProject={onExitToProject ? handleExitToProject : undefined}
         />
       )}
       {/* ---- LEFT PANE: room imagery (optional slot) + mask canvas ------ */}
@@ -474,6 +517,15 @@ export default function InpaintEditor({
       {/* Issue #616: Floating glassmorphic canvas tool rail — left-anchored
           stack (1.5rem from viewport edges) with the tool strip, brush
           parameter flyout, and zoom HUD. Shown when Zen Mode is active. */}
+      {/* Issue #1188: Zen Mode hides the page header, so keep a way back to
+          the project overview at the top-right (the tool rail owns the
+          top-left corner). */}
+      {zenMode && onExitToProject && (
+        <div className="fixed right-6 top-6 z-50">
+          <ExitToProjectButton onClick={handleExitToProject} />
+        </div>
+      )}
+      {zenMode && <ZenFirstVisitHint />}
       {zenMode && (
         <ZenToolRail
           studioActiveTool={studioActiveTool}

@@ -11,15 +11,18 @@ import {
   requireProjectOwnershipOrThrow,
 } from "@/lib/api-auth";
 import { buildDeprecationHeaders } from "@/lib/api-version";
-import { PREVIEW_TOKEN_QUERY_PARAM, signPreviewToken } from "@/lib/preview-token";
+import {
+  PREVIEW_CAPTURE_QUERY_PARAM,
+  PREVIEW_CAPTURE_QUERY_VALUE,
+  PREVIEW_TOKEN_QUERY_PARAM,
+  signPreviewToken,
+} from "@/lib/preview-token";
 import { classifyIntegrationError } from "@/lib/error-classify";
 import {
   DEFAULT_DAILY_EXPORT_LIMIT,
   DAILY_LIMIT_ENV_VAR,
   dailyQuotaExceededPayload,
-  evaluateDailyQuota,
-  getDailyUsage,
-  recordDailyUsage,
+  claimDailyQuota,
   resolveDailyLimit,
 } from "@/lib/api-quota";
 import {
@@ -85,35 +88,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Issue #201: daily per-user Browserless cost guardrail, checked before
-    // any validation work. Usage lives in the in-process daily counter
-    // (lib/api-quota.ts), which resets on cold start; that under-count
-    // limitation is documented there.
+    // Issue #201: daily per-user Browserless cost guardrail. Usage lives in
+    // the `DailyApiUsage` Postgres table, so it survives serverless cold
+    // starts and multi-instance traffic splitting (issues #784, #1131).
+    // #1132: the unit is claimed ATOMICALLY just before the render (below),
+    // not gate-read up front — the old check-then-charge let a concurrent
+    // burst all read the same pre-spend count and overshoot the cap. A user
+    // at their cap still never reaches the paid renderer.
     const exportLimit = resolveDailyLimit(
       process.env[DAILY_LIMIT_ENV_VAR.export],
       DEFAULT_DAILY_EXPORT_LIMIT
     );
-    const exportQuota = evaluateDailyQuota(
-      await getDailyUsage("export", user.id),
-      exportLimit
-    );
-    if (!exportQuota.allowed) {
-      console.warn(
-        JSON.stringify({
-          event: "export_pdf_daily_quota_exceeded",
-          userId: user.id,
-          used: exportQuota.used,
-          limit: exportQuota.limit,
-        })
-      );
-      return NextResponse.json(
-        {
-          ...dailyQuotaExceededPayload(exportQuota, "Please try again tomorrow."),
-          code: API_ERROR_RATE_LIMIT_EXCEEDED,
-        },
-        { status: 429 }
-      );
-    }
 
     // 2. Shape-validate projectId BEFORE it is interpolated into the
     //    preview URL handed to an external service.
@@ -190,11 +175,41 @@ export async function POST(req: NextRequest) {
     //    Browserless queueing delays that can exceed the default 5-minute TTL
     //    (issue #1036).
     const token = await signPreviewToken(projectId, 15 * 60);
-    const previewUrl = `${appUrl}/preview/${projectId}?${PREVIEW_TOKEN_QUERY_PARAM}=${encodeURIComponent(token)}`;
+    // Issue #1222: the capture path marks itself so the print CSS can keep
+    // this render full-bleed (@page margin 0, matching the zero margins in
+    // buildBrowserlessPdfBody) while a human printing the preview from a
+    // browser gets the --print-margin safe area. The param is additive to
+    // the signed token and changes nothing about preview access.
+    const previewUrl = `${appUrl}/preview/${projectId}?${PREVIEW_TOKEN_QUERY_PARAM}=${encodeURIComponent(token)}&${PREVIEW_CAPTURE_QUERY_PARAM}=${PREVIEW_CAPTURE_QUERY_VALUE}`;
 
     // 6. Credential rides in a header (Basic auth, `apiKey:`), never the
     //    query string; bounded by an AbortController so a hung Browserless
     //    call cannot hold the request open forever.
+    // Issue #201/#1132: claim one export unit ATOMICALLY here, on the
+    // eve of the Browserless call. The conditional increment (UPDATE ...
+    // WHERE count <= limit - N) is serialized by Postgres, so a
+    // concurrent burst can no longer all read the same pre-spend count
+    // and all reach the paid renderer; losers get 429 with the same
+    // payload shape as before.
+    const exportClaim = await claimDailyQuota("export", user.id, exportLimit);
+    if (!exportClaim.claimed) {
+      console.warn(
+        JSON.stringify({
+          event: "export_pdf_daily_quota_exceeded",
+          userId: user.id,
+          used: exportClaim.used,
+          limit: exportClaim.limit,
+        })
+      );
+      return NextResponse.json(
+        {
+          ...dailyQuotaExceededPayload(exportClaim, "Please try again tomorrow."),
+          code: API_ERROR_RATE_LIMIT_EXCEEDED,
+        },
+        { status: 429 }
+      );
+    }
+
     const controller = new AbortController();
     const timeoutId = setTimeout(
       () => controller.abort(),
@@ -229,6 +244,10 @@ export async function POST(req: NextRequest) {
     }
 
     if (!chromeResponse.ok) {
+    // Issue #1124: the unit stays claimed. This failed render still
+    // consumed Browserless compute, and the retryable response below
+    // invites retries, so the daily cap must bound dispatches, not
+    // just successes.
       const errorText = await chromeResponse.text();
       console.error(
         JSON.stringify({
@@ -285,6 +304,9 @@ export async function POST(req: NextRequest) {
       !contentType.includes("application/pdf") ||
       leadingBytes !== "%PDF"
     ) {
+    // Issue #1124: the unit stays claimed. An HTML error page that
+    // slipped through with a 200 consumed Browserless compute and
+    // counts against the user's daily cap.
       console.error(
         JSON.stringify({
           event: "export_pdf_non_pdf_response",
@@ -304,10 +326,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Count the billable export only once a verified PDF is about to be
-    // delivered: Browserless errors and non-PDF payloads do not count
-    // against the user's daily cap.
-    await recordDailyUsage("export", user.id);
+    // No charge is written here: the unit was claimed atomically before
+    // the render (issue #1132) and stays claimed on every post-dispatch
+    // outcome (issue #1124): failed renders consumed Browserless compute
+    // and count toward the user's daily cap.
 
     return new NextResponse(pdfBuffer, {
       status: 200,
@@ -317,6 +339,9 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error) {
+    // Issue #1124: a dispatch that dies here (timeout abort, network
+    // error) keeps its claim; it consumed or attempted Browserless
+    // compute and counts toward the user's daily cap.
     console.error(
       JSON.stringify({
         event: "export_pdf_failed",

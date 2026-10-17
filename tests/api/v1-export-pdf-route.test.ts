@@ -42,6 +42,8 @@ const { MockProjectNotFoundError, MockProjectForbiddenError } = vi.hoisted(() =>
 const mockProjectFindUnique = vi.hoisted(() => vi.fn());
 const mockDailyApiUsageUpsert = vi.hoisted(() => vi.fn());
 const mockDailyApiUsageFindUnique = vi.hoisted(() => vi.fn());
+const mockDailyApiUsageUpdateMany = vi.hoisted(() => vi.fn());
+const mockDailyApiUsageCreate = vi.hoisted(() => vi.fn());
 const mockSignPreviewToken = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/api-auth", () => ({
@@ -54,7 +56,7 @@ vi.mock("@/lib/api-auth", () => ({
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     project: { findUnique: mockProjectFindUnique },
-    dailyApiUsage: { upsert: mockDailyApiUsageUpsert, findUnique: mockDailyApiUsageFindUnique },
+    dailyApiUsage: { upsert: mockDailyApiUsageUpsert, findUnique: mockDailyApiUsageFindUnique, updateMany: mockDailyApiUsageUpdateMany, create: mockDailyApiUsageCreate },
   },
 }));
 
@@ -73,7 +75,7 @@ vi.mock("@/lib/browserless", () => ({
 }));
 
 // We need to import after mocking
-import { GET } from "@/app/api/v1/export-pdf/route";
+import { POST } from "@/app/api/v1/export-pdf/route";
 
 const USER_ID = "user-1";
 // Exactly 25 chars: c + 24 lowercase alphanumerics (matches PROJECT_ID_PATTERN /^c[a-z0-9]{24}$/)
@@ -94,6 +96,8 @@ const ORIGINAL_ENV = { ...process.env };
     mockProjectFindUnique.mockResolvedValue({ id: PROJECT_ID, userId: USER_ID });
     mockDailyApiUsageUpsert.mockResolvedValue({});
     mockDailyApiUsageFindUnique.mockResolvedValue({ count: 0 });
+    mockDailyApiUsageUpdateMany.mockResolvedValue({ count: 1 });
+    mockDailyApiUsageCreate.mockResolvedValue({ count: 1 });
     mockSignPreviewToken.mockResolvedValue("test-preview-token");
 
     // Default: the resolver hands back the real endpoint. The hermetic-seam
@@ -116,16 +120,29 @@ const ORIGINAL_ENV = { ...process.env };
 });
 
 function callExportRoute(projectId?: string): Promise<Response> {
-  const url = projectId
-    ? `http://localhost/api/v1/export-pdf?projectId=${projectId}`
-    : "http://localhost/api/v1/export-pdf";
-  const request = new Request(url, {
-    method: "GET",
+  const request = new Request("http://localhost/api/v1/export-pdf", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: projectId ? JSON.stringify({ projectId }) : JSON.stringify({}),
   });
-  return GET(request as unknown as NextRequest);
+  return POST(request as unknown as NextRequest);
 }
 
-describe("GET /api/v1/export-pdf — projectId validation", () => {
+/**
+ * Build a POST whose `body` is the raw string (not JSON.stringify'd) so the
+ * route exercises `req.json()` parse failures. Issue #1109: a malformed
+ * upload must answer 400, not 500.
+ */
+function callExportRouteWithRawBody(rawBody: string): Promise<Response> {
+  const request = new Request("http://localhost/api/v1/export-pdf", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: rawBody,
+  });
+  return POST(request as unknown as NextRequest);
+}
+
+describe("POST /api/v1/export-pdf — projectId validation", () => {
   it("returns 400 when projectId is missing", async () => {
     const response = await callExportRoute();
     expect(response.status).toBe(400);
@@ -154,7 +171,36 @@ describe("GET /api/v1/export-pdf — projectId validation", () => {
   });
 });
 
-describe("GET /api/v1/export-pdf — auth", () => {
+/**
+ * Issue #1109: a malformed request body must answer 400 (client-side
+ * mistake), not 500 (server error). Pinned for `/api/v1/export-pdf` only
+ * — the unversioned route still throws to the catch-all by design, so
+ * don't mirror this block there.
+ */
+describe("POST /api/v1/export-pdf — payload validation (issue #1109)", () => {
+  it("returns 400 when the body is not valid JSON", async () => {
+    const response = await callExportRouteWithRawBody("{not json");
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.code).toBe("invalid-request");
+  });
+
+  it("returns 400 when the body is a JSON array, not an object", async () => {
+    const response = await callExportRouteWithRawBody(JSON.stringify([1, 2, 3]));
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.code).toBe("invalid-request");
+  });
+
+  it("returns 400 when the body is a JSON null", async () => {
+    const response = await callExportRouteWithRawBody("null");
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.code).toBe("invalid-request");
+  });
+});
+
+describe("POST /api/v1/export-pdf — auth", () => {
   it("returns 401 when user is not authenticated", async () => {
     mockGetAuthedPrismaUser.mockResolvedValue(null);
 
@@ -165,7 +211,7 @@ describe("GET /api/v1/export-pdf — auth", () => {
   });
 });
 
-describe("GET /api/v1/export-pdf — ownership", () => {
+describe("POST /api/v1/export-pdf — ownership", () => {
   it("returns 404 when project does not exist", async () => {
     mockRequireProjectOwnershipOrThrow.mockRejectedValue(new MockProjectNotFoundError(PROJECT_ID));
 
@@ -185,7 +231,7 @@ describe("GET /api/v1/export-pdf — ownership", () => {
   });
 });
 
-describe("GET /api/v1/export-pdf — response headers", () => {
+describe("POST /api/v1/export-pdf — response headers", () => {
   it("includes X-Supabase-API-Version header in response", async () => {
     const response = await callExportRoute(PROJECT_ID);
     expect(response.status).toBe(200);
@@ -198,8 +244,12 @@ describe("GET /api/v1/export-pdf — response headers", () => {
  * directly, so it had no hermetic seam and no e2e spec could drive the real
  * handler. These pin that it now resolves through `resolveBrowserlessPdfUrl`
  * — the same gate the unversioned `/api/export-pdf` route uses.
+ *
+ * Issue #1158: the route was converted from GET (query param) to POST (JSON
+ * body) to close the cross-site GET navigation attack vector. These tests
+ * reflect the POST interface.
  */
-describe("GET /api/v1/export-pdf — hermetic Browserless endpoint seam", () => {
+describe("POST /api/v1/export-pdf — hermetic Browserless endpoint seam", () => {
   const MOCK_ENDPOINT = "http://127.0.0.1:8899/pdf";
 
   function mockPdfResponseForAnyUrl() {
@@ -259,5 +309,46 @@ describe("GET /api/v1/export-pdf — hermetic Browserless endpoint seam", () => 
     expect(init.headers).toMatchObject({
       Authorization: `Basic ${Buffer.from("test-browserless-key:").toString("base64")}`,
     });
+  });
+});
+
+/**
+ * Issue #1124: the unit claimed before the dispatch (issue #1132) stays
+ * claimed when the render fails — Browserless compute was consumed and the
+ * failure response is retryable, so the daily cap bounds failing dispatches.
+ */
+describe("POST /api/v1/export-pdf — failed exports consume quota (issue #1124)", () => {
+  it("keeps the claim when the render fails (no refund after dispatch)", async () => {
+    let counter = 0;
+    const increments: number[] = [];
+    const decrements: number[] = [];
+    mockDailyApiUsageUpdateMany.mockImplementation(
+      async (
+        args: {
+          where?: { count?: { lte?: number } };
+          data?: { count?: { increment?: number; decrement?: number } };
+        }
+      ) => {
+        if (args?.data?.count?.increment !== undefined) {
+          increments.push(args.data.count.increment);
+          counter += args.data.count.increment;
+          return { count: 1 };
+        }
+        if (args?.data?.count?.decrement !== undefined) {
+          // A decrement here means a refund call site sneaked back in.
+          decrements.push(args.data.count.decrement);
+          return { count: 1 };
+        }
+        return { count: 0 };
+      }
+    );
+    mockDailyApiUsageFindUnique.mockImplementation(async () => ({ count: counter }));
+    fetchBrowserlessPdfWithCircuitBreaker.mockRejectedValue(new Error("network down"));
+
+    const response = await callExportRoute(PROJECT_ID);
+
+    expect(response.status).toBeGreaterThanOrEqual(500);
+    expect(increments).toEqual([1]);
+    expect(decrements).toEqual([]);
   });
 });

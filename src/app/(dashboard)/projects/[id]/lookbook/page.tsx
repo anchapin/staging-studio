@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
+import { decryptSignature } from "@/lib/signature-encryption";
 import type { PreviewProject } from "@/app/(print)/preview/[id]/lookbook-preview-view";
 
 import { LookbookEditor } from "./lookbook-editor";
@@ -38,6 +39,9 @@ const getOwnedLookbookProject = cache(async (projectId: string) => {
       clientSignature: true,
       clientSignatureStatus: true,
       clientSignatureTimestamp: true,
+      // Issue #1186: disclosure toggle for AI after-images in the
+      // lookbook preview/edit page.
+      virtuallyStagedLabelEnabled: true,
       user: {
         select: {
           firmName: true,
@@ -47,7 +51,25 @@ const getOwnedLookbookProject = cache(async (projectId: string) => {
           signoffContent: true,
         },
       },
-      rooms: true,
+      rooms: {
+        select: {
+          id: true,
+          name: true,
+          beforeImageUrl: true,
+          afterImageUrl: true,
+          beforeImageUrl2: true,
+          afterImageUrl2: true,
+          selectedVariantIndex: true,
+          observedChallenge: true,
+          recommendation: true,
+          buyerPsychology: true,
+          checklistItems: true,
+          // Issue #1343 — listing-copy columns (CopyPanel). Pinned by
+          // the new e2e branch in `tests/e2e/specs/lookbook-edit.spec.ts`.
+          lookbookHeadline: true,
+          lookbookBody: true,
+        },
+      },
       materialSwatches: true,
       procurementItems: true,
     },
@@ -82,14 +104,26 @@ export default async function LookbookPage({ params }: LookbookPageProps) {
     notFound();
   }
 
+  // Issue #1106: `clientSignature` is stored encrypted at rest. Decrypt
+  // here so the dashboard's lookbook view (which reuses the same
+  // LookbookPreviewView as /preview/[id]) shows the signature image
+  // rather than the ciphertext blob. A missing or empty stored value
+  // is allowed (unsigned project) and is passed through as null.
+  const decryptedSignature =
+    project.clientSignature && project.clientSignature.length > 0
+      ? await decryptSignature(project.clientSignature)
+      : null;
+
   const previewProject: PreviewProject = {
     id: project.id,
     propertyAddress: project.propertyAddress,
     clientName: project.clientName,
     targetBuyer: project.targetBuyer,
     stagingAesthetic: project.stagingAesthetic,
+    // Issue #1186: disclosure toggle, threaded into the preview render.
+    virtuallyStagedLabelEnabled: project.virtuallyStagedLabelEnabled,
     roiMetrics: buildROIMetrics(project),
-    clientSignature: project.clientSignature,
+    clientSignature: decryptedSignature,
     clientSignatureStatus: project.clientSignatureStatus,
     clientSignatureTimestamp: project.clientSignatureTimestamp
       ? project.clientSignatureTimestamp.toISOString()
@@ -112,6 +146,12 @@ export default async function LookbookPage({ params }: LookbookPageProps) {
       observedChallenge: room.observedChallenge,
       recommendation: room.recommendation,
       buyerPsychology: room.buyerPsychology,
+      // Issue #1343 — listing-copy columns (CopyPanel). Null on rooms
+      // that pre-date the redesigned panel; the spread's
+      // `resolveListingCopy` falls back to `recommendation` for the
+      // body slot when both columns are unset.
+      lookbookHeadline: room.lookbookHeadline,
+      lookbookBody: room.lookbookBody,
       // Parsed/validated by parseChecklistItems inside the view.
       checklistItems:
         room.checklistItems as PreviewProject["rooms"][number]["checklistItems"],

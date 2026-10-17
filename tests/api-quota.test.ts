@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Prisma } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
 
 import {
   DEFAULT_DAILY_COPY_LIMIT,
@@ -8,42 +10,82 @@ import {
   DEFAULT_DAILY_SEGMENT_LIMIT,
   DAILY_LIMIT_ENV_VAR,
   SEGMENT_DAILY_LIMIT,
+  claimDailyQuota,
   dailyQuotaExceededPayload,
   dailyWindow,
   evaluateDailyBatchQuota,
   evaluateDailyQuota,
   getDailyUsage,
-  inpaintDailyUsageWhere,
   recordDailyUsage,
+  refundDailyQuota,
   resolveDailyLimit,
 } from "@/lib/api-quota";
 
-// Shared in-memory store for mock api-quota functions (reset between tests)
+// Issue #1138: the money counters run for real here. Only @/lib/prisma is
+// mocked, with a faithful in-memory upsert/findUnique, so the actual
+// recordDailyUsage / getDailyUsage implementations (composite unique key,
+// create count:1, update increment:1) are what the tests exercise.
 const mockUsageStore: Record<string, number> = {};
+const mockUpsertCalls: Array<{
+  where: { userId_surface_dayKey: { userId: string; surface: string; dayKey: string } };
+  create?: { userId: string; surface: string; dayKey: string; count: number };
+  update?: { count: { increment: number } };
+}> = [];
 
-vi.mock("@/lib/api-quota", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/api-quota")>();
-  return {
-    ...actual,
-    recordDailyUsage: vi.fn(async (surface: string, userId: string, now: Date) => {
-      const dayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-      const key = `${userId}:${surface}:${dayKey}`;
-      // Prune previous day's entries for this user+surface (simulates old in-process Map behavior)
-      for (const k of Object.keys(mockUsageStore)) {
-        if (k.startsWith(`${userId}:${surface}:`) && !k.endsWith(`:${dayKey}`)) {
-          delete mockUsageStore[k];
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
+    dailyApiUsage: {
+      upsert: vi.fn(async ({ where, create, update }: (typeof mockUpsertCalls)[number]) => {
+        mockUpsertCalls.push({ where, create, update });
+        const { userId, surface, dayKey } = where.userId_surface_dayKey;
+        const key = `${userId}|${surface}|${dayKey}`;
+        if (key in mockUsageStore) {
+          mockUsageStore[key] += update?.count?.increment ?? 0;
+        } else {
+          mockUsageStore[key] = create?.count ?? 0;
         }
-      }
-      mockUsageStore[key] = (mockUsageStore[key] ?? 0) + 1;
-      return mockUsageStore[key];
-    }),
-    getDailyUsage: vi.fn(async (surface: string, userId: string, now: Date) => {
-      const dayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-      const key = `${userId}:${surface}:${dayKey}`;
-      return mockUsageStore[key] ?? 0;
-    }),
-  };
-});
+        return { count: mockUsageStore[key] };
+      }),
+      // Issue #1132: the atomic-claim primitives share the same in-memory
+      // store so the real claimDailyQuota / refundDailyQuota implementations
+      // are exercised end to end.
+      updateMany: vi.fn(async ({
+        where,
+        data,
+      }: {
+        where: { userId: string; surface: string; dayKey: string; count?: { lte: number; gte: number } };
+        data: { count: { increment?: number; decrement?: number } };
+      }) => {
+        const key = `${where.userId}|${where.surface}|${where.dayKey}`;
+        if (!(key in mockUsageStore)) return { count: 0 };
+        if (where.count?.lte !== undefined && mockUsageStore[key] > where.count.lte) {
+          return { count: 0 };
+        }
+        if (where.count?.gte !== undefined && mockUsageStore[key] < where.count.gte) {
+          return { count: 0 };
+        }
+        mockUsageStore[key] += (data.count.increment ?? 0) - (data.count.decrement ?? 0);
+        return { count: 1 };
+      }),
+      create: vi.fn(async ({ data }: { data: { userId: string; surface: string; dayKey: string; count: number } }) => {
+        const key = `${data.userId}|${data.surface}|${data.dayKey}`;
+        if (key in mockUsageStore) {
+          throw new Prisma.PrismaClientKnownRequestError(
+            "Unique constraint failed on the fields: (`userId`,`surface`,`dayKey`)",
+            { code: "P2002", clientVersion: "5.22.0" }
+          );
+        }
+        mockUsageStore[key] = data.count;
+        return { count: data.count };
+      }),
+      findUnique: vi.fn(async ({ where }: (typeof mockUpsertCalls)[number]) => {
+        const { userId, surface, dayKey } = where.userId_surface_dayKey;
+        const key = `${userId}|${surface}|${dayKey}`;
+        return key in mockUsageStore ? { count: mockUsageStore[key] } : null;
+      }),
+    },
+  },
+}));
 
 // Constructed via the local-time Date constructor so expectations hold in
 // every TZ: the quota window is defined in server-local time.
@@ -154,55 +196,77 @@ describe("dailyQuotaExceededPayload", () => {
   });
 });
 
-describe("inpaintDailyUsageWhere", () => {
-  it("scopes the count to the user's rooms within the daily window", () => {
-    const where = inpaintDailyUsageWhere("user_1", midDay);
-    expect(where).toEqual({
-      room: { project: { userId: "user_1" } },
-      createdAt: { gte: new Date(DAY.y, DAY.m, DAY.d, 0, 0, 0, 0) },
-    });
+describe("inpaint surface (FLUX.1 Fill runs, issue #1131)", () => {
+  it("counts charged runs on its own counter row", async () => {
+    await expect(recordDailyUsage("inpaint", "inpaint-user-a", 1, midDay)).resolves.toBe(1);
+    await expect(recordDailyUsage("inpaint", "inpaint-user-a", 1, midDay)).resolves.toBe(2);
+    await expect(getDailyUsage("inpaint", "inpaint-user-a", midDay)).resolves.toBe(2);
+  });
+
+  it("does not share a counter with any other surface", async () => {
+    await recordDailyUsage("inpaint", "inpaint-user-b", 1, midDay);
+    await expect(getDailyUsage("copy", "inpaint-user-b", midDay)).resolves.toBe(0);
+    await expect(getDailyUsage("segment", "inpaint-user-b", midDay)).resolves.toBe(0);
   });
 });
 
 beforeEach(() => {
-  // Clear the shared in-memory store between tests
+  // Clear the shared in-memory store and the recorded upsert calls between tests
   for (const key in mockUsageStore) delete mockUsageStore[key];
+  mockUpsertCalls.length = 0;
 });
 
-describe("in-process daily usage counter", () => {
-  it("records billable units cumulatively and returns the new count", async () => {
-    await expect(recordDailyUsage("copy", "counter-user-a", midDay)).resolves.toBe(1);
-    await expect(recordDailyUsage("copy", "counter-user-a", midDay)).resolves.toBe(2);
+describe("Postgres-backed daily usage counter (issue #784)", () => {
+  it("records billable units cumulatively on the composite key and returns the new count", async () => {
+    await expect(recordDailyUsage("copy", "counter-user-a", 1, midDay)).resolves.toBe(1);
+    await expect(recordDailyUsage("copy", "counter-user-a", 1, midDay)).resolves.toBe(2);
     await expect(getDailyUsage("copy", "counter-user-a", midDay)).resolves.toBe(2);
+
+    // Both writes carry the (userId, surface, dayKey) composite from
+    // dailyWindow and the create:1 / update:increment:1 branches...
+    const expectedCall = {
+      where: { userId_surface_dayKey: { userId: "counter-user-a", surface: "copy", dayKey: "2026-09-17" } },
+      create: { userId: "counter-user-a", surface: "copy", dayKey: "2026-09-17", count: 1 },
+      update: { count: { increment: 1 } },
+    };
+    expect(mockUpsertCalls[0]).toEqual(expectedCall);
+    expect(mockUpsertCalls[1]).toEqual(expectedCall);
+    // ...and the in-memory upsert executed create on the first write and
+    // the increment on the second (counts 1 then 2 above), matching what
+    // Postgres does with the same arguments.
   });
 
   it("isolates usage per user", async () => {
-    await recordDailyUsage("export", "counter-user-b", midDay);
+    await recordDailyUsage("export", "counter-user-b", 1, midDay);
     await expect(getDailyUsage("export", "counter-user-b", midDay)).resolves.toBe(1);
     await expect(getDailyUsage("export", "counter-user-c", midDay)).resolves.toBe(0);
   });
 
   it("isolates usage per surface", async () => {
-    await recordDailyUsage("copy", "counter-user-d", midDay);
+    await recordDailyUsage("copy", "counter-user-d", 1, midDay);
     await expect(getDailyUsage("copy", "counter-user-d", midDay)).resolves.toBe(1);
     await expect(getDailyUsage("export", "counter-user-d", midDay)).resolves.toBe(0);
   });
 
-  it("resets at the daily rollover and prunes previous-day keys", async () => {
+  it("starts a new row at the daily rollover; the previous day row persists but stops counting", async () => {
     const before = new Date(DAY.y, DAY.m, DAY.d, 23, 59, 59, 999);
     const after = new Date(DAY.y, DAY.m, DAY.d + 1, 0, 0, 0, 0);
 
-    await recordDailyUsage("copy", "counter-user-e", before);
-    await recordDailyUsage("copy", "counter-user-e", before);
+    await recordDailyUsage("copy", "counter-user-e", 1, before);
+    await recordDailyUsage("copy", "counter-user-e", 1, before);
     await expect(getDailyUsage("copy", "counter-user-e", before)).resolves.toBe(2);
 
     // Next day starts from zero...
     await expect(getDailyUsage("copy", "counter-user-e", after)).resolves.toBe(0);
-    await recordDailyUsage("copy", "counter-user-e", after);
+    await recordDailyUsage("copy", "counter-user-e", 1, after);
     await expect(getDailyUsage("copy", "counter-user-e", after)).resolves.toBe(1);
 
-    // ...and the previous day's key was pruned by the day-2 write.
-    await expect(getDailyUsage("copy", "counter-user-e", before)).resolves.toBe(0);
+    // ...via a row with the new dayKey, not an increment of the old one.
+    const dayKeys = mockUpsertCalls.map((c) => c.where.userId_surface_dayKey.dayKey);
+    expect(dayKeys).toEqual(["2026-09-17", "2026-09-17", "2026-09-18"]);
+
+    // Postgres rows persist; the old row simply never matches the new window.
+    await expect(getDailyUsage("copy", "counter-user-e", before)).resolves.toBe(2);
   });
 
   it("treats an unknown user as zero usage", async () => {
@@ -211,8 +275,8 @@ describe("in-process daily usage counter", () => {
 });
 
 describe("segment surface (SAM 3.1 concept calls, issue #226)", () => {
-  it("records usage on its own in-process counter", async () => {
-    await expect(recordDailyUsage("segment", "segment-user-a", midDay)).resolves.toBe(1);
+  it("records usage on its own Postgres counter", async () => {
+    await expect(recordDailyUsage("segment", "segment-user-a", 1, midDay)).resolves.toBe(1);
     await expect(getDailyUsage("segment", "segment-user-a", midDay)).resolves.toBe(1);
     await expect(getDailyUsage("copy", "segment-user-a", midDay)).resolves.toBe(0);
   });
@@ -245,19 +309,19 @@ describe("segment surface (SAM 3.1 concept calls, issue #226)", () => {
     const before = new Date(DAY.y, DAY.m, DAY.d, 23, 59, 59, 999);
     const after = new Date(DAY.y, DAY.m, DAY.d + 1, 0, 0, 0, 0);
 
-    await recordDailyUsage("segment", "segment-user-b", before);
+    await recordDailyUsage("segment", "segment-user-b", 1, before);
     await expect(getDailyUsage("segment", "segment-user-b", before)).resolves.toBe(1);
 
     // Next day starts from zero again.
     await expect(getDailyUsage("segment", "segment-user-b", after)).resolves.toBe(0);
-    await recordDailyUsage("segment", "segment-user-b", after);
+    await recordDailyUsage("segment", "segment-user-b", 1, after);
     await expect(getDailyUsage("segment", "segment-user-b", after)).resolves.toBe(1);
   });
 });
 
 describe("label surface (OpenAI gpt-4o-mini vision, issue #263)", () => {
-  it("records usage on its own in-process counter", async () => {
-    await expect(recordDailyUsage("label", "label-user-a", midDay)).resolves.toBe(1);
+  it("records usage on its own Postgres counter", async () => {
+    await expect(recordDailyUsage("label", "label-user-a", 1, midDay)).resolves.toBe(1);
     await expect(getDailyUsage("label", "label-user-a", midDay)).resolves.toBe(1);
     await expect(getDailyUsage("copy", "label-user-a", midDay)).resolves.toBe(0);
   });
@@ -290,12 +354,12 @@ describe("label surface (OpenAI gpt-4o-mini vision, issue #263)", () => {
     const before = new Date(DAY.y, DAY.m, DAY.d, 23, 59, 59, 999);
     const after = new Date(DAY.y, DAY.m, DAY.d + 1, 0, 0, 0, 0);
 
-    await recordDailyUsage("label", "label-user-b", before);
+    await recordDailyUsage("label", "label-user-b", 1, before);
     await expect(getDailyUsage("label", "label-user-b", before)).resolves.toBe(1);
 
     // Next day starts from zero again.
     await expect(getDailyUsage("label", "label-user-b", after)).resolves.toBe(0);
-    await recordDailyUsage("label", "label-user-b", after);
+    await recordDailyUsage("label", "label-user-b", 1, after);
     await expect(getDailyUsage("label", "label-user-b", after)).resolves.toBe(1);
   });
 });
@@ -354,5 +418,163 @@ describe("evaluateDailyBatchQuota (batch room-type detection, issue #681)", () =
       expect(decision.resetsAt).toBe(nextMidnight.toISOString());
       expect(decision.resetsAt).toBe(dailyWindow(midDay).endAt.toISOString());
     }
+  });
+});
+
+// Issue #1110: a N-entry batch passed the OLD `evaluateDailyQuota(used, limit)`
+// per-unit gate (`used < limit`) even when `used + N > limit`, so the batch
+// would then `recordDailyUsage` N times and overshoot the cap by N-1. The
+// wired call now uses `evaluateDailyBatchQuota(used, count, limit)` whose
+// `used + count <= limit` semantic makes the straddler undeletable. These
+// pins target the exact boundary the issue names so the regression cannot
+// return without breaking a unit test.
+describe("evaluateDailyBatchQuota overshoot guard (issue #1110)", () => {
+  it("rejects a 5-entry batch at used=49/limit=50 (would have overshot by 4)", () => {
+    // Per-unit gate would have allowed this (49 < 50) and the subsequent
+    // recordDailyUsage x5 would have pushed used to 54. Batch gate denies
+    // because 49 + 5 > 50, leaving used untouched at 49.
+    const decision = evaluateDailyBatchQuota(49, 5, 50);
+    expect(decision.allowed).toBe(false);
+    if (!decision.allowed) {
+      expect(decision.used).toBe(49);
+      expect(decision.limit).toBe(50);
+    }
+  });
+
+  it("allows the exactly-filling batch at used=49/limit=50, count=1", () => {
+    const decision = evaluateDailyBatchQuota(49, 1, 50);
+    expect(decision).toEqual({ allowed: true, used: 49, limit: 50, remaining: 1 });
+  });
+
+  it("rejects N rooms each running N-1 labels (the issue's worst case)", async () => {
+    // 20-entry batch (the schema cap) at used=31 / limit=50: 31 + 20 = 51
+    // > 50, so the whole batch is denied. The old per-unit gate would have
+    // passed (31 < 50) and recorded 20 units, leaving the user at 51/50.
+    const decision = evaluateDailyBatchQuota(31, 20, 50);
+    expect(decision.allowed).toBe(false);
+  });
+
+  it("allows a batch whose exact fill is `used + count === limit`", () => {
+    expect(evaluateDailyBatchQuota(48, 2, 50).allowed).toBe(true);
+    expect(evaluateDailyBatchQuota(0, 50, 50).allowed).toBe(true);
+  });
+
+  it("denies straddlers of any size, not just the unit case", () => {
+    // Off-by-one across the boundary: each pair straddles by 1.
+    expect(evaluateDailyBatchQuota(45, 6, 50).allowed).toBe(false);
+    expect(evaluateDailyBatchQuota(40, 11, 50).allowed).toBe(false);
+    expect(evaluateDailyBatchQuota(1, 50, 50).allowed).toBe(false);
+  });
+
+  it("end-to-end: a denied batch never reaches recordDailyUsage, so used stays at pre-batch value", async () => {
+    // Mirrors the room-batch flow: gate with evaluateDailyBatchQuota; if
+    // allowed, record N units. A denied batch must skip the recording step
+    // entirely, which is what the room-batch.ts change enforces. Verify the
+    // gate + recorder chain lands at exactly the pre-batch count, never
+    // above (the regression would push above by count-1).
+    const userId = "issue-1110-user";
+    await recordDailyUsage("label", userId, 49, midDay);
+    const gate = evaluateDailyBatchQuota(
+      await getDailyUsage("label", userId, midDay),
+      5,
+      50
+    );
+    expect(gate.allowed).toBe(false);
+    // The defensive caller (room-batch.ts) refuses to record on a denied gate.
+    // Confirm getDailyUsage remains 49, not the 54 the regression would produce.
+    expect(await getDailyUsage("label", userId, midDay)).toBe(49);
+  });
+});
+
+describe("claimDailyQuota (atomic claim, issue #1132)", () => {
+  const userId = "user-claim";
+  beforeEach(() => {
+    for (const key in mockUsageStore) delete mockUsageStore[key];
+  });
+
+  it("claims a unit on an untouched day (first-of-day create)", async () => {
+    const claim = await claimDailyQuota("segment", userId, 100, 1, midDay);
+    expect(claim).toEqual({ claimed: true, allowed: true, used: 1, limit: 100, remaining: 99 });
+  });
+
+  it("claims via the conditional increment when today's row exists", async () => {
+    await recordDailyUsage("copy", userId, 10, midDay);
+    const claim = await claimDailyQuota("copy", userId, 50, 1, midDay);
+    expect(claim).toEqual({ claimed: true, allowed: true, used: 11, limit: 50, remaining: 39 });
+  });
+
+  it("allows the exact-fill claim and denies the straddler", async () => {
+    await recordDailyUsage("label", userId, 48, midDay);
+    const fill = await claimDailyQuota("label", userId, 50, 2, midDay);
+    expect(fill.claimed).toBe(true);
+    expect(fill).toMatchObject({ used: 50, remaining: 0 });
+    // The next claim overshoots: zero rows updated, denied with today's count.
+    const denied = await claimDailyQuota("label", userId, 50, 1, midDay);
+    expect(denied).toEqual({
+      claimed: false,
+      allowed: false,
+      used: 50,
+      limit: 50,
+      resetsAt: nextMidnight.toISOString(),
+    });
+  });
+
+  it("denies a single request larger than the whole cap without writing", async () => {
+    const claim = await claimDailyQuota("copy", userId, 50, 51, midDay);
+    expect(claim.claimed).toBe(false);
+    expect(claim).toMatchObject({ used: 0, limit: 50 });
+    expect(Object.keys(mockUsageStore)).toHaveLength(0);
+  });
+
+  it("arbitrates concurrent first-of-day claims through the P2002 retry", async () => {
+    // Two claims racing on an empty store: the loser of the create gets
+    // P2002, retries the conditional increment, and both claims land.
+    const [a, b] = await Promise.all([
+      claimDailyQuota("export", userId, 20, 1, midDay),
+      claimDailyQuota("export", userId, 20, 1, midDay),
+    ]);
+    expect(a.claimed).toBe(true);
+    expect(b.claimed).toBe(true);
+    expect(await getDailyUsage("export", userId, midDay)).toBe(2);
+  });
+
+  it("claims a multi-unit batch in one conditional increment", async () => {
+    const claim = await claimDailyQuota("label", userId, 50, 5, midDay);
+    expect(claim).toEqual({ claimed: true, allowed: true, used: 5, limit: 50, remaining: 45 });
+  });
+});
+
+describe("refundDailyQuota (issue #1132)", () => {
+  const userId = "user-refund";
+  beforeEach(() => {
+    for (const key in mockUsageStore) delete mockUsageStore[key];
+  });
+
+  it("decrements the claimed units", async () => {
+    await claimDailyQuota("segment", userId, 100, 3, midDay);
+    await refundDailyQuota("segment", userId, 3, midDay);
+    expect(await getDailyUsage("segment", userId, midDay)).toBe(0);
+  });
+
+  it("never drives a row negative", async () => {
+    await claimDailyQuota("copy", userId, 50, 1, midDay);
+    await refundDailyQuota("copy", userId, 5, midDay);
+    expect(await getDailyUsage("copy", userId, midDay)).toBe(1);
+  });
+
+  it("is a no-op for a user with no row today and never throws", async () => {
+    await expect(refundDailyQuota("export", userId, 1, midDay)).resolves.toBeUndefined();
+    expect(await getDailyUsage("export", userId, midDay)).toBe(0);
+  });
+
+  it("swallows store failures instead of throwing", async () => {
+    await claimDailyQuota("label", userId, 50, 1, midDay);
+    const spy = vi
+      .spyOn(prisma.dailyApiUsage, "updateMany")
+      .mockRejectedValueOnce(new Error("store down"));
+    await expect(refundDailyQuota("label", userId, 1, midDay)).resolves.toBeUndefined();
+    spy.mockRestore();
+    // Conservative: the failed refund leaves the count standing.
+    expect(await getDailyUsage("label", userId, midDay)).toBe(1);
   });
 });

@@ -1,0 +1,87 @@
+# Session Handoff Checkpoint
+**Timestamp:** 2026-09-28T15:20:00Z
+**Branch:** `develop` — synced with origin. `main` is also level (develop ⊇ main).
+**Task:** Release develop to Production, then close the branch-divergence gap that release exposed. **Done. No work in flight.**
+
+## 1. Accomplished So Far
+
+- **Filed #1095** (the #219 `core.hooksPath` guard is per-clone opt-in, so a fresh clone is unprotected; README's Getting Started never mentions it) and **#1096** (Vercel Preview workflow failing on every push). Both from the handoff's §5 "Unfiled" items.
+- **Recovered a credential-destroying incident** — see §6. `.env.local` is restored and the DB is confirmed working.
+- **Deleted `.github/workflows/preview.yml`.** It had never run (all three secrets unset) yet its `if` gate made *every* push red, while Vercel's git integration did all the deploying. The user turned off PR preview deploys, so deploys are now owned solely by the git integration (Production on `main`). Closed #1096 as superseded, with a comment explaining why adding the secrets would have caused duplicate deploys.
+- **Cut and merged the release: PR #1097, develop → main.** It was **not** a fast-forward — `main` held 5 commits `develop` never had. Resolved 3 content conflicts, all to develop's side after verifying it was the superset:
+  - `src/app/api/sign-project/route.ts` — both branches independently applied the #1020 `requireProjectOwnershipOrThrow` migration; develop adds the #1078 fix (validate token *before* session, so cookie-less token visitors work).
+  - `tests/api/export-pdf-route.test.ts` — import rename to the #1084 `resolveBrowserlessPdfUrl`.
+  - `tests/api/v1-export-pdf-route.test.ts` — a default resolver mock the seam tests need.
+- **Found and fixed a real drift bug during the merge.** The e2e suite failed 3 tests on the merged tree: main's #1018 renamed `VERSION_HEADER` from `API-Version` to `X-Supabase-API-Version` and had already shipped to Production 2 days earlier. `develop` had never seen it. The code and unit tests were right; the develop-side spec was the stale artifact. Fixed the spec, not the code. **This header rename is a breaking change for external API clients and is now live.**
+- **Cleared the branch-protection deadlock.** `main` required 1 approving review with `enforce_admins: true` — unmeetable for a solo maintainer, and un-overridable. The user set required reviews to **0**; force-pushes, deletions, and `enforce_admins` all remain on. PR #1097 then merged clean and Vercel deployed `main` to Production (Ready, 57s).
+- **Verified the release is actually live**, not just deployed: the production alias now returns `x-supabase-api-version: v1` — a header that only exists in merged code.
+- **Added a release guard** (§3) so the divergence that caused all of the above cannot recur silently.
+- Consulted Foreman twice: 0.91 for deleting the redundant deploy path, and it **abstained** on the branch-protection change, correctly flagging it as a trust-boundary decision for the user.
+
+## 2. Modified Files
+
+- `scripts/check-develop-catchup.sh` — **new**, `100755`. Fails when BASE holds non-merge commits HEAD lacks.
+- `.github/workflows/ci.yml` — added the `release-guard` job (`if: github.base_ref == 'main'`, `fetch-depth: 0`).
+- `package.json` — added `release:check`.
+- `AGENTS.md` — new **"Releasing to Production"** section; `scripts/` inventory line updated.
+- `.gitignore` — added `!.env.example` (see §6).
+- `tests/e2e/specs/export-pdf-v1.spec.ts` — header-name fix (the drift bug above).
+
+## 3. The Release Guard
+
+`npm run release:check` (= `scripts/check-develop-catchup.sh [BASE] [HEAD]`, defaults `origin/main` vs `origin/develop`).
+
+**Why:** a hotfix merged straight to `main` leaves `develop` self-consistent but *stale* — its code and tests agree with each other and both disagree with what ships. Nothing is lost by the merge, but the stale expectations surface only as **test failures at release-merge time**, which is the expensive place to find out. That is exactly what #1097 hit.
+
+**Merge commits are deliberately excluded.** Every develop→main release gives `main` a merge commit `develop` can never contain, so counting them would fail the guard immediately after every successful release. Hotfixes land as ordinary commits, which is what must be caught.
+
+**Proven to bite**, not just to pass: simulated a hotfix on a throwaway branch off `main` → guard FAILED and named the commit; after back-merging it → guard PASSED. Temp branch deleted; `develop` verified clean at `b24a9c45` with no simulation residue. `README.md` marker absent.
+
+Also proven: exit 2 with a clear message on a missing ref (rather than a confusing git error).
+
+## 4. Current Verification State
+
+- `npm test` → **2083 passed / 5 skipped** (152 files). `npm run e2e` → **62 passed / 0 failed**. typecheck clean. lint clean (1 pre-existing `layout.tsx` warning).
+- `npm run release:check` → **OK** against the remote.
+- CI green on the pushed commit; script committed `100755` so the CI job's direct invocation works.
+- Working tree clean except 2 untracked `docs/dana-rig/*` files (not ours). `develop` == `origin/develop`.
+- **Production is live and healthy** on the merged code, with a working `DATABASE_URL` (confirmed by the user seeing real project cards on `/projects`).
+- ✅ The three provider keys were **not** rotated, so the 12-day-old Vercel copies are still valid. No action needed.
+
+## 5. Open Items
+
+1. ~~`required_status_checks` not configured.~~ **DONE this session** — `main` now requires `Lint · Typecheck · Unit tests` with "require branches to be up to date" (`strict`) on. Note the dropdown name is the job's `name:`, not `fast-checks`/`CI`. The only residual gap: the required check covers lint + typecheck + vitest but **not** e2e (needs Docker), so CI still cannot catch an e2e-only regression.
+2. ~~#1095 hook not activated on a fresh clone.~~ **DONE this session.** `scripts/enable-hooks.sh` wired as the `prepare` lifecycle script sets `core.hooksPath` on `npm install`; docs updated in the hook comment, AGENTS.md, and README. Also fixed a **second bug** it exposed: the guard's own remediation (`git checkout -- tsconfig.json`) cannot undo a *staged* flip, because that form restores the working tree from the index. Now `git checkout HEAD -- tsconfig.json`. Verified end-to-end in a real `git clone`.
+3. **The `vercel env pull` footgun is still undocumented.** It destroyed `.env.local` this session. Worth a README/AGENTS.md warning: always pass an explicit path.
+4. **v1 export 403 branch** — last uncovered e2e branch. Needs a second GoTrue identity the mock auth server does not issue, i.e. an extension to `mock-supabase.ts`, not just a spec.
+5. **Issue #1070** — Hydracept spike, not a priority.
+6. **`dashboard-data`, `staging-aesthetics`, `staging-packages-schema`** have no unit test (documented gap, pre-existing).
+
+## 6. Traps Hit or Confirmed This Session
+
+- **`vercel env pull` writes `.env.local` by default.** In this repo that is the app env file *and* the symlink target, so a routine CLI command destroyed both. Always `vercel env pull <explicit path>`. Vercel's own CLI output advertises the default, which is how it happens.
+- **Vercel stores Secrets unrecoverably** — `vercel env pull` writes `[SENSITIVE]` for them. Only `Config`-type values come back. Vercel is *not* a backup for the API keys or `DATABASE_URL`.
+- **Vercel env copy-paste includes double quotes**, which makes `DATABASE_URL="postgresql://…"` fail Prisma's URL validation with a misleading "must start with the protocol" error. Next.js's loader strips them, so `npm run dev` may appear to work anyway.
+- **Supabase API keys and the DB password are unrelated credential families.** A `service_role` JWT can never satisfy a `postgresql://` URL — Postgres compares the password literally and never reads JWT claims. Pooler username is `postgres.<ref>`, not bare `postgres`. For **Prisma 5** use the pooler on **port 5432** (session mode), not 6543: transaction mode has no prepared-statement support and Prisma uses them by default.
+- **`vercel env ls` shows a `created` column — but it does NOT bump when a value is edited in place.** It is not proof a secret was updated. The only reliable check is behavior (sign in, load `/projects`).
+- **Two competing Vercel deploy mechanisms were the real bug**, not a missing secret. One never ran; the other did everything. "Fix the secret" would have caused duplicate deploys.
+- **A Vercel Preview reporting `Ready` proves nothing** when all env vars are Production-scoped — previews build with zero config.
+- **A `Ready` Production deployment likewise proves nothing** about credentials; only a signed-in DB-backed page does. `/api/setup/check` is useless as a probe (returns `setupComplete:false` on both "no user" and "DB error", to prevent enumeration), and `/api/setup` 401s before touching Prisma.
+- **`/dashboard` is a one-line redirect stub to `/projects`** (`src/app/dashboard/page.tsx`). AGENTS.md lists it as if it were a real page; it has no content or layout. Don't be misled into thinking it's broken.
+- **I deleted the tracked `.env.example` with a careless test loop** (`touch "$f"` then `rm -f "$f"` on a real file). Caught it in `git status` immediately and restored with `git checkout --`. **Never `rm` a filename in a loop that might be a real tracked file.**
+- **In bash, `read` returns non-zero at EOF even when it captured a value** — under `set -e` that aborts the script. Use `IFS= read -rs PW || true`.
+- **Don't nest JS in a bash single-quoted `node -e '...'`** — a `'` inside a regex character class silently breaks the quoting. Put the JS in its own `.mjs` and pass values via env vars.
+- **ESM resolves imports from the script's location, not cwd.** A script in `/tmp` cannot import the repo's `@prisma/client`; use `createRequire("<repo path>")`.
+- **A gitignore negation cannot re-include what a later-added rule blocks**, so `!.env.example` must come *after* any tool-added `.env*`. Verified by simulating that rule.
+- **`git merge-base --is-ancestor` needs `fetch-depth: 0` in CI**; a shallow clone makes the check meaningless.
+- Don't quote a commit's hash inside the file that commit carries; use `git log -N`.
+- `ls tests/` does not recurse — use `git ls-files 'tests/**'`.
+- Tracked-but-gitignored `node_modules/.vite/**/results.json` and the `tsconfig.json` jsx flip both re-dirty on every build/test run. Revert before staging.
+
+## 7. Related
+
+- **This session's commits:** read `git log -6` (do not re-quote here). They cover the v1 429 quota test, the release merge + conflict resolutions, the header-name fix, the preview.yml deletion, and the release guard.
+- **Issues:** #1081 #1083 #1084 #1085 #1096 closed; **#1095 open**; #1070 open (spike).
+- **PRs:** #1097 merged (the release).
+- **Scripts in `/tmp/opencode/`:** `check-db.mjs` (read-only DB check, prints no values), `set-db-password.sh` + `splice-pw.mjs`, `env.local.vercel-backup` (the clobbered file — worthless, retained only for the record).
+- **Unrelated:** `spike/dana-rig-obscura` (`c22986d8`) remains unmerged.

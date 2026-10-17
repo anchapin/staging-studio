@@ -30,6 +30,16 @@ export interface SecurityHeader {
 export const CSP_VALUE = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com",
+  // Issue #1344 follow-up: `browser-image-compression@2.0.2` (the room
+  // photo upload's client-side compressor) uses a blob: Web Worker to keep
+  // the main thread responsive on large uploads. Without an explicit
+  // `worker-src`, browsers fall back to `script-src`, which doesn't
+  // permit `blob:` URLs, and the worker is blocked — the upload then
+  // throws `data.find is not a function` mid-compression (the library
+  // passes ArrayBuffer into a path that expected an Array). `blob:` is
+  // scoped to the same origin + document, so widening `worker-src` to
+  // permit it is no broader than the existing `script-src` allowlist.
+  "worker-src 'self' blob:",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com",
   "img-src 'self' data: http://127.0.0.1:* https://*.supabase.co https://*.fal.ai https://*.openai.com https://*.openai-api.com https://picsum.photos https://browserless.io",

@@ -1,9 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { Download, Loader2, RotateCw, Check, X } from "lucide-react";
+import { Download, Info, Loader2, RotateCw, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { STAGING_AESTHETICS } from "@/lib/staging-aesthetics";
+import {
+  PROJECT_AESTHETIC_LABEL,
+  PROJECT_AESTHETIC_HELPER,
+  aestheticOptions,
+} from "@/lib/project-aesthetic";
 import {
   WORKBENCH_DIRECTIVE_GRID_CLASSES,
   WORKBENCH_TOPBAR_SURFACE_CLASSES,
@@ -13,6 +17,17 @@ import { sliderFillStyle } from "@/lib/precision-slider";
 /** Card chrome shared by the four directive cards (issue #620). */
 const DIRECTIVE_CARD_CLASSES =
   "flex flex-wrap items-center gap-2 rounded-lg border border-outline-variant/30 bg-surface-container-low/50 px-3 py-2";
+
+/**
+ * Issue #1193: tooltip copy for the Realism & Lighting slider. Traced
+ * 2026-10-12: `realismValue` is client state in project-detail-view.tsx and
+ * rooms-studio-client.tsx that reaches only this bar — no src/lib or
+ * src/app/api code consumes it, so the dial is not yet wired to generation.
+ * The issue says to say so plainly in the UI rather than ship a decorative
+ * slider, so the copy discloses exactly that alongside the intended scale.
+ */
+const REALISM_TOOLTIP_COPY =
+  "Intended to set how closely staged results stick to the original photo's light and camera feel: lower is more stylized and freer with lighting, higher stays closer to the original photo. Not wired to generation yet, so moving it has no effect on output. Once wired, 75-90% is the recommended range for listing photos.";
 
 interface GlobalStagingDirectivesBarProps {
   /** Current design aesthetic selection */
@@ -63,6 +78,8 @@ export default function GlobalStagingDirectivesBar({
 }: GlobalStagingDirectivesBarProps) {
   const [addLockInput, setAddLockInput] = useState("");
   const [showAddLock, setShowAddLock] = useState(false);
+  // Issue #1193: info tooltip for the Realism & Lighting slider.
+  const [showRealismInfo, setShowRealismInfo] = useState(false);
 
   const handleAddLock = () => {
     const trimmed = addLockInput.trim();
@@ -83,20 +100,25 @@ export default function GlobalStagingDirectivesBar({
       <div className={WORKBENCH_DIRECTIVE_GRID_CLASSES}>
         {/* Card 1: Design Aesthetic Preset */}
         <div className={DIRECTIVE_CARD_CLASSES}>
-          <span className="text-sm text-muted-foreground">Design Aesthetic</span>
+          <span className="text-sm text-muted-foreground">{PROJECT_AESTHETIC_LABEL}</span>
           <select
             value={aesthetic}
             onChange={(e) => onAestheticChange(e.target.value)}
             className="rounded-lg border border-border/40 bg-muted px-3 py-2 text-sm text-foreground"
             aria-label="Design aesthetic preset"
+            aria-describedby="project-aesthetic-helper"
           >
             <option value="">Select aesthetic...</option>
-            {STAGING_AESTHETICS.map((a) => (
+            {aestheticOptions(aesthetic).map((a) => (
               <option key={a} value={a}>
                 {a}
               </option>
             ))}
           </select>
+          {/* Issue #1189: rooms have no aesthetic of their own. */}
+          <span id="project-aesthetic-helper" className="text-xs text-muted-foreground">
+            {PROJECT_AESTHETIC_HELPER}
+          </span>
         </div>
 
         {/* Card 2: Architectural Preservation Lock */}
@@ -148,8 +170,39 @@ export default function GlobalStagingDirectivesBar({
         </div>
 
         {/* Card 3: Realism & Lighting Lock */}
-        <div className={DIRECTIVE_CARD_CLASSES}>
+        <div className={`${DIRECTIVE_CARD_CLASSES} relative`}>
           <span className="text-sm text-muted-foreground">Realism &amp; Lighting</span>
+          {/* Issue #1193: info button opens the tooltip on hover and keyboard
+              focus; Escape closes it. The description span stays in the DOM
+              (sr-only when closed) so the slider's aria-describedby always
+              resolves for screen readers. */}
+          <button
+            type="button"
+            aria-label="About the Realism and Lighting slider"
+            aria-expanded={showRealismInfo}
+            className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-muted-foreground/50 text-muted-foreground hover:border-foreground hover:text-foreground"
+            onMouseEnter={() => setShowRealismInfo(true)}
+            onMouseLeave={() => setShowRealismInfo(false)}
+            onFocus={() => setShowRealismInfo(true)}
+            onBlur={() => setShowRealismInfo(false)}
+            onClick={() => setShowRealismInfo((v) => !v)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setShowRealismInfo(false);
+            }}
+          >
+            <Info className="h-3 w-3" aria-hidden="true" />
+          </button>
+          <span
+            id="realism-info-desc"
+            role="tooltip"
+            className={
+              showRealismInfo
+                ? "absolute left-0 top-full z-10 mt-1 w-64 rounded-md border border-outline-variant/40 bg-surface-container-highest px-3 py-2 text-xs leading-relaxed text-foreground shadow-lg"
+                : "sr-only"
+            }
+          >
+            {REALISM_TOOLTIP_COPY}
+          </span>
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground">Artistic</span>
             <input
@@ -161,6 +214,7 @@ export default function GlobalStagingDirectivesBar({
               className="atelier-slider w-24"
               style={sliderFillStyle(realismValue, 0, 100)}
               aria-label="Realism and lighting slider"
+              aria-describedby="realism-info-desc"
             />
             <span className="font-mono text-xs text-foreground tabular-nums" aria-live="polite">
               {realismValue}%

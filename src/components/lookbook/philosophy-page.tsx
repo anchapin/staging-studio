@@ -13,7 +13,8 @@ export function PhilosophyPage({ user, project, room }: PhilosophyPageProps) {
   return (
     <div className="lookbook-page min-h-screen flex flex-col items-center justify-between bg-stone-50 p-12">
       <div className="flex-1 flex flex-col items-center justify-center">
-        <div className="max-w-3xl text-center space-y-8">
+        {/* Issue #1222: keep this content block off a page boundary (docs/print-styling-audit.md). */}
+        <div className="max-w-3xl text-center space-y-8 avoid-break">
           <div className="space-y-4">
             <p className="font-cinzel text-sm tracking-[0.3em] uppercase text-muted-foreground">
               Our Staging Philosophy

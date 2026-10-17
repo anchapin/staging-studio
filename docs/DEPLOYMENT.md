@@ -49,8 +49,9 @@ These match `.env.example` exactly — that file is the source of truth for what
 | `BROWSERLESS_API_KEY` | **Yes** (for PDF export) | Read by `api/export-pdf`; missing key returns a 500 on export | browserless.io → account API keys |
 | `NEXT_PUBLIC_APP_URL` | **Yes** | The app's public origin (not a PDF-export-only value). `api/export-pdf` builds the cookie-less preview URL its cloud browser fetches from it. **Must be publicly reachable.** See [the section above](#the-one-thing-to-get-right-next_public_app_url) | Your deployment's URL (e.g. the Vercel production domain) |
 | `PREVIEW_TOKEN_SECRET` | **Yes** | HMAC secret signing short-lived (5 min) lookbook-preview tokens, read by `lib/preview-token.ts`. Optional in dev, where a fixed **public** fallback is used — production must set a real secret | Generate with `openssl rand -base64 32` |
+| `NEXT_PUBLIC_SENTRY_DSN` | No — **recommended for production** | Sentry DSN read by `sentry.client.config.ts` and `sentry.server.config.ts` (issue #1107). When unset, `Sentry.init()` is a no-op and no events are sent. Leave blank in dev so local errors don't reach the production Sentry project. Set in production to enable unhandled-exception reporting and performance traces. Because it is `NEXT_PUBLIC_`, the value must be present at build time as well as runtime — re-deploy after changing it | sentry.io → Project Settings → Client Keys (DSN) |
 
-Why `PREVIEW_TOKEN_SECRET` matters for export: Browserless's Chrome is a cookie-less browser, so the preview page would redirect it to `/login` and the PDF would capture the login page. The export route instead mints a signed token (scoped to one project, 5-minute TTL) that both the root middleware and the preview page verify. An unset secret in production means every deployment runs on a publicly known key.
+Why `PREVIEW_TOKEN_SECRET` matters for export: Browserless's Chrome is a cookie-less browser, so the preview page would redirect it to `/login` and the PDF would capture the login page. The export route instead mints a signed token (scoped to one project, 30-minute TTL via `PREVIEW_TOKEN_TTL_SECONDS`, #1109) that both the root middleware and the preview page verify. An unset secret in production means every deployment runs on a publicly known key.
 
 ### Supabase auth configuration
 
@@ -66,9 +67,87 @@ npx prisma db push
 
 Re-run this after any change to `prisma/schema.prisma` (regenerate the client locally with `npm run db:generate`).
 
+Against Production, a `db push` has a pre-flight checklist first (dump, schema hash, diff preview): see [Database safety](#database-safety-backups-and-the-pre-db-push-checklist). There is no migration history to fall back on, so that checklist is the only recorded prior state.
+
 ### Vercel serverless timeout for PDF export
 
 `POST /api/export-pdf` needs more than Vercel's default 10-second serverless function timeout — Browserless fetch + auth/DB overhead comfortably fits under 90s. The route itself declares `export const maxDuration = 90`, but the **platform-level request timeout also needs to be raised**: set `maxDuration: 90` in `next.config.ts` under the `vercel` key (or at the top level — Next.js forwards it to Vercel). This requires **Vercel Pro or Enterprise**. Without it, every PDF export on a cold Vercel instance silently fails.
+
+## Rolling back a bad deploy
+
+The sections above document the path into Production; this one is the path out. Work through the two options in order.
+
+### Option 1: Vercel instant rollback (minutes, no code change)
+
+Vercel keeps the history of production deployments. In Vercel, open the project's **Deployments** tab, find the last deployment that was verified healthy (the verification checklist above is what "verified" means), open its menu, and choose **Instant Rollback**. Vercel re-points the production domain at that build's output without a new build. Consult Vercel's docs for the current UI wording and limits.
+
+This is the right first move for a bad deploy: it is fast and it touches nothing else. But it does two things only partially:
+
+- **It does not fix history.** The bad commit is still on `main`, so the next push to `main` redeploys it. Follow the rollback with a real fix or a revert (Option 2) before the next deploy goes out.
+- **It does not touch the database.** If the bad deploy shipped a schema change, Production is still running old code against the new schema. Decide the database side deliberately (see [Database safety](#database-safety-backups-and-the-pre-db-push-checklist)); a code rollback never restores data by itself.
+
+### Option 2: revert the merge on `main` (slower, permanent)
+
+Revert the offending commit and let Vercel deploy the revert as a normal production build:
+
+```bash
+git checkout main && git pull
+git revert -m 1 <merge-commit-sha>   # squash commits have one parent: plain `git revert <sha>`
+git push origin main
+```
+
+This is the durable fix: `main` is healthy again and the deploy that follows is reproducible. It is also the only option once the last-good deployment has aged out of Vercel's history, and the only option when the fix itself needs new code.
+
+If the bad deploy included a schema change, the revert reverts the code but not the database shape. Decide the database side separately: either restore the pre-push dump from the checklist below, or push a corrective schema. Do not assume the revert handled it.
+
+## Database safety: backups and the pre-`db push` checklist
+
+Prisma here runs schema-first with no migration history (`db push`, see [Database schema](#database-schema)). A push to Production applies its diff with no recorded prior state anywhere, and the data in that database is the deliverable: client records, room data, and the rows that tie staged images to rooms. Before any `db push` against the Production Supabase project, run this checklist from a machine that has `DATABASE_URL`:
+
+### 1. Confirm the restore posture (once, then re-verify on plan changes)
+
+In the Supabase dashboard, open Database → Backups and read what the project actually has: whether PITR is enabled, and what its retention window is. Backups and retention are plan-dependent, so this is a read of the dashboard, not an assumption. Record what you found, with the date, in this table:
+
+| Date checked | PITR enabled | Retention | Checked by |
+| --- | --- | --- | --- |
+| *(fill in on first run)* | | | |
+
+If the project has neither PITR nor scheduled backups, stop and fix that before any schema change. This page is also where a restore is initiated if one is ever needed.
+
+### 2. Dump the database before the push
+
+```bash
+mkdir -p backups   # gitignored; local disk is fine at this scale
+pg_dump "$DATABASE_URL" -Fc -f "backups/pre-push-$(date +%Y%m%d-%H%M%S).dump"
+```
+
+Keep the dump until the next deploy is verified healthy. Note the dump covers the Postgres database only: staged images and logos live in the Supabase Storage buckets (`room-photos`, `logos`) and are not in a `pg_dump`.
+
+### 3. Record the pre-push schema hash
+
+A dump is only restorable to the schema it was taken from, so the rollback needs to know which shape the dump encodes. Record the hash beside the dump (in the deploy PR description is a good place):
+
+```bash
+shasum -a 256 prisma/schema.prisma
+```
+
+### 4. Preview the diff, then push
+
+`db push` prints a destructive-change warning and refuses data-losing changes unless `--accept-data-loss` is passed. Before finding that out on Production, read the SQL it will apply:
+
+```bash
+npx prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --script
+```
+
+Anything unexpected in that output (a dropped column, a changed type) stops here for a decision, not a push. If the push does warn of data loss, the answer is never `--accept-data-loss` on Production: go back to the dump from step 2 and decide with real data in hand.
+
+### Restoring from a dump
+
+```bash
+pg_restore -d "$DATABASE_URL" --clean --if-exists backups/pre-push-YYYYMMDD-HHMMSS.dump
+```
+
+`--clean` drops the current tables before restoring, so this replaces the live database with the dump's contents: anything written after the dump was taken is gone. That trade is exactly why the dump comes first and stays until the next deploy is verified.
 
 ## Local development and PDF export
 

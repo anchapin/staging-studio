@@ -1,5 +1,3 @@
-import { useEffect, useRef, useState } from "react";
-
 /**
  * Debounced autosave decision logic for the lookbook edit page
  * (issue #250).
@@ -175,41 +173,4 @@ export class AutosaveController<T> {
     })();
     return this.inFlight;
   }
-}
-
-const _controllers = new Map<string, AutosaveController<unknown>>();
-
-function getAutoSaveController(roomId: string): AutosaveController<unknown> {
-  let controller = _controllers.get(roomId);
-  if (!controller) {
-    controller = new AutosaveController<unknown>({ save: async () => true });
-    _controllers.set(roomId, controller);
-  }
-  return controller;
-}
-
-export function useAutoSaveStatus(roomId: string): AutosaveStatus {
-  const [status, setStatus] = useState<AutosaveStatus>("idle");
-  const controllerRef = useRef<AutosaveController<unknown> | null>(null);
-
-  if (!controllerRef.current) {
-    controllerRef.current = getAutoSaveController(roomId);
-    controllerRef.current.onStatusChange?.(controllerRef.current.status);
-  }
-
-  useEffect(() => {
-    const controller = controllerRef.current;
-    if (!controller) return;
-    const prev = controller.onStatusChange;
-    controller.onStatusChange = (s) => {
-      setStatus(s);
-      prev?.(s);
-    };
-    setStatus(controller.status);
-    return () => {
-      controller.onStatusChange = prev ?? undefined;
-    };
-  }, [roomId]);
-
-  return status;
 }

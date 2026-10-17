@@ -3,6 +3,8 @@ import { createHash, createHmac } from "node:crypto";
 
 import {
   E2E_EMAIL,
+  E2E_OTHER_EMAIL,
+  E2E_OTHER_USER_ID,
   E2E_USER_ID,
   MOCK_SUPABASE_HOST,
   MOCK_SUPABASE_PORT,
@@ -54,17 +56,44 @@ export interface StoredObject {
 
 const JWT_SECRET = "e2e-hmac-secret";
 
+interface MockIdentity {
+  id: string;
+  email: string;
+}
+
+/**
+ * Every GoTrue identity the mock can issue a session for (issue #1101).
+ * The password-grant endpoint picks one by matching the request body's
+ * `email` field against this list, so specs can sign in as the second
+ * user without rewriting the existing single-user helpers — `login()`
+ * still uses the default identity, `loginAs(page, email)` selects from
+ * here.
+ *
+ * The Prisma `User` row MUST exist for any email a spec passes to
+ * `loginAs` — `getAuthedPrismaUser` in `src/lib/api-auth.ts` resolves
+ * the row by `user.email`, so a GoTrue session with no matching Prisma
+ * row yields a 401 even when the password grant succeeds.
+ */
+const KNOWN_IDENTITIES: MockIdentity[] = [
+  { id: E2E_USER_ID, email: E2E_EMAIL },
+  { id: E2E_OTHER_USER_ID, email: E2E_OTHER_EMAIL },
+];
+
+function findIdentityByEmail(email: string): MockIdentity | null {
+  return KNOWN_IDENTITIES.find((identity) => identity.email === email) ?? null;
+}
+
 function base64url(input: string | Buffer): string {
   return Buffer.from(input).toString("base64url");
 }
 
-function signJwt(user: Record<string, unknown>): string {
+function signJwt(user: MockIdentity): string {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const header = base64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
   const claims = base64url(
     JSON.stringify({
-      sub: E2E_USER_ID,
-      email: E2E_EMAIL,
+      sub: user.id,
+      email: user.email,
       aud: "authenticated",
       role: "authenticated",
       iat: nowSeconds,
@@ -74,17 +103,16 @@ function signJwt(user: Record<string, unknown>): string {
   const signature = createHmac("sha256", JWT_SECRET)
     .update(`${header}.${claims}`)
     .digest("base64url");
-  void user;
   return `${header}.${claims}.${signature}`;
 }
 
-function mockUser(): Record<string, unknown> {
+function mockUser(identity: MockIdentity): Record<string, unknown> {
   const now = new Date().toISOString();
   return {
-    id: E2E_USER_ID,
+    id: identity.id,
     aud: "authenticated",
     role: "authenticated",
-    email: E2E_EMAIL,
+    email: identity.email,
     email_confirmed_at: now,
     phone: "",
     confirmed_at: now,
@@ -97,15 +125,15 @@ function mockUser(): Record<string, unknown> {
   };
 }
 
-function mockSession(): Record<string, unknown> {
+function mockSession(identity: MockIdentity): Record<string, unknown> {
   const nowSeconds = Math.floor(Date.now() / 1000);
   return {
-    access_token: signJwt(mockUser()),
+    access_token: signJwt(identity),
     token_type: "bearer",
     expires_in: 3600,
     expires_at: nowSeconds + 3600,
-    refresh_token: `e2e-refresh-${nowSeconds}`,
-    user: mockUser(),
+    refresh_token: `e2e-refresh-${nowSeconds}-${identity.id}`,
+    user: mockUser(identity),
   };
 }
 
@@ -122,6 +150,64 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json");
   res.end(JSON.stringify(body));
+}
+
+/**
+ * Reads `email` out of either shape a password grant can arrive in:
+ * `application/x-www-form-urlencoded` (real GoTrue, an older supabase-js
+ * path) or `application/json` (the path
+ * `@supabase/auth-js` 2.x actually takes — issue #1101 hit this when
+ * the browser-side signInWithPassword posted JSON and the form parser
+ * returned null, which fell through to the default identity).
+ * Unknown shapes return null so the caller falls back to its default
+ * identity.
+ */
+function parseEmailFromPasswordBody(body: Buffer): string | null {
+  const text = body.toString("utf8");
+  if (!text) return null;
+  const trimmed = text.trimStart();
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed) as { email?: unknown };
+      if (typeof parsed.email === "string") return parsed.email;
+    } catch {
+      return null;
+    }
+    return null;
+  }
+  if (text.includes("=")) {
+    const params = new URLSearchParams(text);
+    return params.get("email");
+  }
+  return null;
+}
+
+/**
+ * Decodes the mock's HS256 JWT from a `Bearer …` header and returns the
+ * matching {@link MockIdentity}. The mock signs tokens with a known
+ * secret and is the only place we need to crack them open — the app
+ * itself trusts whatever Supabase-typed shape comes back, so we never
+ * need to validate the signature here. Returns null when the header is
+ * absent or the JWT is malformed.
+ */
+function identityFromBearerHeader(
+  authorization: string | string[] | undefined
+): MockIdentity | null {
+  if (!authorization || typeof authorization !== "string") return null;
+  const match = /^Bearer\s+([^.]+)\.([^.]+)\.([^.]+)$/.exec(authorization);
+  if (!match) return null;
+  try {
+    const claimsJson = Buffer.from(match[2], "base64url").toString("utf8");
+    const claims = JSON.parse(claimsJson) as { sub?: string; email?: string };
+    if (claims.sub) {
+      const found = KNOWN_IDENTITIES.find((identity) => identity.id === claims.sub);
+      if (found) return found;
+    }
+    if (claims.email) return findIdentityByEmail(claims.email);
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 async function readBody(req: IncomingMessage): Promise<Buffer> {
@@ -292,9 +378,28 @@ export class MockSupabase {
     // POST /auth/v1/token?grant_type=password|refresh_token
     if (parts[2] === "token" && req.method === "POST") {
       const grant = url.searchParams.get("grant_type");
-      await readBody(req); // drain credentials; mock accepts anything
-      if (grant === "password" || grant === "refresh_token") {
-        json(res, 200, mockSession());
+      const body = await readBody(req);
+      if (grant === "refresh_token") {
+        // Refresh re-issues for whichever identity held the original
+        // access_token. supabase-js sends the (still-valid) access_token
+        // in the Authorization header alongside the refresh_token in
+        // the form-urlencoded body, so we decode the header's JWT to
+        // find the matching identity. Falls back to the default identity
+        // if no Bearer token was supplied.
+        const refreshed =
+          identityFromBearerHeader(req.headers.authorization) ?? KNOWN_IDENTITIES[0];
+        json(res, 200, mockSession(refreshed));
+        return;
+      }
+      if (grant === "password") {
+        // Issue #1101: the password grant accepts EITHER identity. The
+        // request body is JSON-encoded as form-urlencoded (supabase-js),
+        // so `email=` is the first lookup key. Unknown emails fall back
+        // to the default identity to keep the existing helper working
+        // (the helper always passes the well-known seeded email).
+        const requestedEmail = parseEmailFromPasswordBody(body) ?? E2E_EMAIL;
+        const identity = findIdentityByEmail(requestedEmail) ?? KNOWN_IDENTITIES[0];
+        json(res, 200, mockSession(identity));
         return;
       }
       json(res, 400, { error: "unsupported_grant_type" });
@@ -303,7 +408,9 @@ export class MockSupabase {
 
     // GET /auth/v1/user — middleware/server components send the Bearer JWT.
     if (parts[2] === "user" && req.method === "GET") {
-      json(res, 200, mockUser());
+      const identity = identityFromBearerHeader(req.headers.authorization)
+        ?? KNOWN_IDENTITIES[0];
+      json(res, 200, mockUser(identity));
       return;
     }
 
@@ -348,6 +455,24 @@ export class MockSupabase {
       return;
     }
 
+    // Object listing (issue #1344 follow-up): the room-photo upload
+    // action's size-enforcement call (`readUploadedObjectSize`) needs
+    // a real /storage/v1/object/list/<bucket> responder — without
+    // it, the e2e mock returns a non-array shape, and the action's
+    // `data.find` call throws `TypeError: data.find is not a
+    // function`, surfacing as a "Room photo upload failed." toast in
+    // the spec. supabase-js sends the prefix + search + limit as a
+    // JSON body on POST /object/list/<bucket>, so we read the body
+    // and filter the in-memory object map by bucket + prefix +
+    // (optional) substring search, then project the rows into the
+    // `{ name, metadata: { size, mimetype } }` shape supabase-js
+    // expects.
+    if (mode === "list" && req.method === "POST") {
+      const listBucket = parts[4];
+      void this.handleList(req, res, listBucket);
+      return;
+    }
+
     // Plain upload (issue #747): saveInpaintVersion uploads version-history
     // thumbnails with supabase-js `.upload()`, which services as a plain
     // POST /object/<bucket>/<path>. Blob bodies arrive wrapped in a
@@ -387,6 +512,49 @@ export class MockSupabase {
     const contentType = String(req.headers["content-type"] ?? "application/octet-stream");
     this.storeObject(bucket, objectPath, bytes, contentType);
     this.ackObject(res, bucket, objectPath);
+  }
+
+  /**
+   * `POST /storage/v1/object/list/<bucket>` (issue #1344 follow-up):
+   * supabase-js v2 sends `{ prefix, search, limit, sortBy, ... }` as a
+   * JSON body. Filter the in-memory object map by bucket + prefix,
+   * optionally narrow by the substring `search`, and project each row
+   * into the `{ name, metadata: { size, mimetype }, ... }` shape
+   * supabase-js hands back to the caller. Used by
+   * `readUploadedObjectSize` in the room-photo upload action to read
+   * the just-uploaded object's byte size and enforce the 10 MB cap
+   * (issue #1145).
+   */
+  private async handleList(
+    req: IncomingMessage,
+    res: ServerResponse,
+    bucket: string
+  ): Promise<void> {
+    const raw = await readBody(req);
+    let body: { prefix?: string; search?: string } = {};
+    try {
+      body = JSON.parse(raw.toString("utf8"));
+    } catch {
+      // supabase-js always sends a JSON body; if a future version
+      // sends something else, fall through with an empty filter and
+      // return the full bucket.
+    }
+    const prefix = body.prefix ?? "";
+    const search = body.search ?? "";
+    const now = new Date().toISOString();
+    const entries = this.listObjects()
+      .filter((o) => o.bucket === bucket)
+      .filter((o) => (prefix ? o.path.startsWith(prefix) : true))
+      .filter((o) => (search ? o.path.includes(search) : true))
+      .map((o) => ({
+        name: o.path.slice(prefix.length).replace(/^\/+/, "") || o.path,
+        id: `${o.bucket}/${o.path}`,
+        updated_at: now,
+        created_at: now,
+        last_accessed_at: now,
+        metadata: { size: o.size, mimetype: o.contentType },
+      }));
+    json(res, 200, entries);
   }
 
   /**
