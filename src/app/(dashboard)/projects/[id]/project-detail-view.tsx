@@ -720,6 +720,73 @@ export default function ProjectDetailView({
   );
 
   /**
+   * Issue #1362c — dev-only test seam for the FineTune blend-edges wire
+   * spec. Lets the e2e suite mutate `fineTune[editorRoomId].fineTuneExpand`
+   * directly without driving the `<Slider>` DOM (every DOM-driven strategy
+   * — pointer drag, keyboard `Home`/`ArrowRight`, `fill`, native setter +
+   * dispatched `input` — silently leaves the slider at 12 in the Playwright
+   * harness because React 19/Next 16's event delegation root does not pick
+   * up programmatic `input` events on this controlled range input). The
+   * unit pin (`tests/mask-feather.test.ts`) covers `featherMask`'s math;
+   * this seam lets the e2e cover `beforeSubmit`'s `?? 0` fallback and the
+   * `featherMask(maskDataUrl, expand)` → `maskUrl` POST-body composition.
+   *
+   * Also exposes `__test_submitInpaint(maskDataUrl)` because the run
+   * button's `blockedReason` reads from the studio reducer's
+   * `state.directions` (not from the route's `directives[roomId]`),
+   * and Playwright's textarea fill races the reducer's
+   * `SET_DIRECTIONS` dispatch through `<BufferedDirectivesTextarea>`'s
+   * 120ms idle commit + 2s autosave flush dance. Calling the cluster's
+   * `beginRun` directly bypasses that gate and exercises the same
+   * `beforeSubmit` → `featherMask` → POST-body wire the spec is
+   * pinning.
+   *
+   * Gated by `NEXT_PUBLIC_EDIT_ROOM_REDESIGN` so production bundles
+   * never carry the window binding. The e2e harness turns the gate on
+   * via `nextEnv()` in `tests/e2e/env.ts`.
+   */
+  useEffect(() => {
+    if (!isEditRoomRedesignEnabled) return;
+    if (typeof window === "undefined") return;
+    (window as unknown as {
+      __test_setFineTune?: (next: number) => void;
+    }).__test_setFineTune = (next: number) => {
+      if (!editorRoomId) return;
+      editFineTune(editorRoomId, { fineTuneExpand: next });
+    };
+    (window as unknown as {
+      __test_submitInpaint?: (maskDataUrl: string) => Promise<void>;
+    }).__test_submitInpaint = async (maskDataUrl: string) => {
+      const cluster = editRoomRunClusterRef.current;
+      if (!cluster) {
+        throw new Error(
+          "editRoomRunClusterRef is not mounted; is the focused editor open?",
+        );
+      }
+      await cluster.beginRun(maskDataUrl);
+    };
+    (window as unknown as {
+      __test_setDirectives?: (next: string) => void;
+    }).__test_setDirectives = (next: string) => {
+      if (!editorRoomId) return;
+      editDirectives(editorRoomId, next);
+    };
+    return () => {
+      delete (window as unknown as { __test_setFineTune?: unknown })
+        .__test_setFineTune;
+      delete (window as unknown as { __test_submitInpaint?: unknown })
+        .__test_submitInpaint;
+      delete (window as unknown as { __test_setDirectives?: unknown })
+        .__test_setDirectives;
+    };
+  }, [
+    isEditRoomRedesignEnabled,
+    editorRoomId,
+    editFineTune,
+    editDirectives,
+  ]);
+
+  /**
    * Issue #1362b (Stage B) — guidance memo for the `<EditRoomRunCluster>`
    * (mounted in JSX). Reads the per-room FineTune state from
    * `fineTune[editorRoomId]` (issue #1362a) and forwards
