@@ -1,34 +1,31 @@
 /**
- * Feature flag for the Edit Room UX redesign (issue #1344).
+ * Kill-switch for the Edit Room UX redesign (#1344 / #1346 wave-5).
  *
- * `NEXT_PUBLIC_EDIT_ROOM_REDESIGN` is the single source of truth for
- * which staging editor surface the project detail view mounts:
+ * After issue #1346, the `<EditRoomStudio>` (Magic Patterns redesign) is
+ * the ONLY mounted editor — the legacy `<InpaintEditor>` and
+ * `<RefineStudioClient>` are slated for deletion in this same PR. To
+ * give operators a single-line escape hatch while the delete pass is in
+ * flight, `NEXT_PUBLIC_EDIT_ROOM_REDESIGN` is still honored: set it to
+ * `"0"` / `"false"` / `"no"` to re-enable the legacy mount. Default
+ * (unset / `"1"` / anything truthy) keeps the new studio.
  *
- * - `"0"` (default, unset, empty, whitespace) → mount the legacy
- *   `<InpaintEditor>` (the #691 subtree) so a stale deploy surfaces
- *   the working surface instead of an unfinished redesign.
- * - `"1"` (or `"true"` / `"yes"`, case-insensitive) → mount the new
- *   `<EditRoomStudio>` (the Magic Patterns redesign).
- *
- * The env var carries the `NEXT_PUBLIC_` prefix because the gate is
- * read in `project-detail-view.tsx` (a client component). The values
- * the resolver parses are deliberately narrow — any other string is
- * `false`, so a typo in a deployment env cannot silently flip the
- * surface to the redesign in production.
- *
- * Pure logic so the rule is pinned 1:1 by
- * `tests/edit-room-flag.test.ts` (issue #1344).
+ * Once issue #1346 lands the entire `edit-room-flag.ts` module and the
+ * env var are retired (wave-5 commit 3) — this file is intentionally
+ * short-lived. Pure logic so the rule is pinned 1:1 by
+ * `tests/edit-room-flag.test.ts` (#1344 / #1346).
  */
 
-const TRUTHY = new Set(["1", "true", "yes"]);
+const FALSY = new Set(["0", "false", "no", "off", "disable", "disabled"]);
 
 /**
  * Resolves the `NEXT_PUBLIC_EDIT_ROOM_REDESIGN` env value to a boolean.
  *
- * Contract:
- * - `undefined` / `""` / whitespace-only → `false` (default off).
- * - `"1"`, `"true"`, `"yes"` (case-insensitive) → `true`.
- * - `"0"`, `"false"`, `"no"`, or any other value → `false`.
+ * Contract (inverted from the pre-#1346 gate, default is now ON):
+ * - `undefined` / `""` / whitespace-only → `true` (default ON).
+ * - `"0"`, `"false"`, `"no"`, `"off"`, `"disable"`, `"disabled"`
+ *   (case-insensitive) → `false` (opt OUT to the legacy mount).
+ * - Any other value → `true` (treat typos as ON so a stale deploy
+ *   cannot accidentally keep the legacy surface).
  *
  * @param value Raw env var value, or `undefined` when unset.
  * @returns Whether the redesign surface should mount.
@@ -36,8 +33,8 @@ const TRUTHY = new Set(["1", "true", "yes"]);
 export function resolveEditRoomRedesignEnabled(
   value: string | undefined
 ): boolean {
-  if (value === undefined) return false;
+  if (value === undefined) return true;
   const normalized = value.trim().toLowerCase();
-  if (normalized.length === 0) return false;
-  return TRUTHY.has(normalized);
+  if (normalized.length === 0) return true;
+  return !FALSY.has(normalized);
 }

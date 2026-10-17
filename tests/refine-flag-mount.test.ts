@@ -70,11 +70,17 @@ describe("refine flag-gated mount (issue #1345)", () => {
     expect(typeof RefineStudioClient).toBe("function");
   });
 
-  it("flag resolver still gates the new mount correctly", () => {
-    expect(resolveEditRoomRedesignEnabled(undefined)).toBe(false);
-    expect(resolveEditRoomRedesignEnabled("")).toBe(false);
+  it("flag resolver still gates the new mount correctly (#1346 default is ON)", () => {
+    // After #1346 the env var is a kill-switch (default ON, opt OUT
+    // to legacy). Undefined / empty / whitespace default to true; the
+    // explicit "0" / "false" / "no" set returns false; the original
+    // truthy set still works for back-compat with the #1344 deploys.
+    expect(resolveEditRoomRedesignEnabled(undefined)).toBe(true);
+    expect(resolveEditRoomRedesignEnabled("")).toBe(true);
     expect(resolveEditRoomRedesignEnabled("1")).toBe(true);
     expect(resolveEditRoomRedesignEnabled("true")).toBe(true);
+    expect(resolveEditRoomRedesignEnabled("0")).toBe(false);
+    expect(resolveEditRoomRedesignEnabled("false")).toBe(false);
   });
 
   it("URL ?room=<id> picks the matching room when present", () => {

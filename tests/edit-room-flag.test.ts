@@ -1,71 +1,49 @@
 /**
- * Issue #1344 — Feature flag resolver for the Edit Room UX redesign mount.
+ * Issue #1346 — the `NEXT_PUBLIC_EDIT_ROOM_REDESIGN` env var is
+ * now a kill-switch (default ON, opt OUT to legacy). Test the new
+ * contract: every input resolves to `true` EXCEPT the explicit
+ * falsy set, which resolves to `false`.
  *
- * `NEXT_PUBLIC_EDIT_ROOM_REDESIGN` gates which editor surface the
- * project view mounts (legacy `<InpaintEditor>` vs new `<EditRoomStudio>`).
- * The flag is `NEXT_PUBLIC_*` because the decision is made in a client
- * component (`project-detail-view.tsx`). The resolver is the single
- * source of truth for the rule:
- *
- * - `undefined`, `""`, whitespace-only → `false` (legacy stays live).
- * - `"0"`, `"FALSE"`, `"false"`, `"no"` (case-insensitive) → `false`.
- * - `"1"`, `"TRUE"`, `"true"`, `"yes"` (case-insensitive) → `true`.
- * - Any other string → `false` (defense in depth: a typo must NOT
- *   silently flip the surface to the new editor in production).
- *
- * Pinned by the cases below so a future "we should just JSON.parse it"
- * or "trim then cast" simplification is caught by tests, not by a
- * regression in prod.
+ * Pre-#1346 the gate was default-OFF; the inversion is the whole
+ * point of this commit (wave-5 of the Edit Room UX redesign).
  */
-
 import { describe, expect, it } from "vitest";
-
 import { resolveEditRoomRedesignEnabled } from "@/lib/edit-room-flag";
 
-describe("resolveEditRoomRedesignEnabled (issue #1344)", () => {
-  it("returns false when the env value is undefined", () => {
-    expect(resolveEditRoomRedesignEnabled(undefined)).toBe(false);
+describe("resolveEditRoomRedesignEnabled (#1346 kill-switch, default ON)", () => {
+  it("returns true when env is undefined (default ON after #1346)", () => {
+    expect(resolveEditRoomRedesignEnabled(undefined)).toBe(true);
   });
 
-  it("returns false when the env value is the empty string", () => {
-    expect(resolveEditRoomRedesignEnabled("")).toBe(false);
+  it("returns true for empty / whitespace-only values", () => {
+    expect(resolveEditRoomRedesignEnabled("")).toBe(true);
+    expect(resolveEditRoomRedesignEnabled("   ")).toBe(true);
   });
 
-  it("returns false when the env value is whitespace-only", () => {
-    expect(resolveEditRoomRedesignEnabled("   ")).toBe(false);
-  });
-
-  it("returns true for the exact string '1'", () => {
+  it("returns true for the original truthy set (back-compat with #1344)", () => {
     expect(resolveEditRoomRedesignEnabled("1")).toBe(true);
-  });
-
-  it("returns true for 'true' (case-insensitive)", () => {
     expect(resolveEditRoomRedesignEnabled("true")).toBe(true);
-    expect(resolveEditRoomRedesignEnabled("TRUE")).toBe(true);
-    expect(resolveEditRoomRedesignEnabled("True")).toBe(true);
-  });
-
-  it("returns true for 'yes' (case-insensitive)", () => {
     expect(resolveEditRoomRedesignEnabled("yes")).toBe(true);
-    expect(resolveEditRoomRedesignEnabled("YES")).toBe(true);
   });
 
-  it("returns false for the exact string '0'", () => {
+  it("treats unknown values as ON so a typo cannot flip to legacy", () => {
+    expect(resolveEditRoomRedesignEnabled("enable")).toBe(true);
+    expect(resolveEditRoomRedesignEnabled("on")).toBe(true);
+    expect(resolveEditRoomRedesignEnabled("foo")).toBe(true);
+  });
+
+  it("returns false ONLY for the explicit falsy kill-switch set", () => {
     expect(resolveEditRoomRedesignEnabled("0")).toBe(false);
-  });
-
-  it("returns false for 'false' (case-insensitive)", () => {
     expect(resolveEditRoomRedesignEnabled("false")).toBe(false);
-    expect(resolveEditRoomRedesignEnabled("FALSE")).toBe(false);
-  });
-
-  it("returns false for 'no' (case-insensitive)", () => {
     expect(resolveEditRoomRedesignEnabled("no")).toBe(false);
+    expect(resolveEditRoomRedesignEnabled("off")).toBe(false);
+    expect(resolveEditRoomRedesignEnabled("disable")).toBe(false);
+    expect(resolveEditRoomRedesignEnabled("disabled")).toBe(false);
   });
 
-  it("returns false for an unrecognised value (defense in depth)", () => {
-    expect(resolveEditRoomRedesignEnabled("maybe")).toBe(false);
-    expect(resolveEditRoomRedesignEnabled("2")).toBe(false);
-    expect(resolveEditRoomRedesignEnabled("enable")).toBe(false);
+  it("normalises case and surrounding whitespace", () => {
+    expect(resolveEditRoomRedesignEnabled(" FALSE ")).toBe(false);
+    expect(resolveEditRoomRedesignEnabled("0")).toBe(false);
+    expect(resolveEditRoomRedesignEnabled(" 1 ")).toBe(true);
   });
 });
