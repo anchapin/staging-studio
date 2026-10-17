@@ -6,6 +6,8 @@ import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 
 import { RefineStudioClient } from "./refine-studio-client";
+import { EditRoomStudioMount } from "./edit-room-studio-mount";
+import { resolveEditRoomRedesignEnabled } from "@/lib/edit-room-flag";
 
 interface RefinePageProps {
   params: Promise<{ id: string }>;
@@ -92,6 +94,38 @@ export default async function RefineStudioPage({
     firstRenderable?.id ??
     project.rooms[0]?.id ??
     null;
+
+  // Issue #1345 — flag-gated mount of `<EditRoomStudio>` (#1342 / #1344).
+  // When ON, the legacy `RefineStudioClient` is unreachable; the new
+  // studio (single focused room via the `?room=` searchParam) takes over.
+  // The room the URL selected (via `requestedRoom` / `initialRoomId`)
+  // becomes `focusedRoom`. When OFF, the legacy mount runs unchanged.
+  const isEditRoomRedesignEnabled = resolveEditRoomRedesignEnabled(
+    process.env.NEXT_PUBLIC_EDIT_ROOM_REDESIGN,
+  );
+  const focusedRoomForNewStudio = isEditRoomRedesignEnabled
+    ? project.rooms.find((candidate) => candidate.id === initialRoomId) ?? null
+    : null;
+
+  if (isEditRoomRedesignEnabled && focusedRoomForNewStudio) {
+    return (
+      <EditRoomStudioMount
+        project={{
+          id: project.id,
+          propertyAddress: project.propertyAddress,
+        }}
+        focusedRoom={{
+          id: focusedRoomForNewStudio.id,
+          name: focusedRoomForNewStudio.name,
+          beforeImageUrl: focusedRoomForNewStudio.beforeImageUrl,
+          afterImageUrl: focusedRoomForNewStudio.afterImageUrl,
+          afterImageUrl2: focusedRoomForNewStudio.afterImageUrl2,
+          selectedVariantIndex: focusedRoomForNewStudio.selectedVariantIndex,
+          rawDirectives: focusedRoomForNewStudio.rawDirectives,
+        }}
+      />
+    );
+  }
 
   return (
     <RefineStudioClient
