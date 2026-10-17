@@ -5,9 +5,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 
-import { RefineStudioClient } from "./refine-studio-client";
 import { EditRoomStudioMount } from "./edit-room-studio-mount";
-import { resolveEditRoomRedesignEnabled } from "@/lib/edit-room-flag";
 
 interface RefinePageProps {
   params: Promise<{ id: string }>;
@@ -99,15 +97,16 @@ export default async function RefineStudioPage({
   // When ON, the legacy `RefineStudioClient` is unreachable; the new
   // studio (single focused room via the `?room=` searchParam) takes over.
   // The room the URL selected (via `requestedRoom` / `initialRoomId`)
-  // becomes `focusedRoom`. When OFF, the legacy mount runs unchanged.
-  const isEditRoomRedesignEnabled = resolveEditRoomRedesignEnabled(
-    process.env.NEXT_PUBLIC_EDIT_ROOM_REDESIGN,
-  );
-  const focusedRoomForNewStudio = isEditRoomRedesignEnabled
-    ? project.rooms.find((candidate) => candidate.id === initialRoomId) ?? null
-    : null;
+  // Issue #1346 — `isEditRoomRedesignEnabled` (the kill-switch
+  // flag) and the legacy `RefineStudioClient` fallback are gone.
+  // The new `<EditRoomStudioMount>` is the only mount; when
+  // `initialRoomId` is missing the focused room, render nothing
+  // (the user is expected to pick a room from the project view
+  // and the URL will re-render with a valid `?room=`).
+  const focusedRoomForNewStudio =
+    project.rooms.find((candidate) => candidate.id === initialRoomId) ?? null;
 
-  if (isEditRoomRedesignEnabled && focusedRoomForNewStudio) {
+  if (focusedRoomForNewStudio) {
     return (
       <EditRoomStudioMount
         project={{
@@ -127,33 +126,5 @@ export default async function RefineStudioPage({
     );
   }
 
-  return (
-    <RefineStudioClient
-      projectId={project.id}
-      propertyAddress={project.propertyAddress}
-      initialRoomId={initialRoomId}
-      rooms={project.rooms.map((candidate) => ({
-        id: candidate.id,
-        name: candidate.name,
-        beforeImageUrl: candidate.beforeImageUrl,
-        afterImageUrl: candidate.afterImageUrl,
-        afterImageUrl2: candidate.afterImageUrl2,
-        selectedVariantIndex: candidate.selectedVariantIndex,
-        rawDirectives: candidate.rawDirectives,
-        completedRequestIds: candidate.inpaintRequests
-          .filter(
-            (request) => request.status === "COMPLETED" && request.resultUrl
-          )
-          .map((request) => request.id),
-        variations: candidate.inpaintRequests
-          .filter(
-            (request) => request.status === "COMPLETED" && request.resultUrl
-          )
-          .map((request) => ({
-            id: request.id,
-            resultUrl: request.resultUrl as string,
-          })),
-      }))}
-    />
-  );
+  return null;
 }
