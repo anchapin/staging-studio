@@ -97,6 +97,19 @@ const SPEC_TABLE: Record<string, string> = {
   canvas: "#F8F6F2",
   taupe: "#8C827A",
   cream: "#fff8f8",
+  // Issue #1375: studio-toolbar palette additions for WCAG 2.2 AA contrast.
+  "surface-mid": "#d5ba96",
+  "surface-low": "#e8d5b6",
+  "surface-lowest": "#f6ebd8",
+  "surface-highest": "#ceb791",
+  ink: "#201a15",
+  "ink-subtle": "#3a322d",
+  "ink-muted": "#4d443c",
+  line: "#8C827A",
+  "line-soft": "#cdc4ba",
+  walnut: "#181716",
+  "walnut-foreground": "#ffffff",
+  "on-walnut": "#fff8f4",
 };
 
 describe("Atelier color token table — issue #613", () => {
@@ -384,5 +397,34 @@ describe("acceptance: system colors via tokens, not raw hex", () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  // Issue #1375: pin the room-studio toolbar WCAG 2.2 AA contrast ratios
+  // so a token-table tweak can't silently regress the toolbar's legibility.
+  it("passes WCAG 2.2 AA for the room-studio toolbar contrast stack", () => {
+    const atelier = ATELIER_COLOR_TOKENS;
+
+    // Layer 1 — toolbar surface vs studio canvas (clearly distinguishable).
+    expect(contrastRatio(atelier["surface-mid"], atelier.canvas)).toBeGreaterThanOrEqual(
+      1.5,
+    );
+
+    // Layer 2 — button raised bg vs toolbar surface (clearly distinguishable).
+    expect(contrastRatio(atelier["surface-lowest"], atelier["surface-mid"])).toBeGreaterThanOrEqual(
+      1.5,
+    );
+
+    // Layer 3 — default-state text on raised button (>=4.5:1).
+    expect(contrastRatio(atelier.ink, atelier["surface-lowest"])).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(atelier["ink-subtle"], atelier["surface-lowest"])).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(atelier["ink-muted"], atelier["surface-lowest"])).toBeGreaterThanOrEqual(4.5);
+
+    // Layer 3 — text on toolbar surface (>=4.5:1).
+    expect(contrastRatio(atelier["ink-subtle"], atelier["surface-mid"])).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(atelier["ink-muted"], atelier["surface-mid"])).toBeGreaterThanOrEqual(4.5);
+
+    // Layer 3 — active-state button text on accent fill (>=4.5:1).
+    expect(contrastRatio(atelier["walnut-foreground"], atelier.walnut)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(atelier["on-walnut"], atelier.walnut)).toBeGreaterThanOrEqual(4.5);
   });
 });

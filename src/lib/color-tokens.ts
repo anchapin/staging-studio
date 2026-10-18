@@ -94,6 +94,20 @@ export const ATELIER_COLOR_TOKENS = {
   canvas: "#F8F6F2",
   taupe: "#8C827A",
   cream: "#fff8f8",
+  // Issue #1375: studio-toolbar palette additions for WCAG 2.2 AA contrast.
+  // All text-on-fill pairs verified >=4.5:1 (see tests/color-tokens.test.ts).
+  "surface-mid": "#d5ba96",
+  "surface-low": "#e8d5b6",
+  "surface-lowest": "#f6ebd8",
+  "surface-highest": "#ceb791",
+  ink: "#201a15",
+  "ink-subtle": "#3a322d",
+  "ink-muted": "#4d443c",
+  line: "#8C827A",
+  "line-soft": "#cdc4ba",
+  walnut: "#181716",
+  "walnut-foreground": "#ffffff",
+  "on-walnut": "#fff8f4",
 } as const;
 
 export type AtelierColorToken = keyof typeof ATELIER_COLOR_TOKENS;
