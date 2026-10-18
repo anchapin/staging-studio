@@ -279,3 +279,73 @@ export async function restoreInpaintVersion(
   revalidatePath(`/preview/${projectId}`);
   return { success: true };
 }
+
+/**
+ * Hard-deletes every `InpaintVersion` row for one (roomId, variantSlot).
+ *
+ * Issue #1376 — per-variant delete (X) on `<VersionStrip>`. The user deletes
+ * one variant to start over on that slot without touching the other. Deletion
+ * is recoverable only via DB restore (no soft-delete / archive in this scope).
+ *
+ * If the deleted slot currently holds the room's afterImageUrl / afterImageUrl2,
+ * that column is cleared so the variant visibly resets to a fresh state. The
+ * remaining variant (if any) is the caller-supplied fallback to select after
+ * the delete. If both slots are deleted the parent should select "original".
+ *
+ * Contract: requires authenticated session owning the room's project.
+ *
+ * @param roomId       Room whose variants are being deleted.
+ * @param variantSlot  0 or 1 — which variant slot.
+ */
+export async function deleteInpaintVariant(
+  roomId: string,
+  variantSlot: 0 | 1,
+): Promise<
+  | { success: true; deletedCount: number; remaining: { A: boolean; B: boolean } }
+  | ActionFailure
+> {
+  const user = await getAuthedPrismaUser();
+  if (!user) return failure("Not authenticated");
+
+  // Ownership check: room must belong to a project owned by the caller.
+  const room = await prisma.room.findFirst({
+    where: { id: roomId, project: { userId: user.id } },
+    select: { id: true, projectId: true, afterImageUrl: true, afterImageUrl2: true },
+  });
+  if (!room) return failure("Room not found or not owned by user");
+
+  // Delete every version row for this (roomId, variantSlot). Any dependent
+  // logs (per AGENTS.md: Room → InpaintVersion cascades with the room; the
+  // per-slot delete here clears versions scoped to the deleted variant slot).
+  const result = await prisma.inpaintVersion.deleteMany({
+    where: { roomId, variantSlot },
+  });
+
+  // If the deleted slot currently holds the room's afterImageUrl/afterImageUrl2,
+  // clear it so the variant visibly resets. Column → slot mapping: slot 0 → 1,
+  // slot 1 → 2 (matches the existing `saveInpaintVersion` callers).
+  const column = variantSlot === 0 ? "afterImageUrl" : "afterImageUrl2";
+  if (room[column]) {
+    await prisma.room.update({
+      where: { id: roomId },
+      data: { [column]: null },
+    });
+  }
+
+  // Re-read remaining slots so the caller can pick the right fallback viewing.
+  const remainingRows = await prisma.inpaintVersion.findMany({
+    where: { roomId },
+    select: { variantSlot: true },
+    distinct: ["variantSlot"],
+  });
+  const remaining = {
+    A: remainingRows.some((r) => r.variantSlot === 0),
+    B: remainingRows.some((r) => r.variantSlot === 1),
+  };
+
+  revalidatePath(`/projects/${room.projectId}/refine`);
+  revalidatePath(`/dashboard`);
+  revalidatePath(`/preview/${room.projectId}`);
+
+  return { success: true, deletedCount: result.count, remaining };
+}

@@ -1,5 +1,8 @@
+"use client";
+
 /**
  * Issue #1340 — `<VersionStrip>` + Lookbook slot.
+ * Issue #1376 — Per-variant delete (X icon) on each populated variant slot.
  *
  * Single row beneath the canvas that consolidates the three legacy
  * version surfaces (variant-thumbnail-strip, version-history-pills,
@@ -23,6 +26,8 @@
  */
 
 import { LookbookBadge } from "@/components/edit-room/lookbook-badge";
+import { useState } from "react";
+
 import type { SlotId } from "@/lib/edit-room-scope";
 import type { Version } from "@/components/edit-room/types";
 
@@ -41,6 +46,13 @@ interface VersionStripProps {
   onSelect: (slot: SlotId) => void;
   /** Fires when the user clicks the "Use X in lookbook" CTA. */
   onUseInLookbook: (slot: SlotId) => void;
+  /**
+   * Fires when the user confirms deletion of a variant slot (#1376).
+   * Only `A` and `B` may be deleted — the `original` slot is immutable.
+   * The parent is responsible for hard-deleting the underlying
+   * `InpaintVersion` rows and selecting a fallback `viewing` slot.
+   */
+  onDelete?: (slot: SlotId) => void | Promise<void>;
 }
 
 /**
@@ -64,8 +76,25 @@ export function VersionStrip({
   running,
   onSelect,
   onUseInLookbook,
+  onDelete,
 }: VersionStripProps) {
   const viewingVersion = versions.find((v) => v.id === viewing);
+
+  // #1376 — confirm-delete modal state. `null` means closed.
+  const [confirmingDelete, setConfirmingDelete] = useState<SlotId | null>(null);
+  // Tracks the in-flight deletion so we can disable both modal buttons.
+  const [deleting, setDeleting] = useState(false);
+
+  const handleConfirmDelete = async () => {
+    if (!confirmingDelete || !onDelete) return;
+    setDeleting(true);
+    try {
+      await onDelete(confirmingDelete);
+    } finally {
+      setDeleting(false);
+      setConfirmingDelete(null);
+    }
+  };
 
   return (
     <section
@@ -132,6 +161,22 @@ export function VersionStrip({
               >
                 <img src={v.url} alt="" className="h-full w-full object-cover" />
                 {inLookbook && <LookbookBadge />}
+                {/* #1376 — per-variant delete (X). Only on A/B; original is immutable. */}
+                {onDelete && v.id !== "original" && (
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setConfirmingDelete(v.id);
+                    }}
+                    disabled={running}
+                    aria-label={`Delete ${v.label}`}
+                    data-testid={`edit-room-version-strip-delete-${v.id}`}
+                    className="absolute right-1 top-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-surface-container-highest/90 text-on-surface shadow-sm ring-1 ring-outline-variant backdrop-blur transition-colors hover:bg-error hover:text-on-error focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <CloseIcon className="h-3.5 w-3.5" aria-hidden />
+                  </button>
+                )}
               </div>
               <div className="leading-tight">
                 <p
@@ -176,6 +221,63 @@ export function VersionStrip({
           </button>
         )}
       </div>
+
+      {/* #1376 — Confirm-delete modal. Inline + minimal to keep the strip self-contained. */}
+      {confirmingDelete && (
+        <div
+          role="presentation"
+          data-testid="edit-room-version-strip-delete-modal"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/60 px-4"
+          onClick={(event) => {
+            if (event.target === event.currentTarget && !deleting) {
+              setConfirmingDelete(null);
+            }
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && !deleting) {
+              setConfirmingDelete(null);
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-room-version-strip-delete-title"
+            className="w-full max-w-sm rounded-xl bg-surface-container-low p-5 shadow-2xl ring-1 ring-outline-variant"
+          >
+            <h2
+              id="edit-room-version-strip-delete-title"
+              className="text-base font-semibold text-on-surface"
+            >
+              Delete {confirmingDelete === "A" ? "variant A" : "variant B"}?
+            </h2>
+            <p className="mt-2 text-sm text-on-surface-variant">
+              The variant and its version history will be removed. This can&apos;t
+              be undone.
+            </p>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmingDelete(null)}
+                disabled={deleting}
+                data-testid="edit-room-version-strip-delete-cancel"
+                className="h-9 rounded-lg border border-outline bg-surface px-3 text-sm font-medium text-on-surface transition-colors duration-150 hover:bg-surface-container-high focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={deleting}
+                data-testid="edit-room-version-strip-delete-confirm"
+                className="h-9 rounded-lg bg-error px-3 text-sm font-medium text-on-error transition-colors duration-150 hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -197,6 +299,27 @@ function PlusIcon({ className }: { className?: string }) {
       aria-hidden
     >
       <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
+/** Inline `Close` (X) glyph — matches PlusIcon + BookOpen's zero-dependency style. */
+function CloseIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={14}
+      height={14}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M18 6L6 18M6 6l12 12" />
     </svg>
   );
 }
