@@ -47,6 +47,7 @@ import {
 } from "@/lib/lookbook-variant";
 import type { EditRoomStudioProps, Version } from "@/components/edit-room/types";
 import { setLookbookVariant } from "@/app/actions/lookbook-variant";
+import { deleteInpaintVariant } from "@/app/actions/inpaint-versions";
 import { AutosaveController } from "@/lib/autosave-controller";
 import { saveListingCopy } from "@/app/actions/room-copy";
 
@@ -450,6 +451,61 @@ export function EditRoomStudio({
     dispatch({ type: "SET_VIEWING", viewing: slot });
   };
 
+  // #1376 — per-variant delete handler.
+  // - Server action hard-deletes the InpaintVersion rows for (roomId, variantSlot).
+  // - If the deleted slot was currently being viewed, fall back to the
+  //   remaining variant (or "original" when both are gone).
+  // - Calls router.refresh() to re-pull server-derived `versions` + `afterImageUrl*`.
+  const handleDeleteVariant = async (slot: SlotId) => {
+    if (slot === "original") return;
+    const variantSlot: 0 | 1 = slot === "A" ? 0 : 1;
+
+    // Compute fallback BEFORE the delete so selection is correct even if
+    // the server response is delayed (we want an immediate optimistic switch).
+    const deletedSlot = slot;
+    const otherSlot: SlotId = slot === "A" ? "B" : "A";
+    const otherSlotHasVersion = versions.some(
+      (v) => v.id === otherSlot && v.url,
+    );
+
+    let result:
+      | { success: true; deletedCount: number; remaining: { A: boolean; B: boolean } }
+      | { success: false; error: string }
+      | undefined;
+    try {
+      result = await deleteInpaintVariant(roomId, variantSlot);
+    } catch (error) {
+      console.error("[EditRoomStudio] deleteInpaintVariant failed:", error);
+      dispatch({
+        type: "SHOW_TOAST",
+        message: "Could not delete variant. Please try again.",
+      });
+      return;
+    }
+
+    if (!result || result.success !== true) {
+      const message =
+        "error" in result && result.error
+          ? `Could not delete variant: ${result.error}`
+          : "Could not delete variant. Please try again.";
+      dispatch({ type: "SHOW_TOAST", message });
+      return;
+    }
+
+    // Switch the visible slot so the user sees the deletion immediately.
+    const fallback: SlotId =
+      deletedSlot === state.viewing
+        ? otherSlotHasVersion
+          ? otherSlot
+          : "original"
+        : state.viewing;
+    if (fallback !== state.viewing) {
+      dispatch({ type: "SET_VIEWING", viewing: fallback });
+    }
+
+    router.refresh();
+  };
+
   // The CTA persists the local lookbook slot AND calls the server
   // action. We optimistically move the badge to the new slot so the
   // UI is snappy; a `router.refresh()` then pulls the canonical
@@ -621,6 +677,7 @@ export function EditRoomStudio({
               running={running !== null || isLookbookPending}
               onSelect={handleSelectSlot}
               onUseInLookbook={handleUseInLookbook}
+              onDelete={handleDeleteVariant}
             />
           </footer>
         </main>
