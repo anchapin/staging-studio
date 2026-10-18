@@ -70,6 +70,19 @@
   --color-on-error: var(--color-on-error);
   --color-error-container: var(--color-error-container);
   --color-on-error-container: var(--color-on-error-container);
+  /* Issue #1375: studio-toolbar palette additions */
+  --color-surface-mid: var(--color-surface-mid);
+  --color-surface-low: var(--color-surface-low);
+  --color-surface-lowest: var(--color-surface-lowest);
+  --color-surface-highest: var(--color-surface-highest);
+  --color-ink: var(--color-ink);
+  --color-ink-subtle: var(--color-ink-subtle);
+  --color-ink-muted: var(--color-ink-muted);
+  --color-line: var(--color-line);
+  --color-line-soft: var(--color-line-soft);
+  --color-walnut: var(--color-walnut);
+  --color-walnut-foreground: var(--color-walnut-foreground);
+  --color-on-walnut: var(--color-on-walnut);
   --radius: var(--radius);
   --font-cinzel: var(--font-cinzel-google);
   --font-playfair: var(--font-playfair-google);
@@ -286,6 +299,21 @@
     --color-on-error: #ffffff;
     --color-error-container: #ffdad6;
     --color-on-error-container: #93000a;
+
+    /* Issue #1375: studio-toolbar palette for WCAG 2.2 AA contrast.
+       Pairs with src/lib/color-tokens.ts (ATELIER_COLOR_TOKENS). */
+    --color-surface-mid: #d5ba96;
+    --color-surface-low: #e8d5b6;
+    --color-surface-lowest: #f6ebd8;
+    --color-surface-highest: #ceb791;
+    --color-ink: #201a15;
+    --color-ink-subtle: #3a322d;
+    --color-ink-muted: #4d443c;
+    --color-line: #8C827A;
+    --color-line-soft: #cdc4ba;
+    --color-walnut: #181716;
+    --color-walnut-foreground: #ffffff;
+    --color-on-walnut: #fff8f4;
 
     /* Issue #614: font stack aliases — canonical vars are minted by next/font
        in src/app/layout.tsx; these aliases give every var(--font-*) consumer
