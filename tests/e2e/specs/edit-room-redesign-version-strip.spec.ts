@@ -217,6 +217,34 @@ test.describe("Edit Room redesign — version strip delete (issue #1376, flag=ON
       await strip.getByTestId("edit-room-version-strip-delete-A").click();
       await page.getByTestId("edit-room-version-strip-delete-confirm").click();
 
+      // Wait for the in-flight RSC refresh triggered by
+      // `router.refresh()` inside `handleDeleteVariant` to settle.
+      // Without this, the following expect.toHaveCount races the
+      // re-fetch and fails intermittently in CI where the RSC payload
+      // can take a few seconds to round-trip under load.
+      await page
+        .waitForResponse(
+          (resp) =>
+            resp.url().includes(`/projects/${E2E_EDITOR_PROJECT_ID}`) &&
+            resp.request().method() === "GET",
+          { timeout: 15_000 },
+        )
+        .catch(() => {
+          // The refresh may have completed before this listener
+          // attached; let the toHaveCount assertion do its own polling.
+        });
+
+      // DB sanity FIRST — tells us if the server action cleared
+      // Room.afterImageUrl. If it didn't, no UI re-render will ever
+      // remove the X (lookbookVariantUrls.A is sourced from
+      // Room.afterImageUrl directly).
+      const roomAfter = await prisma.room.findUnique({
+        where: { id: E2E_EDITOR_ROOM_ID },
+        select: { afterImageUrl: true, afterImageUrl2: true, selectedVariantIndex: true },
+      });
+      expect(roomAfter?.afterImageUrl).toBeNull();
+      expect(roomAfter?.afterImageUrl2).toBe(VARIANT_B_URL);
+
       // After the server action + router.refresh(), A's X is gone
       // (variant A has no version rows anymore → empty slot renders
       // the placeholder, no delete button).
