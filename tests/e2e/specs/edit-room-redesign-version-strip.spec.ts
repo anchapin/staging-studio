@@ -123,10 +123,35 @@ test.describe("Edit Room redesign — version strip delete (issue #1376, flag=ON
           promptDirectives: "variant B",
         },
       });
+      // VersionStrip reads `lookbookVariantUrls.{A,B}` which maps to
+      // `Room.afterImageUrl` / `Room.afterImageUrl2`, NOT directly to
+      // InpaintVersion rows. The X icon only renders when the variant
+      // slot has a non-null URL, so the seed must populate the room's
+      // image-url fields too — otherwise both slots stay empty and
+      // the test fails to find the delete buttons.
+      await prisma.room.update({
+        where: { id: E2E_EDITOR_ROOM_ID },
+        data: {
+          afterImageUrl: VARIANT_A_URL,
+          afterImageUrl2: VARIANT_B_URL,
+          selectedVariantIndex: 0,
+        },
+      });
       return await fn(prisma);
     } finally {
       await prisma.inpaintVersion.deleteMany({
         where: { roomId: E2E_EDITOR_ROOM_ID },
+      });
+      // Restore the room's image-url fields to null so other specs
+      // (and the suite's deterministic seed) see the same starting
+      // state they did before this block ran.
+      await prisma.room.update({
+        where: { id: E2E_EDITOR_ROOM_ID },
+        data: {
+          afterImageUrl: null,
+          afterImageUrl2: null,
+          selectedVariantIndex: null,
+        },
       });
       await prisma.$disconnect();
     }
