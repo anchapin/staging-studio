@@ -343,6 +343,7 @@ export async function deleteInpaintVariant(
     B: remainingRows.some((r) => r.variantSlot === 1),
   };
 
+  revalidatePath(`/projects/${room.projectId}`);
   revalidatePath(`/projects/${room.projectId}/refine`);
   revalidatePath(`/dashboard`);
   revalidatePath(`/preview/${room.projectId}`);
