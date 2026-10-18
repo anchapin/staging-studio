@@ -66,6 +66,7 @@ import {
 } from "@/lib/autosave-controller";
 import { projectFetchStateFromStatus } from "@/lib/project-fetch-state";
 import { buildEditRoomStudioProps } from "@/lib/edit-room-studio-props";
+import { mergeServerUrlFields } from "@/lib/edit-room-url-reconcile";
 import { clamp, parseSeedOrUndefined } from "@/lib/finetune-wire";
 import { featherMask } from "@/lib/mask-feather";
 import { EditRoomStudio } from "@/components/edit-room/EditRoomStudio";
@@ -1052,6 +1053,22 @@ export default function ProjectDetailView({
     // oxlint-disable-next-line react/immutability
     handleStripSelectRef.current = handleStripSelect;
   }, [handleStripSelect]);
+
+  // ─── #1376: re-sync URL/selection fields after `router.refresh()`.
+  // `useState(initialProject)` (line ~349) only reads the prop on mount,
+  // so server-driven mutations made from inside `<EditRoomStudio>` (which
+  // does not thread through the parent's `applyRoomUpdate`) would otherwise
+  // leave the version strip showing stale `lookbookVariantUrls` until a
+  // full page reload. The three URL/selection fields are server-only
+  // truth — no local optimistic path mutates them — so adopting them on
+  // prop change is safe and the merge semantics are pinned by the
+  // `mergeServerUrlFields` unit test.
+  useEffect(() => {
+    if (!initialProject) return;
+    setProject((prev) =>
+      prev ? mergeServerUrlFields(prev, initialProject) : prev,
+    );
+  }, [initialProject]);
 
   /**
    * Issue #192: deletes one variant's staged after-image. Optimistically
