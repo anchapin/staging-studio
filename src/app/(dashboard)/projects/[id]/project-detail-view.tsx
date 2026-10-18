@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ChevronRight, GripVertical, PencilRuler, X, Plus } from "lucide-react";
+import { ChevronRight, GripVertical, PencilRuler, X, Plus } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -1348,10 +1348,15 @@ export default function ProjectDetailView({
           : "min-h-screen bg-background"
       }
     >
-      <header className="shrink-0 bg-background border-b border-border px-8 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <nav aria-label="Breadcrumb" className="flex items-center gap-1 text-sm text-muted-foreground">
+      {/* Issue #1374 — header compressed from `py-4` (~96px) to `py-2` + single-row
+          layout so the page + room-studio sub-header combined stay ≤15% of a 1920×932
+          viewport. Address drops its duplicate `<h1>` (already in the breadcrumb)
+          and the client name is inlined next to the breadcrumb instead of in a
+          separate vertical row. */}
+      <header className="shrink-0 bg-background border-b border-border px-8 py-2">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1 truncate text-sm text-muted-foreground">
               <Link
                 href="/projects"
                 className="hover:text-foreground"
@@ -1381,26 +1386,34 @@ export default function ProjectDetailView({
               {focusedRoom && (
                 <>
                   <ChevronRight className="w-4 h-4 shrink-0" aria-hidden="true" />
-                  <span className="max-w-[12rem] truncate text-foreground" title={focusedRoom.name}>
+                  <span
+                    className="max-w-[12rem] truncate text-foreground"
+                    title={focusedRoom.name}
+                    aria-current="page"
+                  >
                     {focusedRoom.name}
                   </span>
                 </>
               )}
             </nav>
-            <h1 className="font-playfair text-2xl font-bold text-foreground mt-1">
-              {project.propertyAddress}
-            </h1>
-            <div className="mt-1 flex items-center gap-4">
-              <p className="text-sm text-muted-foreground">{project.clientName}</p>
+            {project.clientName ? (
               <span
-                className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-foreground"
-                title={PROJECT_AESTHETIC_HELPER}
+                className="hidden truncate text-sm text-muted-foreground sm:inline"
+                title={project.clientName}
               >
-                {projectAestheticBadge(project.stagingAesthetic)}
+                · {project.clientName}
               </span>
-            </div>
+            ) : null}
           </div>
+          {/* Right-side cluster keeps its original place — `justify-between`
+              does the work that the removed `<h1>` + `<p>` row did vertically. */}
           <div className="flex items-center gap-3">
+            <span
+              className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-foreground"
+              title={PROJECT_AESTHETIC_HELPER}
+            >
+              {projectAestheticBadge(project.stagingAesthetic)}
+            </span>
             <Link
               href={`/projects/${project.id}/lookbook`}
               className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary"
@@ -1424,7 +1437,9 @@ export default function ProjectDetailView({
            * imagery and editor render, spanning the full available content
            * width — no half-width grid card, no other rooms splitting
            * attention. The mask canvas drops its compact cap (fullWidth).
-           * "All rooms" is the visible affordance back to the grid.
+           * "All rooms" is the affordance back to the grid — kept in the
+           * accessibility tree (sr-only, see #1374) since the visible
+           * affordance moved up to the EditRoomStudio `<TopBar>`'s breadcrumb.
            *
            * Issue #252 D5: laptop-first fixed-viewport layout — the page
            * fills the dashboard shell's height and the editor's two panes
@@ -1436,19 +1451,26 @@ export default function ProjectDetailView({
            * at lg+.
            */
           <div className="flex min-h-0 flex-col lg:flex-1">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            {/* Issue #1374 — the room-studio sub-header is now `sr-only`:
+                the page header's breadcrumb already carries the room name
+                (aria-current="page") and the EditRoomStudio `<TopBar>` adds
+                its own "All rooms" exit button. Both the room name and the
+                "All rooms" affordance stay in the accessibility tree (the
+                e2e helper at `openFocusedEditor` uses
+                `getByRole("heading", { name: roomName })` and `getByRole(
+                "button", { name: "All rooms" })` to wait for mount) but no
+                longer eat vertical space. The visible sub-header becomes
+                just the `mt-2` (8px) breath between the page header and the
+                editor body. */}
+            <div className="sr-only">
+              <h2>{focusedRoom.name}</h2>
               <button
                 type="button"
                 onClick={leaveEditor}
                 title="Back to the project overview"
-                className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
               >
-                <ArrowLeft className="w-4 h-4" aria-hidden="true" />
                 All rooms
               </button>
-              <h2 className="font-playfair text-xl font-semibold text-foreground">
-                {focusedRoom.name}
-              </h2>
             </div>
 
             {/* One PERSISTENT RoomCanvas for the focused room, above the
