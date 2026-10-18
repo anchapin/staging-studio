@@ -89,6 +89,19 @@ test.describe("Edit Room redesign — version strip delete (issue #1376, flag=ON
   const VARIANT_A_URL = "https://example.test/variant-a.png";
   const VARIANT_B_URL = "https://example.test/variant-b.png";
 
+  // Dev-mode Server Action + `router.refresh()` returns the RSC payload
+  // before the React render commits, so toHaveAttribute/toHaveCount can
+  // race the re-render in CI. Wait for networkidle with a swallowing
+  // fallback so a sustained-traffic run still proceeds to assertions.
+  async function waitForRscRefresh(page: import("@playwright/test").Page) {
+    await page
+      .waitForLoadState("networkidle", { timeout: 15_000 })
+      .catch(() => {
+        // networkidle may not be reached under sustained traffic;
+        // let the auto-polling toHaveCount/toHaveAttribute do its work.
+      });
+  }
+
   async function withSeededVariants<T>(
     fn: (prisma: PrismaClient) => Promise<T>,
   ): Promise<T> {
@@ -283,6 +296,7 @@ test.describe("Edit Room redesign — version strip delete (issue #1376, flag=ON
 
       await strip.getByTestId("edit-room-version-strip-delete-A").click();
       await page.getByTestId("edit-room-version-strip-delete-confirm").click();
+      await waitForRscRefresh(page);
 
       // A is gone, B becomes the viewing slot.
       await expect(studio).toHaveAttribute("data-viewing", "B");
@@ -302,6 +316,7 @@ test.describe("Edit Room redesign — version strip delete (issue #1376, flag=ON
       await expect(studio).toHaveAttribute("data-viewing", "A");
       await strip.getByTestId("edit-room-version-strip-delete-B").click();
       await page.getByTestId("edit-room-version-strip-delete-confirm").click();
+      await waitForRscRefresh(page);
 
       await expect(studio).toHaveAttribute("data-viewing", "A");
       await expect(
@@ -325,12 +340,14 @@ test.describe("Edit Room redesign — version strip delete (issue #1376, flag=ON
       // Delete A first, then B.
       await strip.getByTestId("edit-room-version-strip-delete-A").click();
       await page.getByTestId("edit-room-version-strip-delete-confirm").click();
+      await waitForRscRefresh(page);
       await expect(
         strip.getByTestId("edit-room-version-strip-delete-A"),
       ).toHaveCount(0);
 
       await strip.getByTestId("edit-room-version-strip-delete-B").click();
       await page.getByTestId("edit-room-version-strip-delete-confirm").click();
+      await waitForRscRefresh(page);
       await expect(
         strip.getByTestId("edit-room-version-strip-delete-B"),
       ).toHaveCount(0);
