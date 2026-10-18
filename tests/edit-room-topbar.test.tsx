@@ -83,4 +83,16 @@ describe("TopBar", () => {
     // a missing token reference (color-tokens.ts is the SSOT).
     expect(html).not.toMatch(/#[0-9a-f]{6}/i);
   });
+
+  it("renders with a tightened header height (h-12 = 48px) — issue #1374", () => {
+    // Page + room-studio sub-header must fit ≤15% of a 1920×932 viewport
+    // (~140px). The TopBar was `h-14` (56px); tightening to `h-12` (48px)
+    // is the small piece the TopBar can contribute to that budget.
+    // Don't accept any other `h-1N` so a future revert to `h-14` (or a
+    // case like `h-20`) trips this test before shipping.
+    const html = renderToStaticMarkup(<TopBar {...baseProps()} />);
+    expect(html).toContain("h-12");
+    expect(html).not.toMatch(/\bh-1[3-9]\b/);
+    expect(html).not.toMatch(/\bh-[2-9]\d\b/);
+  });
 });
