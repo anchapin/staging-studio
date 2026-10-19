@@ -113,7 +113,33 @@ export const initialEditRoomState: EditRoomState = {
 export function createInitialEditRoomState(
   overrides: Partial<EditRoomState> = {}
 ): EditRoomState {
-  return { ...initialEditRoomState, ...overrides };
+  // Issue #1380 — when the shell (or any caller) explicitly passes a
+  // `lookbookSlot`, mirror it into the seeded `viewing` value so the
+  // studio's first render carries the correct `data-viewing`
+  // attribute. Without this, test #6 of
+  // `edit-room-redesign-version-strip.spec.ts` is racy: `openFocusedEditor`
+  // on a seeded Mask Room (selectedVariantIndex = 0 ⇒
+  // initialLookbookSlot = "A") returns immediately and then asserts
+  // `data-viewing="A"`, but the reducer's lazy init returns
+  // `viewing: "original"` regardless.
+  //
+  // Coercion triggers only when an explicit `lookbookSlot` override is
+  // provided — the no-arg call (and the existing tests that pin it as
+  // the canonical default) keep getting `viewing: "original"`. Manual
+  // override via the inspector CTA still wins, because the shell
+  // dispatches `SET_VIEWING` post-boot.
+  let seedViewing: SlotId = initialEditRoomState.viewing;
+  if (
+    overrides.viewing !== undefined
+  ) {
+    seedViewing = overrides.viewing;
+  } else if (overrides.lookbookSlot !== undefined) {
+    seedViewing =
+      overrides.lookbookSlot === "original"
+        ? "original"
+        : overrides.lookbookSlot;
+  }
+  return { ...initialEditRoomState, ...overrides, viewing: seedViewing };
 }
 
 /**

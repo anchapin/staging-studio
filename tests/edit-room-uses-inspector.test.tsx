@@ -73,8 +73,15 @@ describe("EditRoomStudio mounts <Inspector> (issue #1342)", () => {
   it("renders the helper text under the Run button", () => {
     const html = renderToStaticMarkup(<EditRoomStudio {...baseProps()} />);
     expect(html).toContain('data-testid="run-helper-text"');
-    // Initial state: blocked=Add directions…
-    expect(html).toContain("Add directions");
+    // #1380 — with the fix that syncs `viewing` to `initialLookbookSlot`
+    // on mount, the studio now boots viewing Variant A. Whole-room
+    // staging operates on the original photo, so the canonical blocked
+    // helper text is the "starts from the original photo" copy, not
+    // the "add directions" copy. We assert the slot-aware message is
+    // present and that the legacy "add directions" copy is NOT the
+    // blocker when viewing a variant.
+    expect(html).toContain("starts from the original photo");
+    expect(html).not.toContain("Add directions");
   });
 
   it("renders the StagePanel inside the Inspector when Staging tab is active", () => {
