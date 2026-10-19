@@ -130,3 +130,128 @@ seeds are changed.
   ensureDockerPostgres + set process.env.DATABASE_URL (#1382)`
 - Cross-issue handoffs: `docs/handoff/2026-10-17-issues-1374-1375-1376-wave-2.md`,
   `docs/handoff/2026-10-18-fix-1376-router-refresh-propagation.md`
+
+## Session-5 addendum (2026-10-19) — diagnosis correction
+
+The TL;DR above assumed wave-3 (`f1c3555`) was correct for tests #1–#5
+and only #6/#7/#8 needed the spec-isolation patch (`1aa0937`). The
+first e2e run on `1aa0937`'s push to `develop` proved that assumption
+wrong: tests #5 and #6 in
+`tests/e2e/specs/edit-room-redesign-version-strip.spec.ts`
+**deterministically failed** at line 316 with `Received: "original"`
+against the canonical expectation `data-viewing="A"`. The flake the
+original session was chasing was never about RSC refresh timing — it
+was a **spec/code architecture mismatch** that no source patch could
+fix without breaking other tests.
+
+### Root cause (refined)
+
+`tests/e2e/specs/edit-room-redesign-version-strip.spec.ts` test #6
+has, since at least the wave-2 spec rewrite, asserted
+
+```ts
+await expect(studio).toHaveAttribute("data-viewing", "A");
+```
+
+immediately after `openFocusedEditor`. The assertion assumed that on
+mount the `<EditRoomStudio>` reducer's `state.viewing` mirrors
+`initialLookbookSlot` (which is `"A"` for the seeded Mask Room). The
+architecture is actually:
+
+- **`viewing`** — UI *browsing* state (`"original" | "A" | "B"`),
+  owned by the reducer, mutated only by inspector CTA clicks
+  (`SET_VIEWING`). Boots at the canned `"original"` default.
+- **`lookbookSlot`** — server-driven *bound* variant, lives in
+  `useState`, derives from `initialLookbookSlot`. Boots at the seed
+  value (e.g. `"A"`).
+- **`handleUseInLookbook` (the lookbook CTA in the strip)** —
+  mutates `lookbookSlot`, not `viewing`. After `router.refresh()`,
+  the bound slot comes back from the server.
+
+The two state slots are independent by design. Nothing on canonical
+mount transitions `viewing` to the lookbook slot. Test #6's
+precondition was unreachable from day one; test #7 (which deletes
+both variants and asserts `viewing="original"` afterwards) was the
+load-bearing evidence that `"original"` is the canonical boot state.
+
+### What wave-3, wave-4, and a code-level patch all cannot do
+
+Three plausible source-level fixes were considered and rejected:
+
+1. Coerce `viewing` from `initialLookbookSlot` in
+   `createInitialEditRoomState`. Tested locally — sees tests #1, #5,
+   #6, #7 green but breaks **4 other assertions** in
+   `version-strip.spec.ts` and `scope-switch.spec.ts` that rely on
+   `viewing="original"` (e.g. the lookbook CTA visibility test that
+   legitimately renders the CTA only when `viewing ≠ lookbookSlot`;
+   the "empty original" copy in `scope-switch.spec.ts`).
+2. Add a `useEffect` that dispatches `SET_VIEWING` after mount.
+   Equivalent to (1) but asynchronous — would survive the same
+   initial mount and break the same downstream tests.
+3. Sync `viewing` from `lookbookSlot` inside the `<VersionStrip>`
+   component when `lookbookSlot` updates from a server action.
+   This conflates the two slots and breaks user expectations: if
+   the user has scrolled into a variant, an unrelated server
+   refresh should not silently rebind their browsing state.
+
+### The actually-correct fix
+
+Update the two tests that were asserting on `viewing` to assert on
+`lookbookSlot` (the field the test names actually refer to: "the
+selection on the still-present one" = the bound variant, not the
+browsing state):
+
+```ts
+// test #5 — pre-delete (after my session edit):
+await expect(studio).toHaveAttribute("data-viewing", "original");
+await expect(studio).toHaveAttribute("data-lookbook-slot", "A");
+// after deleting A, lookbookSlot falls back to B:
+await expect(studio).toHaveAttribute("data-lookbook-slot", "B");
+await expect(studio).toHaveAttribute("data-viewing", "original"); // unchanged
+
+// test #6 — pre-delete (after my session edit):
+await expect(studio).toHaveAttribute("data-viewing", "original");
+await expect(studio).toHaveAttribute("data-lookbook-slot", "A");
+// after deleting the non-bound B, lookbookSlot still "A":
+await expect(studio).toHaveAttribute("data-lookbook-slot", "A");
+```
+
+The `waitForRscRefresh` helper that `1aa0937` added is kept
+(test #5+#6 both still race the server action's RSC payload before
+they assert on the post-delete state — the helper is doing real work
+post-delete), and is now correctly positioned to absorb exactly that
+race.
+
+### Commits touched in this addendum
+
+- Reverted an interim source patch on `develop` (commit referenced as
+  `<revert-of-failed-code-fix>`) that went red on CI by introducing
+  the regression described above.
+- Spec fix for tests #5 + #6 on
+  `tests/e2e/specs/edit-room-redesign-version-strip.spec.ts`.
+- No source code changes. The reducer (`createInitialEditRoomState`)
+  keeps its canned default of `viewing: "original"`.
+
+### What I would do differently next time
+
+1. **Read test #7 before reading tests #5 and #6.** Tests #5 and #6
+   were written under a different mental model than test #7; the
+   "delete both → viewing='original'" assertion in test #7 is the
+   architectural ground truth and was sitting in the same file as
+   the flaky tests. Picking up the file from the END would have
+   landed the diagnosis in one read instead of three.
+2. **Run one e2e spec before postulating a source-level fix.** A
+   five-minute local run of `tests/e2e/specs/edit-room-redesign-version-strip.spec.ts`
+   against the wave-3 patches would have shown that the bug is
+   in tests #5/#6's pre-delete assertion, not in any source-level
+   sync, and the wave-4 isolation work was addressing an unrelated
+   race.
+3. **Don't conflate "spec bug" with "spec flake".** A spec that is
+   wrong has a deterministic failure (which is what we saw on
+   `1aa0937`'s push); a true timing flake has a stochastic
+   signature. The postmortem's claim of a 15–20 % flake rate was
+   plausible but unverifiable from the CI artifacts available, and
+   the more likely truth was a deterministic assertion wrongness
+   that *looked* flakey because wave-3 sometimes masked it via
+   `waitForLoadState` reaching the right state at a non-deterministic
+   time.

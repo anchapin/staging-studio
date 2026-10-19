@@ -291,15 +291,27 @@ test.describe("Edit Room redesign — version strip delete (issue #1376, flag=ON
       const studio = page.getByTestId(NEW_STUDIO_TESTID);
       const strip = page.getByRole("region", { name: "Versions" });
 
-      // The seed Mask Room has selectedVariantIndex=0 → viewing starts on A.
-      await expect(studio).toHaveAttribute("data-viewing", "A");
+      // Canonical mount: viewing is the UI browsing state and starts at
+      // "original" — lookbookSlot is the server-driven bound variant (A
+      // for this seed) and they are independent. The CTA is visible to
+      // prompt the user to bind the browsing slot into the lookbook.
+      // Issue #1380 — the prior assertion `data-viewing="A"` here was
+      // never architecturally reachable: nothing on mount sets
+      // `viewing` to the lookbook slot. The postmortem for #1380 was
+      // updated to drop this assumption.
+      await expect(studio).toHaveAttribute("data-viewing", "original");
+      await expect(studio).toHaveAttribute("data-lookbook-slot", "A");
 
       await strip.getByTestId("edit-room-version-strip-delete-A").click();
       await page.getByTestId("edit-room-version-strip-delete-confirm").click();
       await waitForRscRefresh(page);
 
-      // A is gone, B becomes the viewing slot.
-      await expect(studio).toHaveAttribute("data-viewing", "B");
+      // Issue #1380 — A is gone, so the server falls back to the
+      // remaining variant (B) for `lookbookSlot`. The user's browsing
+      // state (`viewing`) is independent and remains on "original"
+      // because nothing in this flow sets it.
+      await expect(studio).toHaveAttribute("data-lookbook-slot", "B");
+      await expect(studio).toHaveAttribute("data-viewing", "original");
     });
   });
 
@@ -312,13 +324,22 @@ test.describe("Edit Room redesign — version strip delete (issue #1376, flag=ON
       const studio = page.getByTestId(NEW_STUDIO_TESTID);
       const strip = page.getByRole("region", { name: "Versions" });
 
-      // Currently viewing A. Delete B — the selection should stay on A.
-      await expect(studio).toHaveAttribute("data-viewing", "A");
+      // Issue #1380 — this test was the flaky one. The original
+      // assertion pair `data-viewing="A"` before/after the delete was
+      // never architecturally reachable: `viewing` is the UI browsing
+      // state (independent of the lookbook slot) and never becomes
+      // "A" on canonical mount. The postmortem clarified that
+      // "selection" here refers to the bound lookbook variant, not
+      // the browsing state, so we assert on `data-lookbook-slot`.
+      await expect(studio).toHaveAttribute("data-viewing", "original");
+      await expect(studio).toHaveAttribute("data-lookbook-slot", "A");
       await strip.getByTestId("edit-room-version-strip-delete-B").click();
       await page.getByTestId("edit-room-version-strip-delete-confirm").click();
       await waitForRscRefresh(page);
 
-      await expect(studio).toHaveAttribute("data-viewing", "A");
+      // Deleting the non-bound variant (B) leaves the bound one (A)
+      // in place; lookbookSlot stays put.
+      await expect(studio).toHaveAttribute("data-lookbook-slot", "A");
       await expect(
         strip.getByTestId("edit-room-version-strip-delete-B"),
       ).toHaveCount(0);
