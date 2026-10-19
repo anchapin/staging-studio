@@ -80,3 +80,12 @@ tsconfig.tsbuildinfo
 
 # Pre-push pg_dump backups (see docs/DEPLOYMENT.md, Database safety)
 backups/
+
+# Local handoff scratch directories. The canonical, tracked handoff dir is
+# `.handoffs/` (single-s) — anything else (typos, ad-hoc scratch dumps,
+# per-feature subdirs) is untracked on purpose. Rules first (broad ignore),
+# then negate the canonical dir + ALL its contents, mirroring the `.env*` /
+# `!.env.example` pattern above.
+.handoff*/**
+!.handoffs/
+!.handoffs/**
