@@ -144,8 +144,16 @@ test.describe("Atelier studio workflow shell", () => {
     await expect(
       stepper.getByRole("link", { name: "Brush Refinement" })
     ).toHaveAttribute("aria-current", "step");
+    // Issue #1372 + #1345 design intent: the new `<EditRoomStudio>`
+    // surfaces a `<nav aria-label="Edit room location">` (All rooms →
+    // property address → room switcher) where the legacy
+    // `<RefineStudioClient>` exposed `<nav aria-label="Breadcrumb">`.
+    // The TopBar's location nav is what was renamed, NOT the
+    // project-detail-view's cross-page breadcrumb which still has the
+    // legacy aria-label. Keeping this assertion prevents #1345 from
+    // silently dropping the location chrome.
     await expect(
-      page.getByRole("navigation", { name: "Breadcrumb" })
+      page.getByRole("navigation", { name: "Edit room location" })
     ).toBeVisible();
 
     // Step 4 is reached via the stepper chip — the shell's navigable

@@ -30,9 +30,9 @@ test.beforeEach(({ page }) => {
  * Mask painting + real `/api/inpaint` submit (issue #165 acceptance
  * criterion 1, retargeted to the new `<EditRoomStudio>` surface).
  *
- * With `NEXT_PUBLIC_EDIT_ROOM_REDESIGN=1` (the harness default since
- * #1344), the focused editor mounts the new shell + the new
- * `<MaskLayer>` (issue #1339). The Run button (`data-testid="run-button"`)
+ * With `<EditRoomStudio>` the only mount (#1346 wave-5), the
+ * focused editor mounts the new shell + the new `<MaskLayer>`
+ * (issue #1339). The Run button (`data-testid="run-button"`)
  * is disabled until BOTH directions AND a mask exist (issue #1342 +
  * #1344's real `/api/inpaint` wire); a click submits the request the
  * same way the legacy `<InpaintEditor>` did. The body the browser puts

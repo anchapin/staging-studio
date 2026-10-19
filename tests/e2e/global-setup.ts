@@ -350,6 +350,15 @@ async function main(): Promise<void> {
   // because each has its own write surface; this top-level guard exists
   // so a misdirected URL never even starts the container.
   assertEphemeralDatabaseUrl(DATABASE_URL, POSTGRES_PORT);
+  // Issue #1382 — globalSetup runs before any next.config.ts / dotenv
+  // loader, so process.env.DATABASE_URL is normally undefined here. If
+  // the dev leaked a prod URL into their shell, that's caught by the
+  // guard below; if nothing leaked, propagate the imported ephemeral URL
+  // so pushSchema() (which shells out to `prisma db push`) has a real
+  // value to pass through.
+  if (!process.env.DATABASE_URL) {
+    process.env.DATABASE_URL = DATABASE_URL;
+  }
   assertEphemeralDatabaseUrl(process.env.DATABASE_URL, POSTGRES_PORT);
 
   console.log("[e2e] app under test:", APP_URL);
@@ -358,7 +367,7 @@ async function main(): Promise<void> {
     `[e2e] mock browserless: http://${MOCK_BROWSERLESS_HOST}:${MOCK_BROWSERLESS_PORT}/pdf`
   );
 
-  ensureDockerPostgres();
+  await ensureDockerPostgres();
   await pushSchema();
   await seed();
 

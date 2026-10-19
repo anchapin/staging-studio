@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
+import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 
-import { E2E_EDITOR_PROJECT_ID } from "../env";
+import { E2E_EDITOR_PROJECT_ID, E2E_EDITOR_ROOM_ID } from "../env";
 import { login, openFocusedEditor } from "../helpers";
 
 /**
@@ -25,6 +27,13 @@ import { login, openFocusedEditor } from "../helpers";
  * carry — that flow is pinned by the action-level unit test
  * (`tests/lookbook-variant.test.ts`) and lights up e2e once a
  * spec seeds a populated variant.
+ *
+ * Issue #1376 — per-variant delete (X) on `<VersionStrip>`. Adds
+ * the X icon to each populated variant slot, an inline confirm
+ * modal (Cancel / Delete), selection fallback (deleted selection
+ * → other variant; deleted non-selection → keep), and the
+ * both-deleted empty state (viewing falls back to "original",
+ * no variant X buttons remain).
  */
 
 const NEW_STUDIO_TESTID = "edit-room-studio";
@@ -63,5 +72,321 @@ test.describe("Edit Room redesign — version strip CTA (issue #1344, flag=ON)",
     // (`tests/lookbook-variant.test.ts`).
     const studio = page.getByTestId(NEW_STUDIO_TESTID);
     await expect(studio).toHaveAttribute("data-lookbook-slot", "A");
+  });
+});
+
+// Issue #1376 — per-variant delete (X) on <VersionStrip>. The base seed
+// leaves both variants empty on the Mask Room, so this block seeds two
+// `InpaintVersion` rows (variantSlot 0/1) on `E2E_EDITOR_ROOM_ID` at
+// test start, exercises the X + modal + selection-fallback +
+// both-deleted empty state, and tears them down so other specs are
+// unaffected. The seed runs against the suite's throwaway Postgres
+// (the same one `tests/e2e/global-setup.ts` populates), driven by the
+// `DATABASE_URL` that `nextEnv()` in `tests/e2e/env.ts` injects into
+// the dev process — the exact same Prisma 7 driver-adapter pattern
+// `tests/e2e/specs/inpaint-quota-ledger.spec.ts` uses.
+test.describe("Edit Room redesign — version strip delete (issue #1376, flag=ON)", () => {
+  const VARIANT_A_URL = "https://example.test/variant-a.png";
+  const VARIANT_B_URL = "https://example.test/variant-b.png";
+
+  // Dev-mode Server Action + `router.refresh()` returns the RSC payload
+  // before the React render commits, so toHaveAttribute/toHaveCount can
+  // race the re-render in CI. Wait for networkidle with a swallowing
+  // fallback so a sustained-traffic run still proceeds to assertions.
+  async function waitForRscRefresh(page: import("@playwright/test").Page) {
+    await page
+      .waitForLoadState("networkidle", { timeout: 15_000 })
+      .catch(() => {
+        // networkidle may not be reached under sustained traffic;
+        // let the auto-polling toHaveCount/toHaveAttribute do its work.
+      });
+  }
+
+  async function withSeededVariants<T>(
+    fn: (prisma: PrismaClient) => Promise<T>,
+  ): Promise<T> {
+    const prisma = new PrismaClient({
+      adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
+    });
+    try {
+      // Wipe any leftover rows for this room from a prior test run
+      // (the suite Postgres is per-run, but a retry within the same
+      // run could leave them — global-setup populates a different
+      // room, so this is belt-and-braces).
+      await prisma.inpaintVersion.deleteMany({
+        where: { roomId: E2E_EDITOR_ROOM_ID },
+      });
+      await prisma.inpaintVersion.create({
+        data: {
+          roomId: E2E_EDITOR_ROOM_ID,
+          variantSlot: 0,
+          resultUrl: VARIANT_A_URL,
+          thumbnailUrl: VARIANT_A_URL,
+          seed: "1",
+          promptDirectives: "variant A",
+        },
+      });
+      await prisma.inpaintVersion.create({
+        data: {
+          roomId: E2E_EDITOR_ROOM_ID,
+          variantSlot: 1,
+          resultUrl: VARIANT_B_URL,
+          thumbnailUrl: VARIANT_B_URL,
+          seed: "2",
+          promptDirectives: "variant B",
+        },
+      });
+      // VersionStrip reads `lookbookVariantUrls.{A,B}` which maps to
+      // `Room.afterImageUrl` / `Room.afterImageUrl2`, NOT directly to
+      // InpaintVersion rows. The X icon only renders when the variant
+      // slot has a non-null URL, so the seed must populate the room's
+      // image-url fields too — otherwise both slots stay empty and
+      // the test fails to find the delete buttons.
+      await prisma.room.update({
+        where: { id: E2E_EDITOR_ROOM_ID },
+        data: {
+          afterImageUrl: VARIANT_A_URL,
+          afterImageUrl2: VARIANT_B_URL,
+          selectedVariantIndex: 0,
+        },
+      });
+      return await fn(prisma);
+    } finally {
+      await prisma.inpaintVersion.deleteMany({
+        where: { roomId: E2E_EDITOR_ROOM_ID },
+      });
+      // Restore the room's image-url fields to null so other specs
+      // (and the suite's deterministic seed) see the same starting
+      // state they did before this block ran.
+      await prisma.room.update({
+        where: { id: E2E_EDITOR_ROOM_ID },
+        data: {
+          afterImageUrl: null,
+          afterImageUrl2: null,
+          selectedVariantIndex: null,
+        },
+      });
+      await prisma.$disconnect();
+    }
+  }
+
+  test("X icon appears on each populated variant thumbnail", async ({ page }) => {
+    await withSeededVariants(async () => {
+      await login(page);
+      await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
+      const strip = page.getByRole("region", { name: "Versions" });
+      await expect(strip).toBeVisible();
+      await expect(
+        strip.getByTestId("edit-room-version-strip-delete-A"),
+      ).toBeVisible();
+      await expect(
+        strip.getByTestId("edit-room-version-strip-delete-B"),
+      ).toBeVisible();
+      // Original slot is immutable: no X on it.
+      await expect(
+        strip.getByTestId("edit-room-version-strip-delete-original"),
+      ).toHaveCount(0);
+    });
+  });
+
+  test("Clicking X opens the confirm modal; Cancel dismisses without changes", async ({
+    page,
+  }) => {
+    await withSeededVariants(async () => {
+      await login(page);
+      await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
+      const strip = page.getByRole("region", { name: "Versions" });
+
+      await strip.getByTestId("edit-room-version-strip-delete-A").click();
+      const modal = page.getByTestId("edit-room-version-strip-delete-modal");
+      await expect(modal).toBeVisible();
+      await expect(
+        modal.getByRole("heading", { name: "Delete variant A?" }),
+      ).toBeVisible();
+      // Both X icons stay in place — Cancel must not delete anything.
+      await expect(
+        strip.getByTestId("edit-room-version-strip-delete-A"),
+      ).toBeVisible();
+      await expect(
+        strip.getByTestId("edit-room-version-strip-delete-B"),
+      ).toBeVisible();
+
+      await page.getByTestId("edit-room-version-strip-delete-cancel").click();
+      await expect(modal).toBeHidden();
+      await expect(
+        strip.getByTestId("edit-room-version-strip-delete-A"),
+      ).toBeVisible();
+    });
+  });
+
+  test("Confirming removes the variant from the strip and its versions", async ({
+    page,
+  }) => {
+    await withSeededVariants(async (prisma) => {
+      await login(page);
+      await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
+      const strip = page.getByRole("region", { name: "Versions" });
+
+      await strip.getByTestId("edit-room-version-strip-delete-A").click();
+      await page.getByTestId("edit-room-version-strip-delete-confirm").click();
+
+      // Wait for the in-flight RSC refresh triggered by
+      // `router.refresh()` inside `handleDeleteVariant` to settle.
+      // Without this, the following expect.toHaveCount races the
+      // re-fetch and fails intermittently in CI where the RSC payload
+      // can take a few seconds to round-trip under load.
+      await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(
+        () => {
+          // networkidle may not be reached under sustained traffic;
+          // let the toHaveCount assertion do its own polling.
+        },
+      );
+
+      // DB sanity FIRST — tells us if the server action cleared
+      // Room.afterImageUrl. If it didn't, no UI re-render will ever
+      // remove the X (lookbookVariantUrls.A is sourced from
+      // Room.afterImageUrl directly).
+      const roomAfter = await prisma.room.findUnique({
+        where: { id: E2E_EDITOR_ROOM_ID },
+        select: { afterImageUrl: true, afterImageUrl2: true, selectedVariantIndex: true },
+      });
+      expect(roomAfter?.afterImageUrl).toBeNull();
+      expect(roomAfter?.afterImageUrl2).toBe(VARIANT_B_URL);
+
+      // After the server action + router.refresh(), A's X is gone
+      // (variant A has no version rows anymore → empty slot renders
+      // the placeholder, no delete button).
+      //
+      // `router.refresh()` is async and the RSC re-fetch may take
+      // longer than the toHaveCount default polling window in CI; we
+      // explicitly wait for it via networkidle and then assert with a
+      // generous timeout.
+      await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(
+        () => {
+          // networkidle may not be reached; fall through.
+        },
+      );
+      await expect(
+        strip.getByTestId("edit-room-version-strip-delete-A"),
+      ).toHaveCount(0, { timeout: 20_000 });
+      await expect(
+        strip.getByTestId("edit-room-version-strip-delete-B"),
+      ).toBeVisible();
+
+      // DB sanity: only B remains for this room.
+      const remaining = await prisma.inpaintVersion.findMany({
+        where: { roomId: E2E_EDITOR_ROOM_ID },
+        select: { variantSlot: true },
+      });
+      expect(remaining.map((r) => r.variantSlot).sort()).toEqual([1]);
+    });
+  });
+
+  test("Deleting the selected variant falls back to the remaining one", async ({
+    page,
+  }) => {
+    await withSeededVariants(async () => {
+      await login(page);
+      await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
+      const studio = page.getByTestId(NEW_STUDIO_TESTID);
+      const strip = page.getByRole("region", { name: "Versions" });
+
+      // Canonical mount: viewing is the UI browsing state and starts at
+      // "original" — lookbookSlot is the server-driven bound variant (A
+      // for this seed) and they are independent. The CTA is visible to
+      // prompt the user to bind the browsing slot into the lookbook.
+      // Issue #1380 — the prior assertion `data-viewing="A"` here was
+      // never architecturally reachable: nothing on mount sets
+      // `viewing` to the lookbook slot. The postmortem for #1380 was
+      // updated to drop that assumption.
+      await expect(studio).toHaveAttribute("data-viewing", "original");
+      await expect(studio).toHaveAttribute("data-lookbook-slot", "A");
+
+      await strip.getByTestId("edit-room-version-strip-delete-A").click();
+      await page.getByTestId("edit-room-version-strip-delete-confirm").click();
+      await waitForRscRefresh(page);
+
+      // Issue #1381 — the server action's `deleteInpaintVariant`
+      // now re-binds `room.selectedVariantIndex` away from the
+      // deleted slot when it was the pinned lookbook variant, so
+      // the lookbook falls back to the surviving variant. The
+      // user's browsing state (`viewing`) is independent and
+      // remains on "original" because nothing in this flow sets
+      // it.
+      await expect(studio).toHaveAttribute("data-lookbook-slot", "B");
+      await expect(studio).toHaveAttribute("data-viewing", "original");
+    });
+  });
+
+  test("Deleting the non-selected variant keeps the selection on the still-present one", async ({
+    page,
+  }) => {
+    await withSeededVariants(async () => {
+      await login(page);
+      await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
+      const studio = page.getByTestId(NEW_STUDIO_TESTID);
+      const strip = page.getByRole("region", { name: "Versions" });
+
+      // Issue #1380 — this test was the flaky one. The original
+      // assertion pair `data-viewing="A"` before/after the delete was
+      // never architecturally reachable: `viewing` is the UI browsing
+      // state (independent of the lookbook slot) and never becomes
+      // "A" on canonical mount. The postmortem clarified that
+      // "selection" here refers to the bound lookbook variant, not
+      // the browsing state, so we assert on `data-lookbook-slot`.
+      await expect(studio).toHaveAttribute("data-viewing", "original");
+      await expect(studio).toHaveAttribute("data-lookbook-slot", "A");
+      await strip.getByTestId("edit-room-version-strip-delete-B").click();
+      await page.getByTestId("edit-room-version-strip-delete-confirm").click();
+      await waitForRscRefresh(page);
+
+      // Deleting the non-bound variant (B) leaves the bound one (A)
+      // in place; lookbookSlot stays put.
+      await expect(studio).toHaveAttribute("data-lookbook-slot", "A");
+      await expect(
+        strip.getByTestId("edit-room-version-strip-delete-B"),
+      ).toHaveCount(0);
+      await expect(
+        strip.getByTestId("edit-room-version-strip-delete-A"),
+      ).toBeVisible();
+    });
+  });
+
+  test("Deleting both variants leaves only the original before-photo and no delete buttons", async ({
+    page,
+  }) => {
+    await withSeededVariants(async () => {
+      await login(page);
+      await openFocusedEditor(page, E2E_EDITOR_PROJECT_ID, "Mask Room");
+      const studio = page.getByTestId(NEW_STUDIO_TESTID);
+      const strip = page.getByRole("region", { name: "Versions" });
+
+      // Delete A first, then B.
+      await strip.getByTestId("edit-room-version-strip-delete-A").click();
+      await page.getByTestId("edit-room-version-strip-delete-confirm").click();
+      await waitForRscRefresh(page);
+      await expect(
+        strip.getByTestId("edit-room-version-strip-delete-A"),
+      ).toHaveCount(0);
+
+      await strip.getByTestId("edit-room-version-strip-delete-B").click();
+      await page.getByTestId("edit-room-version-strip-delete-confirm").click();
+      await waitForRscRefresh(page);
+      await expect(
+        strip.getByTestId("edit-room-version-strip-delete-B"),
+      ).toHaveCount(0);
+
+      // Both variants gone → viewing falls back to "original".
+      await expect(studio).toHaveAttribute("data-viewing", "original");
+      // Note: I considered adding `data-lookbook-slot === "original"`
+      // here to pin the resolver's `null → "original"` contract, but
+      // two back-to-back deletes pile up RSC revalidation + render
+      // races that defeat Playwright's default retry budget in CI.
+      // The same contract is pinned by the unit test
+      // `tests/edit-room-studio-props.test.ts` ("maps
+      // selectedVariantIndex=null → initialLookbookSlot='original'
+      // (#1381)"). The unit test runs in a fraction of the time and
+      // exercises the resolver directly without an RSC race.
+    });
   });
 });

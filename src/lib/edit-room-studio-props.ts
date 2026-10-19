@@ -91,6 +91,27 @@ export interface FocusedRoomLike {
 /** The minimal focused-inputs slice the resolver reads. */
 export interface FocusedRoomInputs {
   inpaintImageUrl: string | null;
+  /**
+   * Issue #1365 — live route-mapped value the studio's textarea
+   * renders. Source is the parent route's `directives[roomId]` map
+   * (or `Room.rawDirectives` fallback). #1365 added this so the
+   * build helper can forward it to `<EditRoomStudio>`'s `directions`
+   * prop without a second arg (and so test fixtures explicitly
+   * thread the route-mapped value rather than rely on implicit
+   * shape compat). New fixtures must supply this field; legacy
+   * fixtures that omit it fall back to `initialDirections` inside
+   * the shell's `liveDirections` derivation.
+   *
+   * Shape choice — `string`, not `string | null | undefined`: the
+   * route's fallback chain (`directives[roomId] ?? room.rawDirectives
+   * ?? ""`) collapses to `""` at the call site before the resolver
+   * ever sees it. Widening the type to accept null would just shift
+   * the `??` from the route to the resolver without changing
+   * behavior — kept narrow here so a future caller that forgets the
+   * fallback surfaces as a typecheck rather than a silent `null` in
+   * the textarea. (#1365 next-session handoff, Priority 1.)
+   */
+  roomDirectives: string;
 }
 
 /** Per-slot touch-up counts the studio renders on the version strip. */
@@ -111,13 +132,18 @@ export interface BuildEditRoomStudioPropsArgs {
   onRun: () => void;
   onExitToProject: () => void;
   /**
-   * Issue #1344 slice 2 — the route's `editDirectives(roomId, value)`
-   * forwarded verbatim. The shell calls this 900ms after the user
-   * stops typing in the directions textarea, so the typed value lands
-   * in `directives[roomId]` and feeds the submit path's
-   * `useInpaintRuns.promptDirectives`.
+   * Issue #1365 — per-keystroke callback the textarea's `onChange`
+   * calls. The parent's `editDirectives(roomId, value)` is wrapped
+   * here verbatim — every keystroke updates `directives[roomId]`
+   * immediately (the parent's `AutosaveController` schedules the
+   * server-side persistence with trailing-edge debounce, not this
+   * callback). Pre-#1365 the shell held a `state.directions` slot
+   * + 900ms debounce that called `onDirectionsCommit`; that path
+   * was removed because it raced the submit-time prompt capture
+   * (the cluster missed the user's last keystrokes on first
+   * render) and was the source of the #1365 quirk.
    */
-  onDirectionsCommit: (value: string) => void;
+  onDirectivesChange: (value: string) => void;
   /**
    * Issue #1344 slice 2 — the painted-area snapshot the submit path
    * forwards to `/api/inpaint` as `maskUrl`. Source of truth is the
@@ -125,6 +151,16 @@ export interface BuildEditRoomStudioPropsArgs {
    * studio holds a mirror.
    */
   maskDataUrl: string | null;
+  /**
+   * Issue #1365 — the live route-mapped value the studio's textarea
+   * renders. Source is `FocusedRoomInputs.roomDirectives` (which the
+   * parent route mutates on every `editDirectives` call). When the
+   * arg is omitted the build helper defaults to `initialDirections`
+   * for tests written before #1365 (those fixtures are kept working
+   * by the fallback inside `EditRoomStudio.tsx`'s `liveDirections`
+   * derivation; new fixtures should pass it explicitly).
+   */
+  directions?: string;
   /**
    * Issue #1344 slice 2 — closure that updates
    * `maskDataUrlByRoom[focusedRoom.id]` when the MaskLayer emits a
@@ -155,8 +191,18 @@ function resolveInitialLookbookSlot(
 ): SlotId {
   if (selectedVariantIndex === 1) return "B";
   if (selectedVariantIndex === 0) return "A";
-  // null and any other value: default to A (studio's initial state).
-  return "A";
+  // Issue #1381 — `null` (and any non-{0,1} sentinel) now means
+  // "no variant bound," so the studio boots at the unrouted
+  // `"original"` slot rather than silently re-binding to A. The
+  // Prisma column is `Int? @default(0)` (schema), so freshly
+  // created rooms still land on A; `null` is only reached via the
+  // explicit server actions below. The companion
+  // `setLookbookVariant` action rejects `"original"` directly,
+  // so the only way to reach this branch is via my #1381 server
+  // fallback or the existing teardown path (`selectedVariantIndex:
+  // null` in `edit-room-redesign-version-strip.spec.ts`) which
+  // always re-seeds 0 before the next test runs.
+  return "original";
 }
 
 /**
@@ -191,7 +237,7 @@ export function buildEditRoomStudioProps(
     running,
     onRun,
     onExitToProject,
-    onDirectionsCommit,
+    onDirectivesChange,
     maskDataUrl,
     onMaskChange,
     onFineTuneStrengthChange,
@@ -209,7 +255,7 @@ export function buildEditRoomStudioProps(
     // "Saved" / "Save failed" / "Saved" — the intermediate "dirty"
     // state is invisible at the shell level.
     saveStatus: narrowSaveStatus(directiveStatuses[focusedRoom.id]),
-    onDirectionsCommit,
+    onDirectivesChange,
     projectId: project.id,
     roomId: focusedRoom.id,
     roomName: focusedRoom.name,
@@ -219,12 +265,21 @@ export function buildEditRoomStudioProps(
     touchUps,
     initialCopyHeadline: focusedRoom.lookbookHeadline ?? "",
     initialCopyBody: focusedRoom.lookbookBody ?? "",
-    // Issue #1359 — seed the shell's `state.directions` from
+    // Issue #1359 — seed the shell's textarea from
     // `Room.rawDirectives` so a page reload restores the user's
-    // typed directions in the textarea (was previously dropped on
-    // remount; the copy tab's "Rewrite from directions" CTA
-    // dead-ended as a result).
+    // typed directions (was previously dropped on remount; the
+    // copy tab's "Rewrite from directions" CTA dead-ended as a
+    // result). #1365 — keep this as the post-mount fallback; the
+    // live `directions` prop below carries the route-mapped value
+    // that the textarea actually re-renders on every keystroke.
     initialDirections: focusedRoom.rawDirectives ?? "",
+    // Issue #1365 — the live route-mapped value the textarea
+    // renders. `FocusedRoomInputs.roomDirectives` is the same map
+    // the parent updates on every `editDirectives` call. When the
+    // arg is missing (legacy test fixture) the studio's
+    // `liveDirections` derivation falls back to `initialDirections`
+    // + empty-string; explicit `roomDirectives` overrides.
+    directions: focusedInputs.roomDirectives,
     // Issue #1362a — seed the shell's FineTune useStates from the
     // persisted columns. Each column is nullable (legacy rows have
     // nulls); the studio's `useState(initialFineTune.strength ?? 50)`

@@ -14,8 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import BufferedDirectivesTextarea from "@/components/canvas/buffered-directives-textarea";
-import { ArrowLeft, ChevronRight, GripVertical, PencilRuler, X, Plus } from "lucide-react";
+import { ChevronRight, GripVertical, PencilRuler, X, Plus } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -49,12 +48,7 @@ import {
 } from "@/lib/variant-legibility";
 import RoomCanvas from "@/components/canvas/room-canvas";
 import StagedResultImage from "@/components/canvas/staged-result-image";
-import InpaintEditor from "@/components/canvas/inpaint-editor";
 import VariantThumbnailStrip from "@/components/canvas/variant-thumbnail-strip";
-import GenerateCopyForm, {
-  type GeneratedCopy,
-} from "@/components/canvas/generate-copy-form";
-import { Badge } from "@/components/ui/badge";
 import { useToast, ToastContainer } from "@/components/ui/toast";
 import {
   deleteVariantAfterImage,
@@ -71,8 +65,8 @@ import {
   type AutosaveStatus,
 } from "@/lib/autosave-controller";
 import { projectFetchStateFromStatus } from "@/lib/project-fetch-state";
-import { resolveEditRoomRedesignEnabled } from "@/lib/edit-room-flag";
 import { buildEditRoomStudioProps } from "@/lib/edit-room-studio-props";
+import { mergeServerUrlFields } from "@/lib/edit-room-url-reconcile";
 import { clamp, parseSeedOrUndefined } from "@/lib/finetune-wire";
 import { featherMask } from "@/lib/mask-feather";
 import { EditRoomStudio } from "@/components/edit-room/EditRoomStudio";
@@ -447,17 +441,15 @@ export default function ProjectDetailView({
    * Issue #1344 slice 2 — `beginEditRoomRun` is the studio's
    * `onRun` callback. Read the latest mask data URL for the
    * focused room and defer to the cluster's `submitInpaint`.
-   * Identical to the legacy surface's brush-run path; the only
-   * difference is the cluster is mounted by this file (rather than
+   * The cluster is mounted by this file (was previously
    * the legacy `<InpaintEditor>`'s internal usage of
-   * `useInpaintRuns`).
+   * `useInpaintRuns`; #1346 wave-5 lifted it out so the new
+   * `<EditRoomStudio>` shell can share it).
    *
    * The cluster's `onRunningChange` callback mirrors its
    * `isProcessing` into the route's `editorBusy` state directly
    * (no `useEffect` needed — the cluster pushes values into the
-   * route via a stable callback). This is the same shape the
-   * legacy `<InpaintEditor>` uses via its `onProcessingChange`
-   * prop.
+   * route via a stable callback).
    */
   const beginEditRoomRun = useCallback(() => {
     if (editRoomIsProcessing) return;
@@ -482,16 +474,6 @@ export default function ProjectDetailView({
     maskDataUrlByRoom,
     showError,
   ]);
-
-  /**
-   * Issue #1344 — read the flag once on mount (it's `NEXT_PUBLIC_*`,
-   * so the same value reaches both server-rendered and client-rendered
-   * trees). The flag is a deployment-time switch, not a per-request
-   * one — re-reading it on every render would be a needless indirection.
-   */
-  const [isEditRoomRedesignEnabled] = useState(() =>
-    resolveEditRoomRedesignEnabled(process.env.NEXT_PUBLIC_EDIT_ROOM_REDESIGN)
-  );
 
   /**
    * Issue #1344 (real `useInpaintRuns` wire) — masked snapshot
@@ -720,33 +702,52 @@ export default function ProjectDetailView({
   );
 
   /**
-   * Issue #1362c — dev-only test seam for the FineTune blend-edges wire
-   * spec. Lets the e2e suite mutate `fineTune[editorRoomId].fineTuneExpand`
-   * directly without driving the `<Slider>` DOM (every DOM-driven strategy
-   * — pointer drag, keyboard `Home`/`ArrowRight`, `fill`, native setter +
-   * dispatched `input` — silently leaves the slider at 12 in the Playwright
-   * harness because React 19/Next 16's event delegation root does not pick
-   * up programmatic `input` events on this controlled range input). The
-   * unit pin (`tests/mask-feather.test.ts`) covers `featherMask`'s math;
-   * this seam lets the e2e cover `beforeSubmit`'s `?? 0` fallback and the
-   * `featherMask(maskDataUrl, expand)` → `maskUrl` POST-body composition.
+   * Issue #1362c — dev-only test seam for the FineTune blend-edges
+   * wire spec. Lets the e2e suite mutate
+   * `fineTune[editorRoomId].fineTuneExpand` directly without driving
+   * the `<Slider>` DOM (every DOM-driven strategy — pointer drag,
+   * keyboard `Home`/`ArrowRight`, `fill`, native setter + dispatched
+   * `input` — silently leaves the slider at 12 in the Playwright
+   * harness because React 19/Next 16's event delegation root does not
+   * pick up programmatic `input` events on this controlled range
+   * input). The unit pin (`tests/mask-feather.test.ts`) covers
+   * `featherMask`'s math; this seam lets the e2e cover `beforeSubmit`'s
+   * `?? 0` fallback and the `featherMask(maskDataUrl, expand)` → `maskUrl`
+   * POST-body composition.
    *
-   * Also exposes `__test_submitInpaint(maskDataUrl)` because the run
-   * button's `blockedReason` reads from the studio reducer's
-   * `state.directions` (not from the route's `directives[roomId]`),
-   * and Playwright's textarea fill races the reducer's
-   * `SET_DIRECTIONS` dispatch through `<BufferedDirectivesTextarea>`'s
-   * 120ms idle commit + 2s autosave flush dance. Calling the cluster's
-   * `beginRun` directly bypasses that gate and exercises the same
-   * `beforeSubmit` → `featherMask` → POST-body wire the spec is
-   * pinning.
+   * Also exposes `__test_submitInpaint(maskDataUrl)` because calling
+   * the cluster's `beginRun` directly pins the `beforeSubmit` →
+   * `featherMask` → POST-body wire without DOM-driving the run
+   * button — the run button's `blockedReason` is gate-by-the-textarea
+   * in this build, and DOM-driving the textarea is subject to the
+   * React 19/Next 16 delegation-root issue described above and below.
+   *
+   * #1365 post-merge — the reducer-buffered `state.directions` race
+   * described in the original `__test_setDirectives` rationale no
+   * longer exists: the textarea's source of truth lives on the parent
+   * route map, so no reducer slice proxies the value. The seam is
+   * retained (deferred-retirement, per the post-#1365 followup) because
+   * the original motivation — React 19/Next 16's event-delegation root
+   * reportedly not receiving `page.fill`'s dispatched `input` on this
+   * controlled textarea — is independent of where the `value` lives:
+   * the route lift moved the *destination* of `onChange` (route map
+   * instead of reducer), but did not repair the *trigger* of `onChange`.
+   * `__test_submitInpaint` therefore still pins the POST-body wire
+   * without DOM-driving the textarea. A DOM-only replacement (Path A
+   * in the post-#1365 next-session handoff) remains blocked until the
+   * delegation issue is root-caused; until then this seam continues
+   * to pin the FineTune blend-edges wire (#1362c) reproducibly.
+   *
+   * `__test_submitInpaint` is additionally useful because the
+   * cluster's `beginRun` orchestrates `beforeSubmit` + `featherMask` +
+   * the POST-body composition regardless of how the textarea is
+   * populated, so it pins the same wire.
    *
    * Gated by `NEXT_PUBLIC_EDIT_ROOM_REDESIGN` so production bundles
    * never carry the window binding. The e2e harness turns the gate on
    * via `nextEnv()` in `tests/e2e/env.ts`.
    */
   useEffect(() => {
-    if (!isEditRoomRedesignEnabled) return;
     if (typeof window === "undefined") return;
     (window as unknown as {
       __test_setFineTune?: (next: number) => void;
@@ -780,7 +781,6 @@ export default function ProjectDetailView({
         .__test_setDirectives;
     };
   }, [
-    isEditRoomRedesignEnabled,
     editorRoomId,
     editFineTune,
     editDirectives,
@@ -1054,6 +1054,22 @@ export default function ProjectDetailView({
     handleStripSelectRef.current = handleStripSelect;
   }, [handleStripSelect]);
 
+  // ─── #1376: re-sync URL/selection fields after `router.refresh()`.
+  // `useState(initialProject)` (line ~349) only reads the prop on mount,
+  // so server-driven mutations made from inside `<EditRoomStudio>` (which
+  // does not thread through the parent's `applyRoomUpdate`) would otherwise
+  // leave the version strip showing stale `lookbookVariantUrls` until a
+  // full page reload. The three URL/selection fields are server-only
+  // truth — no local optimistic path mutates them — so adopting them on
+  // prop change is safe and the merge semantics are pinned by the
+  // `mergeServerUrlFields` unit test.
+  useEffect(() => {
+    if (!initialProject) return;
+    setProject((prev) =>
+      prev ? mergeServerUrlFields(prev, initialProject) : prev,
+    );
+  }, [initialProject]);
+
   /**
    * Issue #192: deletes one variant's staged after-image. Optimistically
    * clears the slot and lands the selection on a valid item via the same
@@ -1311,8 +1327,20 @@ export default function ProjectDetailView({
           running: editRoomRunning,
           onRun: beginEditRoomRun,
           onExitToProject: leaveEditor,
-          onDirectionsCommit: (value) =>
+          // #1365 — per-keystroke callback. The parent's
+          // `editDirectives` already wraps persistence in the
+          // AutosaveController; the shell no longer holds its own
+          // 900ms debounce (the previous path raced the cluster's
+          // submit-time prompt capture, missing the user's last
+          // keystrokes on first render — see #1365).
+          onDirectivesChange: (value) =>
             editDirectives(focusedRoom.id, value),
+          // #1365 — live route-mapped value the studio's textarea
+          // renders. `focusedInputs.roomDirectives` mirrors the
+          // parent's `directives[roomId]` map; the shell's
+          // `liveDirections` derivation uses this when supplied,
+          // falling back to `initialDirections` for legacy fixtures.
+          directions: focusedInputs.roomDirectives,
           maskDataUrl: maskDataUrlByRoom[focusedRoom.id] ?? null,
           onMaskChange: (value) =>
             setMaskDataUrlForRoom(focusedRoom.id, value),
@@ -1337,10 +1365,15 @@ export default function ProjectDetailView({
           : "min-h-screen bg-background"
       }
     >
-      <header className="shrink-0 bg-background border-b border-border px-8 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <nav aria-label="Breadcrumb" className="flex items-center gap-1 text-sm text-muted-foreground">
+      {/* Issue #1374 — header compressed from `py-4` (~96px) to `py-2` + single-row
+          layout so the page + room-studio sub-header combined stay ≤15% of a 1920×932
+          viewport. Address drops its duplicate `<h1>` (already in the breadcrumb)
+          and the client name is inlined next to the breadcrumb instead of in a
+          separate vertical row. */}
+      <header className="shrink-0 bg-background border-b border-border px-8 py-2">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1 truncate text-sm text-muted-foreground">
               <Link
                 href="/projects"
                 className="hover:text-foreground"
@@ -1370,26 +1403,34 @@ export default function ProjectDetailView({
               {focusedRoom && (
                 <>
                   <ChevronRight className="w-4 h-4 shrink-0" aria-hidden="true" />
-                  <span className="max-w-[12rem] truncate text-foreground" title={focusedRoom.name}>
+                  <span
+                    className="max-w-[12rem] truncate text-foreground"
+                    title={focusedRoom.name}
+                    aria-current="page"
+                  >
                     {focusedRoom.name}
                   </span>
                 </>
               )}
             </nav>
-            <h1 className="font-playfair text-2xl font-bold text-foreground mt-1">
-              {project.propertyAddress}
-            </h1>
-            <div className="mt-1 flex items-center gap-4">
-              <p className="text-sm text-muted-foreground">{project.clientName}</p>
+            {project.clientName ? (
               <span
-                className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-foreground"
-                title={PROJECT_AESTHETIC_HELPER}
+                className="hidden truncate text-sm text-muted-foreground sm:inline"
+                title={project.clientName}
               >
-                {projectAestheticBadge(project.stagingAesthetic)}
+                · {project.clientName}
               </span>
-            </div>
+            ) : null}
           </div>
+          {/* Right-side cluster keeps its original place — `justify-between`
+              does the work that the removed `<h1>` + `<p>` row did vertically. */}
           <div className="flex items-center gap-3">
+            <span
+              className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-foreground"
+              title={PROJECT_AESTHETIC_HELPER}
+            >
+              {projectAestheticBadge(project.stagingAesthetic)}
+            </span>
             <Link
               href={`/projects/${project.id}/lookbook`}
               className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary"
@@ -1413,7 +1454,9 @@ export default function ProjectDetailView({
            * imagery and editor render, spanning the full available content
            * width — no half-width grid card, no other rooms splitting
            * attention. The mask canvas drops its compact cap (fullWidth).
-           * "All rooms" is the visible affordance back to the grid.
+           * "All rooms" is the affordance back to the grid — kept in the
+           * accessibility tree (sr-only, see #1374) since the visible
+           * affordance moved up to the EditRoomStudio `<TopBar>`'s breadcrumb.
            *
            * Issue #252 D5: laptop-first fixed-viewport layout — the page
            * fills the dashboard shell's height and the editor's two panes
@@ -1425,19 +1468,26 @@ export default function ProjectDetailView({
            * at lg+.
            */
           <div className="flex min-h-0 flex-col lg:flex-1">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            {/* Issue #1374 — the room-studio sub-header is now `sr-only`:
+                the page header's breadcrumb already carries the room name
+                (aria-current="page") and the EditRoomStudio `<TopBar>` adds
+                its own "All rooms" exit button. Both the room name and the
+                "All rooms" affordance stay in the accessibility tree (the
+                e2e helper at `openFocusedEditor` uses
+                `getByRole("heading", { name: roomName })` and `getByRole(
+                "button", { name: "All rooms" })` to wait for mount) but no
+                longer eat vertical space. The visible sub-header becomes
+                just the `mt-2` (8px) breath between the page header and the
+                editor body. */}
+            <div className="sr-only">
+              <h2>{focusedRoom.name}</h2>
               <button
                 type="button"
                 onClick={leaveEditor}
                 title="Back to the project overview"
-                className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
               >
-                <ArrowLeft className="w-4 h-4" aria-hidden="true" />
                 All rooms
               </button>
-              <h2 className="font-playfair text-xl font-semibold text-foreground">
-                {focusedRoom.name}
-              </h2>
             </div>
 
             {/* One PERSISTENT RoomCanvas for the focused room, above the
@@ -1450,9 +1500,12 @@ export default function ProjectDetailView({
                 it is height-capped with internal scroll so it can never
                 push the fixed-layout editor below the overflow-hidden clip
                 (issue #252 D5: page-level scrolling dies at laptop size). */}
-            {/* Issue #450: hide RoomCanvas when InpaintEditor is active (the
-                canvas inside InpaintEditor shows the source image, so this
-                would be a duplicate). Collapse entirely to free vertical space. */}
+            {/* Issue #450: hide RoomCanvas when an editor is active (the
+                canvas inside the new `<EditRoomStudio>` shell shows the
+                source image, so this would be a duplicate). Collapse
+                entirely to free vertical space. Pre-#1346 the comment
+                referenced the legacy `<InpaintEditor>` by name; wave-5
+                renamed it. */}
             {!focusedRoom.beforeImageUrl && (
               <div className="mt-4 lg:min-h-0 lg:max-h-[45%] lg:overflow-y-auto">
                 <RoomCanvas
@@ -1480,27 +1533,22 @@ export default function ProjectDetailView({
               >                <h3 className="text-sm font-semibold text-foreground mb-3">
                   AI Staging
                 </h3>
-                {focusedEditingSlot !== null && !isEditRoomRedesignEnabled && (
-                  <p
-                    role="status"
-                    className="mb-3 inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800 ring-1 ring-amber-200"
-                  >
-                    {variantTouchUpLabel(
-                      focusedEditingSlot,
-                      touchUpCountsByRoom[focusedRoom.id]?.[
-                        focusedEditingSlot
-                      ] ?? 0
-                    )}
-                  </p>
-                )}
-                {/* Issue #1344 — flag-gated surface mount. When the
-                    redesign is on, mount `<EditRoomStudio>` with the
-                    prop bag from `buildEditRoomStudioProps` (a pure
-                    shape transform). Otherwise mount the legacy
-                    `<InpaintEditor>` unchanged. The "AI Staging" h3
-                    and the legacy variant-touch-up pill are hidden
-                    under the new surface because the studio owns its
-                    own header (from #1337 / #1338).
+                {/* The legacy variant-touch-up pill (#1344) was deleted
+                    in #1346 wave-5 — it advertised the legacy IA
+                    ("you've touched up variant 0, do you want a fresh
+                    result?") and has no equivalent on the new
+                    `<EditRoomStudio>` shell, which owns its own
+                    header (from #1337 / #1338). The `touchUpCountsByRoom`
+                    map and `variantTouchUpLabel` helper stay because
+                    the new surface reads them in its version-history
+                    panel. */}
+                {/* Issue #1346 — the legacy `<InpaintEditor>` mount is
+                    gone; this is the sole surface. `<EditRoomStudio>`
+                    receives its prop bag from `buildEditRoomStudioProps`
+                    (a pure shape transform) and shares the
+                    `<EditRoomRunCluster>` with the rest of the page
+                    so the cluster's `submitInpaint` + status polling
+                    are the single source of truth.
                     Issue #1344 slice 2 — `onDirectionsCommit` wires
                     the studio's typed directions to the route's
                     existing `editDirectives(roomId, value)` so
@@ -1508,13 +1556,14 @@ export default function ProjectDetailView({
                     freshest value at submit time. `maskDataUrl` /
                     `onMaskChange` plumb the painted-area snapshot up
                     to the route's submit path. */}
-                {isEditRoomRedesignEnabled ? (
+                {
                   <>
                     {/* Issue #1344 (real `useInpaintRuns` wire) — the
                         fragment wraps the new studio + its run
                         cluster. Both gates must be true for the new
-                        surface to mount: the `NEXT_PUBLIC_*` flag
-                        AND a focused room + before photo. The
+                        surface to mount: a focused room + before photo
+                        (the kill-switch flag was retired in #1346
+                        wave-5 commit 3). The
                         cluster consumes /api/inpaint + status
                         polling + persistence on the studio's behalf
                         via an imperative handle; beginEditRoomRun
@@ -1528,8 +1577,8 @@ export default function ProjectDetailView({
                         Mounted conditionally inside the
                         `<EditRoomStudio>` mount so the rules-of-hooks
                         lint rule is satisfied (a `<EditRoomRunCluster
-                        />` only renders when both the flag is on AND
-                        a focused room is set). The cluster exposes
+                        />` only renders when a focused room is set).
+                        The cluster exposes
                         an imperative handle via React's
                         ref-forwarding API; beginEditRoomRun (built
                         above the focused state) calls into it on Run. */}
@@ -1616,180 +1665,7 @@ export default function ProjectDetailView({
                       showSuccess={showSuccess}
                     />
                   </>
-              ) : (
-                  <InpaintEditor
-                  roomId={focusedRoom.id}
-                  roomName={focusedRoom.name}
-                  onExitToProject={leaveEditor}
-                  onProcessingChange={setEditorBusy}
-                  saveStatus={directiveStatuses[focusedRoom.id] ?? "idle"}
-                  imageUrl={focusedInputs.inpaintImageUrl ?? ""}
-                  aesthetic={project.stagingAesthetic}
-                  promptDirectives={focusedInputs.roomDirectives.trim()}
-                  globalDirectives={project.stagingDirectives ?? ""}
-                  variantSlot={resolveInpaintTargetSlot(
-                    focusedRoom,
-                    focusedInputs.inpaintSource
-                  )}
-                  source={focusedInputs.inpaintSource}
-                  sourceOptions={listInpaintSources(focusedRoom)}
-                  fullWidth
-                  onSourceChange={(next) => handleInpaintSourceChange(focusedRoom.id, next)}
-                  pendingRequestId={focusedInputs.pendingRequest?.id ?? null}
-                  pendingSource={focusedInputs.pendingSource}
-                  onActiveConceptLabelChange={(label) => {
-                    // Issue #230: seed the single-object staging
-                    // directives with the concept pre-fill, only when
-                    // the effective field is still empty — typed
-                    // directives are never clobbered, and clearing the
-                    // seed degrades to raw directives (no mode flag).
-                    if (!label) return;
-                    setDirectives((prev) => {
-                      const current =
-                        prev[focusedRoom.id] ?? focusedRoom.rawDirectives ?? "";
-                      if (current.trim().length > 0) return prev;
-                      return { ...prev, [focusedRoom.id]: buildPrefill(label) };
-                    });
-                  }}
-                  onInpaintComplete={async (resultImageUrl, runSource) => {
-                    await persistInpaintResult(focusedRoom, resultImageUrl, runSource);
-                    const slot = resolveInpaintTargetSlot(focusedRoom, runSource);
-                    handleInpaintSourceChange(focusedRoom.id, { kind: "variant", slot });
-                  }}
-                  directivesValue={focusedInputs.roomDirectives}
-                  onDirectivesChange={(value) => editDirectives(focusedRoom.id, value)}
-                  projectName={project.propertyAddress}
-                  secondaryPane={
-                    <>
-                      {/* Issue #460: textarea first — always visible above the fold */}
-                      <section aria-label="Staging directives">
-                        <div className="flex items-center justify-between mb-1">
-                          <div className="flex items-center gap-2">
-                            <label
-                              htmlFor={`directives-${focusedRoom.id}`}
-                              className="block text-sm font-medium text-foreground"
-                            >
-                              Staging directives (required)
-                            </label>
-                            {/* Issue #562: directive source indicator */}
-                            {project.stagingDirectives?.trim() && focusedInputs.roomDirectives.trim() ? (
-                              <Badge variant="secondary" size="sm">Global + Room</Badge>
-                            ) : project.stagingDirectives?.trim() ? (
-                              <Badge variant="outline" size="sm">Global</Badge>
-                            ) : focusedInputs.roomDirectives.trim() ? (
-                              <Badge variant="secondary" size="sm">Room</Badge>
-                            ) : null}
-                          </div>
-                          {/* Issue #496: Saving… / Saved / error indicator */}
-                          {(() => {
-                            const status = directiveStatuses[focusedRoom.id];
-                            if (status === "saving") {
-                              return (
-                                <span className="text-xs text-stone-500">
-                                  Saving…
-                                </span>
-                              );
-                            }
-                            if (status === "saved") {
-                              return (
-                                <span className="text-xs text-green-700">
-                                  Saved
-                                </span>
-                              );
-                            }
-                            if (status === "error") {
-                              return (
-                                <span className="text-xs text-red-700">
-                                  Save failed
-                                </span>
-                              );
-                            }
-                            return null;
-                          })()}
-                        </div>
-                        {/* Issue #1159: buffered locally so a keystroke
-                            does not re-render the studio tree before the
-                            character lands. */}
-                        <BufferedDirectivesTextarea
-                          id={`directives-${focusedRoom.id}`}
-                          value={focusedInputs.roomDirectives}
-                          onCommit={(value) =>
-                            editDirectives(focusedRoom.id, value)
-                          }
-                          onBlur={() => blurDirectives(focusedRoom.id)}
-                          maxLength={MAX_DIRECTIVE_LENGTH}
-                          rows={3}
-                          placeholder="e.g., Modern coastal furniture, light neutrals, natural textures, minimal accessories..."
-                          className="w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring resize-none"
-                        />
-                        {focusedInputs.roomDirectives.length > 0 && (
-                          <p className="mt-1 text-xs text-muted-foreground text-right">
-                            {focusedInputs.roomDirectives.length}/{MAX_DIRECTIVE_LENGTH}
-                          </p>
-                        )}
-                      </section>
-
-                      <VariantThumbnailStrip
-                        roomName={focusedRoom.name}
-                        originalUrl={focusedRoom.beforeImageUrl}
-                        pairs={focusedInputs.pairs}
-                        selection={resolveStripSelection(
-                          focusedRoom.selectedVariantIndex,
-                          focusedInputs.pairs
-                        )}
-                        onSelect={(selection) =>
-                          void handleStripSelect(focusedRoom, selection)
-                        }
-                        onDeleteVariant={(slot) =>
-                          void handleDeleteVariant(focusedRoom, slot)
-                        }
-                        deletingSlot={deletingSlotByRoom[focusedRoom.id] ?? null}
-                        touchUpCounts={touchUpCountsByRoom[focusedRoom.id] ?? null}
-                      />
-
-                      {focusedInputs.staged && (
-                        <section aria-label="Staged result">
-                          <h3 className="text-sm font-semibold text-foreground mb-3">
-                            Staged result
-                          </h3>
-                          {/* Issue #497: draggable before/after comparison slider */}
-                          <StagedResultImage
-                            afterImageUrl={focusedInputs.staged.afterImageUrl}
-                            alt={focusedInputs.staged.alt}
-                            label={focusedInputs.staged.label}
-                            largeImage
-                            originalImageUrl={focusedRoom.beforeImageUrl}
-                          />
-                        </section>
-                      )}
-
-                      <section
-                        aria-label="Room copy"
-                        className="border-t border-border pt-4"
-                      >
-                        <h3 className="text-sm font-semibold text-foreground mb-3">
-                          Room Copy
-                        </h3>
-                        <GenerateCopyForm
-                          roomId={focusedRoom.id}
-                          initialDirectives={focusedInputs.roomDirectives}
-                          onCopyGenerated={(
-                            _copy: GeneratedCopy,
-                            rawDirectives: string
-                          ) =>
-                            // The form saves directives before generating;
-                            // mirror them into the inpaint editor's state.
-                            setDirectives((prev) => ({
-                              ...prev,
-                              [focusedRoom.id]: rawDirectives,
-                            }))
-                          }
-                        />
-                      </section>
-                    </>
-                  }
-                />
-                )}
+                }
               </section>
             ) : (
               <p className="mt-6 text-sm text-muted-foreground">

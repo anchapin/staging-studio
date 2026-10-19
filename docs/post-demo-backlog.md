@@ -204,6 +204,43 @@ Until that signal appears, the single-project-aesthetic model is the simpler def
 
 ---
 
+## 5. `buildBatchPlan` Lift-vs-Defer Decision — Issue #1367 (closed 2026-10-17)
+
+Closed as **deferred** (not wontfix) after the 2026-10-17 session-review re-verified that `buildBatchPlan` is a pure plan-shape transform: no I/O, no held state, only consumes and derives from its inputs. The unit pin (`tests/multi-select-batch.test.ts`, 11 cases) already covers the realistic per-room directive mixes; the sole production caller is `use-inpaint-runs.ts`'s batch runner (sequential, no fan-out). Lifting it without a measured reason would be speculative micro-optimization of a function that's already O(items × directives) over the small set of items the runner submits per batch.
+
+### Current State
+
+`src/lib/multi-select-batch.ts` exports `buildBatchPlan(input)`. It returns `{ plan, submissionOrder, summary }` describing which room/variant inpaint submits fire in what sequence. Today each room's directives are independently grouped into concepts, so a 5-room batch where every room asked for "swap the sofa" + "warm the lighting" submits ten near-identical requests serially. That is correct — but it is also the only thing that gets expensive at scale.
+
+The function is already cheap. The deferral is not about today's pain; it is about preserving a *clear* revisit signal so we do not quietly entrench a slower path when the lift becomes worth doing.
+
+### What Would Need to Be Built
+
+1. A **microbenchmark** (`tests/multi-select-batch.bench.ts`) covering the realistic room-count range (1, 3, 5, 10, 25 rooms × the per-room directive sizes the unit pin already covers). The benchmark alone is not enough — see "Trigger to Revisit."
+2. A **grouping algorithm**: cluster rooms by shared directive prefix, then issue one inpaint submit per cluster instead of one per room. Sequential runner, no fan-out — that ceiling is deliberate (see #1214's parallelization discussion for the rationale).
+3. A **behavioral-regression test** pinned alongside the implementation, asserting the current return shape (order, `submissionOrder`, per-item `planId`) so the cluster-merge cannot silently change what `use-inpaint-runs` receives.
+4. The lift is benchmark-driven only: implement iff the bench places `buildBatchPlan` in the top-3 hot spots of a representative batch run. Otherwise the issue stays closed.
+
+### Files Reserved
+
+- `src/lib/multi-select-batch.ts` — `buildBatchPlan`; JSDoc notes its purity contract, which the new code must continue to satisfy.
+- `src/components/canvas/use-inpaint-runs.ts` — sole production caller; the new return shape must be additive, not breaking.
+- `tests/multi-select-batch.test.ts` — existing 11-case pin.
+- `tests/multi-select-batch.bench.ts` — new; gated by vitest's `--bench` flag, not part of `npm test`.
+- `tests/multi-select-batch.behavioral-regression.test.ts` — new; pins the merged return shape so a future change cannot silently drop `planId` / reorder `submissionOrder`.
+
+### Trigger to Revisit
+
+Any **one** of the following:
+
+- A Next.js dev-mode profile or production flame graph of a real 5+ room batch shows `buildBatchPlan` in the top 3 by self-time.
+- A user-perceived latency report — not a one-off slow image upload, but a repeatable "editor hangs during batch planning" complaint from a demo or UAT session.
+- A microbenchmark in the new bench file that exceeds the threshold we set when we land the bench. (Threshold itself to be defined at that time — the bench file ships with no pass/fail gate, just measurements.)
+
+If none of these land within a quarter of meaningful staging-studio usage, the issue stays closed and this entry can be removed from the backlog entirely — its reason for existing was to keep the lift visible, not to keep it pending forever.
+
+---
+
 ## Summary: Priority After First Solo Sessions
 
 | Feature | Current State | Usage Signal to Watch | Recommended Priority |
@@ -212,9 +249,10 @@ Until that signal appears, the single-project-aesthetic model is the simpler def
 | **Photo Intake** | Manual upload per room via editor | Does Lauren chase listing agents for photos or re-upload photos from email/text? | Medium-Low |
 | **Multi-Tenant / Team Seats** | Single-firm, single-user | Does Lauren mention an assistant, partner, or growing her team? | Low (hold until observed) |
 | **Per-Room Aesthetic Overrides (#1214)** | All rooms inherit project aesthetic | Does Lauren ask to mix aesthetics per room within a single project? | Low — deferred until after Lauren demo by decision |
+| **`buildBatchPlan` directive-prefix clustering (#1367)** | Each room's directives independently grouped into inpaint submits | Does a 5+ room batch show `buildBatchPlan` in the top-3 hot spots of a real profile, or does batch planning become a user-perceived latency complaint? | Low — closed 2026-10-17 as deferred; revisit iff bench-driven or latency-driven |
 
 **Tier 3 rule applies:** none of these should be built speculatively. Ship v1, observe Lauren's first solo sessions, then re-rank based on actual friction points.
 
 ---
 
-*Last updated: post-demo research, issue #204; added #1214 (per-room aesthetic overrides) entry on its explicit deferral.*
+*Last updated: post-demo research, issue #204; added #1214 (per-room aesthetic overrides) entry on its explicit deferral; added #1367 (`buildBatchPlan` lift-vs-defer) entry on its explicit deferral (closed 2026-10-17).*

@@ -24,10 +24,11 @@ import {
  * not_found` and saved the version row with `thumbnailUrl: null`, so
  * the UI's thumbnail-rendering path ran with zero e2e coverage.
  *
- * With the harness default flipped to `NEXT_PUBLIC_EDIT_ROOM_REDESIGN=1`,
- * the focused editor mounts the new shell and the new submit path
- * (issue #1344's real `/api/inpaint` wire). The thumbnail upload
- * pipeline is unchanged — only the shell wrapping the editor changed.
+ * With the new `<EditRoomStudio>` shell (#1344, #1346 wave-5) being
+ * the only mount after wave-5, the focused editor mounts the new
+ * shell and the new submit path (issue #1344's real `/api/inpaint`
+ * wire). The thumbnail upload pipeline is unchanged — only the
+ * shell wrapping the editor changed.
  *
  * The legacy assertion that opened the `<CollapsibleSection>`'s
  * "Version History" panel and verified the thumbnail `<img>` renders

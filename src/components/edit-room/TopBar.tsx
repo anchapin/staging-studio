@@ -90,8 +90,12 @@ export function TopBar({
   const save = SAVE_LABEL[saveStatus];
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-outline/20 bg-surface-container-lowest px-4">
-      <div className="flex min-w-0 items-center gap-1">
+    /* Issue #1374 — `h-14` (56px) → `h-12` (48px) saves 8px on the
+       combined-chrome budget so page + sub-header stay ≤15% of a 1920×932
+       viewport. The room-name `<button>` and the action buttons (h-9/h-8)
+       fit cleanly in 48px. */
+    <header className="flex h-12 shrink-0 items-center justify-between border-b border-outline/20 bg-surface-container-lowest px-4">
+      <nav aria-label="Edit room location" className="flex min-w-0 items-center gap-1">
         <button
           type="button"
           onClick={onExitToProject}
@@ -174,7 +178,7 @@ export function TopBar({
             <ChevronRight className="h-4 w-4" aria-hidden />
           </button>
         </div>
-      </div>
+      </nav>
 
       <div className="flex shrink-0 items-center gap-4">
         <span

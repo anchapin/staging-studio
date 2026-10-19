@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 
-import { RefineStudioClient } from "./refine-studio-client";
+import { EditRoomStudioMount } from "./edit-room-studio-mount";
 
 interface RefinePageProps {
   params: Promise<{ id: string }>;
@@ -93,33 +93,38 @@ export default async function RefineStudioPage({
     project.rooms[0]?.id ??
     null;
 
-  return (
-    <RefineStudioClient
-      projectId={project.id}
-      propertyAddress={project.propertyAddress}
-      initialRoomId={initialRoomId}
-      rooms={project.rooms.map((candidate) => ({
-        id: candidate.id,
-        name: candidate.name,
-        beforeImageUrl: candidate.beforeImageUrl,
-        afterImageUrl: candidate.afterImageUrl,
-        afterImageUrl2: candidate.afterImageUrl2,
-        selectedVariantIndex: candidate.selectedVariantIndex,
-        rawDirectives: candidate.rawDirectives,
-        completedRequestIds: candidate.inpaintRequests
-          .filter(
-            (request) => request.status === "COMPLETED" && request.resultUrl
-          )
-          .map((request) => request.id),
-        variations: candidate.inpaintRequests
-          .filter(
-            (request) => request.status === "COMPLETED" && request.resultUrl
-          )
-          .map((request) => ({
-            id: request.id,
-            resultUrl: request.resultUrl as string,
-          })),
-      }))}
-    />
-  );
+  // Issue #1345 — flag-gated mount of `<EditRoomStudio>` (#1342 / #1344).
+  // When ON, the legacy `RefineStudioClient` is unreachable; the new
+  // studio (single focused room via the `?room=` searchParam) takes over.
+  // The room the URL selected (via `requestedRoom` / `initialRoomId`)
+  // Issue #1346 — `isEditRoomRedesignEnabled` (the kill-switch
+  // flag) and the legacy `RefineStudioClient` fallback are gone.
+  // The new `<EditRoomStudioMount>` is the only mount; when
+  // `initialRoomId` is missing the focused room, render nothing
+  // (the user is expected to pick a room from the project view
+  // and the URL will re-render with a valid `?room=`).
+  const focusedRoomForNewStudio =
+    project.rooms.find((candidate) => candidate.id === initialRoomId) ?? null;
+
+  if (focusedRoomForNewStudio) {
+    return (
+      <EditRoomStudioMount
+        project={{
+          id: project.id,
+          propertyAddress: project.propertyAddress,
+        }}
+        focusedRoom={{
+          id: focusedRoomForNewStudio.id,
+          name: focusedRoomForNewStudio.name,
+          beforeImageUrl: focusedRoomForNewStudio.beforeImageUrl,
+          afterImageUrl: focusedRoomForNewStudio.afterImageUrl,
+          afterImageUrl2: focusedRoomForNewStudio.afterImageUrl2,
+          selectedVariantIndex: focusedRoomForNewStudio.selectedVariantIndex,
+          rawDirectives: focusedRoomForNewStudio.rawDirectives,
+        }}
+      />
+    );
+  }
+
+  return null;
 }
