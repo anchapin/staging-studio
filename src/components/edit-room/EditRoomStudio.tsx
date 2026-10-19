@@ -106,14 +106,7 @@ export function EditRoomStudio({
   const [state, dispatch] = useReducer(
     editRoomReducer,
     null,
-    // Issue #1380 — pass `initialLookbookSlot` so the reducer's first
-    // render mirrors the slot the studio is rendering for, not the canned
-    // `"original"` default. See `createInitialEditRoomState` in
-    // `edit-room-reducer.ts` for the coercion rule and its test.
-    () =>
-      createInitialEditRoomState({
-        lookbookSlot: initialLookbookSlot,
-      })
+    () => createInitialEditRoomState()
   );
   // #1365 — single derivation for every read site that used to read
   // `state.directions`. Cached here so each consumer reads the same
