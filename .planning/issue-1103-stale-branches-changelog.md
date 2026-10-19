@@ -110,3 +110,116 @@ to inspect the historical state
   choice (re-escalate the relevant oxlint rule from `warn` to `error`) was
   reverted. Per issue #1103's procedure (verify content present in
   develop), they qualify as superseded.
+
+---
+
+## 2026-10-19 followup sweep — orphan worktrees + typo dir
+
+**Operator:** session opened on `.handoffs/2026-10-19-triage-8-abandoned-branches-followups.md`.
+**Develop HEAD at cleanup:** `0f7b9726` (already up to date with origin).
+**Trigger:** the previous sweep (above) deleted the 8 abandoned branches but
+left 4 worktrees pointing at local-only refs for branches whose content had
+already merged into develop. The .gitignore typo dir `.handoffs/` (the
+canonical `.handoffs/` lives next to it) was also preserved.
+
+### Tags added 2026-10-19 (followup)
+
+Each tag archives the worktree's tip before deletion; none of these branches
+have remote refs (gone at PR-merge time), so the tag is the *only* path back
+to the content.
+
+| Tag | SHA | Original branch | Origin issue | PR (closed-merged) |
+|-----|-----|-----------------|--------------|---------------------|
+| `archive/mp-redesign__copypanel-e2e-2026-10-19` | `0ac426d` | `mp-redesign/issue-1343-copypanel-e2e` | #1343 | #1357 (2026-10-16) |
+| `archive/mp-redesign__e2e-unblock-2026-10-19` | `1d55203` | `mp-redesign/issue-1344-e2e-unblock` | #1344 | #1359 (2026-10-17) |
+| `archive/mp-redesign__listing-copy-2026-10-19` | `7c0426a` | `mp-redesign/issue-1343-listing-copy` | #1343 | #1356 (2026-10-16) |
+| `archive/mp-redesign__release-1362c-develop-to-main-2026-10-19` | `c247a20` | `release/issue-1362c-develop-to-main` | #1362c | #1366 (2026-10-17) |
+
+### Worktrees removed
+
+`git worktree remove --force` on each; each had at least one dirty file
+(`D node_modules/.package-lock.json` from the prior `npm install`, plus one
+`.handoffs/<date>-<topic>.md` scratch note, plus one `M tsconfig.json`
+framework-induced flip on `issue-1343-copypanel-e2e` only). Content preserved
+via the archive tag table above.
+
+| Worktree dir | Branch | Dirty artifacts |
+|--------------|--------|-----------------|
+| `~/Projects/staging-studio-copypanel-e2e` | `mp-redesign/issue-1343-copypanel-e2e` | `M tsconfig.json` (build-induced `preserve` → `react-jsx` flip, see AGENTS.md "Toolchain quirks"), `D node_modules/.package-lock.json`, `?? .handoffs/2026-10-16-e2e-upload-failure-diagnostic.md` |
+| `~/Projects/staging-studio-e2e-unblock` | `mp-redesign/issue-1344-e2e-unblock` | `D node_modules/.package-lock.json` (no scratch note in this clone) |
+| `~/Projects/staging-studio-feather-e2e` | `release/issue-1362c-develop-to-main` | `?? .handoffs/2026-10-17-finetune-e2e-feather-landed-and-shipped.md` |
+| `~/Projects/staging-studio-listing-copy` | `mp-redesign/issue-1343-listing-copy` | `D node_modules/.package-lock.json`, `?? .handoffs/2026-10-16-edit-room-redesign-listing-copy-route.md` |
+
+The 3 untracked `.handoffs/*.md` notes found in the orphan clones appeared to
+overlap in title with already-tracked handoffs at sweep time:
+
+| Lost orphan handoff (untracked, in removed worktree) | Title from pre-cleanup pre-flight | Best-fit overlap in tracked `.handoffs/` |
+|------------------------------------------------------|------------------------------------|------------------------------------------|
+| `2026-10-16-e2e-upload-failure-diagnostic.md` | "Diagnostic — Upload e2e failures (issue #1344 follow-up)" | `2026-10-16-signoff-e2e-fix-slice.md` (same date, same surface area) |
+| `2026-10-17-finetune-e2e-feather-landed-and-shipped.md` | "#1362c landed and shipped — next steps" | This session's `2026-10-19-triage-8-abandoned-branches-complete.md` (covers PR #1362c) |
+| `2026-10-16-edit-room-redesign-listing-copy-route.md` | "Handoff — Edit Room UX redesign, session of 2026-10-16 (Listing Copy route + CopyPanel wire)" | `2026-10-15-edit-room-redesign-canvas-stage.md` + `2026-10-16-signoff-e2e-fix-slice.md` (combined) |
+
+**Caveat:** the worktree `--force` removed the dirs before content-equivalence
+could be byte-compared, so the overlap table above is title-based, not
+content-based. If the human operator (or next session) finds the lost content
+matters and was NOT a duplicate, the only recovery path is `.git/worktrees/`
+restoration (already gone) or a fresh `git stash`-equivalent from outside this
+repo. None of the 3 orphan titles reference a dedicated source-tree doc or
+issue body that supersedes them, so the loss is plausible-but-unverified.
+
+### Local branches deleted (`git branch -D`)
+
+All four were already merged + already remote-deleted; the local refs had no
+upstream and no new commits diverged from develop.
+
+- `mp-redesign/issue-1343-copypanel-e2e`
+- `mp-redesign/issue-1344-e2e-unblock`
+- `mp-redesign/issue-1343-listing-copy`
+- `release/issue-1362c-develop-to-main`
+
+### Typo dir cleanup
+
+- `.handooffs/` (the typo'd scratch dir) was renamed into the canonical
+  `.handoffs/` via `git add`, preserving its single content file
+  (`.handooffs/2026-10-18-next-session-handoff.md` → now
+  `.handoffs/2026-10-18-next-session-handoff.md`). The typo dir was removed
+  (rmdir OK, was empty after rename).
+- New `.gitignore` block (see commit `fe7bb90`) ignores any future
+  `.handoff*/*` scratch dir while leaving `.handoffs/` and its tracked
+  contents visible: `.handoff*/**` broad rule + `!.handoffs/` and
+  `!.handoffs/**` negations (mirrors the `.env*` / `!.env.example` pattern).
+
+### Issue 924 — orphaned env-tests branch (RESOLVED)
+
+Branch `origin/issue-924-env-tests` (tip `b12c1e7a`) was retained by the
+prior sweep because Issue #924 was still open at the time. Since then,
+**Issue #924 was closed as COMPLETED 2026-09-25** (via PR #965
+`issue-924-v2` → merged into main). At followup-sweep time, the branch
+was investigated for unmerged work:
+
+- 19 commits not on `origin/develop`, of which **18 are squash-merge commits
+  of PRs that already shipped into develop** independently (`#942` through
+  `#957`, all MERGED). The 19th, `b12c1e7 test(env): add unit tests for
+  environment validation`, is the commit-message-named-after-#924 work that
+  landed as PR #965 itself.
+- Net: **zero unmerged work** on the branch. All test + API-route changes
+  present in the 19 commits exist on `origin/develop` via the independent
+  PRs.
+
+**Resolution:** branch deleted (`git push --delete origin issue-924-env-tests`)
+after archive-tag at the tip.
+
+| Archive tag | SHA | Source |
+|-------------|-----|--------|
+| `archive/issue-924-env-tests__branch-tip-2026-10-19` | `b12c1e7adce3bf35731abd2273225016aaeac6bc` | tip of `origin/issue-924-env-tests` before push-delete |
+
+The tag preserves reachability for anyone who wants to inspect the full
+commit graph or recover the squash-merge SHAs that were the issue-PRs'
+canonical refs.
+
+### Notes for next session
+
+- `git worktree list` is now a single-line output (the primary worktree only). Any new worktree added will be a fresh branch, not a resurrected orphan.
+- The `.gitignore` change is reversible: revert commit `fe7bb90` to restore the previous (un-typo-safe) behavior.
+- `origin/issue-924-v2` (Issue #924's actual closing PR, #965's branch name) was treated as "the closed work" by the prior session; if you find it lingering on origin post-merge, it's also safe to delete (the merged branch).
+- The 3 untracked handoff notes recovered from orphan worktrees before deletion (see "Lost orphan handoffs" table above) are likely content-overlaps with already-tracked handoffs but the comparison was not byte-equivalent; if any of those notes turn out to be load-bearing and not duplicated, recovery requires `git fsck` / `git reflog` of the removed worktrees (likely already expired) or human author recall.
