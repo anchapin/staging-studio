@@ -222,12 +222,21 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
     expect(props.initialLookbookSlot).toBe("B");
   });
 
-  it("maps selectedVariantIndex=null → initialLookbookSlot='A' (studio default; legacy convention)", () => {
-    // A room without an explicit selection falls back to A because the
-    // staging editor's lookbook-badge positions are based on the
-    // studio's initial state (the badge lands on A unless the user
-    // actively picks B). Mirrors the legacy `resolveStripSelection`
-    // fallback (issue #169).
+  it("maps selectedVariantIndex=null → initialLookbookSlot='original' (issue #1381)", () => {
+    // Issue #1381 — the resolver used to fall back to "A" for any
+    // value outside {0,1} (including null), which was the legacy
+    // #169 "default to A" convention from when rooms were created
+    // with implicit A binding. That convention produced a stale
+    // lookbookSlot when a server action (the #1381 patch in
+    // `deleteInpaintVariant`) deliberately unbinded to null after
+    // deleting both variants — the resolver would silently re-bind
+    // to A on the next mount, leaving the user looking at the
+    // original photo while the lookbook announced "A".
+    //
+    // The new resolver treats null (and any out-of-band sentinel)
+    // as an explicit "no variant bound" signal → the unrouted
+    // `"original"` slot. Fresh rooms continue to land on A
+    // because the schema default for `selectedVariantIndex` is 0.
     const props = buildEditRoomStudioProps(withRunArgs({
       project: baseProject,
       focusedRoom: { ...baseFocusedRoom, selectedVariantIndex: null },
@@ -238,7 +247,26 @@ describe("buildEditRoomStudioProps (issue #1344)", () => {
       onRun: () => {},
       onExitToProject: () => {},
     }));
-    expect(props.initialLookbookSlot).toBe("A");
+    expect(props.initialLookbookSlot).toBe("original");
+  });
+
+  it("maps selectedVariantIndex=-1 to initialLookbookSlot='original' (forward-compat sentinel)", () => {
+    // Issue #1381 — the resolver should treat any non-{0,1} sentinel
+    // (including future reserved values like -1) as "no variant
+    // bound" rather than silently re-binding to A. This keeps the
+    // contract robust if a future Prisma migration introduces more
+    // explicit "unbound" sentinels without touching the resolver.
+    const props = buildEditRoomStudioProps(withRunArgs({
+      project: baseProject,
+      focusedRoom: { ...baseFocusedRoom, selectedVariantIndex: -1 as number | null },
+      focusedInputs: baseFocusedInputs,
+      directiveStatuses: {},
+      touchUps: { original: 0, A: 0, B: 0 },
+      running: null,
+      onRun: () => {},
+      onExitToProject: () => {},
+    }));
+    expect(props.initialLookbookSlot).toBe("original");
   });
 
   it("forwards the project aesthetic + global directives", () => {

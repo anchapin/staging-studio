@@ -310,7 +310,15 @@ export async function deleteInpaintVariant(
   // Ownership check: room must belong to a project owned by the caller.
   const room = await prisma.room.findFirst({
     where: { id: roomId, project: { userId: user.id } },
-    select: { id: true, projectId: true, afterImageUrl: true, afterImageUrl2: true },
+    select: {
+      id: true,
+      projectId: true,
+      afterImageUrl: true,
+      afterImageUrl2: true,
+      // #1381 — needed to decide whether the deleted slot was the
+      // currently pinned lookbook variant.
+      selectedVariantIndex: true,
+    },
   });
   if (!room) return failure("Room not found or not owned by user");
 
@@ -332,7 +340,15 @@ export async function deleteInpaintVariant(
     });
   }
 
-  // Re-read remaining slots so the caller can pick the right fallback viewing.
+  // Issue #1381 — if the deleted slot was the room's currently pinned
+  // lookbook variant, re-bind `room.selectedVariantIndex` so the user
+  // is not left with the lookbook bound to a deleted slot. If a
+  // surviving variant exists, pin it (preserves user intent as best
+  // we can); if both variants are gone (or if a column-clear happened
+  // without a matching `InpaintVersion` row surviving), unbind to
+  // `null` so the resolver in `src/lib/edit-room-studio-props.ts`
+  // maps to the unrouted "original" lookbook slot rather than
+  // silently re-binding to A. The Prisma column is `Int? @default(0)`.
   const remainingRows = await prisma.inpaintVersion.findMany({
     where: { roomId },
     select: { variantSlot: true },
@@ -342,6 +358,19 @@ export async function deleteInpaintVariant(
     A: remainingRows.some((r) => r.variantSlot === 0),
     B: remainingRows.some((r) => r.variantSlot === 1),
   };
+  if (room && room.selectedVariantIndex === variantSlot) {
+    // Note: schema default is `0`, so freshly created rooms reach A;
+    // only the explicit unbind path lands here.
+    const nextPin: number | null = remaining.A
+      ? 0
+      : remaining.B
+      ? 1
+      : null;
+    await prisma.room.update({
+      where: { id: roomId },
+      data: { selectedVariantIndex: nextPin },
+    });
+  }
 
   revalidatePath(`/projects/${room.projectId}`);
   revalidatePath(`/projects/${room.projectId}/refine`);

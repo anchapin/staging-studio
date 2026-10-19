@@ -191,8 +191,18 @@ function resolveInitialLookbookSlot(
 ): SlotId {
   if (selectedVariantIndex === 1) return "B";
   if (selectedVariantIndex === 0) return "A";
-  // null and any other value: default to A (studio's initial state).
-  return "A";
+  // Issue #1381 — `null` (and any non-{0,1} sentinel) now means
+  // "no variant bound," so the studio boots at the unrouted
+  // `"original"` slot rather than silently re-binding to A. The
+  // Prisma column is `Int? @default(0)` (schema), so freshly
+  // created rooms still land on A; `null` is only reached via the
+  // explicit server actions below. The companion
+  // `setLookbookVariant` action rejects `"original"` directly,
+  // so the only way to reach this branch is via my #1381 server
+  // fallback or the existing teardown path (`selectedVariantIndex:
+  // null` in `edit-room-redesign-version-strip.spec.ts`) which
+  // always re-seeds 0 before the next test runs.
+  return "original";
 }
 
 /**

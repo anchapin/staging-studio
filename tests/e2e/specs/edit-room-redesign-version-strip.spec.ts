@@ -306,16 +306,14 @@ test.describe("Edit Room redesign — version strip delete (issue #1376, flag=ON
       await page.getByTestId("edit-room-version-strip-delete-confirm").click();
       await waitForRscRefresh(page);
 
-      // Known gap (separate from #1380, see postmortem
-      // session-5-addendum): the server's `deleteInpaintVariant`
-      // action clears the variant row but does not currently re-bind
-      // `room.selectedVariantIndex` away from the deleted slot.
-      // `lookbookSlot` therefore stays on the now-empty "A" until the
-      // user re-binds it (e.g. via the lookbook CTA on B). This test
-      // pins the *current* behavior so the regression is no longer a
-      // silent flake; the architectural fix (server-side fallback)
-      // is tracked separately.
-      await expect(studio).toHaveAttribute("data-lookbook-slot", "A");
+      // Issue #1381 — the server action's `deleteInpaintVariant`
+      // now re-binds `room.selectedVariantIndex` away from the
+      // deleted slot when it was the pinned lookbook variant, so
+      // the lookbook falls back to the surviving variant. The
+      // user's browsing state (`viewing`) is independent and
+      // remains on "original" because nothing in this flow sets
+      // it.
+      await expect(studio).toHaveAttribute("data-lookbook-slot", "B");
       await expect(studio).toHaveAttribute("data-viewing", "original");
     });
   });
@@ -380,6 +378,11 @@ test.describe("Edit Room redesign — version strip delete (issue #1376, flag=ON
 
       // Both variants gone → viewing falls back to "original".
       await expect(studio).toHaveAttribute("data-viewing", "original");
+      // Issue #1381 — once both variants are deleted, the lookbook
+      // is unbound (selectedVariantIndex = null ⇒ resolver returns
+      // "original"). Pin this so the legacy `null → "A"` default
+      // doesn't sneak back in via a future regression.
+      await expect(studio).toHaveAttribute("data-lookbook-slot", "original");
     });
   });
 });
