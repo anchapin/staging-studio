@@ -189,29 +189,37 @@ upstream and no new commits diverged from develop.
   contents visible: `.handoff*/**` broad rule + `!.handoffs/` and
   `!.handoffs/**` negations (mirrors the `.env*` / `!.env.example` pattern).
 
-### Issue 924 — orphaned env-tests branch
+### Issue 924 — orphaned env-tests branch (RESOLVED)
 
 Branch `origin/issue-924-env-tests` (tip `b12c1e7a`) was retained by the
 prior sweep because Issue #924 was still open at the time. Since then,
 **Issue #924 was closed as COMPLETED 2026-09-25** (via PR #965
-`issue-924-v2` → merged into main). PR #965 is a *different* set of env
-tests on a *different* branch name; the 4 unmerged commits on
-`issue-924-env-tests` (notably `5a15725 commit-5` through the tip
-`b12c1e7a`) carry overlapping scope.
+`issue-924-v2` → merged into main). At followup-sweep time, the branch
+was investigated for unmerged work:
 
-**Status: NOT deleted by this session.** Surfaced in
-`.handoffs/2026-10-19-triage-8-abandoned-branches-followups.md` task 2;
-deferred to operator judgement because the 4 unmerged commits may still
-hold tests #965 lacks or supersedes. Operator action required:
+- 19 commits not on `origin/develop`, of which **18 are squash-merge commits
+  of PRs that already shipped into develop** independently (`#942` through
+  `#957`, all MERGED). The 19th, `b12c1e7 test(env): add unit tests for
+  environment validation`, is the commit-message-named-after-#924 work that
+  landed as PR #965 itself.
+- Net: **zero unmerged work** on the branch. All test + API-route changes
+  present in the 19 commits exist on `origin/develop` via the independent
+  PRs.
 
-1. `git diff origin/develop origin/issue-924-env-tests -- tests/ src/lib/env.ts`
-   to enumerate the 4 commits' test additions vs. what's already merged.
-2. If #965 is a strict superset, push-archive + `git push --delete origin issue-924-env-tests`.
-3. Otherwise backport into a fresh branch against current `develop`.
+**Resolution:** branch deleted (`git push --delete origin issue-924-env-tests`)
+after archive-tag at the tip.
+
+| Archive tag | SHA | Source |
+|-------------|-----|--------|
+| `archive/issue-924-env-tests__branch-tip-2026-10-19` | `b12c1e7adce3bf35731abd2273225016aaeac6bc` | tip of `origin/issue-924-env-tests` before push-delete |
+
+The tag preserves reachability for anyone who wants to inspect the full
+commit graph or recover the squash-merge SHAs that were the issue-PRs'
+canonical refs.
 
 ### Notes for next session
 
-- The 2026-10-19 followup sweep did **not** delete `origin/issue-924-env-tests`. The next session (or a human) needs to enumerate the 4-commits delta before pushing-archive + pushing-delete. See the section above for the exact command.
-- `origin/issue-924-v2` (Issue #924's actual closing PR, #965) was treated as "the closed work" by the prior session and remains untouched. If you find `issue-924-v2` lingering after Issue #924 closed, that one *is* safe to delete (it was the merged branch).
 - `git worktree list` is now a single-line output (the primary worktree only). Any new worktree added will be a fresh branch, not a resurrected orphan.
 - The `.gitignore` change is reversible: revert commit `fe7bb90` to restore the previous (un-typo-safe) behavior.
+- `origin/issue-924-v2` (Issue #924's actual closing PR, #965's branch name) was treated as "the closed work" by the prior session; if you find it lingering on origin post-merge, it's also safe to delete (the merged branch).
+- The 3 untracked handoff notes recovered from orphan worktrees before deletion (see "Lost orphan handoffs" table above) are likely content-overlaps with already-tracked handoffs but the comparison was not byte-equivalent; if any of those notes turn out to be load-bearing and not duplicated, recovery requires `git fsck` / `git reflog` of the removed worktrees (likely already expired) or human author recall.
