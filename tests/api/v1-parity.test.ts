@@ -41,13 +41,23 @@ vi.mock("@/lib/api-auth", () => ({
   ProjectForbiddenError: class ProjectForbiddenError extends Error {},
 }));
 
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
-    room: { findFirst: mockRoomFindFirst, findUnique: mockRoomFindUnique },
-    inpaintRequest: { findFirst: mockInpaintRequestFindFirst },
-    dailyApiUsage: { findUnique: mockDailyApiUsageFindUnique, create: mockDailyApiUsageCreate, update: mockDailyApiUsageUpdate },
-  },
-}));
+vi.mock("@/lib/prisma", () => {
+  const dailyApiUsage = { findUnique: mockDailyApiUsageFindUnique, create: mockDailyApiUsageCreate, update: mockDailyApiUsageUpdate, upsert: vi.fn().mockResolvedValue({}) };
+  return {
+    prisma: {
+      room: { findFirst: mockRoomFindFirst, findUnique: mockRoomFindUnique },
+      inpaintRequest: { findFirst: mockInpaintRequestFindFirst },
+      dailyApiUsage,
+      // The inpaint-status limiter claims quota atomically inside an
+      // interactive transaction (see `claimRateLimit`), so surface a
+      // `$transaction` that runs the callback against the same methods.
+      $transaction: vi.fn(
+        async (fn: (tx: unknown) => Promise<unknown>) =>
+          fn({ dailyApiUsage, $queryRaw: async () => [] })
+      ),
+    },
+  };
+});
 
 // Issue #1343: the listing-copy route uses the `claimDailyQuota`
 // path (atomic pre-call claim per #1132), unlike the existing v1

@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { checkAndRecordRateLimit } from "@/lib/sliding-window-ratelimit";
+import { claimRateLimit } from "@/lib/sliding-window-ratelimit";
 import { createSupabaseRequestClient } from "@/lib/supabase";
 import { decideInpaintPersistence } from "@/lib/inpaint-persistence";
 import { classifyIntegrationError } from "@/lib/error-classify";
@@ -43,7 +43,7 @@ export async function checkInpaintStatusRateLimit(
   userId: string,
   requestId: string
 ): Promise<RateLimitResult> {
-  const result = await checkAndRecordRateLimit(
+  const result = await claimRateLimit(
     `inpaint-status:${userId}:${requestId}`,
     INPAINT_STATUS_RATE_LIMIT,
     INPAINT_STATUS_RATE_WINDOW_MS
