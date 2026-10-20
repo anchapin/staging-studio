@@ -128,6 +128,26 @@ export async function POST(req: NextRequest) {
           { status: 500, headers: buildDeprecationHeaders() }
         );
 
+      case "timeout":
+        // Issue #1424: the Browserless render exceeded EXPORT_PDF_DEFAULT_TIMEOUT_MS.
+        // The service has already refunded the claimed `DAILY_EXPORT_LIMIT` unit,
+        // so the client may retry immediately without burning its daily budget.
+        return NextResponse.json(
+          {
+            error: "PDF export timed out",
+            message:
+              "The Browserless render exceeded the 90s ceiling. No quota was consumed — retry in a moment.",
+            code: API_ERROR_EXPORT_FAILED,
+          },
+          {
+            status: 504,
+            headers: {
+              "Retry-After": "5",
+              ...buildDeprecationHeaders(),
+            },
+          }
+        );
+
       case "fetchResult": {
         const fetch = result.fetch;
         projectId = projectIdFromBody(bodyText);
