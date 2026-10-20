@@ -307,6 +307,11 @@ export async function runExportPdf(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 60_000);
 
+  const browserlessApiKey = deps.getEnv("BROWSERLESS_API_KEY");
+  if (!browserlessApiKey) {
+    return { kind: "missingConfig", reason: "browserlessApiKey" };
+  }
+
   try {
     const chromeResponse = await deps.fetchBrowserlessPdfWithCircuitBreaker(
       browserlessUrl,
@@ -315,6 +320,7 @@ export async function runExportPdf(
         headers: {
           "Content-Type": "application/json",
           "Cache-Control": "no-cache",
+          Authorization: `Basic ${Buffer.from(`${browserlessApiKey}:`).toString("base64")}`,
         },
         body: JSON.stringify({
           url: previewUrl,

@@ -306,6 +306,46 @@ describe("runExportPdf fetch path", () => {
     expect(body.options.margin).toEqual({ top: 0, bottom: 0, left: 0, right: 0 });
   });
 
+  it("signs the outbound Browserless request with a Basic Authorization header carrying BROWSERLESS_API_KEY", async () => {
+    let observedHeaders: Record<string, string> | undefined;
+    const deps = makeDeps({
+      fetchBrowserlessPdfWithCircuitBreaker: vi.fn(async (_url, init) => {
+        observedHeaders = init.headers as Record<string, string>;
+        return new Response(new Uint8Array([0x25, 0x50, 0x44, 0x46]), {
+          status: 200,
+          headers: { "content-type": "application/pdf" },
+        });
+      }),
+      getEnv: ((name: string) =>
+        name === "BROWSERLESS_API_KEY" ? "test-key" : process.env[name]) as (
+          name: string,
+        ) => string | undefined,
+    });
+    await runExportPdf({ bodyText: VALID_BODY }, deps!);
+    expect(observedHeaders).toBeDefined();
+    expect(observedHeaders!["Authorization"]).toBe(
+      `Basic ${Buffer.from("test-key:").toString("base64")}`,
+    );
+  });
+
+  it("returns missingConfig when BROWSERLESS_API_KEY is unset on the dispatched fetch path", async () => {
+    const fetchMock = vi.fn();
+    const deps = makeDeps({
+      fetchBrowserlessPdfWithCircuitBreaker: fetchMock,
+      getEnv: ((name: string) =>
+        name === "BROWSERLESS_API_KEY"
+          ? undefined
+          : name === "NEXT_PUBLIC_APP_URL"
+            ? "https://app.example.test"
+            : name === "PREVIEW_TOKEN_SECRET"
+              ? "test-secret"
+              : undefined) as (name: string) => string | undefined,
+    });
+    const result = await runExportPdf({ bodyText: VALID_BODY }, deps!);
+    expect(result.kind).toBe("missingConfig");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("returns a pdf kind with buffer + contentType when upstream answers 2xx + application/pdf", async () => {
     const deps = makeDeps();
     const out = await runExportPdf({ bodyText: VALID_BODY }, deps!);
