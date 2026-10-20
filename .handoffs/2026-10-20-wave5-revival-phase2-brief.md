@@ -169,7 +169,38 @@ These are facts the first session learned the hard way. Trust them; reverify onl
   - **`buildRequest` mock in `tests/export-pdf-route.test.ts` is now slightly divergent from the real `NextRequest`** — it returns the body as both `text()` and `json()`. If the suite later adds a `Content-Type` assertion on the request, the test will need a second update.
 
 ### PR-4 report — `/api/generate-copy` → `src/lib/generate-copy-service.ts`
-- ...
+- Branch: `wave5-generate-copy` (off `origin/main` @ `3741147`, the squash-merge of PR-3's self-report)
+- URL: https://github.com/anchapin/staging-studio/pull/1406
+- Merge commit: `fede00c5eab6015c1a7fc7ead12824c85714771a`
+- Merged: 2026-10-20T13:12:54Z
+- Files touched:
+  - `src/lib/generate-copy-service.ts` — **new**, 446 lines (deps-injected orchestrator with 8-arm discriminated result: `unauthorized`, `invalidRequest`, `roomNotFound`, `projectNotFound`, `projectForbidden`, `missingDirectives`, `quotaExceeded`, `success`, `saveFailed`).
+  - `tests/generate-copy-service.test.ts` — **new**, ~512 lines, **26 vitest cases** hand-rolled with `vi.fn()` deps (no `vi.mock`).
+  - `src/app/api/generate-copy/route.ts` — 444 → 230 lines (terminal HTTP mapping only; preserves `{ success: true|false }` envelope, `code` strings, `saveFailed` `error: "save_failed"` + `retryable: true` + `copy: generatedCopy` shape).
+  - `tests/api/generate-copy-route.test.ts` — pre-existing test kept passing: `buildRequest` mock now exposes `text()` (route uses `req.text()` for stricter JSON-parse failure).
+  - `src/app/api/export-pdf/route.ts` — cleanup of the unused-import lint warnings left by PR-3 (the `PREVIEW_CAPTURE_QUERY_PARAM`/`VALUE` constants are still referenced by `tests/print-css.test.ts`'s source-grep assertion; added `// eslint-disable-next-line` lines).
+- Verification (all gates clean):
+  - `npm run lint` — 0 errors in touched files.
+  - `npm run typecheck` — 0 errors.
+  - `npx vitest run tests/generate-copy-service.test.ts` — 26/26 pass.
+  - `npx vitest run tests/` — 231 files / 2895 tests, 0 failures.
+  - `npm run build` — succeeds.
+  - Pre-commit `check-tsconfig-flip.sh` — clean (flip reverted before commit).
+- Decision points hit:
+  - **`saveRoomCopy` import path**: imported from `@/app/actions/room` (the re-exporter) rather than `@/app/actions/room-copy` (the source). The pre-existing route test mocks `@/app/actions/room`, so the re-exporter import path lets the mock apply. This mirrors the convention every other consumer in the codebase uses for `saveRoomCopy`.
+  - **`assertOpenAIConfigured` is a dep**: added as an injected dep rather than calling the real function. Reason: the test environment has no `process.env.OPENAI_API_KEY` set, and `assertOpenAIConfigured` reads `process.env` directly via `requireEnvVars`. Without injection, every test would fail with a "missing env" error before the actual logic runs. Same correction applies to `generateWithFailover` and `generateWithCircuitBreaker` — both are injected as narrower `<T>(...)` signatures (the real types require `LanguageModel`, but test mocks pass `unknown`).
+  - **No `missingConfig` arm**: deliberately removed. The pre-existing route test relies on `assertOpenAIConfigured` throwing a structured error that the catch routes through `classifyIntegrationError`. A pre-emptive `missingConfig` arm in the service would duplicate that and break the test. Documented inline at the top of the service.
+  - **`ChecklistItem` shape**: the canonical schema (`@/lib/checklist-schema`) requires `category` + `priority`, NOT just `item` + `rationale`. The `GeneratedCopy` type inherits from `ChecklistItem`, so the service passes `copy.checklist` through unchanged rather than mapping.
+  - **`CopyOutputSchema` lives in the service**: the unversioned route's local `CopyOutputSchema` was promoted into the service (it had no business being inline in the route — the v1 `listing-copy` route has its own `listingCopyOutputSchema` for `headline`/`body` and uses a different prompt; not to be confused). The service uses the correct schema for the unversioned endpoint's surface.
+  - **`saveFailed` shape preserved**: the original route returned `error: "save_failed"` + `retryable: true` + `copy: generatedCopy` to distinguish from a fresh generation failure (#1132 keeps the claim). My route preserves that exact shape so the pre-existing test stays green.
+  - **Refund policy divergence from PR-3**: documented at the top of the service. Export-pdf keeps the claim on dispatch failure (#1124); generate-copy refunds on paid-call failure (#1132) but keeps the claim on `saveFailed` (copy in hand). Both policies are pinned by their respective vitest specs.
+  - **`generatedCopy.checklist` passed through**: the route's old code mapped `checklist` items to drop `category`/`priority` (which would have been `undefined` and broken `saveRoomCopy`'s Zod validation). Service passes them through unchanged.
+- Risk observations:
+  - **`@/lib/sanitize-prompt` is the canonical source for `sanitizePromptValue`** — `@/lib/prompts` imports it but does NOT re-export it. Initial import from `@/lib/prompts` failed at module-resolution time inside the test runner. Caught by `tsc` (`Cannot find name 'sanitizePromptValue'`).
+  - **The `requireProjectOwnershipOrThrow` real return type** is `{ ok: true; projectId: string }`, not `void`. Test mock updated to match. Pre-existing Phase-1 services made the same correction.
+  - **The PR-3 `export-pdf` route's `PREVIEW_CAPTURE_QUERY_PARAM`/`VALUE` imports were unused** at runtime (the URL build moved into the service). Lint flagged them. Fix: added `// eslint-disable-next-line @typescript-eslint/no-unused-vars` rather than removing them — the source-grep assertion in `tests/print-css.test.ts` requires the literal strings to appear in the route file.
+  - **Pre-existing `tests/api/generate-copy-route.test.ts` mocks `@/lib/ai` and `@/app/actions/room`** at the module level (not via `vi.fn()` deps). Service keeps working because the deps-injection pattern doesn't break those mocks: the default factory imports from the same modules, so the test mocks apply transparently.
+  - **`/api/v1/generate-copy` and `/api/v1/listing-copy` are intentionally NOT touched**. The v1 generate-copy route has its own flattened error mapping (different from the unversioned route's `{ success: true|false }` envelope); adopting the service would require a separate PR with its own test verification. The v1 listing-copy route uses a different schema entirely (`listingCopyOutputSchema` for `headline`/`body`, not the checklist-based schema used here).
 ```
 
 ## Termination condition
