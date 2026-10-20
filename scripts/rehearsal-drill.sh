@@ -61,7 +61,13 @@ if [ -f "$FALLBACK_PDF" ]; then
     warn "suspiciously small ($size bytes) — re-export per runbook §5"
   fi
 else
-  fail "missing — export it per runbook §5"
+  # The fallback PDF is an operator-generated artifact, not a committed file.
+  # On a fresh clone there is no demo-assets/ to assert against, so a missing
+  # PDF is a warning, not a blocker: runbook §5 produces it locally with the
+  # operator's Supabase credentials and lookbook content. Live checks in
+  # Section 1 still run; the operator must produce the PDF before delivering
+  # a real demo (see docs/demo/rehearsal-runbook.md §5).
+  warn "missing — operator must produce per runbook §5 (docs/demo/rehearsal-runbook.md)"
 fi
 
 echo "3. Laptop battery (warn-only)"

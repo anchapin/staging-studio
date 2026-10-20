@@ -83,29 +83,42 @@ This pushes the Prisma schema, seeds one user + the "789 Prototype Lane" /
 "Living Room" project, and starts the repo's mock Supabase (GoTrue auth +
 storage) on `127.0.0.1:39911`.
 
-**Repo — apply the two TEMPORARY test-only bypasses** (never commit these):
+## Status
 
-```bash
-cd /path/to/staging-studio
-git apply /path/to/dana-rig/mock-fal.patch
-```
+**UNSUPPORTED for the current provider.** The Dana rig was written
+against fal.ai as the inpaint provider (the `UX_PROTO_MOCK_FAL=1` /
+`UX_PROTO_MOCK_RESULT_URL=...` env vars wired the `src/app/api/inpaint`
+route to a local mock backend). After the #1240 migration to Alibaba
+DashScope, the inpaint surface moved from `lib/fal.ts` to a
+provider-agnostic `lib/inference.ts` seam, and the rig's two TEMPORARY
+test-only patches no longer apply:
 
-Then add the localhost allowance in `src/lib/ai-route-schemas.ts`
-(UX-PROTO-ONLY — the mock result URL is `http://127.0.0.1:39911/...`,
-which the https-only allowlist would otherwise reject):
+- **`mock-fal.patch` — REMOVED** (issue #1425). No longer patches any
+  file in the current tree; deleting it is the safe state.
+- **`localhost-allow.patch`** — still on disk but does not apply
+  (`next.config.ts` was reorganized). The mock seam it supported has no
+  replacement; without a mock seam, the URL allowlist exemption is
+  moot.
+- **`nightly.sh` / `nightly-compose.sh`** exit 1 immediately with a
+  "Dana rig is unsupported for the Alibaba provider" message rather
+  than half-starting and producing a misleading run.
+- **`driver.js` → headless Dana session** and the **`mock-ai/`
+  backend** are inert until the seam replacement lands.
 
-```ts
-function isAllowlistedHttpsUrl(value: string) {
-  try {
-    const url = new URL(value);
-    // UX-PROTO-ONLY (revert): allow the local mock result URL.
-    if (url.hostname === "127.0.0.1" || url.hostname === "localhost") return true;
-    return url.protocol === "https:" && IMAGE_HOST_PATTERN.test(url.hostname);
-  } catch {
-    return false;
-  }
-}
-```
+**Mock-seam replacement (tracked, not yet scheduled):** A
+provider-agnostic env-gated override (e.g. `UX_PROTO_MOCK_INFERENCE_BASE`)
+read by `lib/inference.ts`'s provider selector would let a mock backend
+on `http://127.0.0.1:39911` serve inpaint traffic without patching route
+source. That is a separate change touching the production seam — out of
+scope for the #1425 close-out; see issue #1425 for the long-form
+rationale.
+
+If you are running the rig by hand before the seam replacement lands,
+expect every legacy TEMPORARY-bypasses step to fail (the patches no
+longer apply — see **Status** above). The current hand-ran section
+below documents **what works** (the mock Supabase + the local dev server),
+even though the missing mock-inference seam means the rig cannot actually
+exercised inpaint without real Alibaba credentials in the rig container.
 
 **Terminal 2 — the app:**
 
@@ -197,8 +210,8 @@ Supabase), 39999 (driver relay), 5432 (postgres).
 - `driver.js` — headless Playwright Chromium + JSON relay (`UX_PROTO_APP_URL`, `UX_PROTO_CHROME_PATH`, `UX_PROTO_RELAY_HOST`, `UX_PROTO_SHOT_DIR`, `UX_PROTO_CHROMIUM_ARGS` envs)
 - `setup.ts` — Postgres schema push + seed + mock Supabase (`UX_PROTO_REPO`, `DATABASE_URL` envs)
 - `start-app.sh` — dev server with dummy keys + mock flags (`UX_PROTO_REPO` env)
-- `mock-fal.patch` — temporary fal.ai bypass (apply → run → **revert**)
-- `localhost-allow.patch` — temporary localhost URL allowance for `ai-route-schemas.ts` (**revert**)
+- `mock-fal.patch` — **REMOVED in #1425** (Alibaba migration made it moot). See **Status** above.
+- `localhost-allow.patch` — still on disk but no longer applies. Without a mock seam the URL allowlist exemption it supported has no consumer; preserved for the day the seam replacement lands.
 - `persona-brief.md` — the Dana persona prompt for the driving agent
 - `dana-prompt.md` — headless-runner prompt template (`__PHOTO__`/`__REPORT__`/`__RIG__`/`__SCREENSHOT_NOTE__` substituted by the nightly scripts)
 - `nightly.sh` — unattended nightly regression, three-terminal stack: stack up → Dana session → dated report → teardown → repo reverted clean
