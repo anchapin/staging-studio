@@ -121,6 +121,44 @@ describe("AutosaveController", () => {
     expect(statuses).toContain("error");
   });
 
+  /**
+   * #1428. A failed save must never be silent, because the controller is
+   * deliberately *coalescing*: the next `edit()` supersedes the failed payload
+   * rather than re-attempting it. That trade is only sound if the failure is
+   * reported to the UI first, so `EditRoomStudio` can raise a toast off the
+   * `error` status. This pins the two halves of that contract:
+   *   1. the failure emits exactly one `"error"` status to observe, and
+   *   2. the coalesce then carries the newer payload to a successful save.
+   */
+  it("reports a failed save to the UI, then coalesces the next edit onto a successful save", async () => {
+    const save = vi
+      .fn<(payload: string) => Promise<boolean>>()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true);
+    const statuses: string[] = [];
+    const controller = new AutosaveController<string>({
+      save,
+      onStatusChange: (s) => statuses.push(s),
+    });
+
+    controller.edit("lost copy");
+    await expect(controller.flush()).resolves.toBe(false);
+
+    // (1) Exactly one error status, which is what the toast keys off. One, not
+    // zero — a silent failure is the bug — and not two, which would double-toast.
+    expect(statuses.filter((s) => s === "error")).toHaveLength(1);
+
+    // (2) The newer edit supersedes the failed payload and saves cleanly.
+    controller.edit("newer copy");
+    await vi.runAllTimersAsync();
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save).toHaveBeenLastCalledWith("newer copy");
+    expect(controller.status).toBe("saved");
+
+    // The toast must not re-fire on the recovery.
+    expect(statuses.filter((s) => s === "error")).toHaveLength(1);
+  });
+
   it("emits the dirty → saving → saved transition sequence", async () => {
     const statuses: string[] = [];
     const controller = new AutosaveController<string>({
