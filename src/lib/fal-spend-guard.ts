@@ -58,7 +58,7 @@ import path from "node:path";
  * half-merged PR) still trips the guard.
  */
 export const FAL_SPEND_CALL =
-  /falSubscribeWithCircuitBreaker\b|falQueueSubmitWithCircuitBreaker\b|(?:^|[^.\w])fal\s*\.\s*subscribe\b|inference\.(?:subscribe|submit)\b/;
+  /falSubscribeWithCircuitBreaker\b|falQueueSubmitWithCircuitBreaker\b|(?:^|[^.\w])fal\s*\.\s*subscribe\b|inference\.(?:subscribe|submit)\b|runFurnishingDetection\s*\(|runLabelGeneration\s*\(/;
 
 /**
  * Every real entry point into the daily-cap machinery in `lib/api-quota`.
