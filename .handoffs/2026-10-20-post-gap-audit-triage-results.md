@@ -1,5 +1,13 @@
 # Handoff — post-gap-audit triage (partial)
 
+> ⚠️ **SUPERSEDED IN PART — do not trust the #1428 / #1429 sections below.**
+> Those two issue bodies were never read; this file reports the *brief's* claims about
+> them instead of the real issues. #1428 is a live autosave bug (not a "test discovery
+> blind spot"), and #1429 is a Rust `image-data.rs` chunked flood-fill task (not a vitest
+> exec surface). Both are untouched. See
+> `.handoffs/2026-10-20-post-gap-audit-triage-part2.md` for the corrected plan.
+> The #1418 / #1420 / #1427 / #1430 sections below are accurate and verified.
+
 Session date: 2026-10-20 · branch: `develop` · base: `7177b06`
 
 Brief: `.handoffs/2026-10-20-post-gap-audit-triage-brief.md`
