@@ -17,8 +17,13 @@ const MOCK_API_KEY = "test-browserless-key";
 const mockUser = { id: MOCK_USER_ID, email: "test@example.com", name: "Test User" };
 
 function buildRequest(body: unknown): NextRequest {
+  const text = typeof body === "string" ? body : JSON.stringify(body);
   return {
     json: () => Promise.resolve(body),
+    // Wave-5 revival (issue #1389): the route now passes the raw body
+    // text to the service so JSON-parse failures stay inside the service
+    // (single source of truth for the 400 code/message shape).
+    text: () => Promise.resolve(text),
   } as unknown as NextRequest;
 }
 
@@ -326,7 +331,17 @@ describe("POST /api/export-pdf", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toBe("application/pdf");
     expect(res.headers.get("Content-Disposition")).toContain("attachment");
-    expect(claimDailyQuota).toHaveBeenCalledWith("export", MOCK_USER_ID, 20);
+    // Wave-5 revival (issue #1389): claimDailyQuota is now called with the
+    // 5-arg atomic signature `(surface, userId, limit, count, now)` —
+    // #1132. The third positional argument matches the test's prior
+    // expectation; the 4th/5th are new.
+    expect(claimDailyQuota).toHaveBeenCalledWith(
+      "export",
+      MOCK_USER_ID,
+      20,
+      1,
+      expect.any(Date),
+    );
   });
 
   it("counts Browserless errors against daily quota (issue #1124)", async () => {
@@ -346,6 +361,12 @@ describe("POST /api/export-pdf", () => {
     // before the dispatch stays claimed. A refund here would reopen the
     // unbounded-retry window the daily cap exists to close.
     expect(refundDailyQuota).not.toHaveBeenCalled();
-    expect(claimDailyQuota).toHaveBeenCalledWith("export", MOCK_USER_ID, 20);
+    expect(claimDailyQuota).toHaveBeenCalledWith(
+      "export",
+      MOCK_USER_ID,
+      20,
+      1,
+      expect.any(Date),
+    );
   });
 });

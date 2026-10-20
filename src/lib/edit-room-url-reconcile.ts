@@ -73,7 +73,7 @@ export function mergeServerUrlFields<T extends MergeableProject>(
   return { ...localProject, rooms: mergedRooms };
 }
 
-function adoptUrlField<T>(
+function adoptUrlField(
   serverValue: string | null | undefined,
   localValue: string | null | undefined,
 ): string | null | undefined {
@@ -82,7 +82,7 @@ function adoptUrlField<T>(
   return serverValue;
 }
 
-function adoptSelectedVariant<T>(
+function adoptSelectedVariant(
   serverValue: number | null | undefined,
   localValue: number | null | undefined,
 ): number | null | undefined {
