@@ -25,6 +25,10 @@ const exportRoute = readFileSync(
   join(process.cwd(), "src/app/api/export-pdf/route.ts"),
   "utf8"
 );
+const exportPdfService = readFileSync(
+  join(process.cwd(), "src/lib/export-pdf-service.ts"),
+  "utf8"
+);
 
 describe("lookbook print CSS (issue #1222)", () => {
   it("defines the --print-margin safe-area token with a 6mm default", () => {
@@ -59,7 +63,13 @@ describe("lookbook print CSS (issue #1222)", () => {
   });
 
   it("marks the capture path: export route appends capture=pdf to the preview URL", () => {
-    expect(exportRoute).toContain("${PREVIEW_CAPTURE_QUERY_PARAM}=${PREVIEW_CAPTURE_QUERY_VALUE}");
+    // Wave-5 revival (issue #1389): the URL build moved into
+    // `lib/export-pdf-service.ts`; the route file re-exports the
+    // constants so both the unversioned and the v1 routes share one
+    // source of truth.
+    expect(exportPdfService).toContain("${PREVIEW_CAPTURE_QUERY_PARAM}=${PREVIEW_CAPTURE_QUERY_VALUE}");
+    expect(exportRoute).toContain("PREVIEW_CAPTURE_QUERY_PARAM");
+    expect(exportRoute).toContain("PREVIEW_CAPTURE_QUERY_VALUE");
     expect(PREVIEW_CAPTURE_QUERY_PARAM).toBe("capture");
     expect(PREVIEW_CAPTURE_QUERY_VALUE).toBe("pdf");
   });
