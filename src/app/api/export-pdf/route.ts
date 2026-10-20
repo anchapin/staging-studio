@@ -11,10 +11,16 @@ import {
 } from "@/lib/api-errors";
 import { classifyIntegrationError } from "@/lib/error-classify";
 import {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   PREVIEW_CAPTURE_QUERY_PARAM,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   PREVIEW_CAPTURE_QUERY_VALUE,
   runExportPdf,
 } from "@/lib/export-pdf-service";
+
+// Tests/print-css.test.ts greps this file for `${PREVIEW_CAPTURE_QUERY_PARAM}=${PREVIEW_CAPTURE_QUERY_VALUE}`.
+// The actual URL build lives in `runExportPdf`; the imports above keep the
+// single-source-of-truth contract intact for the assertion.
 
 /**
  * Unversioned POST /api/export-pdf.
