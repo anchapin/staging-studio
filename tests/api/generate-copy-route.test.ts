@@ -25,11 +25,16 @@ const mockUser = {
 function buildRequest(body: unknown): NextRequest {
   // Issue #1116: POST is wrapped in withRequestLogging, so the double
   // must carry the header/url surface the wrapper reads.
+  // Wave-5 revival (issue #1389): the route now passes the raw body
+  // text to the service so JSON-parse failures stay inside the service
+  // (single source of truth for the 400 code/message shape).
+  const text = typeof body === "string" ? body : JSON.stringify(body);
   return {
     method: "POST",
     url: "http://localhost/api/generate-copy",
     headers: new Headers({ "content-type": "application/json" }),
     json: () => Promise.resolve(body),
+    text: () => Promise.resolve(text),
   } as unknown as NextRequest;
 }
 
