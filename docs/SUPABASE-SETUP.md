@@ -172,6 +172,40 @@ using (
 
 The `logos` bucket path `${email}-logo-${Date.now()}.{ext}` embeds the user's email, providing natural path scoping. Users cannot overwrite another user's logo because the path is unique per email. The current INSERT-only policy is sufficient for this bucket.
 
+##### Verified 2026-10-20 (#1418) — anon-key `upsert` is NOT a live overwrite vector
+
+The browser client (`lib/supabase.ts`) sends the **anon** key plus `x-upsert: true` when
+uploading a logo. Because `upsert` performs an UPDATE on an existing path, this looked
+like a cross-tenant logo overwrite: an attacker-controlled path could in principle
+replace an existing firm's branding. The live project was probed directly (service-role
+read of bucket config, then writes attempted with the real `sb_publishable_…` anon key
+using the exact headers the app sends):
+
+| probe | result |
+|---|---|
+| anon `POST` to a **new** path in `logos` | `403 AccessDenied — new row violates row level security policy` |
+| anon `POST` (`x-upsert`) over an **existing** logo path | `403 AccessDenied — new row violates row level security policy` |
+| anon `POST` (`x-upsert`) over an existing path with an attacker-chosen `.svg` extension | `403 AccessDenied — new row violates row level security policy` |
+
+`GET /storage/v1/bucket` confirms the live config: `logos` is `public = true` with
+`file_size_limit = null` and `allowed_mime_types = null` — i.e. **no bucket-level size
+or MIME restriction**, consistent with the report, but the RLS policy denies the writes.
+
+**Invariant to preserve:** the `logos` and `room-photos` INSERT policies must remain
+authenticated-only (`to authenticated` + `bucket_id = '<bucket>'`). They are what makes
+`upsert: true` unreachable pre-auth. Do not relax them to `to anon`, and re-run the
+probes above if the policy is ever changed.
+
+**Residual risk (not an anon overwrite, still worth fixing):** the bucket has no
+`allowed_mime_types`/`file_size_limit`, and the only client-side guard is
+`accept="image/*"` in `settings-form.tsx` / `setup-form.tsx` — a hint a hostile client
+ignores. There is **no server-side MIME/size validation** on the logo path, so an
+authenticated user can store an `.html`/scripted-`.svg` file (rendered as `src` in
+`cover-page.tsx` and `signoff-page.tsx`) or an unbounded blob in a public bucket. Fix by
+setting bucket `allowed_mime_types` (`image/png`, `image/jpeg`, `image/webp`) plus a
+sane `file_size_limit`, validating MIME/size server-side, and serving logos under a
+non-executable content type.
+
 ```sql
 -- Path-based INSERT policy for logos (email is embedded in the path):
 -- The authenticated user's email must appear in the object name.
