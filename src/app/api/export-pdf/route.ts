@@ -107,7 +107,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
           {
             error: "Forbidden",
-            message: "You do not have access to this project",
+            message: "You do not have permission to access this project.",
             code: API_ERROR_INVALID_REQUEST,
           },
           { status: 403, headers: buildDeprecationHeaders() }

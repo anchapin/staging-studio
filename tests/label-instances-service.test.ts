@@ -11,7 +11,7 @@
  * shaping, schema coercion) and the deps-injected workflow steps.
  */
 import type { User } from "@prisma/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildLabelPromptMessages,
