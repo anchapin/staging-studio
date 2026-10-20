@@ -44,6 +44,13 @@ import {
   useState,
   type PointerEvent as RPointerEvent,
 } from "react";
+import {
+  beginStroke,
+  createCoalescerState,
+  flush,
+  hasPendingChange,
+  markDirty as markDirtyCoalescer,
+} from "@/lib/mask-emission-coalescer";
 
 // Atelier Canvas bronze — the design's stroke color. Issue #613
 // (`secondary` = `#8f4d20`). Not a Tailwind class so it bypasses the
@@ -105,12 +112,39 @@ export function MaskLayer({
   useEffect(() => {
     onChangeRef.current = onChange ?? null;
   });
-  const emitChange = () => {
+
+  // Issue #1427 — coalesce serialization to once per stroke.
+  //
+  // `toDataURL("image/png")` is a synchronous, full-canvas read + PNG
+  // encode. Calling it on every `pointermove` made the emission rate
+  // scale with pointer sampling (often 60–120+/s), stalling the paint
+  // loop for seconds-long jank on large canvases.
+  //
+  // The policy lives in `lib/mask-emission-coalescer.ts` so it is unit
+  // testable without a DOM; this component only supplies the two effects
+  // (mark dirty / serialize). Mid-stroke moves only mark the buffer dirty;
+  // the actual encode happens once when the stroke ends. This does NOT
+  // weaken #1344: the buffer is still emitted at every terminal event
+  // (pointerup, unmount, and a stranded cancelled stroke), so the parent
+  // always ends up with the final state.
+  const coalescer = useRef(createCoalescerState());
+
+  const serialize = () => {
     const cb = onChangeRef.current;
     if (!cb) return;
     const c = canvasRef.current;
     if (!c) return;
     cb(c.toDataURL("image/png"));
+  };
+
+  /** Emit the current buffer, clearing any coalesced pending update. */
+  const flushChange = () => {
+    if (flush(coalescer.current)) serialize();
+  };
+
+  /** Mark the buffer changed without paying for a synchronous encode. */
+  const markDirty = () => {
+    markDirtyCoalescer(coalescer.current);
   };
 
   // Set the canvas backing store to width × devicePixelRatio so the
@@ -137,6 +171,30 @@ export function MaskLayer({
     onChangeRef.current?.(null);
   }, [width, height, resetKey]);
 
+  // Issue #1427 — flush any coalesced stroke on unmount. Without this a
+  // stroke still pending when the layer unmounts (tool switch, unmount of
+  // the stage) would leave the parent holding a stale mask, which is the
+  // exact state #1344 fixed.
+  //
+  // The refs are copied into locals at effect-setup time so the cleanup
+  // emits the state that existed when this effect ran, rather than
+  // dereferencing a ref whose `.current` may since have changed. A ref
+  // holding a DOM node is safe to read at cleanup: React detaches it only
+  // after the cleanup has run.
+  useEffect(() => {
+    const state = coalescer.current;
+    const cb = onChangeRef;
+    const canvas = canvasRef;
+    return () => {
+      if (!hasPendingChange(state)) return;
+      if (flush(state)) {
+        const handler = cb.current;
+        const c = canvas.current;
+        if (handler && c) handler(c.toDataURL("image/png"));
+      }
+    };
+  }, []);
+
   const point = (e: RPointerEvent) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     // Defensive: if the rect is missing, return origin so the stroke
@@ -147,6 +205,11 @@ export function MaskLayer({
   };
 
   const stroke = (to: { x: number; y: number }) => {
+    // A previous stroke that ended without a `pointerup` (cancelled /
+    // capture lost) left its change buffered with no terminal handler to
+    // drain it. Emit it now, before this stroke takes ownership, so a
+    // cancelled stroke can never lose its final state (#1344).
+    if (beginStroke(coalescer.current) === "flush") serialize();
     const ctx = canvasRef.current?.getContext("2d");
     if (!ctx) return;
     const from = last.current ?? to;
@@ -160,13 +223,15 @@ export function MaskLayer({
     ctx.lineTo(to.x, to.y);
     ctx.stroke();
     last.current = to;
-    // Issue #1344 — emit the buffer snapshot after every stroke so the
-    // parent route always holds the latest mask data URL. The reduce
-    // step (`hasMask` flag flip) is still on `onPainted` for paint
-    // strokes; this fires unconditionally, paint or erase, so a
-    // submit-click after an erase-only interaction still gets the
-    // (possibly-reduced) snapshot.
-    emitChange();
+    // Issue #1344 — the parent must always hold the latest mask data URL.
+    // Issue #1427 — but the encode itself is coalesced to once per stroke:
+    // mid-stroke we only mark the buffer dirty and skip the synchronous
+    // full-canvas `toDataURL`, which is what made pointer sampling rate
+    // dictate paint throughput. Every terminal handler below
+    // (pointerup / pointercancel / lostpointercapture / unmount)
+    // flushes, so the #1344 guarantee is unchanged — the parent still
+    // ends up with the final state of the stroke.
+    markDirty();
   };
 
   return (
@@ -194,6 +259,10 @@ export function MaskLayer({
           if (drawing.current) stroke(p);
         }}
         onPointerUp={() => {
+          // Issue #1427 — end of stroke: pay for exactly one encode and
+          // hand the final buffer to the parent (#1344). Every mid-stroke
+          // `markDirty()` since the last flush collapses into this call.
+          flushChange();
           drawing.current = false;
           last.current = null;
         }}
