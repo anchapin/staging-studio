@@ -15,26 +15,17 @@ import {
   ProjectForbiddenError,
   ProjectNotFoundError,
 } from "@/lib/api-auth";
-import type { User } from "@prisma/client";
 
 import { runExportPdf, defaultExportPdfServiceDeps } from "@/lib/export-pdf-service";
 import type { ExportPdfServiceDeps } from "@/lib/export-pdf-service";
+import { requireUser } from "@/lib/test/require-user";
 
 type Deps = ExportPdfServiceDeps;
 
-const makeUser = (overrides: Partial<User> = {}): User =>
-  ({
-    id: "user-1",
-    email: "user@example.com",
-    firmName: null,
-    darkMode: false,
-    pageTemplates: null,
-    createdAt: new Date("2026-01-01T00:00:00Z"),
-    updatedAt: new Date("2026-01-01T00:00:00Z"),
-    ...overrides,
-  }) as unknown as User;
-
 const makeDeps = (overrides: Partial<Deps> = {}): Deps => {
+  // Issue #1393: shared `requireUser()` factory. Fresh `vi.fn()` per call
+  // so each test's per-assert call count is independent.
+  const { mockGetAuthedPrismaUser } = requireUser({ id: "user-1" });
   const now = new Date("2026-10-20T12:00:00Z");
   const pdfBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]); // %PDF
   const fetchImpl = vi.fn(
@@ -45,7 +36,7 @@ const makeDeps = (overrides: Partial<Deps> = {}): Deps => {
       }),
   ) as unknown as typeof fetch;
   const base: Deps = {
-    getAuthedPrismaUser: vi.fn(async () => makeUser()),
+    getAuthedPrismaUser: mockGetAuthedPrismaUser,
     requireProjectOwnershipOrThrow: vi.fn(async () => ({ ok: true as const, projectId: PROJECT_ID })),
     claimDailyQuota: vi.fn(async () =>
       ({

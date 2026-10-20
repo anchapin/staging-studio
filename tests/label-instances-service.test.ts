@@ -27,22 +27,23 @@ import {
   type LabelInstancesServiceDeps,
 } from "@/lib/label-instances-service";
 import { ApiError } from "@/lib/api-error-handler";
+import { requireUser } from "@/lib/test/require-user";
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const mockUser: User = {
+// Issue #1393: shared `requireUser()` factory. The service signature takes
+// the user as a direct function argument (not via `deps`), so we read
+// `fixture.user` here. Auth for this service is enforced by
+// `requireProjectOwnershipOrThrow` (mocked at the module level in
+// `tests/api/label-instances-route.test.ts`), not through the deps seam.
+const { user: mockUser } = requireUser({
   id: "user-1",
   firmName: "Firm",
   ownerName: "Owner",
-  logoUrl: null,
   email: null,
-  psychologyPageContent: null,
-  signoffContent: null,
-  darkMode: false,
-  createdAt: new Date(0),
-};
+});
 
 const fakeCachedRows = [
   { instanceIndex: 0, label: "Sofa", score: 0.9, editedLabel: null },
