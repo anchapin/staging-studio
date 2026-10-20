@@ -16,31 +16,19 @@ import {
   ProjectForbiddenError,
   ProjectNotFoundError,
 } from "@/lib/api-auth";
-import type { User } from "@prisma/client";
 
 import {
   runGenerateCopy,
   defaultGenerateCopyServiceDeps,
 } from "@/lib/generate-copy-service";
 import type { GenerateCopyServiceDeps } from "@/lib/generate-copy-service";
+import { requireUser } from "@/lib/test/require-user";
 
 const ROOM_ID = "r" + "a".repeat(23) + "z";
 const PROJECT_ID = "c" + "b".repeat(23) + "y";
 const USER_ID = "user-1";
 
 type Deps = GenerateCopyServiceDeps;
-
-const makeUser = (overrides: Partial<User> = {}): User =>
-  ({
-    id: USER_ID,
-    email: "user@example.com",
-    firmName: null,
-    darkMode: false,
-    pageTemplates: null,
-    createdAt: new Date("2026-01-01T00:00:00Z"),
-    updatedAt: new Date("2026-01-01T00:00:00Z"),
-    ...overrides,
-  }) as unknown as User;
 
 const makeRoomBasic = () => ({ id: ROOM_ID, projectId: PROJECT_ID });
 
@@ -66,7 +54,7 @@ const makeDeps = (overrides: Partial<Deps> = {}): Deps => {
     },
   };
   const base: Deps = {
-    getAuthedPrismaUser: vi.fn(async () => makeUser()),
+    getAuthedPrismaUser: requireUser({ id: USER_ID }).mockGetAuthedPrismaUser,
     requireProjectOwnershipOrThrow: vi.fn(async () => ({ ok: true as const, projectId: PROJECT_ID })),
     claimDailyQuota: vi.fn(async () =>
       ({

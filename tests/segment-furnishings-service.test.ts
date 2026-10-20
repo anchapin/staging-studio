@@ -20,6 +20,7 @@ import {
   validateSegmentAccess,
   type SegmentFurnishingsServiceDeps,
 } from "@/lib/segment-furnishings-service";
+import { requireUser } from "@/lib/test/require-user";
 
 afterEach(() => vi.clearAllMocks());
 
@@ -114,7 +115,10 @@ describe("defaultSegmentFurnishingsServiceDeps", () => {
 // Workflow steps (deps-injected)
 // ---------------------------------------------------------------------------
 
-const mockUser = { id: "user-1" };
+// Issue #1393: shared `requireUser()` factory. We only need the minimal
+// `id` field for the param-passed service signature, so the rest of the
+// fixture is discarded.
+const { user: mockUser } = requireUser({ id: "user-1" });
 
 function makeDeps(overrides: Partial<SegmentFurnishingsServiceDeps> = {}): SegmentFurnishingsServiceDeps {
   return {
