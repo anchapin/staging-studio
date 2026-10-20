@@ -140,13 +140,33 @@ These are facts the first session learned the hard way. Trust them; reverify onl
 
 ```
 ### PR-3 report — `/api/export-pdf` → `src/lib/export-pdf-service.ts`
-- Branch: feat/wave5-issue933-export-pdf
-- URL: <gh pr URL>
-- Merged: <iso8601>
-- Files touched: [...]
-- Verification: [...]
-- Decision points hit: [...]
-- Risk observations: [...]
+- Branch: `wave5-export-pdf` (off `origin/main` @ `50d900d`)
+- URL: https://github.com/anchapin/staging-studio/pull/1404
+- Merge commit: `c1df571ef4c4e9a842b744a5ef93fd723841624a`
+- Merged: 2026-10-20T12:53:29Z
+- Files touched:
+  - `src/lib/export-pdf-service.ts` — **new**, 329 lines (deps-injected orchestrator with discriminated-union result).
+  - `tests/export-pdf-service.test.ts` — **new**, ~330 lines, **23 vitest cases** (hand-rolled `vi.fn()` deps, no `vi.mock`).
+  - `src/app/api/export-pdf/route.ts` — 365 → ~190 lines (terminal HTTP mapping only; preserves raw upstream status propagation for #1084 contract).
+  - `tests/export-pdf-route.test.ts` — 2 surgical updates: `buildRequest` mock now exposes `text()` (route uses `req.text()` for stricter JSON-parse failure); `claimDailyQuota` assertion updated to the 5-arg atomic signature (`surface, userId, limit, count=1, now`) per #1132.
+  - `tests/print-css.test.ts` — capture-marker template literal now lives in the service; route re-exports `PREVIEW_CAPTURE_QUERY_PARAM` / `PREVIEW_CAPTURE_QUERY_VALUE` so the source-grep assertion still passes.
+- Verification (all gates clean):
+  - `npm run lint` — 0 errors in touched files.
+  - `npm run typecheck` — 0 errors.
+  - `npx vitest run tests/export-pdf-service.test.ts` — 23/23 pass.
+  - `npx vitest run tests/` — 230 files / 2870 tests, 0 failures.
+  - `npm run build` — succeeds.
+  - Pre-commit `check-tsconfig-flip.sh` — clean (flip reverted before commit).
+- Decision points hit:
+  - **`requireProjectOwnershipOrThrow` return shape**: the real implementation returns `{ ok: true; projectId: string }` (not `void`). Caught by `tsc` during the first typecheck pass; mock updated to match. Worth flagging for PR-4 (generate-copy uses the same helper).
+  - **`DAILY_LIMIT_ENV_VAR` is an object, not a string**: the export is `{ export: "DAILY_EXPORT_LIMIT", ... }` and routes must access `.export`. Same correction applies to PR-4.
+  - **`claimDailyQuota` 5-arg signature**: the existing `tests/export-pdf-route.test.ts` asserted a 3-arg signature; corrected to 5-arg with `1` (count) and `Date` (now). The 5-arg signature is the post-#1132 atomic form and the only correct one — earlier tests in the repo will need similar updates when each surface is touched.
+  - **Service does NOT normalize upstream status**: the unversioned route propagates raw status (401/403/429/echoed) and answers 502 on a non-PDF 2xx body. The service returns `{ kind: 'browserlessError', status, errorText }` (raw) and `{ kind: 'nonPdfResponse', contentType, upstreamStatus, bodyBytes }`; the route maps both per its pinned contract. `/api/v1/export-pdf` is intentionally NOT touched in this PR — its flattened 500 contract diverges from the unversioned route. A future PR can adopt the same service once its specs are verified.
+  - **`req.text()` vs `req.json()`**: switched from `req.json()` to `req.text()` so the service owns JSON-parse failure (one source of truth for the 400 code/message shape). Required updating `buildRequest` mock in the existing route test.
+- Risk observations:
+  - **Pre-existing `tests/export-pdf-route.test.ts` mocks the auth module**: this test still uses `vi.mock("@/lib/api-auth")` and exercises the real service. After PR-3 lands, both the unversioned route and the v1 route have the same default-deps surface; the v1 route's divergence on error mapping means a future "unify both routes onto the service" PR must do its own analysis.
+  - **The `nonPdfResponse` magic-byte check (`%PDF`) is in the service, not the route**: the unversioned route's pinned 502-on-non-PDF behavior is preserved because the service classifies by content-type **and** magic prefix. The v1 route has no such check today; if/when it adopts the service, the v1 contract will gain a 502-style arm unless the service is given a `validatePdfBytes: boolean` flag. Documented at the top of the service file.
+  - **`buildRequest` mock in `tests/export-pdf-route.test.ts` is now slightly divergent from the real `NextRequest`** — it returns the body as both `text()` and `json()`. If the suite later adds a `Content-Type` assertion on the request, the test will need a second update.
 
 ### PR-4 report — `/api/generate-copy` → `src/lib/generate-copy-service.ts`
 - ...
