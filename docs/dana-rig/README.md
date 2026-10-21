@@ -93,22 +93,33 @@ cd /path/to/staging-studio
 # git apply /path/to/dana-rig/mock-fal.patch
 ```
 
-Then add the localhost allowance in `src/lib/ai-route-schemas.ts`
-(UX-PROTO-ONLY — the mock result URL is `http://127.0.0.1:39911/...`,
-which the https-only allowlist would otherwise reject):
 
-```ts
-function isAllowlistedHttpsUrl(value: string) {
-  try {
-    const url = new URL(value);
-    // UX-PROTO-ONLY (revert): allow the local mock result URL.
-    if (url.hostname === "127.0.0.1" || url.hostname === "localhost") return true;
-    return url.protocol === "https:" && IMAGE_HOST_PATTERN.test(url.hostname);
-  } catch {
-    return false;
-  }
-}
-```
+- **`mock-fal.patch` — REMOVED** (issue #1425). No longer patches any
+  file in the current tree; deleting it is the safe state.
+- **`localhost-allow.patch`** — still on disk but does not apply
+  (`next.config.ts` was reorganized). The mock seam it supported has no
+  replacement; without a mock seam, the URL allowlist exemption is
+  moot.
+- **`nightly.sh` / `nightly-compose.sh`** exit 1 immediately with a
+  "Dana rig is unsupported for the Alibaba provider" message rather
+  than half-starting and producing a misleading run.
+- **`driver.js` → headless Dana session** and the **`mock-ai/`
+  backend** are inert until the seam replacement lands.
+
+**Mock-seam replacement (tracked, not yet scheduled):** A
+provider-agnostic env-gated override (e.g. `UX_PROTO_MOCK_INFERENCE_BASE`)
+read by `lib/inference.ts`'s provider selector would let a mock backend
+on `http://127.0.0.1:39911` serve inpaint traffic without patching route
+source. That is a separate change touching the production seam — out of
+scope for the #1425 close-out; see issue #1425 for the long-form
+rationale.
+
+If you are running the rig by hand before the seam replacement lands,
+expect every legacy TEMPORARY-bypasses step to fail (the patches no
+longer apply — see **Status** above). The current hand-ran section
+below documents **what works** (the mock Supabase + the local dev server),
+even though the missing mock-inference seam means the rig cannot actually
+exercised inpaint without real Alibaba credentials in the rig container.
 
 **Terminal 2 — the app:**
 
@@ -202,6 +213,7 @@ Supabase), 39999 (driver relay), 5432 (postgres).
 - `start-app.sh` — dev server with dummy keys + mock flags (`UX_PROTO_REPO` env)
 - `mock-fal.patch` — **legacy, do not apply.** The fal inpaint provider was retired by #1240 (`INFERENCE_PROVIDER=fal` now throws at configure time in `src/lib/inference.ts`). The patch only worked against the pre-#1240 wiring; today it would create a dead-code path that no longer maps to a working provider. The dana rig's mock is now entirely hermetic (it spins up a Dockerised mock-fal inside the same compose stack). If you find yourself re-applying this patch, the rig is being run against an unretired wiring — STOP and open an issue before proceeding. (tracked under #1426 tier-1 closeout.)
 - `localhost-allow.patch` — temporary localhost URL allowance for `ai-route-schemas.ts` (**revert**)
+
 - `persona-brief.md` — the Dana persona prompt for the driving agent
 - `dana-prompt.md` — headless-runner prompt template (`__PHOTO__`/`__REPORT__`/`__RIG__`/`__SCREENSHOT_NOTE__` substituted by the nightly scripts)
 - `nightly.sh` — unattended nightly regression, three-terminal stack: stack up → Dana session → dated report → teardown → repo reverted clean

@@ -4,6 +4,7 @@ import {
   checkRateLimit,
   recordRateLimit,
   checkAndRecordRateLimit,
+  claimRateLimit,
   clearRateLimit,
   dayKey,
 } from "@/lib/sliding-window-ratelimit";
@@ -22,6 +23,15 @@ interface UsageRecord {
 }
 
 const mockStore = new Map<string, UsageRecord>();
+
+/**
+ * Serialises every `$transaction` body across ALL calls. This deliberately
+ * lives in the mock's enclosing closure rather than inside the `$transaction`
+ * implementation: a queue created inside would be a fresh already-resolved
+ * promise per call, and nothing would actually be serialised. This is the stand
+ * -in for `SELECT ... FOR UPDATE` against a single row.
+ */
+let txQueue: Promise<unknown> = Promise.resolve();
 
 function storeKey(userId: string, surface: string, dayKey: string): string {
   return `${userId}::${surface}::${dayKey}`;
@@ -69,7 +79,73 @@ vi.mock("@/lib/prisma", () => ({
         mockStore.delete(k);
         return { count: had ? 1 : 0 };
       }),
+
+      upsert: vi.fn(async ({ where, create }: { where: { userId_surface_dayKey: { userId: string; surface: string; dayKey: string } }; create: { userId: string; surface: string; dayKey: string; count: number; timestamps: Date[] } }) => {
+        const k = storeKey(
+          where.userId_surface_dayKey.userId,
+          where.userId_surface_dayKey.surface,
+          where.userId_surface_dayKey.dayKey
+        );
+        const existing = mockStore.get(k);
+        if (existing) return cloneRecord(existing);
+        mockStore.set(k, cloneRecord(create as unknown as UsageRecord));
+        return cloneRecord(create as unknown as UsageRecord);
+      }),
     },
+
+    /**
+     * Simulate the interactive transaction that `claimRateLimit` relies on.
+     * The in-memory store has no real row locking, so serialisation is modelled
+     * explicitly: every transaction body runs to completion before the next one
+     * starts. That is precisely the guarantee `SELECT ... FOR UPDATE` provides
+     * against a single row, and it is what makes the interleaving test below a
+     * real test of the fix rather than a test of JS scheduling.
+     */
+    $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => {
+      const tx = {
+        dailyApiUsage: {
+          findUnique: vi.fn(async ({ where }: { where: { userId_surface_dayKey: { userId: string; surface: string; dayKey: string } } }) => {
+            const k = storeKey(
+              where.userId_surface_dayKey.userId,
+              where.userId_surface_dayKey.surface,
+              where.userId_surface_dayKey.dayKey
+            );
+            const rec = mockStore.get(k);
+            return rec ? cloneRecord(rec) : null;
+          }),
+          upsert: vi.fn(async ({ where, create }: { where: { userId_surface_dayKey: { userId: string; surface: string; dayKey: string } }; create: { userId: string; surface: string; dayKey: string; count: number; timestamps: Date[] } }) => {
+            const k = storeKey(
+              where.userId_surface_dayKey.userId,
+              where.userId_surface_dayKey.surface,
+              where.userId_surface_dayKey.dayKey
+            );
+            const existing = mockStore.get(k);
+            if (existing) return cloneRecord(existing);
+            mockStore.set(k, cloneRecord(create as unknown as UsageRecord));
+            return cloneRecord(create as unknown as UsageRecord);
+          }),
+          update: vi.fn(async ({ where, data }: { where: { userId_surface_dayKey: { userId: string; surface: string; dayKey: string } }; data: { count?: number; timestamps?: Date[] } }) => {
+            const k = storeKey(
+              where.userId_surface_dayKey.userId,
+              where.userId_surface_dayKey.surface,
+              where.userId_surface_dayKey.dayKey
+            );
+            const existing = mockStore.get(k);
+            if (!existing) return null;
+            if (data.count !== undefined) existing.count = data.count;
+            if (data.timestamps !== undefined) existing.timestamps = [...data.timestamps];
+            return cloneRecord(existing);
+          }),
+        },
+        // Stands in for `SELECT ... FOR UPDATE`; the serialising `$transaction`
+        // wrapper above is what makes the lock effective.
+        $queryRaw: vi.fn(async () => []),
+      };
+      // Chain onto the shared queue so bodies run strictly one at a time.
+      const run = txQueue.then(() => fn(tx));
+      txQueue = run.catch(() => undefined);
+      return run;
+    }),
   },
 }));
 
@@ -250,5 +326,144 @@ describe("sliding-window-ratelimit", () => {
     const result = await checkRateLimit("expire-test", 5, 60_000, fixedDate);
     expect(result.allowed).toBe(true);
     expect(result.remaining).toBe(5); // Window is fresh after cleanup
+  });
+});
+
+describe("claimRateLimit", () => {
+  const id = "claim-user";
+
+  // The suite-level reset above is scoped to its own describe block, so this
+  // block needs its own: sharing one identifier across tests would otherwise
+  // carry a partially-filled row from the previous test into the next one.
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-01-15T12:00:00Z"));
+    mockStore.clear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("allows claims up to the limit and reports remaining correctly", async () => {
+    const now = new Date("2024-01-15T12:00:00Z");
+
+    const first = await claimRateLimit(id, 3, 60_000, now);
+    expect(first.allowed).toBe(true);
+    expect(first.remaining).toBe(2);
+
+    const second = await claimRateLimit(id, 3, 60_000, now);
+    expect(second.allowed).toBe(true);
+    expect(second.remaining).toBe(1);
+
+    const third = await claimRateLimit(id, 3, 60_000, now);
+    expect(third.allowed).toBe(true);
+    expect(third.remaining).toBe(0);
+  });
+
+  it("refuses a claim past the limit without consuming a unit", async () => {
+    const now = new Date("2024-01-15T12:00:00Z");
+    await claimRateLimit(id, 2, 60_000, now);
+    await claimRateLimit(id, 2, 60_000, now);
+
+    const denied = await claimRateLimit(id, 2, 60_000, now);
+    expect(denied.allowed).toBe(false);
+    expect(denied.remaining).toBe(0);
+
+    // The refusal must not have appended a timestamp: the live count stays 2.
+    const k = storeKey(id, "default", dayKey(now));
+    expect(mockStore.get(k)!.count).toBe(2);
+    expect(mockStore.get(k)!.timestamps).toHaveLength(2);
+  });
+
+  /**
+   * The regression this whole function exists for. `recordRateLimit` reads,
+   * decides and writes in three separate statements, so N callers racing on the
+   * same row all observe the same pre-race count and all conclude they are
+   * under the limit. Every one of them is granted a unit while only the last
+   * write survives, so the quota is overshot.
+   */
+  it("does not overshoot when concurrent callers race for the last unit", async () => {
+    const now = new Date("2024-01-15T12:00:00Z");
+
+    // Fill the only slot, then fire five callers at it at once.
+    await claimRateLimit(id, 1, 60_000, now);
+
+    const racing = await Promise.all(
+      Array.from({ length: 5 }, () => claimRateLimit(id, 1, 60_000, now))
+    );
+
+    // The slot is already gone, so every racer must be refused. Under the old
+    // read-decide-write path these racers would each have read count=1, each
+    // concluded it was somehow under the limit, and each written back an array
+    // of length 2 — granting units that were never consistently recorded.
+    const granted = racing.filter((r) => r.allowed).length;
+    expect(granted).toBe(0);
+
+    const k = storeKey(id, "default", dayKey(now));
+    expect(mockStore.get(k)!.timestamps).toHaveLength(1);
+    expect(mockStore.get(k)!.count).toBe(1);
+  });
+
+  it("grants the single free unit to exactly one of many concurrent callers", async () => {
+    const now = new Date("2024-01-15T12:00:00Z");
+
+    const racing = await Promise.all(
+      Array.from({ length: 5 }, () => claimRateLimit(id, 1, 60_000, now))
+    );
+
+    expect(racing.filter((r) => r.allowed)).toHaveLength(1);
+
+    const k = storeKey(id, "default", dayKey(now));
+    expect(mockStore.get(k)!.timestamps).toHaveLength(1);
+  });
+
+  it("grants exactly `limit` units across many concurrent first-time callers", async () => {
+    const now = new Date("2024-01-15T12:00:00Z");
+
+    // Fresh identifier: this also covers the create-vs-create insert race, where
+    // every racer finds no row and would otherwise try to create one.
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () => claimRateLimit(id, 3, 60_000, now))
+    );
+
+    expect(results.filter((r) => r.allowed)).toHaveLength(3);
+
+    const k = storeKey(id, "default", dayKey(now));
+    expect(mockStore.get(k)!.timestamps).toHaveLength(3);
+    expect(mockStore.get(k)!.count).toBe(3);
+  });
+
+  it("reports resetAt from the oldest in-window claim when denying", async () => {
+    const now = new Date("2024-01-15T12:00:00Z");
+    await claimRateLimit(id, 1, 60_000, now);
+
+    const denied = await claimRateLimit(id, 1, 60_000, new Date(now.getTime() + 5_000));
+    expect(denied.allowed).toBe(false);
+    // Oldest claim is at `now`, so the window frees a slot one full window later.
+    expect(denied.resetAt).toBe(now.getTime() + 60_000);
+  });
+
+  it("allows a claim again once earlier timestamps age out of the window", async () => {
+    const now = new Date("2024-01-15T12:00:00Z");
+    await claimRateLimit(id, 1, 60_000, now);
+    expect((await claimRateLimit(id, 1, 60_000, now)).allowed).toBe(false);
+
+    // 61s later the first claim has expired, so the window has room again.
+    const later = new Date(now.getTime() + 61_000);
+    const reopened = await claimRateLimit(id, 1, 60_000, later);
+    expect(reopened.allowed).toBe(true);
+  });
+
+  it("scopes the lock per identifier so different users never block each other", async () => {
+    const now = new Date("2024-01-15T12:00:00Z");
+
+    const [a, b] = await Promise.all([
+      claimRateLimit("claim-user-a", 1, 60_000, now),
+      claimRateLimit("claim-user-b", 1, 60_000, now),
+    ]);
+
+    expect(a.allowed).toBe(true);
+    expect(b.allowed).toBe(true);
   });
 });

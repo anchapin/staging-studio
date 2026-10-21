@@ -277,13 +277,27 @@ export async function reserveInpaintQuota(
 
 /**
  * Best-effort refund of one previously reserved inpaint unit
- * (issue #1111). Called when the InpaintRequest pre-write (#1262) fails
- * so the provider call never runs — without this, a transient DB failure
- * on the row write would still bill the user for work that was not done.
- * The background submit failure path does NOT call this: a paid provider
- * call DID run, so the unit stays charged. The underlying
- * `refundDailyQuota` never throws, so this is safe to call from a 500
- * response path.
+ * (issue #1111, extended by #1421). Called from any code path that
+ * leaves the user with no `InpaintRequest` row to refer back to:
+ *
+ * - the pre-write (#1262) fails before the provider call;
+ * - the post-submit row create fails after the provider billed
+ *   upstream but no Prisma row landed (issue #1421 third unrefunded
+ *   path — the orphan-recovery scripts can only fix *existing* rows,
+ *   so a missing row means the user has zero recourse);
+ * - the daily-quota counter write itself fails (issue #1421 third
+ *   unrefunded path, charge-side) — we refund an unrecorded charge
+ *   back, which is the safe direction for a degraded metric.
+ *
+ * The upstream provider has already billed DashScope per-image in the
+ * submit-succeeded case, so the firm has paid for work it cannot
+ * deliver to the user. The refund is purely the *firm-internal*
+ * daily-quota counter, so a hard upstream failure does not also
+ * block the user's next attempt at the surface. Underlying
+ * `refundDailyQuota` never throws, so this is safe to call from a
+ * 500 response path. The function is idempotent — concurrent or
+ * repeated calls land at zero or slightly-negative counter values
+ * rather than blocking further work.
  */
 export async function refundInpaintQuota(
   userId: string,
@@ -575,6 +589,13 @@ export async function submitInpaintRequest(
       }),
       chargeError
     );
+    // Issue #1421 third unrefunded path: the upstream provider has
+    // charged DashScope per-image (or the fal queue received its bill)
+    // but no row will land — refund the *firm-internal* daily-quota
+    // counter so the user's next attempt is not blocked. Safe to call
+    // before the row create because `refundDailyQuota` is idempotent
+    // and never throws.
+    await refundInpaintQuota(params.userId);
   }
 
   let recordDegraded = false;
@@ -609,6 +630,15 @@ export async function submitInpaintRequest(
       }),
       recordError
     );
+    // Issue #1421 third unrefunded path: the submit succeeded, the
+    // daily-quota counter is up by one, and the user has no row to
+    // retry via the orphan-recovery scripts. Refund so the daily
+    // counter mirrors the user's *visible* state. Skip if the charge
+    // branch above already refunded (both arms landing without a row
+    // would otherwise net the counter to -1, worse than no refund).
+    if (!quotaChargeDegraded) {
+      await refundInpaintQuota(params.userId);
+    }
   }
 
   return {

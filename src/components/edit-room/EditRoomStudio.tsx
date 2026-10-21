@@ -289,6 +289,21 @@ export function EditRoomStudio({
         return result.success;
       },
       idleMs: 600,
+      // #1428: a failed save used to fail invisibly — the controller kept the
+      // payload pending and the next `edit()` overwrote it, so the user's work
+      // was dropped with no signal. The controller deliberately coalesces
+      // (a newer edit wins and the failed payload is superseded), which is only
+      // safe if the failure is *visible*. Report it through the shell's
+      // existing toast so the user knows their edit did not reach the server.
+      // The `status === "error"` guard keeps this edge-triggered: the
+      // controller emits a status on every save, so toast only the failure.
+      onStatusChange: (status) => {
+        if (status !== "error") return;
+        dispatch({
+          type: "SHOW_TOAST",
+          message: "We couldn't save your changes. Please try again.",
+        });
+      },
     })
   );
   // Keep the controller's status observable so the parent route's

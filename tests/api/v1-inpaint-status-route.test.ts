@@ -10,23 +10,35 @@ import { prisma } from "@/lib/prisma";
 // queue. These tests pin the new Postgres-backed rate-limit branch and the
 // pass-through to the stub response.
 
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
-    dailyApiUsage: {
-      findUnique: vi.fn().mockResolvedValue(undefined),
-      create: vi.fn().mockResolvedValue({}),
-      update: vi.fn().mockResolvedValue({}),
-      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+vi.mock("@/lib/prisma", () => {
+  // The poll limiter claims quota atomically inside an interactive transaction
+  // (see `claimRateLimit`), so the mock has to offer `$transaction` as well as
+  // the `dailyApiUsage` methods the callback drives.
+  const dailyApiUsage = {
+    findUnique: vi.fn().mockResolvedValue(undefined),
+    create: vi.fn().mockResolvedValue({}),
+    update: vi.fn().mockResolvedValue({}),
+    upsert: vi.fn().mockResolvedValue({}),
+    deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+  };
+  return {
+    prisma: {
+      dailyApiUsage,
+      inpaintRequest: { findFirst: vi.fn() },
+      $transaction: vi.fn(
+        async (fn: (tx: unknown) => Promise<unknown>) =>
+          fn({ dailyApiUsage, $queryRaw: async () => [] })
+      ),
     },
-    inpaintRequest: { findFirst: vi.fn() },
-  },
-}));
+  };
+});
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
 }));
 
 const findDaily = prisma.dailyApiUsage.findUnique as unknown as Mock;
+const upsertDaily = prisma.dailyApiUsage.upsert as unknown as Mock;
 const findRequest = prisma.inpaintRequest.findFirst as unknown as Mock;
 const authedUser = getAuthedPrismaUser as unknown as Mock;
 
@@ -93,5 +105,28 @@ describe("GET /api/v1/inpaint/[requestId] — poll rate limit (issue #1123)", ()
 
     const response = await callRoute();
     expect(response.status).toBe(429);
+  });
+
+  /**
+   * `claimRateLimit` materialises the row with `upsert` before reading the
+   * window, so a `findUnique` stub alone would let an over-limit row be
+   * recreated at count 0. Mirror the materialise step faithfully: return the
+   * existing row when the test has stubbed one, otherwise create it. Without
+   * this the limit is reset on every poll and no 429 can ever fire.
+   */
+  it("materialises the row via upsert without clobbering a stubbed limit", async () => {
+    findDaily.mockImplementation(async ({ where }: { where: { userId_surface_dayKey: { surface: string } } }) => {
+      const surface = where.userId_surface_dayKey.surface;
+      if (surface === "inpaint-status") return dailyRow(10);
+      return { count: 0 };
+    });
+    upsertDaily.mockImplementation(async ({ create: createData }: { create: { count: number; timestamps: Date[] } }) => {
+      // The row already exists in this scenario, so upsert is a no-op.
+      return dailyRow(createData.count);
+    });
+
+    const response = await callRoute();
+    expect(response.status).toBe(429);
+    expect(findDaily).toHaveBeenCalled();
   });
 });

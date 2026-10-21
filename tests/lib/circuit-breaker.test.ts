@@ -57,7 +57,7 @@ vi.mock("@/lib/sliding-window-ratelimit", () => {
     store.rows.set(id, entries);
     return { allowed: true, remaining: limit - entries.length, resetAt: now + windowMs };
   });
-  const checkAndRecordRateLimit = vi.fn(async (id: string, limit: number, windowMs: number) => {
+  const claimRateLimit = vi.fn(async (id: string, limit: number, windowMs: number) => {
     const check = await checkRateLimit(id, limit, windowMs);
     if (!check.allowed) return check;
     return recordRateLimit(id, limit, windowMs);
@@ -66,7 +66,7 @@ vi.mock("@/lib/sliding-window-ratelimit", () => {
     if (store.failNext) throw new Error("store down");
     store.rows.delete(id);
   });
-  return { checkRateLimit, recordRateLimit, checkAndRecordRateLimit, clearRateLimit };
+  return { checkRateLimit, recordRateLimit, claimRateLimit, clearRateLimit };
 });
 
 describe("CircuitBreaker (Postgres-backed, issue #1123)", () => {
