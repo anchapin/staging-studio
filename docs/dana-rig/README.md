@@ -83,16 +83,15 @@ This pushes the Prisma schema, seeds one user + the "789 Prototype Lane" /
 "Living Room" project, and starts the repo's mock Supabase (GoTrue auth +
 storage) on `127.0.0.1:39911`.
 
-**Repo — apply the localhost-allow bypass** (the fal mock is now part of the rig's Docker compose stack; see `mock-fal.patch` footnote below — DO NOT apply that patch, it targets a retired provider):
+## Status
 
-```bash
-cd /path/to/staging-studio
-# (no `git apply` step needed as of #1426 -- the rig uses its own
-#  mock-fal container; the legacy `git apply /path/to/dana-rig/mock-fal.patch`
-#  line below is preserved for archaeological context only)
-# git apply /path/to/dana-rig/mock-fal.patch
-```
-
+**UNSUPPORTED for the current provider.** The Dana rig was written
+against fal.ai as the inpaint provider (the `UX_PROTO_MOCK_FAL=1` /
+`UX_PROTO_MOCK_RESULT_URL=...` env vars wired the `src/app/api/inpaint`
+route to a local mock backend). After the #1240 migration to Alibaba
+DashScope, the inpaint surface moved from `lib/fal.ts` to a
+provider-agnostic `lib/inference.ts` seam, and the rig's two TEMPORARY
+test-only patches no longer apply:
 
 - **`mock-fal.patch` — REMOVED** (issue #1425). No longer patches any
   file in the current tree; deleting it is the safe state.
@@ -211,9 +210,8 @@ Supabase), 39999 (driver relay), 5432 (postgres).
 - `driver.js` — headless Playwright Chromium + JSON relay (`UX_PROTO_APP_URL`, `UX_PROTO_CHROME_PATH`, `UX_PROTO_RELAY_HOST`, `UX_PROTO_SHOT_DIR`, `UX_PROTO_CHROMIUM_ARGS` envs)
 - `setup.ts` — Postgres schema push + seed + mock Supabase (`UX_PROTO_REPO`, `DATABASE_URL` envs)
 - `start-app.sh` — dev server with dummy keys + mock flags (`UX_PROTO_REPO` env)
-- `mock-fal.patch` — **legacy, do not apply.** The fal inpaint provider was retired by #1240 (`INFERENCE_PROVIDER=fal` now throws at configure time in `src/lib/inference.ts`). The patch only worked against the pre-#1240 wiring; today it would create a dead-code path that no longer maps to a working provider. The dana rig's mock is now entirely hermetic (it spins up a Dockerised mock-fal inside the same compose stack). If you find yourself re-applying this patch, the rig is being run against an unretired wiring — STOP and open an issue before proceeding. (tracked under #1426 tier-1 closeout.)
-- `localhost-allow.patch` — temporary localhost URL allowance for `ai-route-schemas.ts` (**revert**)
-
+- `mock-fal.patch` — **REMOVED in #1425** (Alibaba migration made it moot). See **Status** above.
+- `localhost-allow.patch` — still on disk but no longer applies. Without a mock seam the URL allowlist exemption it supported has no consumer; preserved for the day the seam replacement lands.
 - `persona-brief.md` — the Dana persona prompt for the driving agent
 - `dana-prompt.md` — headless-runner prompt template (`__PHOTO__`/`__REPORT__`/`__RIG__`/`__SCREENSHOT_NOTE__` substituted by the nightly scripts)
 - `nightly.sh` — unattended nightly regression, three-terminal stack: stack up → Dana session → dated report → teardown → repo reverted clean
