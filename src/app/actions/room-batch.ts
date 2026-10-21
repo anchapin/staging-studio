@@ -20,10 +20,9 @@ import {
 import {
   DEFAULT_DAILY_LABEL_LIMIT,
   DAILY_LIMIT_ENV_VAR,
+  claimDailyQuota,
   dailyQuotaExceededPayload,
-  evaluateDailyBatchQuota,
-  getDailyUsage,
-  recordDailyUsage,
+  refundDailyQuota,
   resolveDailyLimit,
 } from "@/lib/api-quota";
 import { detectRoomType } from "@/lib/room-type-detection";
@@ -294,11 +293,23 @@ export async function detectBatchRoomTypes(
     DEFAULT_DAILY_LABEL_LIMIT
   );
   const batchSize = parsed.data.imageUrls.length;
-  const labelQuota = evaluateDailyBatchQuota(
-    await getDailyUsage("label", user.id),
-    batchSize,
-    labelLimit
-  );
+
+  // Ownership: the project the photos belong to must be owned by the
+  // authenticated user — checked before any AI work *and before any quota
+  // write*, so a non-owner can neither consume the caller's quota nor
+  // trigger a refund against it (issue #1420).
+  const ownership = await requireProjectOwnershipSafe(parsed.data.projectId, user.id, prisma);
+  if (!ownership) {
+    return { success: false, error: "Project not found" };
+  }
+
+  // Issue #1420: claim atomically instead of evaluating then recording.
+  // `claimDailyQuota` performs the cap check and the increment in one
+  // conditional `updateMany` (`count <= limit - batchSize`), so two
+  // concurrent batches can no longer both pass the upfront gate and then
+  // each record — the evaluate/record TOCTOU race that let usage exceed
+  // the cap. On denial nothing is written, so no refund is owed.
+  const labelQuota = await claimDailyQuota("label", user.id, labelLimit, batchSize);
   if (!labelQuota.allowed) {
     console.warn(
       JSON.stringify({
@@ -316,21 +327,15 @@ export async function detectBatchRoomTypes(
     };
   }
 
-  // Ownership: the project the photos belong to must be owned by the
-  // authenticated user — checked before any AI work.
-  const ownership = await requireProjectOwnershipSafe(parsed.data.projectId, user.id, prisma);
-  if (!ownership) {
-    return { success: false, error: "Project not found" };
-  }
-
-  // Consume quota BEFORE the batch runs so a user at their cap can never
-  // pass the upfront check yet have all detections fail and avoid billing.
-  // Mirrors /api/label-instances where usage is recorded after a successful
-  // AI response; for a batch the same consumption must happen before the
-  // first AI token is emitted.
-  await Promise.all(
-    parsed.data.imageUrls.map(() => recordDailyUsage("label", user.id))
-  );
+  // Track per-image outcomes. The per-image `catch` below deliberately
+  // degrades a single failure to "Other" rather than failing the batch,
+  // but it must still be *observable* — otherwise a total upstream outage
+  // is indistinguishable from success: every image degrades to "Other",
+  // `Promise.all` resolves, and the action returned `success: true` while
+  // keeping the quota (issue #1420). Counting failures lets the batch fail
+  // loudly once nothing usable came back.
+  let failedCount = 0;
+  let firstError: unknown = null;
 
   try {
     const roomTypes = await Promise.all(
@@ -338,15 +343,28 @@ export async function detectBatchRoomTypes(
         try {
           const roomType = await detectRoomType(url);
           return roomType;
-        } catch {
+        } catch (err) {
+          failedCount += 1;
+          if (firstError === null) firstError = err;
           return "Other";
         }
       })
     );
 
+    // Every image failed: surface it as a failure so the claimed quota is
+    // refunded instead of silently kept.
+    if (failedCount === roomTypes.length) {
+      throw firstError ?? new Error("Detection failed");
+    }
+
     return { success: true, roomTypes };
   } catch (error) {
     console.error("Batch room type detection failed:", error);
+    // Issue #1420: refund the units claimed above that produced no usable
+    // result — all of them on the all-failed path. `refundDailyQuota` is
+    // best-effort and never throws, so a refund failure leaves usage
+    // slightly over-counted (conservative) rather than granting free quota.
+    await refundDailyQuota("label", user.id, failedCount > 0 ? failedCount : batchSize);
     return {
       success: false,
       error: error instanceof Error ? error.message : "Detection failed",

@@ -31,6 +31,7 @@ import {
   DEFAULT_DAILY_EXPORT_LIMIT,
   DAILY_LIMIT_ENV_VAR,
   claimDailyQuota,
+  refundDailyQuota,
   dailyQuotaExceededPayload,
   resolveDailyLimit,
 } from "@/lib/api-quota";
@@ -66,7 +67,20 @@ export type ExportPdfServiceResult =
   | { kind: "projectForbidden" }
   | { kind: "quotaExceeded"; payload: ReturnType<typeof dailyQuotaExceededPayload>; claim: QuotaClaim }
   | { kind: "missingConfig"; reason: "appUrl" | "browserlessApiKey" }
+  | { kind: "timeout"; claim?: QuotaClaim }
   | { kind: "fetchResult"; fetch: ExportPdfFetchResult };
+
+/**
+ * Default outbound timeout for the Browserless PDF render.
+ *
+ * Issue #1424 raised the budget from 60s → 90s after measurements showed
+ * the chrome `networkidle2` window trips for slow lookbook pages right at
+ * the 60s ceiling (issue #1124 pinned the previous value). The route is
+ * free to lower this when the e2e harness supplies a cheaper number via
+ * the `BROWSERLESS_TIMEOUT_MS` env (tests still cap at 60s to keep the
+ * suite deterministic).
+ */
+export const EXPORT_PDF_DEFAULT_TIMEOUT_MS = 90_000;
 
 /**
  * The result of the Browserless fetch itself. The unversioned route also
@@ -109,6 +123,7 @@ export type ExportPdfServiceDeps = {
   getAuthedPrismaUser: typeof getAuthedPrismaUser;
   requireProjectOwnershipOrThrow: typeof requireProjectOwnershipOrThrow;
   claimDailyQuota: typeof claimDailyQuota;
+  refundDailyQuota: typeof refundDailyQuota;
   resolveDailyLimit: typeof resolveDailyLimit;
   signPreviewToken: typeof signPreviewToken;
   fetchBrowserlessPdfWithCircuitBreaker: typeof fetchBrowserlessPdfWithCircuitBreaker;
@@ -125,6 +140,7 @@ export const defaultExportPdfServiceDeps = (): ExportPdfServiceDeps => ({
   getAuthedPrismaUser,
   requireProjectOwnershipOrThrow,
   claimDailyQuota,
+  refundDailyQuota,
   resolveDailyLimit,
   signPreviewToken,
   fetchBrowserlessPdfWithCircuitBreaker,
@@ -133,6 +149,18 @@ export const defaultExportPdfServiceDeps = (): ExportPdfServiceDeps => ({
   fetchImpl: fetch,
   now: () => new Date(),
 });
+
+/**
+ * Detect a request-aborted fetch — Node's WHATWG fetch surfaces `AbortError`
+ * with name === "AbortError"; some adapters (undici, mock service workers)
+ * expose the same shape under a duck-typed object. Keep the predicate
+ * conservative so we only catch true timeouts, not generic network errors.
+ */
+function isAbortErrorLike(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const e = error as { code?: unknown; name?: unknown };
+  return e.code === "ABORT_ERR" || e.name === "AbortError";
+}
 
 /**
  * Read and validate the JSON request body, returning either the
@@ -305,7 +333,10 @@ export async function runExportPdf(
   );
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60_000);
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    EXPORT_PDF_DEFAULT_TIMEOUT_MS,
+  );
 
   const browserlessApiKey = deps.getEnv("BROWSERLESS_API_KEY");
   if (!browserlessApiKey) {
@@ -325,7 +356,10 @@ export async function runExportPdf(
         body: JSON.stringify({
           url: previewUrl,
           options: {
-            gotoOptions: { waitUntil: "networkidle2", timeout: 60_000 },
+            gotoOptions: {
+              waitUntil: "networkidle2",
+              timeout: EXPORT_PDF_DEFAULT_TIMEOUT_MS,
+            },
             media: "print",
             scale: 1,
             displayHeaderFooter: false,
@@ -343,6 +377,30 @@ export async function runExportPdf(
 
     const fetch = await classifyBrowserlessResponse(chromeResponse);
     return { kind: "fetchResult", fetch };
+  } catch (error) {
+    // Issue #1424: a fetch that dies here is almost always our own timeout
+    // AbortController firing — not the browser-less provider rejecting with
+    // an upstream status. Refund the claimed quota unit so a slow render
+    // does not silently consume the user's `DAILY_EXPORT_LIMIT`.
+    if (
+      error instanceof Error &&
+      (error.name === "AbortError" || isAbortErrorLike(error))
+    ) {
+      try {
+        if (exportClaim && exportClaim.claimed && typeof deps.refundDailyQuota === "function") {
+          await deps.refundDailyQuota("export", user.id, 1, deps.now());
+        }
+      } catch (refundError) {
+        // Refund is best-effort — never override the upstream timeout shape
+        // for the caller. Log and continue.
+        console.warn(
+          "[export-pdf] failed to refund quota after timeout",
+          refundError,
+        );
+      }
+      return { kind: "timeout", claim: exportClaim };
+    }
+    throw error;
   } finally {
     clearTimeout(timeoutId);
   }

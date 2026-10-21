@@ -1,97 +1,186 @@
 #!/usr/bin/env tsx
 /**
- * One-shot cleanup for the orphaned InpaintRequest rows that the
- * recovery script flipped to PERSISTENCE_FAILED.
+ * cleanup-orphaned-inpaint-rows.mts (issue #1423)
  *
- * Context: in a debug session, four InpaintRequest rows were marked
- * ERROR after the poller saw 404s on the fal queue endpoints. The
- * recovery script (scripts/recover-orphaned-inpaint-rows.mts) flipped
- * the three ERROR rows to PERSISTENCE_FAILED so the editor's poller
- * would re-pick them up. After the user reloaded the editor, the
- * 4th row (IN_QUEUE) was processed first — it completed normally,
- * the active room variants were set, and a new inpaint run
- * (`01a0ff29-...`) created the second variant. The 3
- * PERSISTENCE_FAILED rows were never touched and are now stale
- * leftovers: leaving them in the DB means the editor's
- * `pendingRequestId` resolution (Prisma's `inpaintRequests[0]`,
- * id-ordered) will keep resuming one of them on the next page load,
- * and the poller will overwrite the room's `afterImageUrl` with a
- * stale result the user has already discarded.
+ * One-shot cleanup script: deletes `PERSISTENCE_FAILED` InpaintRequest
+ * rows that the recovery flow has effectively given up on (updatedAt
+ * older than 7 days, with no recovery activity since).
  *
- * This script deletes those 3 rows. The room's active variants and
- * version history are already populated with the user's chosen
- * work; the 3 stale rows are not referenced by anything in
- * InpaintVersion (every InpaintVersion.resultUrl points to its own
- * `after-{requestId}.png` storage path keyed by the requestId that
- * produced it), so deletion is safe.
+ * Why two scripts and not one:
  *
- * What it does NOT delete:
- *   - The 4th row (`01a0fe78-...`) — it was already completed by
- *     the user's reload and is the active `afterImageUrl`.
- *   - Any InpaintVersion rows — they are independent of
- *     InpaintRequest and hold the work the user kept.
+ *  - `recover-...mts` only ever flips ERROR -> PERSISTENCE_FAILED.
+ *    It writes — never deletes — so the editor can re-pick up
+ *    incomplete work on the next page load.
+ *  - `cleanup-...mts` (this file) deletes the *stale leftovers*. A row
+ *    that's been `PERSISTENCE_FAILED` for 7+ days is, by convention,
+ *    one the user has either re-picked up (and the row advanced to
+ *    COMPLETED or similar) or explicitly discarded. Either way it is
+ *    no longer the "active" variant the editor's `pendingRequestId`
+ *    resolver is shadowing.
  *
- * Usage:
- *   # dry run — prints what would be deleted, writes nothing
- *   npx tsx scripts/cleanup-orphaned-inpaint-rows.mts
+ * Usage (dry run by default; --apply writes):
  *
- *   # actually delete
- *   npx tsx scripts/cleanup-orphaned-inpaint-rows.mts --apply
+ *     npx tsx scripts/cleanup-orphaned-inpaint-rows.mts                # dry run
+ *     npx tsx scripts/cleanup-orphaned-inpaint-rows.mts --apply        # apply
+ *     npx tsx scripts/cleanup-orphaned-inpaint-rows.mts --ids id1,id2  # force-include specific ids
  *
- * Idempotent: re-running --apply after the rows are gone is a
- * no-op (deleteMany of an empty where matches nothing).
+ * Discovery (issue #1423): rows are now selected via the SQL-backed
+ * discovery in `src/lib/orphan-inpaint-discovery.ts`. The hard-coded
+ * `ORPHANED_REQUEST_IDS` literal is preserved as a force-include
+ * allowlist (empty by default) but is no longer the primary path.
  */
-import { prisma } from "../src/lib/prisma";
+import { PrismaClient } from "@prisma/client";
+import {
+  discoverOrphans,
+  formatOrphanLine,
+  type InpaintRequestRow,
+} from "../src/lib/orphan-inpaint-discovery";
 
-const ORPHANED_REQUEST_IDS = [
-  "01a0fe39-f0ba-77a0-85f7-19e3f11171e5",
-  "01a0fe51-5139-79e0-a8a7-6aa18734b2c6",
-  "01a0fe73-09a7-7ef3-a3bf-6ffd67c0165c",
-] as const;
+const prisma = new PrismaClient();
+
+/**
+ * Force-include allowlist for ids that should be deleted regardless
+ * of the discovery cutoff. Empty by default -- discovery is the
+ * primary path.
+ */
+const ORPHANED_REQUEST_IDS: ReadonlyArray<string> = [];
 
 const apply = process.argv.includes("--apply");
+const forceIdsArg = process.argv
+  .find((arg) => arg.startsWith("--ids="))
+  ?.split("=")[1];
+const forceIds = forceIdsArg ? forceIdsArg.split(",").filter(Boolean) : [];
 
-async function main() {
-  console.log(
-    `[cleanup] mode=${apply ? "APPLY" : "DRY-RUN"} requestIds=${ORPHANED_REQUEST_IDS.length}`
-  );
-
+async function loadRows(): Promise<ReadonlyArray<InpaintRequestRow>> {
+  // Same query strategy as recover-...mts: only the discovery-needed
+  // columns, only the two relevant statuses. The cutoffs the discovery
+  // function applies are now in code (orphan-inpaint-discovery.ts),
+  // not SQL, which keeps them unit-pinnable.
   const rows = await prisma.inpaintRequest.findMany({
-    where: { id: { in: [...ORPHANED_REQUEST_IDS] } },
-    select: { id: true, status: true, resultUrl: true, roomId: true },
+    where: { status: { in: ["ERROR", "PERSISTENCE_FAILED"] } },
+    select: {
+      id: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+      resultUrl: true,
+      roomId: true,
+    },
   });
+  return rows.map((r) => ({
+    id: r.id,
+    status: r.status,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt ?? r.createdAt,
+    resultUrl: r.resultUrl,
+    roomId: r.roomId,
+  }));
+}
 
-  if (rows.length === 0) {
-    console.log("[cleanup] nothing to do (all rows already gone)");
+async function loadForceRows(
+  ids: ReadonlyArray<string>,
+): Promise<ReadonlyArray<InpaintRequestRow>> {
+  if (ids.length === 0) return [];
+  const rows = await prisma.inpaintRequest.findMany({
+    where: { id: { in: [...ids] } },
+    select: {
+      id: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+      resultUrl: true,
+      roomId: true,
+    },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    status: r.status,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt ?? r.createdAt,
+    resultUrl: r.resultUrl,
+    roomId: r.roomId,
+  }));
+}
+
+async function main(): Promise<void> {
+  const discoveredRows = await loadRows();
+  const forcedRows = await loadForceRows([
+    ...ORPHANED_REQUEST_IDS,
+    ...forceIds,
+  ]);
+
+  const discovery = discoverOrphans(discoveredRows, new Date());
+
+  type OrphanLike = {
+    id: string;
+    kind: "RECOVERY" | "CLEANUP";
+    row: InpaintRequestRow;
+  };
+  // Forced rows that are PERSISTENCE_FAILED become CLEANUP candidates;
+  // ERROR forced rows would degrade to no-op in this script
+  // (recover-...mts owns those).
+  const forceOrphans: OrphanLike[] = forcedRows.map((row) => ({
+    id: row.id,
+    kind: row.status === "PERSISTENCE_FAILED" ? "CLEANUP" : "RECOVERY",
+    row,
+  }));
+
+  const merged = new Map<string, OrphanLike>();
+  for (const o of discovery.orphans) merged.set(o.id, o);
+  for (const o of forceOrphans) {
+    const prev = merged.get(o.id);
+    if (!prev) merged.set(o.id, o);
+    else if (prev.kind === "RECOVERY" && o.kind === "CLEANUP")
+      merged.set(o.id, o);
+  }
+
+  const allOrphans = [...merged.values()];
+  const cleanupCount = allOrphans.filter((o) => o.kind === "CLEANUP").length;
+  const recoveryCount = allOrphans.filter((o) => o.kind === "RECOVERY").length;
+  const cleanupIds = allOrphans
+    .filter((o) => o.kind === "CLEANUP")
+    .map((o) => o.id);
+
+  if (allOrphans.length === 0) {
+    console.log(
+      `[cleanup-orphaned-inpaint-rows] no candidates found (cutoff: now-7d for PERSISTENCE_FAILED).`
+    );
+    console.log(
+      "[cleanup-orphaned-inpaint-rows] ORPHANED_REQUEST_IDS hard-list is empty."
+    );
     return;
   }
 
-  for (const r of rows) {
-    console.log(
-      `[cleanup] ${apply ? "DELETE" : "would delete"} ${r.id} (status=${r.status}, resultUrl=${r.resultUrl ? r.resultUrl.slice(0, 60) + "..." : "null"}, roomId=${r.roomId})`
-    );
+  console.log(
+    `[cleanup-orphaned-inpaint-rows] ${apply ? "APPLYING" : "DRY RUN"} -- discovered ${allOrphans.length} orphans (cleanup=${cleanupCount}; recovery=${recoveryCount} -- RECOVERY is informational here; recover-...mts owns that bucket):`
+  );
+  for (const o of allOrphans) {
+    console.log(`  ${formatOrphanLine(o, apply)}`);
   }
 
-  if (apply) {
-    const { count } = await prisma.inpaintRequest.deleteMany({
-      where: { id: { in: [...ORPHANED_REQUEST_IDS] } },
-    });
-    console.log(`\n[cleanup] deleted ${count} row(s)`);
-
-    const post = await prisma.inpaintRequest.count({
-      where: { id: { in: [...ORPHANED_REQUEST_IDS] } },
-    });
-    console.log(`[cleanup] post-delete count for these ids: ${post}`);
-  } else {
+  if (!apply) {
     console.log(
-      `\n[cleanup] DRY-RUN: would delete ${rows.length} row(s). Re-run with --apply to write.`
+      "[cleanup-orphaned-inpaint-rows] DRY RUN -- pass --apply to commit."
     );
+    return;
   }
+  if (cleanupIds.length === 0) {
+    console.log(
+      "[cleanup-orphaned-inpaint-rows] no CLEANUP candidates to delete (only RECOVERY orphans discovered; run recover-orphaned-inpaint-rows.mts)."
+    );
+    return;
+  }
+  const result = await prisma.inpaintRequest.deleteMany({
+    where: { id: { in: cleanupIds } },
+  });
+  console.log(
+    `[cleanup-orphaned-inpaint-rows] deleted ${result.count} row(s) from PERSISTENCE_FAILED.`
+  );
 }
 
 main()
   .catch((e) => {
-    console.error("[cleanup] failed:", e);
+    console.error("[cleanup-orphaned-inpaint-rows] failed", e);
     process.exit(1);
   })
-  .finally(() => process.exit(0));
+  .finally(() => prisma.$disconnect());

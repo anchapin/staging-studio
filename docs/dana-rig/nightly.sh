@@ -1,9 +1,15 @@
 #!/bin/bash
 # Nightly Dana regression run for StagingStudio.
 #
-# Brings up the hermetic stack, applies the TEMPORARY test-only bypasses,
-# runs one headless Dana persona session via `opencode run`, saves a dated
-# report, then tears everything down and reverts the bypasses.
+# UNSUPPORTED for the current provider. The rig used to apply two TEMPORARY
+# test-only bypasses (`mock-fal.patch` + `localhost-allow.patch`) that no
+# longer apply after the #1240 migration from fal.ai to Alibaba DashScope.
+# `mock-fal.patch` was removed (see issue #1425); the rig has not yet been
+# rewritten against the provider-agnostic `lib/inference.ts` seam, so a
+# nightly run now exits 1 with a clear "unsupported" message instead of
+# half-starting and producing a misleading report. See
+# `docs/dana-rig/README.md` § "Status" for what still works and what's
+# tracked for the mock-seam replacement.
 #
 # Required env:
 #   UX_PROTO_REPO   path to your staging-studio checkout
@@ -60,9 +66,19 @@ if [ "${DANA_PULL:-0}" = "1" ]; then
   git pull --ff-only 2>&1 | tee -a "$LOG" || log "git pull failed; testing current checkout"
 fi
 
-log "applying temporary test-only bypasses"
-git apply "$DANA_RIG/mock-fal.patch"
-git apply "$DANA_RIG/localhost-allow.patch"
+# Note: the Dana rig's mock-fal + localhost-allow patches were tracked before
+# #1240 moved the inpaint surface from fal.ai to Alibaba DashScope. Both
+# patches no longer apply, and the rig has not been rewritten against the
+# provider-agnostic `lib/inference.ts` seam yet. The rig is therefore
+# **unsupported for the current provider** — see `docs/dana-rig/README.md` §
+# "Status" for what still works and what's tracked for the mock-seam
+# replacement. Bail out with a clear message rather than half-starting and
+# producing a misleading run.
+log "Dana rig is unsupported for the Alibaba provider (issue #1425)"
+log "  - mock-fal.patch deleted (no longer patches after #1240)"
+log "  - localhost-allow.patch also no longer applies (next.config.ts moved)"
+log "  - Mock-seam replacement tracked separately; see README \"Status\""
+exit 1
 
 log "starting setup (postgres schema + seed + mock supabase)"
 UX_PROTO_REPO="$UX_PROTO_REPO" npx tsx "$DANA_RIG/setup.ts" >>"$LOG" 2>&1 &

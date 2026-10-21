@@ -1,5 +1,5 @@
 import {
-  checkAndRecordRateLimit,
+  claimRateLimit,
   checkRateLimit,
   clearRateLimit,
   type RateLimitResult,
@@ -115,7 +115,7 @@ export class CircuitBreaker {
       return result;
     } catch (error) {
       try {
-        await checkAndRecordRateLimit(
+        await claimRateLimit(
           this.identifier,
           this.failureThreshold,
           this.cooldownMs

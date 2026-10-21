@@ -12,15 +12,11 @@ const mockGetAuthedPrismaUser = vi.fn();
 
 const mockRequireProjectOwnershipSafe = vi.fn();
 
-const mockGetDailyUsage = vi.fn();
-
 const mockDetectRoomType = vi.fn();
 
-const mockEvaluateDailyQuota = vi.fn();
+const mockClaimDailyQuota = vi.fn();
 
-const mockEvaluateDailyBatchQuota = vi.fn();
-
-const mockRecordDailyUsage = vi.fn();
+const mockRefundDailyQuota = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: mockPrisma,
@@ -39,10 +35,8 @@ vi.mock("@/lib/api-quota", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api-quota")>();
   return {
     ...actual,
-    getDailyUsage: mockGetDailyUsage,
-    evaluateDailyQuota: mockEvaluateDailyQuota,
-    evaluateDailyBatchQuota: mockEvaluateDailyBatchQuota,
-    recordDailyUsage: mockRecordDailyUsage,
+    claimDailyQuota: mockClaimDailyQuota,
+    refundDailyQuota: mockRefundDailyQuota,
   };
 });
 
@@ -106,8 +100,11 @@ describe("detectBatchRoomTypes", () => {
       "https://room2.jpg.supabase.co/storage/v1/object/public/rooms/room2.jpg",
     ];
 
-    // Simulate quota exceeded - used (20) >= limit (20)
-    mockEvaluateDailyBatchQuota.mockReturnValue({
+    // Simulate quota exceeded - used (20) >= limit (20). `claimDailyQuota`
+    // is the atomic gate (issue #1420): it performs the cap check and the
+    // increment in one conditional update, so a denial means nothing was
+    // written and no refund is owed.
+    mockClaimDailyQuota.mockResolvedValue({
       allowed: false,
       used: 20,
       limit: 20,
@@ -123,39 +120,98 @@ describe("detectBatchRoomTypes", () => {
     expect(mockPrisma.project.findFirst).not.toHaveBeenCalled();
     // Verify no AI calls were made
     expect(mockDetectRoomType).not.toHaveBeenCalled();
-    // Verify no usage was recorded
-    expect(mockRecordDailyUsage).not.toHaveBeenCalled();
+    // A denied claim must not be refunded - nothing was consumed.
+    expect(mockRefundDailyQuota).not.toHaveBeenCalled();
   });
 
-  it("allows batch when quota is within limits", async () => {
+  it("claims the whole batch atomically before any AI call (issue #1420)", async () => {
     const imageUrls = [
       "https://room1.jpg.supabase.co/storage/v1/object/public/rooms/room1.jpg",
+      "https://room2.jpg.supabase.co/storage/v1/object/public/rooms/room2.jpg",
     ];
 
-    // used (5) < limit (20) so allowed
-    mockEvaluateDailyBatchQuota.mockReturnValue({
+    mockClaimDailyQuota.mockResolvedValue({
       allowed: true,
       used: 5,
       limit: 20,
     });
-
     mockDetectRoomType.mockResolvedValue("Living Room");
-    mockRecordDailyUsage.mockResolvedValue(6); // returns updated used count
 
     const result = await detectBatchRoomTypes(mockProject.id, imageUrls);
 
     expect(result).toEqual({
       success: true,
-      roomTypes: ["Living Room"],
+      roomTypes: ["Living Room", "Living Room"],
     });
 
-    // Verify usage was recorded BEFORE the AI call
-    expect(mockRecordDailyUsage).toHaveBeenCalledWith(
+    // The claim covers the whole batch size in a single call, rather than
+    // an evaluate-then-record loop that could race past the cap.
+    // The action resolves the cap via `resolveDailyLimit(env, DEFAULT_DAILY_LABEL_LIMIT)`
+    // and with no env override set in the test env that yields the library default.
+    expect(mockClaimDailyQuota).toHaveBeenCalledWith(
       "label",
-      mockUser.id
+      mockUser.id,
+      expect.any(Number),
+      imageUrls.length
     );
-    expect(mockRecordDailyUsage).toHaveBeenCalledTimes(1);
-    // Verify AI was called after quota consumption
-    expect(mockDetectRoomType).toHaveBeenCalledWith(imageUrls[0]);
+    expect(mockClaimDailyQuota.mock.calls[0][2]).toBeGreaterThan(0);
+    expect(mockClaimDailyQuota).toHaveBeenCalledTimes(1);
+    // Success path consumes nothing further and refunds nothing.
+    expect(mockRefundDailyQuota).not.toHaveBeenCalled();
+  });
+
+  it("refunds the full claimed batch when detection throws (issue #1420)", async () => {
+    const imageUrls = [
+      "https://room1.jpg.supabase.co/storage/v1/object/public/rooms/room1.jpg",
+      "https://room2.jpg.supabase.co/storage/v1/object/public/rooms/room2.jpg",
+    ];
+
+    mockClaimDailyQuota.mockResolvedValue({
+      allowed: true,
+      used: 5,
+      limit: 20,
+    });
+    // `detectRoomType` itself rejects, which rejects the whole
+    // `Promise.all` and lands in the outer catch.
+    mockDetectRoomType.mockRejectedValue(new Error("upstream 503"));
+
+    const result = await detectBatchRoomTypes(mockProject.id, imageUrls);
+
+    expect(result).toEqual({
+      success: false,
+      error: "upstream 503",
+    });
+
+    // Every claimed unit produced no result, so all are returned.
+    expect(mockRefundDailyQuota).toHaveBeenCalledWith(
+      "label",
+      mockUser.id,
+      imageUrls.length
+    );
+  });
+
+  it("refuses before claiming quota when the caller does not own the project", async () => {
+    const imageUrls = [
+      "https://room1.jpg.supabase.co/storage/v1/object/public/rooms/room1.jpg",
+    ];
+
+    mockRequireProjectOwnershipSafe.mockResolvedValue(null);
+    mockClaimDailyQuota.mockResolvedValue({
+      allowed: true,
+      used: 0,
+      limit: 20,
+    });
+
+    const result = await detectBatchRoomTypes("someone-elses-project", imageUrls);
+
+    expect(result).toEqual({
+      success: false,
+      error: "Project not found",
+    });
+
+    // A non-owner must neither consume nor refund the caller's quota.
+    expect(mockClaimDailyQuota).not.toHaveBeenCalled();
+    expect(mockRefundDailyQuota).not.toHaveBeenCalled();
+    expect(mockDetectRoomType).not.toHaveBeenCalled();
   });
 });

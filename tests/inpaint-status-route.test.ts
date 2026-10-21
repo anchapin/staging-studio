@@ -27,20 +27,35 @@ vi.mock("@/lib/inference", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
-    inpaintRequest: { findUnique: vi.fn(), update: vi.fn() },
-    // Issue #1123: the status limiter is Postgres-backed; the default mocks
-    // below return undefined (no record), so every poll is allowed and no
-    // test in this file trips the 10/min cap.
-    dailyApiUsage: {
-      findUnique: vi.fn().mockResolvedValue(undefined),
-      create: vi.fn().mockResolvedValue({}),
-      update: vi.fn().mockResolvedValue({}),
-      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+vi.mock("@/lib/prisma", () => {
+  // The poll limiter claims quota atomically inside an interactive transaction
+  // (see `claimRateLimit`). Expose a `$transaction` that runs the callback
+  // against the same `dailyApiUsage` methods the tests already drive, plus the
+  // `upsert`/`$queryRaw` pair the transaction body uses internally.
+  const dailyApiUsage = {
+    findUnique: vi.fn().mockResolvedValue(undefined),
+    create: vi.fn().mockResolvedValue({}),
+    update: vi.fn().mockResolvedValue({}),
+    upsert: vi.fn().mockResolvedValue({}),
+    deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+  };
+  return {
+    prisma: {
+      inpaintRequest: { findUnique: vi.fn(), update: vi.fn() },
+      // Issue #1123: the status limiter is Postgres-backed; the default mocks
+      // below return undefined (no record), so every poll is allowed and no
+      // test in this file trips the 10/min cap.
+      dailyApiUsage,
+      $transaction: vi.fn(
+        async (fn: (tx: unknown) => Promise<unknown>) =>
+          fn({
+            dailyApiUsage,
+            $queryRaw: async () => [],
+          })
+      ),
     },
-  },
-}));
+  };
+});
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: vi.fn(),
@@ -113,6 +128,11 @@ beforeEach(() => {
   authedUser.mockResolvedValue({ id: USER_ID });
   findUnique.mockResolvedValue(ownedRow());
   update.mockResolvedValue({});
+  // `claimRateLimit` materialises the row with an `upsert` before taking the
+  // row lock, and `vi.resetAllMocks()` above strips the factory's return
+  // values — so re-establish the permissive default here. The limiter tests
+  // further down re-stub `findUnique` with a real row.
+  (prisma.dailyApiUsage as unknown as { upsert: Mock }).upsert.mockResolvedValue({});
 });
 
 describe("GET /api/inpaint/[requestId]/status — fal ERROR terminal state (issue #686)", () => {
@@ -554,6 +574,7 @@ describe("GET /api/inpaint/[requestId]/status — Postgres-backed poll rate limi
     findUnique: Mock;
     create: Mock;
     update: Mock;
+    upsert: Mock;
   };
 
   // In-memory stand-in for the DailyApiUsage row so the limiter's
@@ -582,6 +603,17 @@ describe("GET /api/inpaint/[requestId]/status — Postgres-backed poll rate limi
       if (!row) return null;
       if (data.timestamps) row.timestamps = [...data.timestamps];
       if (data.count !== undefined) row.count = data.count;
+      return row;
+    });
+    // `claimRateLimit` materialises the row via `upsert` (create-if-absent)
+    // before taking its row lock, so this mock must do the same. `create` above
+    // is kept because `recordRateLimit` still uses it on the read-only path.
+    dailyApiUsage.upsert.mockImplementation(async ({ where, create: createData }: { where: { userId_surface_dayKey: { userId: string; surface: string; dayKey: string } }; create: { userId: string; surface: string; dayKey: string; count: number; timestamps: Date[] } }) => {
+      const w = where.userId_surface_dayKey;
+      if (row && row.userId === w.userId && row.surface === w.surface && row.dayKey === w.dayKey) {
+        return row;
+      }
+      row = { ...createData, timestamps: [...createData.timestamps] };
       return row;
     });
   });

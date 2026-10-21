@@ -169,6 +169,18 @@ export function CopyPanel(props: CopyPanelProps): ReactNode {
           <span>Rewrite from directions</span>
         )}
       </button>
+
+      {/* #1432: the CTA above is disabled whenever `directions` is empty, which
+          is its default state — so on first open the only control in the panel
+          is inert and gives no hint as to why. A disabled button is not
+          self-explanatory: without this line the panel dead-ends silently.
+          `aria-live` because the hint appears and disappears as the user types,
+          so a screen-reader user hears the control become actionable. */}
+      {!isRewriting && !canRewrite && directions.trim() === "" && (
+        <p aria-live="polite" className="text-xs text-ink-subtle">
+          Add staging directions first — the rewrite needs a brief to work from.
+        </p>
+      )}
     </div>
   );
 }
