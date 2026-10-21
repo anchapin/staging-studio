@@ -236,10 +236,30 @@ export function LookbookEditor({ project }: LookbookEditorProps) {
   }, []);
 
   const flushBeforeExport = useCallback(async () => {
+    // Issue #1435: gate Export-PDF on TWO conditions, not just `flush()`:
+    //   1. every pending autosave flushes successfully (catches dirty
+    //      edits that haven't been flushed yet), AND
+    //   2. no controller currently sits in `status === "error"` over
+    //      unsaved changes — a previous failed autosave may have left
+    //      the controller in the "error" state with no pending flush
+    //      to retry, so a bare `flush()` would otherwise succeed
+    //      instantly while the user's last edit is silently lost.
     const procurementResult = procurementControllerRef.current.flush();
     const results = Object.values(controllersRef.current).map((c) => c.flush());
     const allVoid = procurementResult === undefined && results.every((r) => r === undefined);
+
+    // Gate #2: scan controller states BEFORE awaiting flushes —
+    // we don't want a controller that's already errored-out to be
+    // allowed to "pass" simply because nothing was dirty this tick.
+    const hasErrorState = Object.values(controllersRef.current).some(
+      (c) => c.status === "error",
+    );
+    const procurementHasErrorState =
+      procurementControllerRef.current.status === "error";
+
+    if (hasErrorState || procurementHasErrorState) return false;
     if (allVoid) return true;
+
     const [pResult, ...rResults] = await Promise.all([procurementResult, ...results]);
     return Boolean(pResult) && rResults.every((ok) => ok !== false);
   }, []);

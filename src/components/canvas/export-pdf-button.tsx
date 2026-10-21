@@ -39,7 +39,17 @@ export default function ExportPdfButton({
 
     try {
       if (onBeforeExport && !(await onBeforeExport())) {
-        showError("Save pending edits before exporting.", true);
+        // Issue #1435: the parent lookbook-editor's onBeforeExport flushes
+        // pending autosave controllers and only rejects the export if
+        // either (a) any flush returned a non-ok result, or (b) any
+        // controller reports status === "error" over unsaved changes. In
+        // both cases the user has not yet lost their work to the next
+        // render, but we still refuse to ship the lookbook PDF until they
+        // confirm the retry succeeded.
+        showError(
+          "We couldn't save your changes — Export-PDF is paused until you retry.",
+          true,
+        );
         return;
       }
 
