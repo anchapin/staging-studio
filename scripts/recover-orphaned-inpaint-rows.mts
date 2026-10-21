@@ -1,175 +1,204 @@
 #!/usr/bin/env tsx
 /**
- * One-shot recovery for orphaned InpaintRequest rows.
+ * recover-orphaned-inpaint-rows.mts (issue #1202, refreshed by #1423)
  *
- * Context: in an earlier debug session, four InpaintRequest rows were
- * transitioned to status=ERROR because `pollFalStatus` repeatedly saw
- * a queue.status 404 (or otherwise failed to retrieve the result) and
- * the new #1187 404-detection path marked them terminal. Live API
- * checks against fal now return 200 COMPLETED with a usable image URL
- * for all four requestIds, so the result data is still recoverable
- * from fal — the rows were marked ERROR in error, not because the
- * results are gone.
+ * One-shot recovery script: flips orphaned `ERROR` InpaintRequest rows to
+ * `PERSISTENCE_FAILED` so the poller re-fetches their result on the next
+ * editor load.
  *
- * What this script does:
- *   - For each ERROR row whose resultUrl is null, set status to
- *     PERSISTENCE_FAILED and clear resultUrl. The on-the-fly
- *     `pollFalStatus` PERSISTENCE_FAILED branch will then
- *     (a) re-fetch the fal result for the requestId,
- *     (b) re-download the image,
- *     (c) re-persist it to Supabase Storage at
- *         `after-{requestId}.png`,
- *     (d) update the row to status=COMPLETED with the new resultUrl,
- *     (e) fire the editor's onCompleted callback, which PATCHes the
- *         room to set afterImageUrl / afterImageUrl2 (and possibly
- *         selectedVariantIndex / beforeImageUrl2 for a fresh slot-1
- *         run, via `buildInpaintResultPatch`).
+ * Why this exists: since #1202 the poller recovers transient provider
+ * 404s itself, so the only way we land in `ERROR` here is when the
+ * provider has truly pruned the request. We still flip these to
+ * `PERSISTENCE_FAILED` because:
  *
- * What this script does NOT do:
- *   - It does not touch IN_QUEUE rows. The editor's `useInpaintRuns`
- *     effect picks the room's first InpaintRequest as pendingRequestId
- *     and re-polls it on every page load; the poller will pick the
- *     IN_QUEUE row up naturally and complete the same path. Marking
- *     it PERSISTENCE_FAILED prematurely would skip the COMPLETED →
- *     result branch in pollFalStatus and force a slightly different
- *     code path (the PERSISTENCE_FAILED one), with no benefit.
- *   - It does not touch the room's afterImageUrl directly. The
- *     client-driven `persistInpaintResult` (project-detail-view.tsx)
- *     applies `buildInpaintResultPatch` and PATCHes the room only
- *     after a successful poll, which is the production contract.
- *   - It does not retry on transient fal 404s. If fal 404s the
- *     status endpoint again at poll time, the row will go back to
- *     ERROR via the existing `isInferenceRequestGone` path; rerun
- *     this script after a few minutes if that happens. CDN retention
- *     is at least 7 days per fal docs, so we have time.
+ *  1. The result may now be available (we never asked after the
+ *     404, the provider may have caught up).
+ *  2. `PERSISTENCE_FAILED` + `resultUrl=null` triggers the editor's
+ *     own recovery-on-load path (`/api/inpaint/[id]/status`) which
+ *     takes one more shot from the user's browser tab.
  *
- * Usage:
- *   # dry run — prints what would change, writes nothing
- *   npx tsx scripts/recover-orphaned-inpaint-rows.mts
+ * Usage (dry run by default; --apply writes):
  *
- *   # actually apply
- *   npx tsx scripts/recover-orphaned-inpaint-rows.mts --apply
+ *     npx tsx scripts/recover-orphaned-inpaint-rows.mts                # dry run
+ *     npx tsx scripts/recover-orphaned-inpaint-rows.mts --apply        # apply
+ *     npx tsx scripts/recover-orphaned-inpaint-rows.mts --ids id1,id2  # force-include specific ids
  *
- * After --apply: the user must reload the room's editor. The poller
- * will see status=PERSISTENCE_FAILED, hit fal (which now returns
- * COMPLETED), persist the image to Supabase, and update the row +
- * room. The onCompleted callback writes the InpaintVersion thumbnail
- * + row automatically.
+ * Dry run by default — same convention as `scripts/cleanup-...mts`.
+ * Idempotent: target rows have already been flipped will appear in the
+ * recovery list (status === "ERROR" with the same `createdAt` check),
+ * the apply loop simply writes the same value again.
  *
- * Idempotent: running --apply twice is safe. The second run is a
- * no-op (the row is already PERSISTENCE_FAILED or COMPLETED) and
- * just prints the current state.
+ * Discovery (issue #1423): rows are now selected via the SQL-backed
+ * discovery in `src/lib/orphan-inpaint-discovery.ts` rather than a
+ * hand-edited `ORPHANED_REQUEST_IDS` literal. The literal list is kept
+ * as a force-include allowlist (use only when a manual report names a
+ * specific id outside the discovery window); the discovery path is the
+ * primary route and removes the manual UUID-list footgun.
  */
-import { prisma } from "../src/lib/prisma";
+import { PrismaClient } from "@prisma/client";
+import {
+  discoverOrphans,
+  formatOrphanLine,
+  type InpaintRequestRow,
+} from "../src/lib/orphan-inpaint-discovery";
 
-const ORPHANED_REQUEST_IDS = [
-  "01a0fe39-f0ba-77a0-85f7-19e3f11171e5",
-  "01a0fe51-5139-79e0-a8a7-6aa18734b2c6",
-  "01a0fe73-09a7-7ef3-a3bf-6ffd67c0165c",
-  "01a0fe78-3bf8-73b0-b493-5b313387d991",
-] as const;
+const prisma = new PrismaClient();
+
+/**
+ * Force-include allowlist for ids that fall outside the discovery
+ * window (e.g. a row with status === "ERROR" but createdAt < 24h ago
+ * that an admin reports via a user-support ticket). Empty by default.
+ * Discovery is the primary path; this is the named-id-only escape
+ * hatch. When adopting #1423's discovery, manually confirm each row
+ * before adding it here -- the script will flip it to
+ * PERSISTENCE_FAILED regardless of its current state.
+ */
+const ORPHANED_REQUEST_IDS: ReadonlyArray<string> = [];
 
 const apply = process.argv.includes("--apply");
+const forceIdsArg = process.argv
+  .find((arg) => arg.startsWith("--ids="))
+  ?.split("=")[1];
+const forceIds = forceIdsArg ? forceIdsArg.split(",").filter(Boolean) : [];
 
-async function main() {
-  console.log(
-    `[recover] mode=${apply ? "APPLY" : "DRY-RUN"} requestIds=${ORPHANED_REQUEST_IDS.length}`
-  );
-
+async function loadRows(): Promise<ReadonlyArray<InpaintRequestRow>> {
+  // Only the discovery-needed columns so the script can scan even a
+  // multi-million-row table cheaply. The index covers `status` and
+  // `createdAt` (the WHERE filter is `status IN ('ERROR',
+  // 'PERSISTENCE_FAILED')`, ordered by the age cutoff the discovery
+  // function applies in code; we fetch both statuses here and let the
+  // discovery function filter them again -- this keeps the Prisma
+  // query simple and the index-tight).
   const rows = await prisma.inpaintRequest.findMany({
-    where: { id: { in: [...ORPHANED_REQUEST_IDS] } },
+    where: { status: { in: ["ERROR", "PERSISTENCE_FAILED"] } },
     select: {
       id: true,
       status: true,
-      resultUrl: true,
-      variantSlot: true,
-      sourceSlot: true,
-      roomId: true,
       createdAt: true,
       updatedAt: true,
+      resultUrl: true,
+      roomId: true,
     },
   });
+  return rows.map((r) => ({
+    id: r.id,
+    status: r.status,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt ?? r.createdAt,
+    resultUrl: r.resultUrl,
+    roomId: r.roomId,
+  }));
+}
 
-  const found = new Set(rows.map((r) => r.id));
-  for (const id of ORPHANED_REQUEST_IDS) {
-    if (!found.has(id)) {
-      console.log(`[recover] MISSING: ${id} not in DB (already pruned?)`);
-    }
+async function loadForceRows(
+  ids: ReadonlyArray<string>,
+): Promise<ReadonlyArray<InpaintRequestRow>> {
+  if (ids.length === 0) return [];
+  const rows = await prisma.inpaintRequest.findMany({
+    where: { id: { in: [...ids] } },
+    select: {
+      id: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+      resultUrl: true,
+      roomId: true,
+    },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    status: r.status,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt ?? r.createdAt,
+    resultUrl: r.resultUrl,
+    roomId: r.roomId,
+  }));
+}
+
+async function main(): Promise<void> {
+  const discoveredRows = await loadRows();
+  const forcedRows = await loadForceRows([
+    ...ORPHANED_REQUEST_IDS,
+    ...forceIds,
+  ]);
+
+  const discovery = discoverOrphans(discoveredRows, new Date());
+
+  type OrphanLike = {
+    id: string;
+    kind: "RECOVERY" | "CLEANUP";
+    row: InpaintRequestRow;
+  };
+  const forceOrphans: OrphanLike[] = forcedRows.map((row) => ({
+    id: row.id,
+    kind: row.status === "ERROR" ? "RECOVERY" : "CLEANUP",
+    row,
+  }));
+
+  // De-duplicate by id, preferring discovery classification. A force
+  // row wins ONLY when it would classify RECOVERY (the bucket this
+  // script owns) AND the discovery row is CLEANUP (so we'd otherwise
+  // ignore it here).
+  const merged = new Map<string, OrphanLike>();
+  for (const o of discovery.orphans) merged.set(o.id, o);
+  for (const o of forceOrphans) {
+    const prev = merged.get(o.id);
+    if (!prev) merged.set(o.id, o);
+    else if (prev.kind === "CLEANUP" && o.kind === "RECOVERY")
+      merged.set(o.id, o);
   }
 
-  let flipped = 0;
-  let skipped = 0;
-  for (const row of rows) {
-    if (row.status === "COMPLETED" && row.resultUrl) {
-      console.log(
-        `[recover] skip ${row.id}: already COMPLETED (resultUrl=${row.resultUrl.slice(
-          0,
-          60
-        )}...)`
-      );
-      skipped++;
-      continue;
-    }
-    if (row.status === "PERSISTENCE_FAILED" && !row.resultUrl) {
-      console.log(
-        `[recover] skip ${row.id}: already PERSISTENCE_FAILED (no resultUrl) — poller will pick up on next page load`
-      );
-      skipped++;
-      continue;
-    }
-    if (row.status === "IN_QUEUE" || row.status === "IN_PROGRESS") {
-      console.log(
-        `[recover] skip ${row.id}: status=${row.status} — editor will resume polling on next page load`
-      );
-      skipped++;
-      continue;
-    }
-    if (row.status !== "ERROR" || row.resultUrl) {
-      console.log(
-        `[recover] skip ${row.id}: unexpected shape status=${row.status} resultUrl=${
-          row.resultUrl ?? "null"
-        } — manual review`
-      );
-      skipped++;
-      continue;
-    }
+  const allOrphans = [...merged.values()];
+  const recoveryCount = allOrphans.filter((o) => o.kind === "RECOVERY").length;
+  const cleanupCount = allOrphans.filter((o) => o.kind === "CLEANUP").length;
+  const recoveryIds = allOrphans
+    .filter((o) => o.kind === "RECOVERY")
+    .map((o) => o.id);
 
+  if (allOrphans.length === 0) {
     console.log(
-      `[recover] ${apply ? "FLIP " : "would flip"} ${row.id}: ERROR + resultUrl=null → PERSISTENCE_FAILED + resultUrl=null (variantSlot=${row.variantSlot}, sourceSlot=${row.sourceSlot ?? "null"}, roomId=${row.roomId})`
+      `[recover-orphaned-inpaint-rows] no candidates found (cutoff: now-24h for ERROR; now-7d for PERSISTENCE_FAILED).`
     );
-    if (apply) {
-      await prisma.inpaintRequest.update({
-        where: { id: row.id },
-        data: { status: "PERSISTENCE_FAILED", resultUrl: null },
-      });
-      flipped++;
-    }
+    console.log(
+      "[recover-orphaned-inpaint-rows] ORPHANED_REQUEST_IDS hard-list is empty."
+    );
+    return;
   }
 
-  if (apply) {
-    const post = await prisma.inpaintRequest.findMany({
-      where: { id: { in: [...ORPHANED_REQUEST_IDS] } },
-      select: { id: true, status: true, resultUrl: true, updatedAt: true },
-    });
-    console.log(`\n[recover] post-apply state:`);
-    for (const r of post) {
-      console.log(
-        `  ${r.id}  status=${r.status}  resultUrl=${r.resultUrl ? r.resultUrl.slice(0, 60) + "..." : "null"}  updatedAt=${r.updatedAt.toISOString()}`
-      );
-    }
-    console.log(
-      `\n[recover] flipped=${flipped} skipped=${skipped}. Reload the room's editor in the browser — the poller will complete the persistence and apply the room patch.`
-    );
-  } else {
-    console.log(
-      `\n[recover] DRY-RUN: would flip ${rows.length - skipped} row(s). Re-run with --apply to write.`
-    );
+  console.log(
+    `[recover-orphaned-inpaint-rows] ${apply ? "APPLYING" : "DRY RUN"} -- discovered ${allOrphans.length} orphans (recovery=${recoveryCount}; cleanup=${cleanupCount} -- CLEANUP is informational here; the cleanup script owns that bucket):`
+  );
+  for (const o of allOrphans) {
+    console.log(`  ${formatOrphanLine(o, apply)}`);
   }
+
+  if (!apply) {
+    console.log(
+      "[recover-orphaned-inpaint-rows] DRY RUN -- pass --apply to commit. Idempotent: re-running with --apply will write the same status to already-fixed rows."
+    );
+    return;
+  }
+  if (recoveryIds.length === 0) {
+    console.log(
+      "[recover-orphaned-inpaint-rows] no RECOVERY candidates to flip (only CLEANUP orphans discovered; run cleanup-orphaned-inpaint-rows.mts)."
+    );
+    return;
+  }
+  const result = await prisma.inpaintRequest.updateMany({
+    where: { id: { in: recoveryIds } },
+    data: { status: "PERSISTENCE_FAILED" },
+  });
+  console.log(
+    `[recover-orphaned-inpaint-rows] flipped ${result.count} row(s) to PERSISTENCE_FAILED.`
+  );
+  console.log(
+    "[recover-orphaned-inpaint-rows] subsequent /api/inpaint/[id]/status calls will now re-attempt the result."
+  );
 }
 
 main()
   .catch((e) => {
-    console.error("[recover] failed:", e);
+    console.error("[recover-orphaned-inpaint-rows] failed", e);
     process.exit(1);
   })
-  .finally(() => process.exit(0));
+  .finally(() => prisma.$disconnect());

@@ -10,6 +10,11 @@
  * call site in `use-inpaint-runs.ts` is responsible for the
  * `typeof window !== "undefined"` gate.
  *
+ * The dimension math itself is pure and lives in
+ * `thumbnail-geometry.ts` so it can be unit-pinned without going
+ * through jsdom. This file owns the browser-only `Image` / `canvas`
+ * glue; `thumbnail-geometry.ts` owns the math.
+ *
  * @param imageUrl Publicly-fetchable image URL (Supabase Storage /
  *   any allowlisted host in `next.config.ts`).
  * @param maxDim Maximum width OR height of the downsized thumbnail
@@ -18,6 +23,8 @@
  * @returns A JPEG data URL (no larger than `maxDim` on either axis)
  *   suitable for `<img src=…>` or `Room.beforeImageThumbnail`.
  */
+import { computeThumbnailSize } from "@/lib/thumbnail-geometry";
+
 export async function generateThumbnailFromUrl(
   imageUrl: string,
   maxDim: number = 200
@@ -32,9 +39,11 @@ export async function generateThumbnailFromUrl(
     img.onerror = () => reject(new Error("Image load failed for thumbnail"));
     img.src = imageUrl;
   });
-  const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
-  const width = Math.max(1, Math.round(img.naturalWidth * scale));
-  const height = Math.max(1, Math.round(img.naturalHeight * scale));
+  const { width, height } = computeThumbnailSize(
+    img.naturalWidth,
+    img.naturalHeight,
+    maxDim,
+  );
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;

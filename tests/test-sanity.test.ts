@@ -39,6 +39,26 @@ const ALLOWED_NO_MODULE_IMPORTS: readonly Record<string, string>[] = [
     "revalidate-preview.test.ts":
       "static-analysis contract pin for issue #1225; no production call is appropriate (see #1287)",
   },
+  {
+    // export-pdf-button-autosave-gate.test.ts pins the issue #1435 contract
+    // statically (the Export-PDF button gates itself on the autosave
+    // error-status state, not on async postEvent). Importing the module
+    // would let the test pass even if the gate string were silently
+    // routed away, so the contract is enforced by reading source.
+    "export-pdf-button-autosave-gate.test.ts":
+      "static-analysis contract pin for issue #1435 (Export-PDF button gates on autosave error status)",
+  },
+  {
+    // api-auth-coverage.test.ts pins the issue #1419 contract statically
+    // (walks src/app/api/**/*.ts and asserts each mutating route reaches
+    // getAuthedPrismaUser / verifyWebhookSignature / supabase.auth.getUser
+    // before doing anything privileged). The contract is enforceable by
+    // reading source, and importing the seam modules would defeat the
+    // purpose (the test would still pass if a route swallowed the seam
+    // import without calling it).
+    "api-auth-coverage.test.ts":
+      "static-analysis contract pin for issue #1419 (every mutation route reaches an auth seam before acting)",
+  },
 ];
 
 const TESTS_DIR = path.dirname(new URL(import.meta.url).pathname);
