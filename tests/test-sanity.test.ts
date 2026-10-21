@@ -39,6 +39,15 @@ const ALLOWED_NO_MODULE_IMPORTS: readonly Record<string, string>[] = [
     "revalidate-preview.test.ts":
       "static-analysis contract pin for issue #1225; no production call is appropriate (see #1287)",
   },
+  {
+    // export-pdf-button-autosave-gate.test.ts pins the issue #1435 contract
+    // statically (the Export-PDF button gates itself on the autosave
+    // error-status state, not on async postEvent). Importing the module
+    // would let the test pass even if the gate string were silently
+    // routed away, so the contract is enforced by reading source.
+    "export-pdf-button-autosave-gate.test.ts":
+      "static-analysis contract pin for issue #1435 (Export-PDF button gates on autosave error status)",
+  },
 ];
 
 const TESTS_DIR = path.dirname(new URL(import.meta.url).pathname);
