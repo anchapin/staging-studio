@@ -47,6 +47,7 @@ const makeDeps = (overrides: Partial<Deps> = {}): Deps => {
         remaining: 19,
       }) as never
     ),
+    refundDailyQuota: vi.fn(async () => undefined) as never,
     resolveDailyLimit: vi.fn(() => 20),
     signPreviewToken: vi.fn(async () => "signed-token"),
     fetchBrowserlessPdfWithCircuitBreaker: vi.fn(
@@ -90,6 +91,85 @@ describe("defaultExportPdfServiceDeps", () => {
     expect(typeof deps.resolveBrowserlessPdfUrl).toBe("function");
     expect(typeof deps.fetchImpl).toBe("function");
     expect(typeof deps.now).toBe("function");
+  });
+});
+
+describe("runExportPdf timeout refund (issue #1424)", () => {
+  it("refunds the claimed quota unit and returns kind='timeout' when the Browserless fetch aborts", async () => {
+    const refund = vi.fn(async () => undefined);
+    const deps = makeDeps({
+      refundDailyQuota: refund as never,
+      fetchBrowserlessPdfWithCircuitBreaker: vi.fn(async () => {
+        // Mimic Node's WHATWG fetch abort behaviour: name === "AbortError",
+        // no `cause`, thrown synchronously from a cancelled signal.
+        const err = new Error("aborted");
+        err.name = "AbortError";
+        throw err;
+      }) as never,
+      resolveDailyLimit: vi.fn(() => 20),
+    });
+
+    const out = await runExportPdf(
+      { bodyText: JSON.stringify({ projectId: "c123456789012345678901234" }) },
+      deps
+    );
+
+    expect(out).toEqual({ kind: "timeout", claim: expect.objectContaining({ claimed: true }) });
+    expect(refund).toHaveBeenCalledTimes(1);
+    expect(refund).toHaveBeenCalledWith(
+      "export",
+      expect.any(String),
+      1,
+      expect.any(Date),
+    );
+  });
+
+  it("does NOT refund on a non-abort error (e.g. upstream 503)", async () => {
+    const refund = vi.fn(async () => undefined);
+    const deps = makeDeps({
+      refundDailyQuota: refund as never,
+      fetchBrowserlessPdfWithCircuitBreaker: vi.fn(async () => {
+        throw new Error("network down");
+      }) as never,
+    });
+
+    // The non-abort error re-throws for the route to translate — neither
+    // refund nor a "timeout" kind should appear here.
+    await expect(
+      runExportPdf(
+        { bodyText: JSON.stringify({ projectId: "c123456789012345678901234" }) },
+        deps
+      )
+    ).rejects.toThrow("network down");
+    expect(refund).not.toHaveBeenCalled();
+  });
+
+  it("still returns kind='timeout' even if the refund call itself throws", async () => {
+    const refund = vi.fn(async () => {
+      throw new Error("refund blew up");
+    });
+    const deps = makeDeps({
+      refundDailyQuota: refund as never,
+      fetchBrowserlessPdfWithCircuitBreaker: vi.fn(async () => {
+        const err = new Error("aborted");
+        err.name = "AbortError";
+        throw err;
+      }) as never,
+    });
+
+    // Spy on warn so we don't actually log during vitest runs.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const out = await runExportPdf(
+      { bodyText: JSON.stringify({ projectId: "c123456789012345678901234" }) },
+      deps
+    );
+
+    expect(out).toMatchObject({ kind: "timeout" });
+    expect(refund).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalled();
+
+    warnSpy.mockRestore();
   });
 });
 
