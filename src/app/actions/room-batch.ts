@@ -333,38 +333,77 @@ export async function detectBatchRoomTypes(
   // is indistinguishable from success: every image degrades to "Other",
   // `Promise.all` resolves, and the action returned `success: true` while
   // keeping the quota (issue #1420). Counting failures lets the batch fail
-  // loudly once nothing usable came back.
+  // loudly once nothing usable came back, and lets the claimed units of
+  // the failed images be refunded.
   let failedCount = 0;
+  let refundedCount = 0;
   let firstError: unknown = null;
+
+  // Returns `units` claimed units to the user's daily `label` allowance.
+  // `refundDailyQuota` is best-effort and never throws, so a refund
+  // failure leaves usage slightly over-counted (conservative) rather than
+  // granting free quota.
+  const refundUnits = async (units: number): Promise<void> => {
+    if (units <= 0) return;
+    refundedCount += units;
+    await refundDailyQuota("label", user.id, units);
+  };
 
   try {
     const roomTypes = await Promise.all(
-      parsed.data.imageUrls.map(async (url) => {
+      parsed.data.imageUrls.map(async (url, index) => {
         try {
           const roomType = await detectRoomType(url);
           return roomType;
         } catch (err) {
           failedCount += 1;
           if (firstError === null) firstError = err;
+          // Issue #1420: the failure is LOGGED, not swallowed. The URL is
+          // not logged (it can carry storage tokens); the image index
+          // identifies the photo within the batch.
+          console.warn(
+            JSON.stringify({
+              event: "batch_room_type_detection_failed",
+              userId: user.id,
+              imageIndex: index,
+              error: err instanceof Error ? err.message : String(err),
+            })
+          );
           return "Other";
         }
       })
     );
 
-    // Every image failed: surface it as a failure so the claimed quota is
-    // refunded instead of silently kept.
+    // Issue #1420: the claimed units of the images that produced NO result
+    // are refunded — a failed detection yielded no room type, so it must
+    // not shrink the user's daily allowance. The units of the images that
+    // DID succeed stay claimed: they bought a real provider call.
+    await refundUnits(failedCount);
+
+    // Every image failed: surface it as a failure so the batch fails
+    // loudly instead of reporting a batch of "Other"s as a success (the
+    // claimed units were already refunded above).
     if (failedCount === roomTypes.length) {
-      throw firstError ?? new Error("Detection failed");
+      console.error(
+        JSON.stringify({
+          event: "batch_room_type_detection_failed_batch",
+          userId: user.id,
+          images: roomTypes.length,
+        })
+      );
+      return {
+        success: false,
+        error: firstError instanceof Error ? firstError.message : "Detection failed",
+      };
     }
 
     return { success: true, roomTypes };
   } catch (error) {
     console.error("Batch room type detection failed:", error);
-    // Issue #1420: refund the units claimed above that produced no usable
-    // result — all of them on the all-failed path. `refundDailyQuota` is
-    // best-effort and never throws, so a refund failure leaves usage
-    // slightly over-counted (conservative) rather than granting free quota.
-    await refundDailyQuota("label", user.id, failedCount > 0 ? failedCount : batchSize);
+    // Unexpected failure (not a per-image detection error): nothing usable
+    // came back, so every claimed unit that was not refunded yet is
+    // returned to the user's allowance.
+    await refundUnits(Math.max(0, batchSize - refundedCount));
     return {
       success: false,
       error: error instanceof Error ? error.message : "Detection failed",
