@@ -35,6 +35,7 @@ import { logger } from "@/lib/logger";
 import {
   InferenceRequestGoneError,
   LOGICAL_MODEL,
+  type InferenceCancelResult,
   type InferenceClient,
   type InferenceStatusResult,
   type LogicalModel,
@@ -436,6 +437,38 @@ export function createAlibabaClient(): InferenceClient {
         404,
         `Alibaba inpaint result for ${requestId} is no longer in the in-process cache`,
       );
+    },
+
+    /**
+     * Issue #1421: cancel support for the "provider billed us but the
+     * DB write failed" path.
+     *
+     * The DashScope endpoint this adapter uses
+     * (`/v1/services/aigc/multimodal-generation/generation`) is
+     * SYNCHRONOUS: the POST has already returned (and has already been
+     * billed) by the time `submit()` resolves, and it exposes no task
+     * id and no cancel endpoint — the async
+     * `DELETE /api/v1/services/aigc/text2image/inpainting/{task_id}`
+     * endpoint belongs to a different (task-based) API that this
+     * adapter never calls.
+     *
+     * So there is no remote job to cancel: the best we can do is drop
+     * the in-process result cache entry so nothing can map to the
+     * unreachable job, and report `cancelled: false` so the caller
+     * records the provider cost as a known-cost write-off instead of
+     * pretending the money was saved.
+     */
+    async cancel(
+      _logicalModel: LogicalModel,
+      requestId: string,
+    ): Promise<InferenceCancelResult> {
+      const evicted = alibabaResultCache.delete(requestId);
+      return {
+        cancelled: false,
+        reason:
+          "alibaba_synchronous_api_has_no_cancel_endpoint" +
+          (evicted ? " (local result cache evicted)" : ""),
+      };
     },
 
     async result<T = unknown>(
