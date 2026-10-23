@@ -9,6 +9,7 @@ import {
   LOGICAL_MODEL,
 } from "@/lib/inference";
 import { firstInpaintImageUrl, type RawInpaintOutput } from "@/lib/inpaint-output";
+import { releaseInpaintQuotaReservation } from "@/lib/inpaint-quota";
 import {
   logInpaintEvent,
   type InpaintEventStatus,
@@ -271,9 +272,18 @@ function isInferenceRequestGone(error: unknown): boolean {
  * logged but does not change the response — the user must see the
  * terminal state either way. Side effects: one Prisma update (best
  * effort) plus one `console.error` on failure.
+ *
+ * Issue #1421: the row dying is the end of the work — the provider
+ * job is unreachable, so no result will ever be produced for this
+ * user. The `DAILY_INPAINT_LIMIT` unit reserved for this request is
+ * therefore released through the central helper. The row's status
+ * BEFORE the flip is passed in so a row that was already in a
+ * released state (PERSISTENCE_FAILED) is not refunded twice.
  */
 async function markRowTerminalAndReturnError(
-  requestId: string
+  requestId: string,
+  userId: string | null,
+  previousStatus: string | null
 ): Promise<InpaintStatusResult> {
   try {
     await prisma.inpaintRequest.update({
@@ -288,6 +298,15 @@ async function markRowTerminalAndReturnError(
   }
   // Issue #1116: the ERROR flip is a pipeline state transition; log it.
   await logInpaintTransition(requestId, "failed");
+  // Issue #1421: no durable result ⇒ give the quota unit back.
+  if (userId) {
+    await releaseInpaintQuotaReservation({
+      userId,
+      requestId,
+      reason: "provider_job_unreachable",
+      previousStatus,
+    });
+  }
   return { status: "ERROR", imageUrl: null, persisted: false };
 }
 
@@ -398,6 +417,17 @@ async function recoverFromStatusGone(
  * - PERSISTENCE_FAILED: retry persistence
  * - IN_QUEUE/PROCESSING: return current status
  */
+/**
+ * Reads the owning user id off a polled row. Defensive (`?.`) because
+ * the row projection can be mocked in tests and because a deleted
+ * project must not crash the poller.
+ */
+function ownerUserId(row: {
+  room?: { project?: { userId?: string } } | null;
+}): string | null {
+  return row.room?.project?.userId ?? null;
+}
+
 export async function pollInpaintStatus(requestId: string): Promise<InpaintStatusResult> {
   const inpaintRequest = await prisma.inpaintRequest.findUnique({
     where: { id: requestId },
@@ -491,7 +521,11 @@ export async function pollInpaintStatus(requestId: string): Promise<InpaintStatu
         // the client polls a phantom job forever and the editor's
         // button is permanently disabled (#1187 follow-up).
         if (isInferenceRequestGone(resultError)) {
-          return await markRowTerminalAndReturnError(requestId);
+          return await markRowTerminalAndReturnError(
+            requestId,
+            ownerUserId(inpaintRequest),
+            inpaintRequest.status
+          );
         }
         console.error(
           JSON.stringify({ event: "inpaint_result_fetch_failed", requestId }),
@@ -588,9 +622,18 @@ export async function pollInpaintStatus(requestId: string): Promise<InpaintStatu
     if (recovered.kind === "status") {
       statusResponse = recovered.statusResponse;
     } else if (recovered.kind === "result") {
-      return await finishCompletedJob(requestId, recovered.payload);
+      return await finishCompletedJob(
+        requestId,
+        recovered.payload,
+        ownerUserId(inpaintRequest),
+        inpaintRequest.status
+      );
     } else {
-      return await markRowTerminalAndReturnError(requestId);
+      return await markRowTerminalAndReturnError(
+        requestId,
+        ownerUserId(inpaintRequest),
+        inpaintRequest.status
+      );
     }
   }
 
@@ -601,6 +644,14 @@ export async function pollInpaintStatus(requestId: string): Promise<InpaintStatu
     } catch (recordError) {
       console.error(JSON.stringify({ event: "inpaint_error_record_failed", requestId }), recordError);
     }
+    // Issue #1421: the provider reported the job as failed — no result
+    // exists, so the reserved quota unit goes back to the user.
+    await releaseInpaintQuotaReservation({
+      userId: ownerUserId(inpaintRequest),
+      requestId,
+      reason: "provider_reported_error",
+      previousStatus: inpaintRequest.status,
+    });
     return { status: "ERROR", imageUrl: null, persisted: false };
   }
 
@@ -632,11 +683,20 @@ export async function pollInpaintStatus(requestId: string): Promise<InpaintStatu
       // as a status-phase 404: mark the row ERROR and return
       // terminal.
       if (isInferenceRequestGone(resultError)) {
-        return await markRowTerminalAndReturnError(requestId);
+        return await markRowTerminalAndReturnError(
+          requestId,
+          ownerUserId(inpaintRequest),
+          inpaintRequest.status
+        );
       }
       return { status: "retryable", imageUrl: null, persisted: false };
     }
-    return await finishCompletedJob(requestId, resultPayload);
+    return await finishCompletedJob(
+      requestId,
+      resultPayload,
+      ownerUserId(inpaintRequest),
+      inpaintRequest.status
+    );
   }
 
   return { status: "retryable", imageUrl: null, persisted: false };
@@ -652,7 +712,9 @@ export async function pollInpaintStatus(requestId: string): Promise<InpaintStatu
  */
 async function finishCompletedJob(
   requestId: string,
-  resultPayload: RawInpaintOutput
+  resultPayload: RawInpaintOutput,
+  userId: string | null,
+  previousStatus: string | null
 ): Promise<InpaintStatusResult> {
   // Provider-neutral: fal's { images: [{ url }] } and Replicate's
   // url / [url1, url2] both reduce to the first URL (#1199).
@@ -711,6 +773,21 @@ async function finishCompletedJob(
       recordError
     );
   });
+  // Issue #1421: the row lands in PERSISTENCE_FAILED — no DURABLE result
+  // exists for the user (the provider URL is temporary and the upload
+  // failed), so the reserved quota unit is released through the central
+  // helper. The row can still complete later (the #687 retry path), in
+  // which case the work is delivered on a released unit — the
+  // conservative direction for the user, and the issue's rule: a
+  // reservation is released on every path that yields no durable result.
+  if (userId) {
+    await releaseInpaintQuotaReservation({
+      userId,
+      requestId,
+      reason: "persistence_failed",
+      previousStatus,
+    });
+  }
   return {
     status: "completed",
     imageUrl: falImageUrl,
