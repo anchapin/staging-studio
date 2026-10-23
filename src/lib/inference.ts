@@ -210,6 +210,39 @@ export interface InferenceClient {
     logicalModel: LogicalModel,
     requestId: string
   ): Promise<InferenceResultResult<T>>;
+
+  /**
+   * OPTIONAL: cancel a job the app can no longer map to a durable
+   * result (issue #1421).
+   *
+   * Used by the inpaint route's post-submit write-failure path: the
+   * provider accepted (and billed) the job, but the DB write failed, so
+   * the result would be invisible — cancelling upstream is the only way
+   * to stop the money.
+   *
+   * Providers WITHOUT a cancel API simply do not implement this method
+   * (the interface member is optional). Callers must therefore treat a
+   * missing `cancel` as "no cancel possible" and record the provider
+   * cost as a known-cost write-off instead of crashing.
+   */
+  cancel?(
+    logicalModel: LogicalModel,
+    requestId: string
+  ): Promise<InferenceCancelResult>;
+}
+
+/**
+ * Outcome of a provider-side cancel attempt (issue #1421).
+ *
+ * `cancelled: false` does NOT mean the attempt failed — it can also
+ * mean the provider has no cancellable job (e.g. a synchronous API that
+ * already completed and was billed). `reason` explains which.
+ */
+export interface InferenceCancelResult {
+  /** True when the provider confirmed the job was cancelled. */
+  cancelled: boolean;
+  /** Machine-readable explanation (logged for cost accounting). */
+  reason: string;
 }
 
 // ─── Provider-agnostic 404 detection ───────────────────────────────────────
