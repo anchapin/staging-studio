@@ -1,6 +1,7 @@
 # LensErase / SERO / ReState evaluation for the de-clutter step
 
 **Issue:** [#1445](https://github.com/anchapin/staging-studio/issues/1445) — Evaluate LensErase / SERO / ReState for the de-clutter step
+**See also:** [`docs/one-step-editing-evaluation.md`](one-step-editing-evaluation.md) — [#1444](https://github.com/anchapin/staging-studio/issues/1444), ER-Chord / PreciseEdit one-step editing (same axes, same evidence rules)
 **Date:** 2026-10-16
 **Status:** Research-only (no code changes in this issue).
 **Labels:** `inpainting`, `research`
