@@ -486,6 +486,7 @@ const EXPLICIT_CLASSIFICATIONS: ReadonlyArray<{
 const MUTATING_ROUTE_SNAPSHOT: ReadonlyArray<string> = [
   "src/app/api/export-pdf/route.ts",
   "src/app/api/generate-copy/route.ts",
+  "src/app/api/inpaint/[requestId]/conservation/route.ts",
   "src/app/api/inpaint/route.ts",
   "src/app/api/inpaint/webhook/route.ts",
   "src/app/api/label-instances/route.ts",
@@ -520,6 +521,9 @@ const SEAM_SNAPSHOT: Readonly<Record<string, ReadonlyArray<string>>> = {
   "src/app/api/generate-copy/route.ts": [
     "api-auth-ownership#src/lib/generate-copy-service.ts#requireProjectOwnershipOrThrow",
     "api-auth-session#src/lib/generate-copy-service.ts#getAuthedPrismaUser",
+  ],
+  "src/app/api/inpaint/[requestId]/conservation/route.ts": [
+    "api-auth-session#src/app/api/inpaint/[requestId]/conservation/route.ts#getAuthedPrismaUser",
   ],
   "src/app/api/inpaint/route.ts": [
     "api-auth-session#src/app/api/inpaint/route.ts#getAuthedPrismaUser",
