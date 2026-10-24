@@ -20,6 +20,7 @@ import {
 } from "@/lib/multi-select-batch";
 import { type DeclutterIntensity } from "@/lib/holistic-prompt";
 import { generateThumbnailFromUrl } from "@/lib/inpaint-thumbnail";
+import { measureSceneConservation } from "@/lib/edit-conservation-measure";
 import { saveInpaintVersion } from "@/app/actions/inpaint-versions";
 
 /** Issue #1362b (Stage B): AI guidance parameters shared by every
@@ -116,6 +117,77 @@ export function useInpaintRuns({
   // pending-request props) change while a run is in flight.
   const runSourceRef = useRef<InpaintSource>(pendingSource ?? source);
 
+  // Issue #1446: the pre-edit frame and the edit mask of the CURRENT run,
+  // captured at submit time. The staged-output QA (the ABACUS-style
+  // scene-conservation check) needs both to measure how much of the frame
+  // changed OUTSIDE the mask — and the editor rebases onto the result
+  // right after the completion, so they cannot be read from props later.
+  const runMeasurementRef = useRef<{
+    sourceUrl: string;
+    maskUrl: string;
+  } | null>(null);
+
+  /**
+   * Issue #1446: run the ABACUS-style edit QA for a completed edit.
+   *
+   * The browser owns the pixel measurement (the server has no pixel
+   * access to the staged images), so the pre-edit frame, the staged
+   * result and the run's mask are measured here and posted to the QA
+   * endpoint, which returns advisory warnings.
+   *
+   * ADVISORY ONLY: a measurement failure (image not loadable, no mask,
+   * no request id) is an explicit no-op, and the returned warnings are
+   * logged — never acted on. The edit's outcome never depends on them.
+   */
+  const reportEditConservation = useCallback(
+    async (resultImageUrl: string, requestId?: string) => {
+      const measurement = runMeasurementRef.current;
+      if (!requestId || !measurement) return;
+      try {
+        const measurements = await measureSceneConservation({
+          referenceUrl: measurement.sourceUrl,
+          candidateUrl: resultImageUrl,
+          maskDataUrl: measurement.maskUrl,
+        });
+        // No measurement ⇒ no data ⇒ nothing to check (explicit no-op).
+        if (!measurements) return;
+
+        const response = await fetch(
+          `/api/inpaint/${encodeURIComponent(requestId)}/conservation`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              regions: {
+                before: measurements.before,
+                after: measurements.after,
+              },
+              mask: measurements.mask,
+            }),
+          }
+        );
+        if (!response.ok) return;
+        const body = (await response.json()) as { qualityWarnings?: string[] };
+        const warnings = Array.isArray(body.qualityWarnings)
+          ? body.qualityWarnings
+          : [];
+        if (warnings.length > 0) {
+          console.warn(
+            JSON.stringify({
+              event: "edit_conservation_advisory",
+              requestId,
+              warnings,
+            })
+          );
+        }
+      } catch {
+        // Advisory only: a broken QA path must never surface as a failed
+        // edit. The completion already happened — nothing to undo here.
+      }
+    },
+    []
+  );
+
   // Issue #203: the status hook routes success/failure through these
   // callbacks, and `start()` itself never throws — so batch steps report
   // outcomes through refs. While a per-object batch is active, the generic
@@ -123,7 +195,7 @@ export function useInpaintRuns({
   // and failures are captured for the panel's retry affordance instead of
   // the toast's own single-step retry.
   const { isProcessing, statusText, start, retryPoll } = useInpaintStatus({
-    onCompleted: (resultImageUrl, persisted) => {
+    onCompleted: (resultImageUrl, persisted, requestId) => {
       // Issue #687: `persisted: false` means the completion carries an
       // expiring fal CDN URL — never write it into the room variant slot
       // (onInpaintComplete) or an InpaintVersion row (saveInpaintVersion);
