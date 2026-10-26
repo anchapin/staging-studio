@@ -1,6 +1,13 @@
 # Mask erosion / feather spike (issue #1457)
 
-Status: harness helper landed, image comparison not yet run.
+Status: helper landed. Image comparison NOT run, and not runnable as designed (see next section).
+
+## Finding: the provider currently ignores the mask
+
+On the Alibaba path, `src/lib/alibaba-adapter.ts` sends only `[{ image }, { text }]` plus `strength`/`seed`/`size` to DashScope. `maskUrl` is never read (`src/lib/inpaint-submit.ts` notes "Alibaba ignores `maskUrl` because its endpoint is instruction-mode only"). So dilating, eroding or feathering the mask cannot change the model output today, and the A/B below would compare identical requests. The protocol is kept for reference.
+
+Erosion/feathering only matters if a post-composite step is added: keep original pixels outside the mask and paste generated pixels inside it with an eroded/feathered alpha edge. That is the proposed follow-up; one generated image per room is enough to compare edge settings, so it needs almost no provider spend.
+
 
 ## Question
 
