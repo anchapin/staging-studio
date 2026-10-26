@@ -20,18 +20,18 @@ The middleware-protected post-login landing page (`src/app/dashboard/page.tsx`);
 
 ### 4. Project intake — `/projects` and `/projects/new`
 
-`/projects` lists staging jobs. `/projects/new` is the intake form — property address, client name, target buyer, and a staging aesthetic chosen from curated staging packages (`src/components/packages/staging-package-card.tsx`, validated by `lib/staging-packages-schema.ts`) — which creates a `Project` through the ownership-checked server action in `src/app/actions/project.ts` and lands on the new project's workspace. A REST surface for projects and rooms also exists under `src/app/api/projects/` (including nested `[id]` and `[id]/rooms/[roomId]` handlers).
+`/projects` lists staging jobs. `/projects/new` is the intake form — property address, client name, target buyer, and a staging aesthetic chosen from curated staging packages (`src/components/packages/staging-package-card.tsx`, validated by `src/lib/staging-packages-schema.ts`) — which creates a `Project` through the ownership-checked server action in `src/app/actions/project.ts` and lands on the new project's workspace. A REST surface for projects and rooms also exists under `src/app/api/projects/` (including nested `[id]` and `[id]/rooms/[roomId]` handlers).
 
 ### 5. Staging workspace — `/projects/[id]`
 
-The core editor, one workspace per property with rooms as the unit of work. The per-room studio lives at `/projects/[id]/rooms` (refinement continues on `/projects/[id]/refine`, `?room=`-scoped). The UI lives in `src/components/canvas/`; server actions in `src/app/actions/` (`room.ts`, `room-photos.ts`, `room-batch.ts`) own all mutations. Per room:
+The core editor, one workspace per property with rooms as the unit of work. The per-room studio lives at `/projects/[id]/rooms` (refinement continues on `/projects/[id]/refine`, `?room=`-scoped). The per-room editor lives in `src/components/edit-room/` (`EditRoomStudio.tsx`, `CanvasStage.tsx`, `MaskLayer.tsx`, `Inspector.tsx`, `VersionStrip.tsx`, …), with shared staging chrome in `src/components/canvas/`; server actions in `src/app/actions/` (`room.ts`, `room-photos.ts`, `room-batch.ts`) own all mutations. Per room:
 
 - **Batch room upload** — create every room of a property in one pass (`batch-room-upload.tsx` → `createRoomsBatch` / `getBatchRoomUploadUrls` in `room-batch.ts`), with AI room-type detection from the uploaded photos (`detectBatchRoomTypes`) and bulk aesthetic assignment from the room matrix (`room-batch-card-matrix.tsx` → `bulkUpdateRoomAesthetic`).
 - **Before-photo upload with client-side compression** — images are compressed in the browser (`browser-image-compression` in `room-canvas.tsx`) and stored in Supabase Storage via `src/app/actions/room-photos.ts`, into either of two variant slots.
-- **Brush-mask AI staging** — paint a mask over the region to restage (`inpaint-mask-canvas.tsx`) and run fal.ai FLUX.1 Fill inpainting (`POST /api/inpaint`). Each run is persisted as an `InpaintRequest` row, so queued jobs survive serverless deadlines and page refreshes resume polling (`GET /api/inpaint/[requestId]/status` + `use-inpaint-status.ts`).
-- **SAM auto-segmentation** — masks don't have to be painted by hand: `POST /api/segment` turns a click on the photo into a furnishing-accurate mask (fal.ai SAM, model id in `lib/segment-mask.ts`, results cached by image hash in `lib/segment-cache.ts`), and `POST /api/segment/furnishings` returns the furnishings SAM 3.1 detects in the room. Both calls are synchronous, daily-capped routes (`DAILY_SEGMENT_LIMIT` via `lib/api-quota.ts`).
-- **Vision label instances** — `POST /api/label-instances` runs GPT-4o-mini vision over the photo and persists per-furnishing labels as `VisionLabel` rows (`lib/vision-labels.ts`); the inspector (`inspector-collapsed-rail.tsx`, hit-testing via `lib/instance-hit-test.ts`) makes each labeled furnishing clickable, so you can select exactly the pieces to restage. Capped by `DAILY_LABEL_LIMIT`.
-- **Inpaint version history** — staged results are saved as restorable `InpaintVersion` snapshots (`src/app/actions/inpaint-versions.ts`), browsed and restored from `version-history-panel.tsx`, so refinements never destroy an earlier take.
+- **Brush-mask AI staging** — paint a mask over the region to restage (mask painting lives in `src/components/edit-room/MaskLayer.tsx`) and run Alibaba DashScope Qwen-Image inpainting (`POST /api/inpaint`; the `qwen-image-2.1-pro` model is reached through `src/lib/alibaba-adapter.ts`). Each run is persisted as an `InpaintRequest` row, so queued jobs survive serverless deadlines and page refreshes resume polling (`GET /api/inpaint/[requestId]/status` + `src/components/canvas/use-inpaint-status.ts`).
+- **SAM auto-segmentation** — masks don't have to be painted by hand: `POST /api/segment/furnishings` returns the furnishings SAM 3.1 detects in the room (inference + mask fetch in `src/lib/segment-furnishings-service.ts`, results cached by image hash in `src/lib/segment-cache.ts`), and the detected objects drive the inspector's object list (`src/components/edit-room/detected-object-list.tsx`) and the concept chips. It is a synchronous, daily-capped route (`DAILY_SEGMENT_LIMIT` via `src/lib/api-quota.ts`).
+- **Vision label instances** — `POST /api/label-instances` runs GPT-4o-mini vision over the photo and persists per-furnishing labels as `VisionLabel` rows (`src/lib/vision-labels.ts`); the inspector (`src/components/edit-room/Inspector.tsx`, hit-testing via `src/lib/instance-hit-test.ts`) makes each labeled furnishing clickable, so you can select exactly the pieces to restage. Capped by `DAILY_LABEL_LIMIT`.
+- **Inpaint version history** — staged results are saved as restorable `InpaintVersion` snapshots (`src/app/actions/inpaint-versions.ts`), browsed and restored from the editor's `VersionStrip.tsx` (`src/components/edit-room/VersionStrip.tsx`), so refinements never destroy an earlier take.
 - **Two selectable variants per room** — each room keeps two before/after pairs (`variant-thumbnail-strip.tsx`, `comparison-slider.tsx`) and a selected-variant index controls which one reaches the PDF.
 - **AI room copy** — freeform staging directives are expanded by GPT-4o-mini through the Vercel AI SDK (`generate-copy-form.tsx` → `POST /api/generate-copy`) into an observed challenge, a staging recommendation, buyer-psychology notes, and a prioritized staging checklist.
 
@@ -41,11 +41,11 @@ The interactive lookbook assembles the client-facing document from `src/componen
 
 ### 7. Client sign-off and PDF export — `/preview/[id]`
 
-`POST /api/export-pdf` renders the lookbook with Browserless.io, signing a short-lived preview token (`lib/preview-token.ts`) so the cloud browser can fetch the cookie-less print page at `/preview/[id]` without a session. The same token gates client digital sign-off: on the sign-off page the client draws a signature (`signature-canvas.tsx`) and `POST /api/sign-project` persists it to the project (`clientSignature` PNG data URL + timestamp; already-signed projects are refused) — the client never needs a login.
+`POST /api/export-pdf` renders the lookbook with Browserless.io, signing a short-lived preview token (`src/lib/preview-token.ts`) so the cloud browser can fetch the cookie-less print page at `/preview/[id]` without a session. The same token gates client digital sign-off: on the sign-off page the client draws a signature (`signature-canvas.tsx`) and `POST /api/sign-project` persists it to the project (`clientSignature` PNG data URL + timestamp; already-signed projects are refused) — the client never needs a login.
 
 ### Domain model
 
-`prisma/schema.prisma` chains `User → Project → Room → InpaintRequest` with cascading deletes: a firm (`User`, with branding and a `darkMode` preference) owns staging jobs (`Project` — address, client, target buyer, staging aesthetic/package/directives, buyer-demographics JSON, and the ROI metrics trio), each job holds rooms, and each room holds its two before/after variant pairs, selected variant, AI copy fields, and checklist JSON — plus the inpaint queue requests that track one fal.ai job each (status + durable result URL), the `InpaintVersion` snapshots that version history restores from, and the `SelectionLog` instance-toggle telemetry that feeds the training corpus, all cascade-deleted with the room. Projects also carry client-facing `MaterialSwatch` and `ProcurementItem` rows (cascade-deleted with the project) alongside the client's digital signature fields — `clientSignature` PNG data URL, `clientSignatureStatus` moving `Pending → Signed`, and `clientSignatureTimestamp` recorded at signing. Detected furnishings persist as `VisionLabel` rows keyed by image hash (unique on hash + concept + instance index, with score); `VisionLabel` has no owner relation and survives deletes.
+`prisma/schema.prisma` chains `User → Project → Room → InpaintRequest` with cascading deletes: a firm (`User`, with branding and a `darkMode` preference) owns staging jobs (`Project` — address, client, target buyer, staging aesthetic/package/directives, buyer-demographics JSON, and the ROI metrics trio), each job holds rooms, and each room holds its two before/after variant pairs, selected variant, AI copy fields, and checklist JSON — plus the inpaint queue requests that track one Alibaba DashScope job each (status + durable result URL), the `InpaintVersion` snapshots that version history restores from, and the `SelectionLog` instance-toggle telemetry that feeds the training corpus, all cascade-deleted with the room. Projects also carry client-facing `MaterialSwatch` and `ProcurementItem` rows (cascade-deleted with the project) alongside the client's digital signature fields — `clientSignature` PNG data URL, `clientSignatureStatus` moving `Pending → Signed`, and `clientSignatureTimestamp` recorded at signing. Detected furnishings persist as `VisionLabel` rows keyed by image hash (unique on hash + concept + instance index, with score); `VisionLabel` has no owner relation and survives deletes.
 
 ### Route → source map
 
@@ -60,7 +60,7 @@ The interactive lookbook assembles the client-facing document from `src/componen
 | `/settings` | Firm branding and lookbook page templates | `src/app/(dashboard)/settings/page.tsx` |
 | `/projects` | Project list | `src/app/(dashboard)/projects/page.tsx` |
 | `/projects/new` | Project intake form | `src/app/(dashboard)/projects/new/page.tsx`, `src/app/actions/project.ts` |
-| `/projects/[id]` | Staging workspace (rooms, masks, segmentation, variants, version history, copy) | `src/app/(dashboard)/projects/[id]/page.tsx`, `src/components/canvas/`, `src/app/actions/`, `src/app/api/inpaint/`, `src/app/api/segment/`, `src/app/api/label-instances/`, `src/app/api/generate-copy/` |
+| `/projects/[id]` | Staging workspace (rooms, masks, segmentation, variants, version history, copy) | `src/app/(dashboard)/projects/[id]/page.tsx`, `src/components/edit-room/`, `src/components/canvas/`, `src/app/actions/`, `src/app/api/inpaint/`, `src/app/api/segment/furnishings/`, `src/app/api/label-instances/`, `src/app/api/generate-copy/` |
 | `/projects/[id]/setup` | Project intake (first workflow-stepper step) | `src/app/(dashboard)/projects/[id]/setup/page.tsx` |
 | `/projects/[id]/rooms` | Per-room staging studio | `src/app/(dashboard)/projects/[id]/rooms/page.tsx` |
 | `/projects/[id]/refine` | Staged-result refinement (`?room=`-scoped) | `src/app/(dashboard)/projects/[id]/refine/page.tsx` |
@@ -75,7 +75,8 @@ The interactive lookbook assembles the client-facing document from `src/componen
 - **Supabase** (Postgres + Storage + Auth)
 - **Prisma** ORM
 - **Vercel AI SDK + GPT-4o-mini** — structured copywriting and vision labeling
-- **fal.ai** — FLUX.1 Fill inpainting + SAM segmentation
+- **Alibaba Cloud DashScope** — Qwen-Image inpainting (`qwen-image-2.1-pro`)
+- **fal.ai** — SAM 3.1 segmentation (furnishings detection)
 - **Browserless.io** — PDF export
 
 ## Getting Started
@@ -124,7 +125,7 @@ The Vercel CLI's `env` subcommands look like a free source of truth for the keys
 ## Development
 
 ```bash
-npm run lint        # eslint .
+npm run lint        # oxlint .
 npm run typecheck   # tsc --noEmit
 npm test            # vitest run (tests live in tests/)
 npm run e2e         # Playwright browser suite (tests/e2e) — see below
@@ -136,7 +137,7 @@ npm run db:studio   # Prisma Studio
 
 `npm run e2e` runs a hermetic Playwright harness (`tests/e2e/`) against a production build of the app. It covers the staging flows the PoC browser driver could not reliably automate — real trusted mouse events painting the mask canvas (asserted by sampling white coverage in the actual `POST /api/inpaint` body), `setInputFiles` uploads (asserted byte-identical against what storage received), and a scripted rehearsal drill (login → project → upload → inpaint → copy → export) plus the #163 failure drills (terminal inpaint error, export outage → error reveal with retry).
 
-**Hermeticity:** no real credentials or paid services. A local mock Supabase (`tests/e2e/mock-supabase.ts`) serves GoTrue auth (self-signed JWTs) and Storage (hashes every stored object); Postgres runs in a disposable Docker container that global setup creates, pushes the schema to, and seeds with fixed rows; fal.ai, OpenAI, and Browserless are simulated by intercepting their API routes at the browser network layer, so the dummy API keys are never exercised.
+**Hermeticity:** no real credentials or paid services. A local mock Supabase (`tests/e2e/mock-supabase.ts`) serves GoTrue auth (self-signed JWTs) and Storage (hashes every stored object); Postgres runs in a disposable Docker container that global setup creates, pushes the schema to, and seeds with fixed rows; the upstreams (DashScope, fal.ai, OpenAI, and Browserless) are simulated by intercepting their API routes at the browser network layer, so the dummy API keys are never exercised.
 
 **Requirements:** Docker (for the throwaway Postgres) and Playwright browsers (`npx playwright install chromium`).
 
