@@ -12,9 +12,13 @@
  * a `Uint8Array` where 1 = painted (regenerated), 0 = unpainted, indexed
  * `y * width + x`. Pure: always returns a new grid and never mutates the
  * input.
+ *
+ * Erosion itself lives in `mask-erosion.ts` (issue #1457), the inverse of
+ * the dilation; this module reuses it for the closing step below.
  */
 
 import { dilateMaskGrid } from "./mask-dilation";
+import { erodeMaskGrid } from "./mask-erosion";
 
 /**
  * Maximum distance, in mask-canvas grid pixels, between two detected
@@ -109,39 +113,6 @@ export interface CloseRegionResult {
   mask: Uint8Array;
   /** Number of painted (1) cells in the output grid. */
   paintedCount: number;
-}
-
-/**
- * Erodes a binary mask grid with a circular (Euclidean) kernel: a cell
- * stays painted only when every in-grid cell within `radius` of it is
- * painted. Implemented as the complement of dilating the complement
- * (`erode(A) = ¬dilate(¬A)`), which reuses `dilateMaskGrid`'s kernel and
- * bounds clamping: the result is 1 exactly where the whole in-grid disc
- * fits inside the paint. Internal building block of {@link closeRegion};
- * not exported — callers compose, they don't erode directly.
- */
-function erodeMaskGrid(
-  grid: Uint8Array,
-  width: number,
-  height: number,
-  radius: number
-): { mask: Uint8Array; paintedCount: number } | null {
-  const total = width * height;
-  const complement = new Uint8Array(total);
-  for (let i = 0; i < total; i++) complement[i] = grid[i] === 1 ? 0 : 1;
-
-  const dilatedComplement = dilateMaskGrid(complement, width, height, radius);
-  if (!dilatedComplement) return null;
-
-  const mask = new Uint8Array(total);
-  let paintedCount = 0;
-  for (let i = 0; i < total; i++) {
-    if (dilatedComplement.mask[i] === 0) {
-      mask[i] = 1;
-      paintedCount++;
-    }
-  }
-  return { mask, paintedCount };
 }
 
 /**
