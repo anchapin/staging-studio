@@ -36,7 +36,6 @@
  */
 
 import { register } from "node:module";
-import { pathToFileURL } from "node:url";
 import { readFileSync } from "node:fs";
 
 // ─── ESM resolver shim ──────────────────────────────────────────────────────
@@ -75,11 +74,13 @@ const { maskGridFromAlphaPixels, maskGridFromPixels } = await import(
   "../src/lib/mask-flood-fill.ts"
 );
 // src/lib/mask-coverage.ts → estimateMaskCoverage() / isMaskedPixel()
-const { estimateMaskCoverage, isMaskedPixel } = await import(
-  "../src/lib/mask-coverage.ts"
-);
+const { estimateMaskCoverage } = await import("../src/lib/mask-coverage.ts");
 
-const results: Array<{ probe: string; status: "PASS" | "FAIL" | "INFO"; detail: string }> = [];
+const results: Array<{
+  probe: string;
+  status: "PASS" | "FAIL" | "INFO";
+  detail: string;
+}> = [];
 function pass(probe: string, detail: string): void {
   results.push({ probe, status: "PASS", detail });
 }
@@ -183,7 +184,8 @@ function info(probe: string, detail: string): void {
   // Coverage of the same buffer under the repo's own estimator.
   const coverage = estimateMaskCoverage(rgba, W, H);
   const alphaMass =
-    rgba.reduce((acc, _v, i) => (i % 4 === 3 ? acc + rgba[i] : acc), 0) / (255 * W * H);
+    rgba.reduce((acc, _v, i) => (i % 4 === 3 ? acc + rgba[i] : acc), 0) /
+    (255 * W * H);
   info(
     "P2c coverage vs. alpha mass (alpha ramp)",
     `estimateMaskCoverage() = ${(coverage * 100).toFixed(1)}% of the tile is "masked"; ` +
@@ -215,7 +217,12 @@ function info(probe: string, detail: string): void {
 // ---------------------------------------------------------------------------
 // Probe 3 — CPU cost of the alpha plumbing (the non-neural part of a stage)
 // ---------------------------------------------------------------------------
-function boxBlurAlpha(alpha: Float32Array, w: number, h: number, radius: number): Float32Array {
+function boxBlurAlpha(
+  alpha: Float32Array,
+  w: number,
+  h: number,
+  radius: number,
+): Float32Array {
   // Separable box blur, 3 passes (H, V, H) — the classic cheap "feather".
   const tmp = new Float32Array(alpha.length);
   const out = new Float32Array(alpha.length);
@@ -303,7 +310,7 @@ function boxBlurAlpha(alpha: Float32Array, w: number, h: number, radius: number)
 // Probe 4 — what survives the binarisation the provider path performs
 // ---------------------------------------------------------------------------
 {
-  // A translucent object at 40% opacity across a 20% of the canvas region.
+  // A translucent object at 40% opacity across a 4% of the canvas region.
   const W = 200;
   const H = 200;
   const rgba = new Uint8ClampedArray(W * H * 4);
@@ -311,7 +318,8 @@ function boxBlurAlpha(alpha: Float32Array, w: number, h: number, radius: number)
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       const o = (y * W + x) * 4;
-      const inside = x >= region.x0 && x < region.x1 && y >= region.y0 && y < region.y1;
+      const inside =
+        x >= region.x0 && x < region.x1 && y >= region.y0 && y < region.y1;
       rgba[o] = 255;
       rgba[o + 1] = 255;
       rgba[o + 2] = 255;
@@ -337,7 +345,9 @@ function boxBlurAlpha(alpha: Float32Array, w: number, h: number, radius: number)
 // ---------------------------------------------------------------------------
 // Report
 // ---------------------------------------------------------------------------
-console.log("soft-matte alpha probe — issue #1458 (offline, no API, no weights)\n");
+console.log(
+  "soft-matte alpha probe — issue #1458 (offline, no API, no weights)\n",
+);
 for (const r of results) {
   console.log(`[${r.status}] ${r.probe}`);
   console.log(`       ${r.detail}\n`);
