@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { MERGE_PROXIMITY_PX, closeRegion, fillHoles } from "@/lib/mask-postprocess";
+import { MERGE_PROXIMITY_PX, closeRegion, erodeRegion, fillHoles } from "@/lib/mask-postprocess";
 
 /** Builds a Uint8Array grid from rows of '0'/'1' characters (readable fixtures). */
 function rows(...lines: string[]): { grid: Uint8Array; width: number; height: number } {
@@ -196,5 +196,41 @@ describe("closeRegion", () => {
 describe("MERGE_PROXIMITY_PX", () => {
   it("is pinned at 5 grid pixels (issue #252 D2)", () => {
     expect(MERGE_PROXIMITY_PX).toBe(5);
+  });
+});
+
+describe("erodeRegion (issue #1457)", () => {
+  const block = () =>
+    rows("0000000", "0111110", "0111110", "0111110", "0111110", "0111110", "0000000");
+
+  it("radius 0 returns an equal copy, not the same array", () => {
+    const { grid, width, height } = block();
+    const out = erodeRegion(grid, width, height, 0);
+    expect(out).not.toBeNull();
+    expect(out!.mask).not.toBe(grid);
+    expect(Array.from(out!.mask)).toEqual(Array.from(grid));
+    expect(out!.paintedCount).toBe(25);
+  });
+
+  it("radius 1 shrinks the block by one cell on every side", () => {
+    const { grid, width, height } = block();
+    const out = erodeRegion(grid, width, height, 1);
+    expect(out!.paintedCount).toBeLessThan(25);
+    // The center survives, the former edge ring does not.
+    expect(out!.mask[3 * width + 3]).toBe(1);
+    expect(out!.mask[1 * width + 1]).toBe(0);
+    expect(out!.mask[3 * width + 1]).toBe(0);
+  });
+
+  it("does not mutate the input grid", () => {
+    const { grid, width, height } = block();
+    const before = Array.from(grid);
+    erodeRegion(grid, width, height, 2);
+    expect(Array.from(grid)).toEqual(before);
+  });
+
+  it("returns null for malformed geometry", () => {
+    expect(erodeRegion(new Uint8Array(5), 2, 2, 0)).toBeNull();
+    expect(erodeRegion(new Uint8Array(4), 0, 4, 1)).toBeNull();
   });
 });

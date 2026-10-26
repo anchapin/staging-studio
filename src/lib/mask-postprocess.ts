@@ -118,7 +118,7 @@ export interface CloseRegionResult {
  * (`erode(A) = ¬dilate(¬A)`), which reuses `dilateMaskGrid`'s kernel and
  * bounds clamping: the result is 1 exactly where the whole in-grid disc
  * fits inside the paint. Internal building block of {@link closeRegion};
- * not exported — callers compose, they don't erode directly.
+ * wrapped by the public {@link erodeRegion} (issue #1457).
  */
 function erodeMaskGrid(
   grid: Uint8Array,
@@ -166,4 +166,35 @@ export function closeRegion(
   if (!eroded) return null;
 
   return { mask: eroded.mask, paintedCount: eroded.paintedCount };
+}
+
+/**
+ * Morphological erosion of a mask region by `radius` (issue #1457 spike).
+ *
+ * Opt-in, default-off: nothing in the inpaint path calls this yet. The
+ * current pipeline dilates masks (issue #180, `DEFAULT_MASK_EXPANSION_RADIUS`)
+ * so the model regenerates the bezel/frame rim. CorridorKey's guidance is
+ * the opposite for matting hints (erode, since a model can fill in an
+ * eroded edge but cannot subtract an over-expanded one). This helper lets
+ * the experiment in `docs/experiments/mask-erosion-spike.md` sweep erosion
+ * radii on the same mask grids. A radius of 0 is a passthrough copy.
+ * Returns null for malformed geometry, mirroring `dilateMaskGrid`.
+ */
+export function erodeRegion(
+  grid: Uint8Array,
+  width: number,
+  height: number,
+  radius: number
+): CloseRegionResult | null {
+  if (radius <= 0) {
+    if (!Number.isInteger(width) || !Number.isInteger(height)) return null;
+    if (width <= 0 || height <= 0 || grid.length !== width * height) {
+      return null;
+    }
+    const copy = new Uint8Array(grid);
+    let paintedCount = 0;
+    for (let i = 0; i < copy.length; i++) if (copy[i] === 1) paintedCount++;
+    return { mask: copy, paintedCount };
+  }
+  return erodeMaskGrid(grid, width, height, radius);
 }
