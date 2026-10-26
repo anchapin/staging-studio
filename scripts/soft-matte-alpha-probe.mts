@@ -73,8 +73,10 @@ const { buildInpaintPayloadForActiveProvider } = await import(
 const { maskGridFromAlphaPixels, maskGridFromPixels } = await import(
   "../src/lib/mask-flood-fill.ts"
 );
-// src/lib/mask-coverage.ts → estimateMaskCoverage() / isMaskedPixel()
-const { estimateMaskCoverage } = await import("../src/lib/mask-coverage.ts");
+// src/lib/mask-coverage.ts → estimateMaskCoverage() / estimateMaskAlphaMass()
+const { estimateMaskCoverage, estimateMaskAlphaMass } = await import(
+  "../src/lib/mask-coverage.ts"
+);
 
 const results: Array<{
   probe: string;
@@ -183,9 +185,7 @@ function info(probe: string, detail: string): void {
 
   // Coverage of the same buffer under the repo's own estimator.
   const coverage = estimateMaskCoverage(rgba, W, H);
-  const alphaMass =
-    rgba.reduce((acc, _v, i) => (i % 4 === 3 ? acc + rgba[i] : acc), 0) /
-    (255 * W * H);
+  const alphaMass = estimateMaskAlphaMass(rgba, W, H);
   info(
     "P2c coverage vs. alpha mass (alpha ramp)",
     `estimateMaskCoverage() = ${(coverage * 100).toFixed(1)}% of the tile is "masked"; ` +
@@ -204,7 +204,7 @@ function info(probe: string, detail: string): void {
     uni[o + 3] = 102; // 40% opaque — below the 128 threshold
   }
   const uniCoverage = estimateMaskCoverage(uni, W, H);
-  const uniMass = 102 / 255;
+  const uniMass = estimateMaskAlphaMass(uni, W, H);
   info(
     "P2d uniform 40%-opaque tile",
     `estimateMaskCoverage() = ${(uniCoverage * 100).toFixed(1)}% "masked" while the ` +
