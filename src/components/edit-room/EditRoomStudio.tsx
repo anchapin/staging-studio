@@ -30,6 +30,12 @@ import { useRouter } from "next/navigation";
 
 import { resolveStageBlockedReason } from "@/lib/edit-room-blocked";
 import { resolveTargetSlot, type SlotId } from "@/lib/edit-room-scope";
+import {
+  buildDetectedObjects,
+  decodeMaskDataUrls,
+  type DecodedInstance,
+} from "@/lib/detection-boxes";
+import type { DetectedObject } from "@/components/edit-room/detected-object-list";
 
 import { CanvasStage } from "@/components/edit-room/CanvasStage";
 import { Inspector, type InspectorTab } from "@/components/edit-room/Inspector";
@@ -52,6 +58,111 @@ import { AutosaveController } from "@/lib/autosave-controller";
 import { saveListingCopy } from "@/app/actions/room-copy";
 
 const TOAST_AUTO_DISMISS_MS = 3200;
+
+/**
+ * Issue #1468 — the client endpoint that runs SAM 3.1 concept
+ * detection. It answers `{concept, maskDataUrls, scores}`; the masks
+ * are decoded client-side into percent bounding boxes (see
+ * `lib/detection-boxes.ts`).
+ */
+export const SEGMENT_FURNISHINGS_ENDPOINT = "/api/segment/furnishings";
+
+/**
+ * Copy for a detection request that failed (network error, non-2xx
+ * response, or an unreadable body). Mirrors the route's classified
+ * "unknown" error copy so the studio's toast reads the same as the
+ * API's own message.
+ */
+export const DETECTION_FAILED_MESSAGE =
+  "We couldn't detect furnishings in this photo. Please try again or use the brush tools.";
+
+/**
+ * Copy for a concept that legitimately matched nothing — an empty
+ * `maskDataUrls` is a valid response, not an error, but the user still
+ * needs to know why no object appeared.
+ */
+export function detectionEmptyMessage(concept: string): string {
+  return `We couldn't find any ${concept} in this photo.`;
+}
+
+/** The outcome of one concept-detection request. */
+export interface ConceptDetectionOutcome {
+  /** The detections derived from the response's masks (empty on failure). */
+  detections: DetectedObject[];
+  /** The toast message to show, or null when the detection succeeded. */
+  error: string | null;
+}
+
+/**
+ * Runs one concept detection and maps the response to the studio's
+ * detection list.
+ *
+ * Contract:
+ * - POSTs `{roomId, imageUrl, concept}` to `/api/segment/furnishings`;
+ * - decodes the response's `maskDataUrls` into binary grids and maps
+ *   them to percent boxes (ids `${concept}:${index}`);
+ * - NEVER returns the old hard-coded placeholder boxes: a failed or
+ *   empty response yields an empty detection list plus a toast
+ *   message.
+ *
+ * `fetchImpl` and `decode` are injectable so the flow can be pinned by
+ * a test without touching the live (paid) endpoint.
+ */
+export async function detectConceptObjects(params: {
+  roomId: string;
+  imageUrl: string;
+  concept: string;
+  fetchImpl?: typeof fetch;
+  decode?: (
+    maskDataUrls: ReadonlyArray<string>
+  ) => Promise<Array<DecodedInstance | null>>;
+}): Promise<ConceptDetectionOutcome> {
+  const { roomId, imageUrl, concept } = params;
+  const fetchImpl = params.fetchImpl ?? fetch;
+  const decode = params.decode ?? decodeMaskDataUrls;
+
+  let response: Response;
+  try {
+    response = await fetchImpl(SEGMENT_FURNISHINGS_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roomId, imageUrl, concept }),
+    });
+  } catch {
+    return { detections: [], error: DETECTION_FAILED_MESSAGE };
+  }
+
+  if (!response.ok) {
+    return { detections: [], error: DETECTION_FAILED_MESSAGE };
+  }
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    return { detections: [], error: DETECTION_FAILED_MESSAGE };
+  }
+
+  const maskDataUrls = Array.isArray(
+    (payload as { maskDataUrls?: unknown } | null)?.maskDataUrls
+  )
+    ? ((payload as { maskDataUrls: unknown[] }).maskDataUrls as unknown[]).filter(
+        (value): value is string => typeof value === "string"
+      )
+    : [];
+
+  if (maskDataUrls.length === 0) {
+    return { detections: [], error: detectionEmptyMessage(concept) };
+  }
+
+  const instances = await decode(maskDataUrls);
+  const detections = buildDetectedObjects(concept, instances);
+  if (detections.length === 0) {
+    return { detections: [], error: detectionEmptyMessage(concept) };
+  }
+  return { detections, error: null };
+}
+
 
 /** Fixed labels per the Magic Patterns design (Original photo / Variant A / Variant B). */
 const SLOT_LABELS: Record<SlotId, string> = {
@@ -238,6 +349,17 @@ export function EditRoomStudio({
   // callback which flows through the AutosaveController (2 s idle) to
   // `saveRoomMetadata` — same shape as `rawDirectives` (#496).
   const [activeTab, setActiveTab] = useState<InspectorTab>("stage");
+
+  // Issue #1468 — the studio's detections come from the REAL
+  // `/api/segment/furnishings` response. Before this, the canvas and
+  // the objects list rendered two hard-coded placeholder boxes
+  // (`obj-1` / `obj-2`) for EVERY photo and concept. The list starts
+  // empty and is filled by the concept-submit handler below; a failed
+  // or empty response leaves it empty (with a toast), never the
+  // placeholders.
+  const [detections, setDetections] = useState<DetectedObject[]>([]);
+  const [isDetecting, setIsDetecting] = useState(false);
+
   const [strength, setStrength] = useState(initialFineTune?.strength ?? 50);
   const [expand, setExpand] = useState(initialFineTune?.expand ?? 12);
   const [seed, setSeed] = useState(initialFineTune?.seed ?? "");
@@ -590,6 +712,7 @@ export function EditRoomStudio({
       data-target-slot={targetSlot}
       data-compare={state.compare ? "true" : "false"}
       data-running={running === null ? "" : String(running)}
+      data-detecting={isDetecting ? "true" : "false"}
       data-mask-url={maskDataUrl === null ? "" : "set"}
       data-lookbook-slot={lookbookSlot}
       data-lookbook-pending={isLookbookPending ? "true" : "false"}
@@ -645,14 +768,7 @@ export function EditRoomStudio({
               concept={state.concept}
               selected={state.selected}
               onToggleObject={(id) => dispatch({ type: "TOGGLE_OBJECT", objectId: id })}
-              detections={
-                state.concept === null
-                  ? []
-                  : [
-                      { id: "obj-1", concept: state.concept, label: state.concept, box: { x: 49, y: 57, w: 31, h: 42 } },
-                      { id: "obj-2", concept: state.concept, label: `${state.concept} 2`, box: { x: 8, y: 58, w: 23, h: 27 } },
-                    ]
-              }
+              detections={detections}
               maskVersion={state.maskVersion}
               onMaskPainted={() => dispatch({ type: "MARK_MASK_PAINTED" })}
               onClearMask={() => dispatch({ type: "CLEAR_MASK" })}
@@ -715,24 +831,28 @@ export function EditRoomStudio({
           concept={state.concept}
           onConceptChange={(c) => dispatch({ type: "SET_CONCEPT", concept: c })}
           onConceptSubmit={(c) => {
-            // #1344 wires the real /api/segment/furnishings call;
-            // for now we set the concept so the chips reflect the
-            // typed value and the user sees the round-trip work.
+            // Issue #1468 — wire the real /api/segment/furnishings
+            // call: set the concept so the chips reflect the typed
+            // value, clear the previous detections, then fill the
+            // list from the real response. A failed/empty response
+            // leaves the list empty (with a toast) — never the old
+            // hard-coded placeholder boxes.
             dispatch({ type: "SET_CONCEPT", concept: c });
+            setDetections([]);
+            setIsDetecting(true);
+            void detectConceptObjects({ roomId, imageUrl, concept: c })
+              .then(({ detections: found, error }) => {
+                setDetections(found);
+                if (error) dispatch({ type: "SHOW_TOAST", message: error });
+              })
+              .finally(() => setIsDetecting(false));
           }}
           selected={state.selected}
           onToggleObject={(id) =>
             dispatch({ type: "TOGGLE_OBJECT", objectId: id })
           }
           onClearSelection={() => dispatch({ type: "CLEAR_SELECTION" })}
-          detections={
-            state.concept === null
-              ? []
-              : [
-                  { id: "obj-1", concept: state.concept, label: state.concept, box: { x: 49, y: 57, w: 31, h: 42 } },
-                  { id: "obj-2", concept: state.concept, label: `${state.concept} 2`, box: { x: 8, y: 58, w: 23, h: 27 } },
-                ]
-          }
+          detections={detections}
           hasMask={state.hasMask}
           onClearMask={() => dispatch({ type: "CLEAR_MASK" })}
           projectAesthetic={aesthetic}
