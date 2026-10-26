@@ -3,6 +3,7 @@ import {
   LOW_COVERAGE_WARNING_THRESHOLD,
   isMaskedPixel,
   estimateMaskCoverage,
+  estimateMaskAlphaMass,
   shouldWarnLowCoverage,
 } from "@/lib/mask-coverage";
 
@@ -84,6 +85,74 @@ describe("estimateMaskCoverage", () => {
     const B: [number, number, number, number] = [0, 0, 0, 255];
     const data = makeRgba([W, W, W, W, W, B, B, W, W, B, B, W, W, W, W, W]);
     expect(estimateMaskCoverage(data, 4, 4)).toBeCloseTo(12 / 16, 5);
+  });
+});
+
+describe("estimateMaskAlphaMass", () => {
+  const makeRgba = (pixels: Array<[number, number, number, number]>) =>
+    new Uint8ClampedArray(pixels.flat());
+
+  it("returns 1 for a fully opaque white buffer", () => {
+    const data = makeRgba([
+      [255, 255, 255, 255],
+      [255, 255, 255, 255],
+      [255, 255, 255, 255],
+      [255, 255, 255, 255],
+    ]);
+    expect(estimateMaskAlphaMass(data, 2, 2)).toBe(1);
+  });
+
+  it("returns 0 for a fully transparent buffer", () => {
+    const data = makeRgba([
+      [255, 255, 255, 0],
+      [255, 255, 255, 0],
+      [255, 255, 255, 0],
+      [255, 255, 255, 0],
+    ]);
+    expect(estimateMaskAlphaMass(data, 2, 2)).toBe(0);
+  });
+
+  it("returns the alpha-weighted mass for a uniform 40%-opaque buffer", () => {
+    const data = makeRgba([
+      [255, 255, 255, 102],
+      [255, 255, 255, 102],
+      [255, 255, 255, 102],
+      [255, 255, 255, 102],
+    ]);
+    expect(estimateMaskAlphaMass(data, 2, 2)).toBeCloseTo(102 / 255, 10);
+    expect(estimateMaskAlphaMass(data, 2, 2)).toBeCloseTo(0.4, 10);
+    // The binary estimator still reports 0 — alpha 102 is below the threshold.
+    expect(estimateMaskCoverage(data, 2, 2)).toBe(0);
+  });
+
+  it("matches the probe's inline alpha-mass formula on an alpha ramp", () => {
+    const W = 8;
+    const H = 4;
+    const rgba = new Uint8ClampedArray(W * H * 4);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const o = (y * W + x) * 4;
+        rgba[o] = 255;
+        rgba[o + 1] = 255;
+        rgba[o + 2] = 255;
+        rgba[o + 3] = Math.round((x / (W - 1)) * 255);
+      }
+    }
+    // The inline reduce used by scripts/soft-matte-alpha-probe.mts before
+    // the helper existed.
+    const inline =
+      rgba.reduce((acc, _v, i) => (i % 4 === 3 ? acc + rgba[i] : acc), 0) /
+      (255 * W * H);
+    expect(estimateMaskAlphaMass(rgba, W, H)).toBeCloseTo(inline, 12);
+    expect(estimateMaskAlphaMass(rgba, W, H)).toBeGreaterThan(0);
+    expect(estimateMaskAlphaMass(rgba, W, H)).toBeLessThan(1);
+  });
+
+  it("returns 0 for malformed inputs", () => {
+    expect(estimateMaskAlphaMass(new Uint8ClampedArray(0), 2, 2)).toBe(0);
+    expect(estimateMaskAlphaMass(new Uint8ClampedArray(4), 2, 2)).toBe(0);
+    expect(estimateMaskAlphaMass(new Uint8ClampedArray(16), 0, 0)).toBe(0);
+    expect(estimateMaskAlphaMass(new Uint8ClampedArray(16), -2, 2)).toBe(0);
   });
 });
 
