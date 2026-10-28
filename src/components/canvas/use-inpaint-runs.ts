@@ -21,6 +21,7 @@ import {
 import { type DeclutterIntensity } from "@/lib/holistic-prompt";
 import { generateThumbnailFromUrl } from "@/lib/inpaint-thumbnail";
 import { measureSceneConservation } from "@/lib/edit-conservation-measure";
+import { prepareMaskForDispatch } from "@/lib/mask-dispatch-prepare";
 import { saveInpaintVersion } from "@/app/actions/inpaint-versions";
 
 /** Issue #1362b (Stage B): AI guidance parameters shared by every
@@ -318,13 +319,26 @@ export function useInpaintRuns({
       batchOutcomeRef.current = null;
       batchFailureRef.current = null;
 
+      // Issue #1457 — the documented segment-mask preparation is applied
+      // HERE, on the one seam every dispatched mask passes: this shared
+      // submit path posts the brush masks, the thematic-union mask, the
+      // per-object SAM region masks and the holistic masks to
+      // `POST /api/inpaint`. `prepareMaskForDispatch` calls the pinned
+      // `prepareSegmentMaskGrid` (erosion at the documented 4 px
+      // default, hole fill on, no closing) — the erosion itself lives
+      // in `src/lib/segment-mask-prepare.ts` / `src/lib/mask-erosion.ts`
+      // and is not re-implemented here. A mask that cannot be prepared
+      // is dispatched unchanged (a failed preparation never blocks a
+      // run).
+      const dispatchMaskUrl = await prepareMaskForDispatch(run.maskUrl);
+
       await start(async (signal) => {
         const startResponse = await fetch("/api/inpaint", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             imageUrl: run.sourceUrl ?? imageUrl,
-            maskUrl: run.maskUrl,
+            maskUrl: dispatchMaskUrl,
             promptDirectives: mergedDirectives,
             negativePrompt: run.negativePrompt,
             aesthetic,
