@@ -112,13 +112,44 @@ export async function createRoomsBatch(
   const uploadedPaths = parsed.data.entries
     .map((entry) => extractStoragePathFromUrl(entry.beforeImageUrl))
     .filter((p): p is string => Boolean(p));
-  for (const storagePath of uploadedPaths) {
+  // TEMPORARY S1 MEASUREMENT (2026-11-02, staging-studio async audit):
+  // Time each sequential storage list() call in this loop only, and log
+  // one structured line per batch: batch size, per-call durations, total,
+  // and the oversized position (or null when none is oversized). No
+  // project/user IDs, paths, or sizes are logged. Remove this
+  // instrumentation (and this comment) once >=100 real confirm batches
+  // have been collected and the parallelize-or-not decision is made
+  // (benchmark criteria: median per-call latency >=25ms over >=100
+  // real batches, plus a burst check). Do not keep this as permanent
+  // logging, and keep this loop sequential until that decision is made.
+  const sizeCheckDurationsMs: number[] = [];
+  const logSizeCheckTiming = (oversizedIndex: number | null) => {
+    // console.info + JSON.stringify, matching the oversized console.warn
+    // below: this file's server actions do not use the pino logger, and
+    // adding that import would pull a new real dependency into the
+    // mocked test surface for this module.
+    console.info(
+      JSON.stringify({
+        event: "s1_size_check_timing",
+        batchSize: uploadedPaths.length,
+        checkedCount: sizeCheckDurationsMs.length,
+        durations_ms: sizeCheckDurationsMs,
+        total_ms: sizeCheckDurationsMs.reduce((sum, ms) => sum + ms, 0),
+        oversizedIndex,
+      })
+    );
+  };
+  for (let i = 0; i < uploadedPaths.length; i++) {
+    const storagePath = uploadedPaths[i];
+    const sizeCheckStartedAt = Date.now();
     const uploadedSize = await readUploadedObjectSize(
       supabase as never,
       ROOM_PHOTOS_BUCKET,
       storagePath
     );
+    sizeCheckDurationsMs.push(Date.now() - sizeCheckStartedAt);
     if (uploadedSize !== null && uploadedSize > MAX_ROOM_PHOTO_BYTES) {
+      logSizeCheckTiming(i);
       console.warn(
         JSON.stringify({
           event: "batch_room_upload_oversized",
@@ -140,6 +171,7 @@ export async function createRoomsBatch(
       };
     }
   }
+  logSizeCheckTiming(null);
 
   try {
     const rooms = await prisma.$transaction(
