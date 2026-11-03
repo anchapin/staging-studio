@@ -1,0 +1,11 @@
+2026-11-02T09:00:00.000Z INFO  room-batch: server ready
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[30],"total_ms":30,"oversizedIndex":null}
+2026-11-02T09:00:01.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":2,"checkedCount":2,"durations_ms":[10,20],"total_ms":30,"oversizedIndex":null}
+{"event":"s1_size_check_timing","batchSize":2,"checkedCount":2,"durations_ms":"30,20","total_ms":30}
+{"level":"info","time":"2026-11-02T09:00:02.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":2,\"checkedCount\":2,\"durations_ms\":[10,30],\"total_ms\":40,\"oversizedIndex\":null}"}
+{"level":"info","msg":"room batch confirmed"}
+{"event":"s1_size_check_timing","batchSize":2,"checkedCount":2,"durations_ms":[20,20],"total_ms":40,"oversizedIndex":null}
+2026-11-02T09:00:03.000Z ERROR console.info {"event":"s1_size_check_timing","batchSize":2,"durations_ms":[10,
+{"event":"s1_size_check_timing","batchSize":0,"checkedCount":0,"durations_ms":[],"total_ms":0,"oversizedIndex":null}
+2026-11-02T09:00:04.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":3,"checkedCount":3,"durations_ms":[10,10,20],"total_ms":40,"oversizedIndex":null}
+{"event":"s1_size_check_timing","batchSize":4,"checkedCount":4,"durations_ms":[10,10,10,10],"total_ms":40,"oversizedIndex":2}
