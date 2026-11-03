@@ -26,7 +26,7 @@ Because `NEXT_PUBLIC_APP_URL` is a `NEXT_PUBLIC_*` variable, Next.js inlines it 
 
 ## Documented target: Vercel
 
-StagingStudio is a Next.js 15 (App Router) application, and **Vercel is the documented hosting target**: every external dependency (Supabase, OpenAI, fal.ai, Browserless) is already a hosted SaaS, so the only thing to deploy is the Next.js app itself, which Vercel runs natively.
+StagingStudio is a Next.js 15 (App Router) application, and **Vercel is the documented hosting target**: every external dependency (Supabase, OpenAI, Alibaba Cloud DashScope, Browserless) is already a hosted SaaS, so the only thing to deploy is the Next.js app itself, which Vercel runs natively.
 
 The general shape (standard Vercel workflow; consult Vercel's docs for specifics):
 
@@ -36,7 +36,7 @@ The general shape (standard Vercel workflow; consult Vercel's docs for specifics
 
 ### Environment variables
 
-These match `.env.example` exactly — that file is the source of truth for what reads each key and where to source it.
+These match `.env.example` — that file is the source of truth for what reads each key and where to source it — with one addition: the retired `FAL_KEY` row is kept here so a stale deploy setting is recognised as dead rather than acted on.
 
 | Variable | Required in production? | What it does | Where it comes from |
 | --- | --- | --- | --- |
@@ -45,7 +45,11 @@ These match `.env.example` exactly — that file is the source of truth for what
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | **Yes** | Supabase anon public key (browser-safe by design), read wherever the project URL is | Supabase dashboard → Project Settings → API → anon public key |
 | `SUPABASE_SERVICE_ROLE_KEY` | No — **reserved** | Not read by any code today. Do not configure or distribute unless you add server-side admin usage; if ever used it must stay server-side only | Supabase dashboard → Project Settings → API → service_role key |
 | `OPENAI_API_KEY` | **Yes** | Read by `lib/ai.ts` (call-time check) for gpt-4o-mini lookbook copy | platform.openai.com → API keys |
-| `FAL_KEY` | **Yes** | Read by `lib/fal.ts` (throws at import when missing) for FLUX.1 Fill inpainting | fal.ai dashboard → keys |
+| `ALIBABA_DASHSCOPE_API_KEY` | **Yes** | Read by `lib/alibaba-adapter.ts` (call-time check in `assertAlibabaConfigured` / `requireAlibabaEnv`) for the DashScope Qwen-Image inpaint call. The key is region-bound — a Singapore/US-East key cannot call the Beijing endpoint | Alibaba Cloud console → Model Studio → API keys |
+| `ALIBABA_BAILIAN_WORKSPACE_ID` | **Yes** | Bailian (Model Studio) workspace id read by `lib/alibaba-adapter.ts`; it implies the region and prefixes the DashScope endpoint URL | Alibaba Cloud console → Model Studio → workspace id (e.g. `llm-…`) |
+| `ALIBABA_INPAINT_MODEL` | No — **defaults** | DashScope model id used for the inpaint surface; read by `lib/alibaba-adapter.ts`, default `qwen-image-2.1-pro` when unset | Alibaba Cloud console → Model Studio → models |
+| `INFERENCE_PROVIDER` | No — **defaults to `alibaba`** | Selects the inference provider (`src/lib/inference.ts`). Only `"alibaba"` is wired as of #1240; `"fal"` and `"replicate"` still parse but throw a clear error at configure time so a stale deploy fails fast instead of silently falling through to Alibaba | Set to `alibaba` (or leave unset) |
+| `FAL_KEY` | No — **retired** | Gates nothing in the deployed app. The fal.ai adapter was retired in #1240 (the adapter module was deleted and no fal client dependency remains); surviving references are the `ENV_VAR_DOCS` lookup entry in `src/lib/env.ts`, a dummy value in the hermetic e2e env (`tests/e2e/env.ts`), offline bake-off scripts, and docker-compose passthrough — none of them a live app path. Kept in the table so a stale deploy setting is recognised as dead rather than acted on | fal.ai dashboard → keys (historical; no longer needed) |
 | `BROWSERLESS_API_KEY` | **Yes** (for PDF export) | Read by `api/export-pdf`; missing key returns a 500 on export | browserless.io → account API keys |
 | `NEXT_PUBLIC_APP_URL` | **Yes** | The app's public origin (not a PDF-export-only value). `api/export-pdf` builds the cookie-less preview URL its cloud browser fetches from it. **Must be publicly reachable.** See [the section above](#the-one-thing-to-get-right-next_public_app_url) | Your deployment's URL (e.g. the Vercel production domain) |
 | `PREVIEW_TOKEN_SECRET` | **Yes** | HMAC secret signing short-lived (5 min) lookbook-preview tokens, read by `lib/preview-token.ts`. Optional in dev, where a fixed **public** fallback is used — production must set a real secret | Generate with `openssl rand -base64 32` |
@@ -205,4 +209,4 @@ Two distinct 500 messages distinguish the misconfigurations at a glance: *"PDF e
 
 ## Other hosting targets
 
-Nothing in the codebase is Vercel-specific: any host that runs a Next.js 15 App Router app on Node works, provided it can make outbound HTTPS calls to Supabase, OpenAI, fal.ai, and Browserless, and the same environment variables are configured there. The `NEXT_PUBLIC_APP_URL` reachability contract and the verification checklist apply unchanged — only the mechanics of setting env vars differ.
+Nothing in the codebase is Vercel-specific: any host that runs a Next.js 15 App Router app on Node works, provided it can make outbound HTTPS calls to Supabase, OpenAI, Alibaba Cloud DashScope, and Browserless, and the same environment variables are configured there. The `NEXT_PUBLIC_APP_URL` reachability contract and the verification checklist apply unchanged — only the mechanics of setting env vars differ.
