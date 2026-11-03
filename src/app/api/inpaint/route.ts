@@ -163,39 +163,20 @@ async function postInpaint(request: NextRequest) {
 
     quotaUserId = user.id;
 
-    // Issue #1111: atomically claim one inpaint unit BEFORE the paid
-    // provider call. The conditional increment in `claimDailyQuota`
-    // (`UPDATE ... WHERE count <= limit - N`) is serialized by
-    // Postgres, so a concurrent burst can no longer all read the same
-    // pre-spend count and all reach the provider; losers get 429 with
-    // the same payload shape as the other surfaces (`copy`, `export`,
-    // `label`, `segment` — see issue #1132). The unit is HELD until
-    // either:
-    //   (a) the provider call settles successfully → keep the unit
-    //       (a paid job ran; the #1131/#1262 fire-and-forget path's
-    //       pre-write failure is the only refund path); or
-    //   (b) the InpaintRequest pre-write fails → refund in the catch
-    //       below so a transient DB failure does not bill for work
-    //       that was never done.
-    inpaintClaim = await reserveInpaintQuota(user.id);
-    if (!inpaintClaim.claimed) {
-      console.warn(
-        JSON.stringify({
-          event: "inpaint_daily_quota_exceeded",
-          userId: user.id,
-          used: inpaintClaim.used,
-          limit: inpaintClaim.limit,
-        })
-      );
-      return NextResponse.json(
-        {
-          ...dailyQuotaExceededPayload(inpaintClaim, "Please try again tomorrow."),
-          code: API_ERROR_RATE_LIMIT_EXCEEDED,
-        },
-        { status: 429 }
-      );
-    }
-
+    // Issue #1495: parse and validate the submit body BEFORE the quota
+    // claim. An invalid body or an unknown room is a request the route
+    // rejects without ever doing paid work, so it must NOT consume one
+    // of the 20 daily inpaint units. The claim used to run first and
+    // the 400/404 returns below simply dropped the unit on the floor
+    // (neither the outer catch nor the pre-write catch refunds it,
+    // because those paths RETURN instead of throwing) — so a typo in
+    // the payload or a stale roomId silently burned a daily unit.
+    //
+    // The parse + the room validation are both read-only (a Zod parse
+    // and a single `findFirst`), so moving them ahead of the claim
+    // preserves every billing invariant: the claim still happens
+    // before the paid provider call, and the units are still held
+    // from the claim until the provider settles.
     const parsed = inpaintSubmitSchema.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json(
@@ -225,6 +206,45 @@ async function postInpaint(request: NextRequest) {
           message: roomValidation.error ?? "Unexpected error",
         },
         { status: roomValidation.status }
+      );
+    }
+
+    // Issue #1111: atomically claim one inpaint unit BEFORE the paid
+    // provider call. The conditional increment in `claimDailyQuota`
+    // (`UPDATE ... WHERE count <= limit - N`) is serialized by
+    // Postgres, so a concurrent burst can no longer all read the same
+    // pre-spend count and all reach the provider; losers get 429 with
+    // the same payload shape as the other surfaces (`copy`, `export`,
+    // `label`, `segment` — see issue #1132). The unit is HELD until
+    // either:
+    //   (a) the provider call settles successfully → keep the unit
+    //       (a paid job ran; the #1131/#1262 fire-and-forget path's
+    //       pre-write failure is the only refund path); or
+    //   (b) the InpaintRequest pre-write fails → refund in the catch
+    //       below so a transient DB failure does not bill for work
+    //       that was never done.
+    //
+    // Issue #1495: the claim runs AFTER the body parse + the room
+    // validation above, so a malformed payload or an unknown room is
+    // rejected with 400/404 without touching the daily counter. It
+    // still runs BEFORE the InpaintRequest pre-write and before the
+    // provider submit, so the paid-work ordering is unchanged.
+    inpaintClaim = await reserveInpaintQuota(user.id);
+    if (!inpaintClaim.claimed) {
+      console.warn(
+        JSON.stringify({
+          event: "inpaint_daily_quota_exceeded",
+          userId: user.id,
+          used: inpaintClaim.used,
+          limit: inpaintClaim.limit,
+        })
+      );
+      return NextResponse.json(
+        {
+          ...dailyQuotaExceededPayload(inpaintClaim, "Please try again tomorrow."),
+          code: API_ERROR_RATE_LIMIT_EXCEEDED,
+        },
+        { status: 429 }
       );
     }
 
@@ -393,14 +413,19 @@ async function postInpaint(request: NextRequest) {
     return response;
   } catch (error) {
     // Issue #1111: when the outer catch fires after a successful
-    // claim, the InpaintRequest pre-write has either not happened
-    // (schema/validation error) or succeeded without the background
-    // IIFE having been kicked off yet (the IIFE catches its own
-    // errors and the `void` invocation is the last synchronous step
-    // before this catch can fire, so the IIFE has not started). In
-    // both cases no provider call ran for this request — refund.
+    // claim, the InpaintRequest pre-write has either not happened yet
+    // or succeeded without the background IIFE having been kicked off
+    // yet (the IIFE catches its own errors and the `void` invocation is
+    // the last synchronous step before this catch can fire, so the
+    // IIFE has not started). In both cases no provider call ran for
+    // this request — refund.
     // The InpaintRequest pre-write failure path is handled
     // separately by its own try/catch above, which also refunds.
+    //
+    // Issue #1495: the schema parse and the room validation now run
+    // BEFORE the claim, so a 400/404 on those paths never reaches
+    // this catch and never needs a refund — the unit is never claimed
+    // for a request that is rejected as invalid.
     if (quotaUserId && inpaintClaim?.claimed) {
       await refundInpaintQuota(quotaUserId);
     }
