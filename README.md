@@ -76,7 +76,7 @@ The interactive lookbook assembles the client-facing document from `src/componen
 - **Prisma** ORM
 - **Vercel AI SDK + GPT-4o-mini** — structured copywriting and vision labeling
 - **Alibaba Cloud DashScope** — Qwen-Image inpainting (`qwen-image-2.1-pro`)
-- **fal.ai** — SAM 3.1 segmentation (furnishings detection)
+- **SAM 3.1 segmentation** (furnishings detection) — routed through the provider-agnostic inference layer (`src/lib/inference.ts`); the fal.ai adapter that used to serve it was retired in #1240 (the adapter module was deleted; no fal client dependency remains) and Alibaba Cloud DashScope is the only wired provider today
 - **Browserless.io** — PDF export
 
 ## Getting Started
@@ -137,7 +137,7 @@ npm run db:studio   # Prisma Studio
 
 `npm run e2e` runs a hermetic Playwright harness (`tests/e2e/`) against a production build of the app. It covers the staging flows the PoC browser driver could not reliably automate — real trusted mouse events painting the mask canvas (asserted by sampling white coverage in the actual `POST /api/inpaint` body), `setInputFiles` uploads (asserted byte-identical against what storage received), and a scripted rehearsal drill (login → project → upload → inpaint → copy → export) plus the #163 failure drills (terminal inpaint error, export outage → error reveal with retry).
 
-**Hermeticity:** no real credentials or paid services. A local mock Supabase (`tests/e2e/mock-supabase.ts`) serves GoTrue auth (self-signed JWTs) and Storage (hashes every stored object); Postgres runs in a disposable Docker container that global setup creates, pushes the schema to, and seeds with fixed rows; the upstreams (DashScope, fal.ai, OpenAI, and Browserless) are simulated by intercepting their API routes at the browser network layer, so the dummy API keys are never exercised.
+**Hermeticity:** no real credentials or paid services. A local mock Supabase (`tests/e2e/mock-supabase.ts`) serves GoTrue auth (self-signed JWTs) and Storage (hashes every stored object); Postgres runs in a disposable Docker container that global setup creates, pushes the schema to, and seeds with fixed rows; the upstreams (DashScope, OpenAI, and Browserless) are simulated by intercepting their API routes at the browser network layer, so the dummy API keys are never exercised.
 
 **Requirements:** Docker (for the throwaway Postgres) and Playwright browsers (`npx playwright install chromium`).
 
