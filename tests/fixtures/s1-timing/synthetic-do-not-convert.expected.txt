@@ -1,0 +1,22 @@
+s1_size_check_timing summary
+lines_scanned: 100
+event_lines: 100
+ignored_lines: 0
+malformed_lines_skipped: 0
+batches: 100
+records_without_samples: 0
+per_call_samples: 100
+per_call_median_ms: 5.000
+per_call_p95_ms: 5.000
+per_call_max_ms: 5.000
+total_median_ms: 5.000
+total_p95_ms: 5.000
+total_max_ms: 5.000
+batch_size_histogram:
+  1: 100
+batch_size_stats:
+  size=1: count=100 median_total_ms=5.000 max_total_ms=5.000
+batches_size_ge_20: 0
+oversized_count: 0
+oversized_rate: 0.0000
+verdict: DO-NOT-CONVERT (median <10ms)

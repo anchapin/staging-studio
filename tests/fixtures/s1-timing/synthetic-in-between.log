@@ -1,0 +1,100 @@
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:00:01.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:02.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:00:04.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:05.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:00:07.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:08.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:00:10.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:11.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:00:13.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:14.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:00:16.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:17.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:00:19.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:20.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:00:22.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:23.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:00:25.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:26.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:00:28.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:29.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:00:31.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:32.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:00:34.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:35.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:00:37.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:38.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:00:40.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:41.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:00:43.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:44.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:00:46.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:47.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:00:49.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:50.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:00:52.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:53.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:00:55.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:56.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:00:58.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:59.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:01:01.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:02.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:01:04.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:05.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:01:07.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:08.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:01:10.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:11.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:01:13.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:14.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:01:16.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:17.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:01:19.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:20.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:01:22.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:23.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:01:25.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:26.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:01:28.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:29.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:01:31.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:32.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:01:34.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:35.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+2026-11-02T10:01:37.000Z INFO  console.info {"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}
+{"level":"info","time":"2026-11-02T10:00:38.000Z","msg":"{\"event\":\"s1_size_check_timing\",\"batchSize\":1,\"checkedCount\":1,\"durations_ms\":[15],\"total_ms\":15,\"oversizedIndex\":null}"}
+{"event":"s1_size_check_timing","batchSize":1,"checkedCount":1,"durations_ms":[15],"total_ms":15,"oversizedIndex":null}

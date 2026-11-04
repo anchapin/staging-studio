@@ -1,0 +1,20 @@
+s1_size_check_timing summary
+lines_scanned: 2
+event_lines: 0
+ignored_lines: 2
+malformed_lines_skipped: 0
+batches: 0
+records_without_samples: 0
+per_call_samples: 0
+per_call_median_ms: n/a
+per_call_p95_ms: n/a
+per_call_max_ms: n/a
+total_median_ms: n/a
+total_p95_ms: n/a
+total_max_ms: n/a
+batch_size_histogram:
+batch_size_stats:
+batches_size_ge_20: 0
+oversized_count: 0
+oversized_rate: n/a
+verdict: INSUFFICIENT (<100 batches)
