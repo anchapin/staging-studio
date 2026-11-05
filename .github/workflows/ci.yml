@@ -35,8 +35,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  fast-checks:
-    name: Lint · Typecheck · Unit tests
+  # Issue #1490: the former single `fast-checks` job (display name
+  # `Lint · Typecheck · Unit tests`) ran lint, typecheck and vitest
+  # sequentially in one job behind one shared `npm ci`. It is split here
+  # into three independent parallel jobs, one per command, each doing its
+  # own checkout + Node 24 setup with npm cache + `npm ci` and running
+  # exactly one command.
+  #
+  # The three jobs cover exactly the same commands as the old single job —
+  # no command was added, dropped or reordered — so coverage is unchanged.
+  # What changes is wall-clock: the old job paid lint + typecheck + vitest
+  # in sequence, the new jobs pay them in parallel. The cost is three
+  # installs instead of one; public-repo runners are free, so that trade is
+  # worth it.
+  #
+  # IMPORTANT (branch protection): `main` requires the OLD check display
+  # name `Lint · Typecheck · Unit tests`, which is the job `name:` of the
+  # removed `fast-checks` job. After this merges, required status checks
+  # on `main` must be updated to the three new job display names
+  # (`Lint`, `Typecheck`, `Unit tests (vitest)`) or every PR will be
+  # blocked waiting on a check that no longer reports. Updating branch
+  # protection is a repo-settings action (Alex's step), not a workflow
+  # change, and is NOT performed here.
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
 
     steps:
@@ -55,8 +77,42 @@ jobs:
       - name: ESLint
         run: npm run lint
 
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: TypeScript type check
         run: npm run typecheck
+
+  unit-tests:
+    name: Unit tests (vitest)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Unit tests (vitest)
         run: npm test
