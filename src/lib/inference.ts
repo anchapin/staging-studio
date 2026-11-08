@@ -62,7 +62,7 @@ export type LogicalModel = (typeof LOGICAL_MODEL)[keyof typeof LOGICAL_MODEL];
  * runtime import failure when those modules were deleted. Once a
  * future provider is added, drop its literal in here too.
  */
-export type InferenceProviderName = "alibaba" | "fal" | "replicate";
+export type InferenceProviderName = "alibaba" | "fal" | "replicate" | "openai";
 
 /**
  * Resolves the active provider from `INFERENCE_PROVIDER`. Defaults to
@@ -73,6 +73,7 @@ export function resolveProvider(): InferenceProviderName {
   const raw = process.env.INFERENCE_PROVIDER?.trim().toLowerCase();
   if (raw === "fal") return "fal";
   if (raw === "replicate") return "replicate";
+  if (raw === "openai") return "openai";
   if (raw === "alibaba") return "alibaba";
   // `alibaba` is the default for any other value, including unset. A typo
   // in the env (e.g. `INFERENCE_PROVIDER=Alibaba` after a case mismatch)
@@ -80,7 +81,7 @@ export function resolveProvider(): InferenceProviderName {
   // hard fail on production deploys; the warning is logged once below.
   if (raw) {
     console.warn(
-      `[inference] Unknown INFERENCE_PROVIDER="${raw}"; falling back to "alibaba". Valid: alibaba.`,
+      `[inference] Unknown INFERENCE_PROVIDER="${raw}"; falling back to "alibaba". Valid: alibaba, openai.`,
     );
   }
   return "alibaba";
@@ -296,6 +297,15 @@ export function assertInferenceConfigured(): void {
         `Use "alibaba" (default).`,
     );
   }
+  if (provider === "openai") {
+    // Issue #1506: the OpenAI GPT-Image provider reuses the
+    // OPENAI_API_KEY that lib/ai.ts already requires; the model has a
+    // built-in default (gpt-image-2.6-flare), so the key is the only
+    // hard requirement. Inlined for the same circular-import reason as
+    // the Alibaba list below.
+    requireEnvVars("OPENAI_API_KEY");
+    return;
+  }
   // Inline the env-var list (rather than importing alibaba-adapter)
   // to avoid a circular import -- alibaba-adapter imports
   // `InferenceClient` from here. `assertAlibabaConfigured` in
@@ -312,8 +322,9 @@ let cachedClient: InferenceClient | null = null;
 
 /**
  * Returns the active `InferenceClient`, instantiating it on the first
- * call. As of #1240 the only wired provider is Alibaba Cloud (DashScope).
- * Side effects: imports `@/lib/alibaba-adapter` on first call.
+ * call. Wired providers: Alibaba Cloud (DashScope, #1240, default) and
+ * OpenAI GPT-Image (#1506, INFERENCE_PROVIDER=openai).
+ * Side effects: imports the active provider's adapter on first call.
  */
 export async function getInferenceClient(): Promise<InferenceClient> {
   if (cachedClient) return cachedClient;
@@ -326,6 +337,11 @@ export async function getInferenceClient(): Promise<InferenceClient> {
       `INFERENCE_PROVIDER="${provider}" is no longer supported after #1240. ` +
         `Use "alibaba" (default).`,
     );
+  }
+  if (provider === "openai") {
+    const { createOpenAiClient } = await import("@/lib/openai-adapter");
+    cachedClient = createOpenAiClient();
+    return cachedClient;
   }
   const { createAlibabaClient } = await import("@/lib/alibaba-adapter");
   cachedClient = createAlibabaClient();

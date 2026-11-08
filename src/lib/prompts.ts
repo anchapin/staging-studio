@@ -543,11 +543,46 @@ export function buildReplicateFillPayload(
  * abstraction's clients may import the payload builders for their
  * submit shapes, and prompts is the natural home for those).
  */
+// ─── OpenAI (GPT Image edits) payload ─────────────────────────────
+
+/**
+ * OpenAI's GPT Image edits endpoint takes multipart form data built
+ * from the actual image/mask BYTES, so there is no JSON wire payload
+ * to construct here (issue #1506). This builder passes the logical
+ * fields the openai-adapter consumes — `imageUrl`, `maskUrl`, `prompt`
+ * in the camelCase shape the adapter reads — so the dispatch seam
+ * stays uniform across providers. `strength` / `seed` have no GPT
+ * Image wire equivalent (quality is pinned to "medium" in the adapter
+ * per the #1502 methodology) and are intentionally not carried.
+ */
+export interface OpenAiFillPayloadInput {
+  imageUrl: string;
+  maskUrl: string;
+  prompt: string;
+}
+
+export type OpenAiFillPayload = {
+  imageUrl: string;
+  maskUrl: string;
+  prompt: string;
+};
+
+export function buildOpenAiFillPayload(
+  input: OpenAiFillPayloadInput
+): OpenAiFillPayload {
+  return {
+    imageUrl: input.imageUrl,
+    maskUrl: input.maskUrl,
+    prompt: input.prompt,
+  };
+}
+
 export function buildInpaintPayloadForActiveProvider(
   input:
     | FalFillPayloadInput
     | ReplicateFillPayloadInput
     | AlibabaFillPayloadInput
+    | OpenAiFillPayloadInput
 ): Record<string, unknown> {
   const provider = process.env.INFERENCE_PROVIDER?.trim().toLowerCase();
   if (provider === "replicate") {
@@ -555,6 +590,9 @@ export function buildInpaintPayloadForActiveProvider(
   }
   if (provider === "fal") {
     return buildFalFillPayload(input as FalFillPayloadInput) as unknown as Record<string, unknown>;
+  }
+  if (provider === "openai") {
+    return buildOpenAiFillPayload(input as OpenAiFillPayloadInput) as unknown as Record<string, unknown>;
   }
   // alibaba (default), or any unknown value
   return buildAlibabaFillPayload(input as AlibabaFillPayloadInput) as unknown as Record<string, unknown>;
