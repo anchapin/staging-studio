@@ -16,6 +16,11 @@ import {
 } from "@/lib/inpaint-submit";
 import { dailyQuotaExceededPayload } from "@/lib/api-quota";
 import type { QuotaClaim } from "@/lib/api-quota";
+import {
+  cancelInpaintProviderJob,
+  releaseInpaintQuotaReservation,
+  writeInpaintProviderJobIdWithRetry,
+} from "@/lib/inpaint-quota";
 import { API_ERROR_RATE_LIMIT_EXCEEDED } from "@/lib/api-errors";
 
 // Issue #1262: the Alibaba DashScope inpaint submit is synchronous and
@@ -28,6 +33,114 @@ import { API_ERROR_RATE_LIMIT_EXCEEDED } from "@/lib/api-errors";
 //
 // See `#1262` in the issue tracker for the full context.
 export const maxDuration = 60;
+
+/**
+ * Flips the row to ERROR, best-effort. A row left in IN_QUEUE would
+ * keep the client's poller spinning (and the #1202 gone-recovery would
+ * never fire), so a failed background tick must mark it terminal.
+ */
+async function markInpaintRowError(requestId: string): Promise<void> {
+  try {
+    await prisma.inpaintRequest.update({
+      where: { id: requestId },
+      data: { status: "ERROR" },
+    });
+  } catch (markError) {
+    console.error(
+      JSON.stringify({
+        event: "inpaint_background_mark_error_failed",
+        requestId,
+      }),
+      markError
+    );
+  }
+}
+
+/**
+ * Issue #1421 path 1 — the provider REJECTED the submit.
+ *
+ * No job exists upstream and no result will ever exist, so the user's
+ * reserved quota unit is released through the central helper. Before
+ * this fix the row was flipped to ERROR but the unit was kept: during
+ * a provider outage every submission failed and every failure still
+ * charged the cap, so a user who retried twice consumed 2 of 20 with
+ * zero outputs.
+ */
+async function handleInpaintSubmitFailure(params: {
+  requestId: string;
+  roomId: string;
+  userId: string;
+  error: unknown;
+}): Promise<void> {
+  console.error(
+    JSON.stringify({
+      event: "inpaint_background_submit_failed",
+      requestId: params.requestId,
+      roomId: params.roomId,
+      userId: params.userId,
+    }),
+    params.error
+  );
+  await markInpaintRowError(params.requestId);
+  await releaseInpaintQuotaReservation({
+    userId: params.userId,
+    requestId: params.requestId,
+    reason: "provider_submit_failed",
+    // The row was pre-written as IN_QUEUE and has never produced a
+    // durable result, so the unit is still held.
+    previousStatus: "IN_QUEUE",
+  });
+}
+
+/**
+ * Issue #1421 path 3 — the provider accepted the job but the
+ * post-submit `providerJobId` write failed permanently.
+ *
+ * The provider has already billed us for a job no DB row can map to, so
+ * the upstream job is cancelled FIRST (the only way to stop the money)
+ * and the user's quota unit is released afterwards. If the cancel
+ * cannot succeed the provider cost is recorded as a known-cost
+ * write-off by the central helper rather than being silently absorbed.
+ */
+async function handleInpaintPostSubmitWriteFailure(params: {
+  requestId: string;
+  userId: string;
+  providerJobId: string;
+  error: unknown;
+}): Promise<void> {
+  console.error(
+    JSON.stringify({
+      event: "inpaint_background_post_submit_write_failed",
+      requestId: params.requestId,
+      userId: params.userId,
+      providerJobId: params.providerJobId,
+    }),
+    params.error
+  );
+
+  const cancel = await cancelInpaintProviderJob(params.providerJobId);
+  console.error(
+    JSON.stringify({
+      event: "inpaint_background_provider_cancel",
+      requestId: params.requestId,
+      providerJobId: params.providerJobId,
+      attempted: cancel.attempted,
+      cancelled: cancel.cancelled,
+      reason: cancel.reason,
+    })
+  );
+
+  await markInpaintRowError(params.requestId);
+  await releaseInpaintQuotaReservation({
+    userId: params.userId,
+    requestId: params.requestId,
+    reason: "post_submit_record_write_failed",
+    previousStatus: "IN_QUEUE",
+    providerJobId: params.providerJobId,
+    providerCostIncurred: true,
+    providerCancelSucceeded: cancel.cancelled,
+  });
+}
 
 async function postInpaint(request: NextRequest) {
   // Issue #1111: track the atomic quota claim so the catch below can
@@ -50,39 +163,20 @@ async function postInpaint(request: NextRequest) {
 
     quotaUserId = user.id;
 
-    // Issue #1111: atomically claim one inpaint unit BEFORE the paid
-    // provider call. The conditional increment in `claimDailyQuota`
-    // (`UPDATE ... WHERE count <= limit - N`) is serialized by
-    // Postgres, so a concurrent burst can no longer all read the same
-    // pre-spend count and all reach the provider; losers get 429 with
-    // the same payload shape as the other surfaces (`copy`, `export`,
-    // `label`, `segment` — see issue #1132). The unit is HELD until
-    // either:
-    //   (a) the provider call settles successfully → keep the unit
-    //       (a paid job ran; the #1131/#1262 fire-and-forget path's
-    //       pre-write failure is the only refund path); or
-    //   (b) the InpaintRequest pre-write fails → refund in the catch
-    //       below so a transient DB failure does not bill for work
-    //       that was never done.
-    inpaintClaim = await reserveInpaintQuota(user.id);
-    if (!inpaintClaim.claimed) {
-      console.warn(
-        JSON.stringify({
-          event: "inpaint_daily_quota_exceeded",
-          userId: user.id,
-          used: inpaintClaim.used,
-          limit: inpaintClaim.limit,
-        })
-      );
-      return NextResponse.json(
-        {
-          ...dailyQuotaExceededPayload(inpaintClaim, "Please try again tomorrow."),
-          code: API_ERROR_RATE_LIMIT_EXCEEDED,
-        },
-        { status: 429 }
-      );
-    }
-
+    // Issue #1495: parse and validate the submit body BEFORE the quota
+    // claim. An invalid body or an unknown room is a request the route
+    // rejects without ever doing paid work, so it must NOT consume one
+    // of the 20 daily inpaint units. The claim used to run first and
+    // the 400/404 returns below simply dropped the unit on the floor
+    // (neither the outer catch nor the pre-write catch refunds it,
+    // because those paths RETURN instead of throwing) — so a typo in
+    // the payload or a stale roomId silently burned a daily unit.
+    //
+    // The parse + the room validation are both read-only (a Zod parse
+    // and a single `findFirst`), so moving them ahead of the claim
+    // preserves every billing invariant: the claim still happens
+    // before the paid provider call, and the units are still held
+    // from the claim until the provider settles.
     const parsed = inpaintSubmitSchema.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json(
@@ -112,6 +206,45 @@ async function postInpaint(request: NextRequest) {
           message: roomValidation.error ?? "Unexpected error",
         },
         { status: roomValidation.status }
+      );
+    }
+
+    // Issue #1111: atomically claim one inpaint unit BEFORE the paid
+    // provider call. The conditional increment in `claimDailyQuota`
+    // (`UPDATE ... WHERE count <= limit - N`) is serialized by
+    // Postgres, so a concurrent burst can no longer all read the same
+    // pre-spend count and all reach the provider; losers get 429 with
+    // the same payload shape as the other surfaces (`copy`, `export`,
+    // `label`, `segment` — see issue #1132). The unit is HELD until
+    // either:
+    //   (a) the provider call settles successfully → keep the unit
+    //       (a paid job ran; the #1131/#1262 fire-and-forget path's
+    //       pre-write failure is the only refund path); or
+    //   (b) the InpaintRequest pre-write fails → refund in the catch
+    //       below so a transient DB failure does not bill for work
+    //       that was never done.
+    //
+    // Issue #1495: the claim runs AFTER the body parse + the room
+    // validation above, so a malformed payload or an unknown room is
+    // rejected with 400/404 without touching the daily counter. It
+    // still runs BEFORE the InpaintRequest pre-write and before the
+    // provider submit, so the paid-work ordering is unchanged.
+    inpaintClaim = await reserveInpaintQuota(user.id);
+    if (!inpaintClaim.claimed) {
+      console.warn(
+        JSON.stringify({
+          event: "inpaint_daily_quota_exceeded",
+          userId: user.id,
+          used: inpaintClaim.used,
+          limit: inpaintClaim.limit,
+        })
+      );
+      return NextResponse.json(
+        {
+          ...dailyQuotaExceededPayload(inpaintClaim, "Please try again tomorrow."),
+          code: API_ERROR_RATE_LIMIT_EXCEEDED,
+        },
+        { status: 429 }
       );
     }
 
@@ -201,66 +334,65 @@ async function postInpaint(request: NextRequest) {
 
     // Fire-and-forget. `void` makes the linter happy; the promise
     // chain owns its own errors so an unhandled rejection cannot reach
-    // Node. The background update on the row is the contract the
-    // poller relies on; logging there surfaces any persistence
-    // failure that would otherwise strand the row in IN_QUEUE.
+    // Node.
+    //
+    // Issue #1421: the background tick now distinguishes the two
+    // failure modes that used to keep the user's quota unit:
+    //   - the PROVIDER rejected the submit (no job exists upstream) —
+    //     the unit is released and the row is flipped to ERROR;
+    //   - the provider accepted the job but the POST-SUBMIT ROW WRITE
+    //     failed (Alibaba already billed us, ~$0.04/image) — the write
+    //     is retried first, and on permanent failure the provider job
+    //     is cancelled before the unit is released.
     void (async () => {
+      let submission: Awaited<ReturnType<typeof submitInpaintToActiveProvider>>;
       try {
-        const submission = await submitInpaintToActiveProvider(submitOptions);
-        const syncResult = submission.result;
-        await prisma.inpaintRequest.update({
-          where: { id: requestId },
-          data: {
-            providerJobId: submission.request_id,
-            // #1240 multi-instance fix: synchronous providers (Alibaba)
-            // surface the durable DashScope-hosted URL inline. The
-            // poller's `decideInpaintPersistence` short-circuits to
-            // `return-stored` on any Vercel instance, so the result
-            // is durable across instances regardless of which lambda
-            // got the first poll.
-            ...(syncResult
-              ? { status: "COMPLETED", resultUrl: syncResult.imageUrl }
-              : { status: "IN_PROGRESS" }),
-          },
-        });
-        console.log(
-          JSON.stringify({
-            event: "inpaint_background_submit_settled",
-            requestId,
-            providerJobId: submission.request_id,
-            provider: "alibaba",
-            sync: Boolean(syncResult),
-          })
-        );
+        submission = await submitInpaintToActiveProvider(submitOptions);
       } catch (submitError) {
-        // Surface to logs so an orphaned IN_QUEUE row is
-        // discoverable, then flip to ERROR so the poller's gone
-        // recovery (#1202) does not loop forever on a row that
-        // never had a job queued against it.
-        console.error(
-          JSON.stringify({
-            event: "inpaint_background_submit_failed",
-            requestId,
-            roomId: room.id,
-            userId: user.id,
-          }),
-          submitError
-        );
-        try {
-          await prisma.inpaintRequest.update({
-            where: { id: requestId },
-            data: { status: "ERROR" },
-          });
-        } catch (markError) {
-          console.error(
-            JSON.stringify({
-              event: "inpaint_background_mark_error_failed",
-              requestId,
-            }),
-            markError
-          );
-        }
+        // Path 1 (issue #1421): the provider rejected the submit
+        // (outage / 5xx / timeout). No job exists upstream, no result
+        // will ever exist, so the reserved quota unit MUST go back to
+        // the user — before this fix the row was flipped to ERROR and
+        // the unit was silently kept, so a provider outage burned the
+        // user's whole daily cap for zero outputs.
+        await handleInpaintSubmitFailure({
+          requestId,
+          roomId: room.id,
+          userId: user.id,
+          error: submitError,
+        });
+        return;
       }
+
+      const syncResult = submission.result;
+      try {
+        // Path 3 (issue #1421): the providerJobId write is retried on
+        // transient DB failures so a blip cannot orphan a job the
+        // provider already accepted.
+        await writeInpaintProviderJobIdWithRetry({
+          requestId,
+          providerJobId: submission.request_id,
+          resultUrl: syncResult?.imageUrl ?? null,
+        });
+      } catch (writeError) {
+        await handleInpaintPostSubmitWriteFailure({
+          requestId,
+          userId: user.id,
+          providerJobId: submission.request_id,
+          error: writeError,
+        });
+        return;
+      }
+
+      console.log(
+        JSON.stringify({
+          event: "inpaint_background_submit_settled",
+          requestId,
+          providerJobId: submission.request_id,
+          provider: "alibaba",
+          sync: Boolean(syncResult),
+        })
+      );
     })();
 
     const response = NextResponse.json({
@@ -281,14 +413,19 @@ async function postInpaint(request: NextRequest) {
     return response;
   } catch (error) {
     // Issue #1111: when the outer catch fires after a successful
-    // claim, the InpaintRequest pre-write has either not happened
-    // (schema/validation error) or succeeded without the background
-    // IIFE having been kicked off yet (the IIFE catches its own
-    // errors and the `void` invocation is the last synchronous step
-    // before this catch can fire, so the IIFE has not started). In
-    // both cases no provider call ran for this request — refund.
+    // claim, the InpaintRequest pre-write has either not happened yet
+    // or succeeded without the background IIFE having been kicked off
+    // yet (the IIFE catches its own errors and the `void` invocation is
+    // the last synchronous step before this catch can fire, so the
+    // IIFE has not started). In both cases no provider call ran for
+    // this request — refund.
     // The InpaintRequest pre-write failure path is handled
     // separately by its own try/catch above, which also refunds.
+    //
+    // Issue #1495: the schema parse and the room validation now run
+    // BEFORE the claim, so a 400/404 on those paths never reaches
+    // this catch and never needs a refund — the unit is never claimed
+    // for a request that is rejected as invalid.
     if (quotaUserId && inpaintClaim?.claimed) {
       await refundInpaintQuota(quotaUserId);
     }

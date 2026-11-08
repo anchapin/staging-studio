@@ -429,29 +429,36 @@ export interface AlibabaFillPayloadInput {
 }
 
 /**
- * The DashScope multimodal-conversation payload shape THIS BUILDER
- * produces — only `image_url` + `prompt`. The alibaba-adapter
- * constructs the final DashScope request body and folds `strength`
- * + `seed` into the `parameters` block; see
- * `src/lib/alibaba-adapter.ts:dashscopeGenerate`.
+ * The seam payload THIS BUILDER produces for the alibaba-adapter:
+ * `image_url` + `prompt`, plus `strength` / `seed` when the caller
+ * provided them. This object is NOT the DashScope wire body — the
+ * adapter constructs that and folds `strength` + `seed` into the
+ * `parameters` block; see `src/lib/alibaba-adapter.ts:dashscopeGenerate`.
  *
- * Only the fields the model actually consumes are populated; the
- * `strength` / `seed` input fields are intentionally NOT in this
- * payload shape because they belong to the `parameters` block, not
- * the input messages — that's the adapter's job.
+ * `strength` / `seed` must ride this payload: the adapter only ever
+ * receives what this builder emits (via
+ * `submitInpaintToActiveProvider`), so omitting them here silently
+ * dropped the caller's values and the adapter fell back to its
+ * defaults — the seam bug the tests in `tests/alibaba-seam.test.ts`
+ * now pin against.
  */
 export type AlibabaFillPayload = {
   image_url: string;
   prompt: string;
+  strength?: number;
+  seed?: number;
 };
 
 export function buildAlibabaFillPayload(
   input: AlibabaFillPayloadInput
 ): AlibabaFillPayload {
-  return {
+  const payload: AlibabaFillPayload = {
     image_url: input.imageUrl,
     prompt: input.prompt,
   };
+  if (input.strength !== undefined) payload.strength = input.strength;
+  if (input.seed !== undefined) payload.seed = input.seed;
+  return payload;
 }
 
 // ─── Replicate payload ─────────────────────────────────────────────────────
@@ -536,11 +543,46 @@ export function buildReplicateFillPayload(
  * abstraction's clients may import the payload builders for their
  * submit shapes, and prompts is the natural home for those).
  */
+// ─── OpenAI (GPT Image edits) payload ─────────────────────────────
+
+/**
+ * OpenAI's GPT Image edits endpoint takes multipart form data built
+ * from the actual image/mask BYTES, so there is no JSON wire payload
+ * to construct here (issue #1506). This builder passes the logical
+ * fields the openai-adapter consumes — `imageUrl`, `maskUrl`, `prompt`
+ * in the camelCase shape the adapter reads — so the dispatch seam
+ * stays uniform across providers. `strength` / `seed` have no GPT
+ * Image wire equivalent (quality is pinned to "medium" in the adapter
+ * per the #1502 methodology) and are intentionally not carried.
+ */
+export interface OpenAiFillPayloadInput {
+  imageUrl: string;
+  maskUrl: string;
+  prompt: string;
+}
+
+export type OpenAiFillPayload = {
+  imageUrl: string;
+  maskUrl: string;
+  prompt: string;
+};
+
+export function buildOpenAiFillPayload(
+  input: OpenAiFillPayloadInput
+): OpenAiFillPayload {
+  return {
+    imageUrl: input.imageUrl,
+    maskUrl: input.maskUrl,
+    prompt: input.prompt,
+  };
+}
+
 export function buildInpaintPayloadForActiveProvider(
   input:
     | FalFillPayloadInput
     | ReplicateFillPayloadInput
     | AlibabaFillPayloadInput
+    | OpenAiFillPayloadInput
 ): Record<string, unknown> {
   const provider = process.env.INFERENCE_PROVIDER?.trim().toLowerCase();
   if (provider === "replicate") {
@@ -548,6 +590,9 @@ export function buildInpaintPayloadForActiveProvider(
   }
   if (provider === "fal") {
     return buildFalFillPayload(input as FalFillPayloadInput) as unknown as Record<string, unknown>;
+  }
+  if (provider === "openai") {
+    return buildOpenAiFillPayload(input as OpenAiFillPayloadInput) as unknown as Record<string, unknown>;
   }
   // alibaba (default), or any unknown value
   return buildAlibabaFillPayload(input as AlibabaFillPayloadInput) as unknown as Record<string, unknown>;

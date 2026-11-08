@@ -24,6 +24,7 @@
 import { prisma } from "@/lib/prisma";
 import { firstInpaintImageUrl } from "@/lib/inpaint-output";
 import { logInpaintTransition, persistInpaintImage } from "@/lib/inpaint-status";
+import { releaseInpaintQuotaReservation } from "@/lib/inpaint-quota";
 
 export type InpaintWebhookOutcome =
   | { kind: "completed"; imageUrl: string }
@@ -54,7 +55,14 @@ export async function applyInpaintWebhookEvent(params: {
 
   const row = await prisma.inpaintRequest.findUnique({
     where: { providerJobId },
-    select: { id: true, status: true, resultUrl: true },
+    select: {
+      id: true,
+      status: true,
+      resultUrl: true,
+      // Issue #1421: the quota unit has to be released on the terminal
+      // paths below, and the refund is keyed by the owning user.
+      room: { select: { project: { select: { userId: true } } } },
+    },
   });
   if (!row) {
     return { kind: "not_found" };
@@ -70,7 +78,7 @@ export async function applyInpaintWebhookEvent(params: {
 
   const providerImageUrl = firstInpaintImageUrl(output);
   if (providerImageUrl) {
-    return persistCompletion(row.id, providerJobId, providerImageUrl);
+    return persistCompletion(row.id, providerJobId, providerImageUrl, row);
   }
 
   // No image inline. fal's queue.status.updated never carries the
@@ -88,7 +96,7 @@ export async function applyInpaintWebhookEvent(params: {
         const fetched = (await res.json()) as unknown;
         const fetchedUrl = firstInpaintImageUrl(fetched);
         if (fetchedUrl) {
-          const persisted = await persistCompletion(row.id, providerJobId, fetchedUrl);
+          const persisted = await persistCompletion(row.id, providerJobId, fetchedUrl, row);
           return persisted;
         }
         return { kind: "unrecognized" };
@@ -143,6 +151,18 @@ export async function applyInpaintWebhookEvent(params: {
       });
     // Issue #1116: the ERROR flip is a pipeline state transition.
     await logInpaintTransition(row.id, "failed");
+    // Issue #1421: the provider reported the job as failed — no result
+    // exists, so the reserved quota unit goes back to the user through
+    // the central helper.
+    const failedUserId = row.room?.project?.userId;
+    if (failedUserId) {
+      await releaseInpaintQuotaReservation({
+        userId: failedUserId,
+        requestId: row.id,
+        reason: "provider_reported_error",
+        previousStatus: row.status,
+      });
+    }
     return { kind: "provider_error" };
   }
 
@@ -167,7 +187,8 @@ export function resolveInpaintDelivery(): "polling" | "webhook" {
 async function persistCompletion(
   requestId: string,
   providerJobId: string,
-  providerImageUrl: string
+  providerImageUrl: string,
+  row: { status: string; room?: { project?: { userId?: string } } | null }
 ): Promise<InpaintWebhookOutcome> {
   const { persisted, imageUrl } = await persistInpaintImage(
     providerImageUrl,
@@ -223,5 +244,17 @@ async function persistCompletion(
         recordError
       );
     });
+  // Issue #1421: the row lands in PERSISTENCE_FAILED — no durable
+  // result exists, so the reserved quota unit is released through the
+  // central helper (same rule as the polling path).
+  const persistenceUserId = row.room?.project?.userId;
+  if (persistenceUserId) {
+    await releaseInpaintQuotaReservation({
+      userId: persistenceUserId,
+      requestId,
+      reason: "persistence_failed",
+      previousStatus: row.status,
+    });
+  }
   return { kind: "persistence_failed", providerImageUrl };
 }

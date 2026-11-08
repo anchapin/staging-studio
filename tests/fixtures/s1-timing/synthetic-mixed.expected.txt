@@ -1,0 +1,28 @@
+s1_size_check_timing summary
+lines_scanned: 11
+event_lines: 9
+ignored_lines: 2
+malformed_lines_skipped: 2
+batches: 6
+records_without_samples: 1
+per_call_samples: 14
+per_call_median_ms: 10.000
+per_call_p95_ms: 30.000
+per_call_max_ms: 30.000
+total_median_ms: 40.000
+total_p95_ms: 40.000
+total_max_ms: 40.000
+batch_size_histogram:
+  1: 1
+  2: 3
+  3: 1
+  4: 1
+batch_size_stats:
+  size=1: count=1 median_total_ms=30.000 max_total_ms=30.000
+  size=2: count=3 median_total_ms=40.000 max_total_ms=40.000
+  size=3: count=1 median_total_ms=40.000 max_total_ms=40.000
+  size=4: count=1 median_total_ms=40.000 max_total_ms=40.000
+batches_size_ge_20: 0
+oversized_count: 1
+oversized_rate: 0.1667
+verdict: INSUFFICIENT (<100 batches)

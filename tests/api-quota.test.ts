@@ -542,6 +542,20 @@ describe("claimDailyQuota (atomic claim, issue #1132)", () => {
     const claim = await claimDailyQuota("label", userId, 50, 5, midDay);
     expect(claim).toEqual({ claimed: true, allowed: true, used: 5, limit: 50, remaining: 45 });
   });
+
+  it("lets only one of two concurrent batch claims land (issue #1420)", async () => {
+    // Mirrors the room-batch staging flow: two batches of 30 images race
+    // for a 50-unit daily `label` allowance. The atomic conditional
+    // increment arbitrates — exactly one claim lands, so the cap is never
+    // overshot by a concurrent burst (an evaluate-then-record gate would
+    // have let both batches pass and charged 60 units).
+    const [a, b] = await Promise.all([
+      claimDailyQuota("label", userId, 50, 30, midDay),
+      claimDailyQuota("label", userId, 50, 30, midDay),
+    ]);
+    expect([a.claimed, b.claimed].filter(Boolean)).toHaveLength(1);
+    expect(await getDailyUsage("label", userId, midDay)).toBe(30);
+  });
 });
 
 describe("refundDailyQuota (issue #1132)", () => {

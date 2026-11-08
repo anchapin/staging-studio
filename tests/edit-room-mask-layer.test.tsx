@@ -24,8 +24,51 @@
 
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 
 import { MaskLayer } from "@/components/edit-room/MaskLayer";
+
+const rootDir = fileURLToPath(new URL("..", import.meta.url));
+
+function readProjectFile(relative: string): string {
+  return readFileSync(path.join(rootDir, relative), "utf8");
+}
+
+/** Drop `//` line comments so prose about an API is not mistaken for a call. */
+function stripComments(source: string): string {
+  return source
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("//"))
+    .join("\n");
+}
+
+/**
+ * Extract the body of a JSX prop handler (e.g. `onPointerMove`) from the
+ * component source so a test can assert what that handler does — and, more
+ * importantly, what it does NOT do.
+ */
+function handlerSource(source: string, prop: string): string {
+  const start = source.indexOf(`${prop}={`);
+  expect(start, `handler ${prop} not found`).toBeGreaterThan(-1);
+  const end = source.indexOf("onPointer", start + prop.length);
+  const stop = end === -1 ? source.indexOf("onPointerLeave", start) : end;
+  return stripComments(source.slice(start, stop === -1 ? source.length : stop));
+}
+
+/**
+ * Extract a named helper function's body (e.g. `stroke`) from the
+ * component source.
+ */
+function functionSource(source: string, name: string): string {
+  const start = source.indexOf(`const ${name} = (`);
+  expect(start, `function ${name} not found`).toBeGreaterThan(-1);
+  const end = source.indexOf("\n  return (", start);
+  return stripComments(
+    source.slice(start, end === -1 ? source.length : end),
+  );
+}
 
 describe("MaskLayer (issue #1339)", () => {
   it("renders a canvas inside an absolute inset-0 container with 55% opacity", () => {
@@ -121,5 +164,67 @@ describe("MaskLayer (issue #1339)", () => {
     // Back-compat invariant: the prop is additive only, so the
     // rendered HTML is identical whether it's supplied or not.
     expect(withOnChange).toBe(withoutOnChange);
+  });
+});
+
+/**
+ * Issue #1427 — the mask emission must not run a full-canvas PNG encode
+ * per pointer event.
+ *
+ * These are source-shape pins (the repo's convention for behavior that
+ * cannot run in vitest's `node` environment — see the header of this
+ * file). They guard the two regressions that matter:
+ *
+ *  1. the pointer-move path must not encode (it only marks the buffer
+ *     dirty; the encode is coalesced to at most one per animation frame);
+ *  2. the terminal event of a stroke must still flush the final mask to
+ *     the parent — issue #1344's guarantee, which the perf fix must not
+ *     weaken.
+ */
+describe("MaskLayer mask-emission coalescing (issue #1427)", () => {
+  const source = readProjectFile("src/components/edit-room/MaskLayer.tsx");
+
+  it("never encodes the canvas in the pointer-move handler", () => {
+    const move = handlerSource(source, "onPointerMove");
+    // No synchronous full-canvas read in the hot path.
+    expect(move).not.toContain("toDataURL");
+    // It only draws; the drawing helper marks the buffer dirty.
+    expect(move).toContain("stroke(p)");
+  });
+
+  it("marks the buffer dirty instead of encoding while painting", () => {
+    const stroke = functionSource(source, "stroke");
+    // The drawing path must not read the canvas back — it schedules the
+    // coalesced frame encode instead.
+    expect(stroke).not.toContain("toDataURL");
+    expect(stroke).toContain("scheduleChange()");
+  });
+
+  it("flushes the final mask to the parent when the stroke ends (#1344)", () => {
+    // Every terminal event of a stroke flushes synchronously, so the
+    // parent holds the complete final mask the moment the stroke ends.
+    expect(handlerSource(source, "onPointerUp")).toContain("flushChange()");
+    expect(handlerSource(source, "onPointerCancel")).toContain(
+      "flushChange()",
+    );
+    expect(handlerSource(source, "onLostPointerCapture")).toContain(
+      "flushChange()",
+    );
+  });
+
+  it("keeps the mask a full-fidelity PNG (alpha channel is the mask)", () => {
+    // The submit path feathers the mask through `featherMask()`, which
+    // blurs the ALPHA channel — a JPEG/downscale would drop alpha and
+    // destroy the mask. Only the encode FREQUENCY changes in #1427.
+    expect(source).toContain('toDataURL("image/png")');
+    expect(source).not.toContain('toDataURL("image/jpeg")');
+  });
+
+  it("coalesces the encode through the shared frame-scheduled policy", () => {
+    // The scheduling policy lives in `lib/mask-emission-coalescer.ts` so
+    // it is unit-testable without a DOM (tests/mask-emission-coalescer.test.ts).
+    expect(source).toContain("requestAnimationFrame");
+    expect(source).toContain("markDirty");
+    expect(source).toContain("flush");
   });
 });

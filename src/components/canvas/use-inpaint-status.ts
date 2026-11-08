@@ -49,8 +49,17 @@ export interface UseInpaintStatusCallbacks {
    * Fired when a run completes. `persisted` is `false` when the image URL
    * is an expiring fal CDN URL that was not saved to durable storage
    * (issue #687) — consumers must warn and skip persisting it.
+   *
+   * `requestId` is the inpaint request the completion belongs to — the
+   * staged-output QA path (issue #1446) posts its measurements under that
+   * id so the server can check ownership. It is undefined when the
+   * request id could not be captured (the QA then no-ops).
    */
-  onCompleted?: (resultImageUrl: string, persisted: boolean) => void;
+  onCompleted?: (
+    resultImageUrl: string,
+    persisted: boolean,
+    requestId?: string
+  ) => void;
   showSuccess: (message: string) => void;
   showError: (
     message: string,
@@ -133,7 +142,11 @@ export function useInpaintStatus(
       if (result.persisted) {
         callbacksRef.current.showSuccess("Inpainting completed successfully!");
       }
-      callbacksRef.current.onCompleted?.(result.imageUrl, result.persisted);
+      callbacksRef.current.onCompleted?.(
+        result.imageUrl,
+        result.persisted,
+        requestId
+      );
       setIsProcessing(false);
       setStatusText("");
     } catch (error) {

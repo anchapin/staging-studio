@@ -50,7 +50,7 @@ vi.mock("@/lib/inference", async (importOriginal) => {
 });
 
 import { evaluateInpaintQualityGate } from "@/lib/inpaint-quality-gate";
-import { resolveDailyLimit, evaluateDailyQuota, getDailyUsage, recordDailyUsage } from "@/lib/api-quota";
+import { resolveDailyLimit, evaluateDailyQuota, getDailyUsage, recordDailyUsage, claimDailyQuota, refundDailyQuota } from "@/lib/api-quota";
 import { buildInpaintPrompt } from "@/lib/prompts";
 
 // The legacy `falQueueSubmitWithCircuitBreaker` import from
@@ -267,6 +267,12 @@ describe("POST /api/inpaint", () => {
     vi.mocked(buildInpaintPrompt).mockReturnValue("replace sofa with leather sofa");
     vi.mocked(resolveDailyLimit).mockReturnValue(20);
     vi.mocked(evaluateDailyQuota).mockReturnValue({ allowed: true, used: 0, limit: 20, remaining: 20 });
+    // Issue #1495: the quota-claim / quota-refund mocks are shared
+    // across the suite, so clear their call logs per test — the
+    // regression tests below assert on WHETHER the claim happened at
+    // all (invalid body / unknown room must not claim).
+    vi.mocked(claimDailyQuota).mockClear();
+    vi.mocked(refundDailyQuota).mockClear();
   });
 
   // -------------------------------------------------------------------------
@@ -375,6 +381,70 @@ describe("POST /api/inpaint", () => {
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toBe("Invalid source");
+  });
+
+  // -------------------------------------------------------------------------
+  // Issue #1495 — invalid body / unknown room must NOT burn a quota unit
+  // -------------------------------------------------------------------------
+
+  it("does not claim a daily quota unit when the body fails schema validation (#1495)", async () => {
+    // The claim used to run BEFORE the parse, so every malformed body
+    // consumed one of the 20 daily inpaint units even though the
+    // request was rejected with a 400 and no work was ever done.
+    const res = await POST(makeRequest({ sourceSlot: 0, variantSlot: 0 }));
+
+    expect(res.status).toBe(400);
+    // Zero quota writes: the counter was never claimed and nothing was
+    // refunded (a refund would also be a quota write).
+    expect(claimDailyQuota).not.toHaveBeenCalled();
+    expect(refundDailyQuota).not.toHaveBeenCalled();
+    expect(prisma.inpaintRequest.create).not.toHaveBeenCalled();
+  });
+
+  it("does not claim a daily quota unit when the room is not found (#1495)", async () => {
+    vi.mocked(prisma.room.findFirst).mockResolvedValue(null);
+
+    const res = await POST(makeRequest({ roomId: "nonexistent", sourceSlot: 0, variantSlot: 0 }));
+
+    expect(res.status).toBe(404);
+    expect(claimDailyQuota).not.toHaveBeenCalled();
+    expect(refundDailyQuota).not.toHaveBeenCalled();
+    expect(prisma.inpaintRequest.create).not.toHaveBeenCalled();
+  });
+
+  it("does not claim a daily quota unit when the variant slot has no staged result (#1495)", async () => {
+    vi.mocked(prisma.room.findFirst).mockResolvedValue({
+      ...mockRoom,
+      afterImageUrl: null,
+    } as never);
+
+    const res = await POST(makeRequest({ roomId: MOCK_ROOM_ID, sourceSlot: 0, variantSlot: 0 }));
+
+    expect(res.status).toBe(400);
+    expect(claimDailyQuota).not.toHaveBeenCalled();
+    expect(refundDailyQuota).not.toHaveBeenCalled();
+    expect(prisma.inpaintRequest.create).not.toHaveBeenCalled();
+  });
+
+  it("claims exactly one daily quota unit on a valid request that reaches the pre-write (#1495)", async () => {
+    const res = await POST(makeRequest({ roomId: MOCK_ROOM_ID, sourceSlot: 0, variantSlot: 0 }));
+
+    expect(res.status).toBe(200);
+    // The reorder must not have broken the happy path: a valid request
+    // still claims exactly one unit, and the claim still happens
+    // BEFORE the InpaintRequest pre-write.
+    expect(claimDailyQuota).toHaveBeenCalledTimes(1);
+    expect(claimDailyQuota).toHaveBeenCalledWith(
+      "inpaint",
+      MOCK_USER_ID,
+      20,
+      1,
+      expect.any(Date)
+    );
+    expect(prisma.inpaintRequest.create).toHaveBeenCalledTimes(1);
+    const json = await res.json();
+    expect(typeof json.requestId).toBe("string");
+    expect(json.qualityWarnings).toEqual([]);
   });
 
   // -------------------------------------------------------------------------

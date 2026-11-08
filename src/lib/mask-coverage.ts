@@ -61,6 +61,35 @@ export function estimateMaskCoverage(
 }
 
 /**
+ * Estimates the alpha-weighted mass (0..1) of the mask canvas: the mean
+ * alpha-channel value divided by 255.
+ *
+ * Unlike {@link estimateMaskCoverage}, which answers binarily (a pixel is
+ * either "painted" or it is not), this keeps the *opacity* of a soft
+ * matte. A uniformly 40%-opaque object has an alpha mass of 0.4 even
+ * though its binary coverage is 0 (alpha 102 is below
+ * {@link MASK_PIXEL_THRESHOLD}).
+ *
+ * `data` is an RGBA byte buffer; `width`/`height` are the pixel dimensions
+ * of that buffer. Returns 0 for empty or malformed inputs, matching
+ * {@link estimateMaskCoverage}'s contract.
+ */
+export function estimateMaskAlphaMass(
+  data: Uint8ClampedArray | Uint8Array,
+  width: number,
+  height: number
+): number {
+  const total = width * height;
+  if (!Number.isFinite(total) || total <= 0 || data.length < total * 4) return 0;
+
+  let alphaSum = 0;
+  for (let i = 0; i < total; i++) {
+    alphaSum += data[i * 4 + 3];
+  }
+  return alphaSum / (255 * total);
+}
+
+/**
  * True when a mask exists but covers less than `threshold` of the canvas —
  * most likely a stray stroke or an outline-only mistake. An empty mask
  * (coverage 0) is NOT a low-coverage warning: that case belongs to the

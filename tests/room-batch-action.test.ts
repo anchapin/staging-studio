@@ -190,6 +190,86 @@ describe("detectBatchRoomTypes", () => {
     );
   });
 
+  it("refunds only the failed images' units and logs the failure (issue #1420)", async () => {
+    const imageUrls = [
+      "https://room1.jpg.supabase.co/storage/v1/object/public/rooms/room1.jpg",
+      "https://room2.jpg.supabase.co/storage/v1/object/public/rooms/room2.jpg",
+      "https://room3.jpg.supabase.co/storage/v1/object/public/rooms/room3.jpg",
+    ];
+
+    mockClaimDailyQuota.mockResolvedValue({
+      allowed: true,
+      used: 5,
+      limit: 20,
+    });
+    // The middle image fails; the other two detect fine.
+    mockDetectRoomType
+      .mockResolvedValueOnce("Living Room")
+      .mockRejectedValueOnce(new Error("upstream 503"))
+      .mockResolvedValueOnce("Kitchen");
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await detectBatchRoomTypes(mockProject.id, imageUrls);
+
+    warnSpy.mockRestore();
+
+    expect(result).toEqual({
+      success: true,
+      roomTypes: ["Living Room", "Other", "Kitchen"],
+    });
+
+    // Only the failed image's claimed unit is returned — the two images
+    // that produced a room type keep theirs.
+    expect(mockRefundDailyQuota).toHaveBeenCalledTimes(1);
+    expect(mockRefundDailyQuota).toHaveBeenCalledWith("label", mockUser.id, 1);
+  });
+
+  it("logs every failed detection instead of swallowing it (issue #1420)", async () => {
+    const imageUrls = [
+      "https://room1.jpg.supabase.co/storage/v1/object/public/rooms/room1.jpg",
+      "https://room2.jpg.supabase.co/storage/v1/object/public/rooms/room2.jpg",
+    ];
+
+    mockClaimDailyQuota.mockResolvedValue({
+      allowed: true,
+      used: 5,
+      limit: 20,
+    });
+    mockDetectRoomType.mockRejectedValue(new Error("upstream 503"));
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await detectBatchRoomTypes(mockProject.id, imageUrls);
+
+    const warnEvents = warnSpy.mock.calls.map((call) => {
+      try {
+        return JSON.parse(String(call[0])).event;
+      } catch {
+        return null;
+      }
+    });
+    const errorEvents = errorSpy.mock.calls.map((call) => {
+      try {
+        return JSON.parse(String(call[0])).event;
+      } catch {
+        return null;
+      }
+    });
+
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
+
+    // One log line per failed image, plus a batch-level line for the
+    // all-failed batch — a total upstream outage is never silent.
+    expect(warnEvents).toEqual([
+      "batch_room_type_detection_failed",
+      "batch_room_type_detection_failed",
+    ]);
+    expect(errorEvents).toContain("batch_room_type_detection_failed_batch");
+  });
+
   it("refuses before claiming quota when the caller does not own the project", async () => {
     const imageUrls = [
       "https://room1.jpg.supabase.co/storage/v1/object/public/rooms/room1.jpg",
