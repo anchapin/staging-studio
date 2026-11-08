@@ -330,7 +330,12 @@ export function createAlibabaClient(): InferenceClient {
     ): Promise<T> {
       const { apiKey, workspaceId } = requireAlibabaEnv();
       const model = resolveAlibabaModel(logicalModel);
-      const imageUrl = String(options.input.imageUrl ?? "");
+      // Seam fix: the payload that actually arrives here is built by
+      // `buildAlibabaFillPayload`, which speaks snake_case (`image_url`);
+      // direct callers and the adapter's own unit tests use the logical
+      // camelCase field. Accept both — reading only `imageUrl` sent an
+      // empty image URL to DashScope on every production call.
+      const imageUrl = String(options.input.image_url ?? options.input.imageUrl ?? "");
       const prompt = String(options.input.prompt ?? "");
       // Issue #1362b: thread `strength` + `seed` from the caller's
       // `LogicalInpaintInput` (read off `options.input` because
@@ -398,7 +403,12 @@ export function createAlibabaClient(): InferenceClient {
       // (404 because B's cache is empty).
       const { apiKey, workspaceId } = requireAlibabaEnv();
       const model = resolveAlibabaModel(_logicalModel);
-      const imageUrl = String(options.input.imageUrl ?? "");
+      // Seam fix: the payload that actually arrives here is built by
+      // `buildAlibabaFillPayload`, which speaks snake_case (`image_url`);
+      // direct callers and the adapter's own unit tests use the logical
+      // camelCase field. Accept both — reading only `imageUrl` sent an
+      // empty image URL to DashScope on every production call.
+      const imageUrl = String(options.input.image_url ?? options.input.imageUrl ?? "");
       const prompt = String(options.input.prompt ?? "");
       // Issue #1362b: same strength/seed extraction as `subscribe()`
       // — see the comment there.
