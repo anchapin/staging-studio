@@ -2,11 +2,12 @@
  * Provider-agnostic inference abstraction.
  *
  * Purpose: decouple the inpainting pipeline from any single remote
- * inference provider. As of #1240 the only wired provider is Alibaba
- * Cloud DashScope (`qwen-image-2.1-pro`); the `fal` and `replicate`
- * adapters were retired (their modules deleted, their `INFERENCE_PROVIDER`
- * values are accepted by the parser but rejected at configure time with a
- * clear error). Adding a future provider (Together, Stability, etc.) is
+ * inference provider. As of #1240 the default wired provider is Alibaba
+ * Cloud DashScope (`qwen-image-2.1-pro`); OpenAI GPT-Image was added as
+ * a second wired provider in #1506 (`openai-adapter.ts`). The `fal` and
+ * `replicate` adapters were retired (their modules deleted, their
+ * `INFERENCE_PROVIDER` values are accepted by the parser but rejected at
+ * configure time with a clear error). Adding a future provider (Together, Stability, etc.) is
  * a new adapter file plus one switch arm in `resolveProvider` /
  * `getInferenceClient` — the `InferenceClient` interface stays the same.
  *
@@ -32,8 +33,8 @@
  *   envelope), so call sites can keep their parsers.
  *
  * Pure logic. Side effects: each adapter binds its own client at
- * module load (e.g. `fal.config(...)` for the legacy fal path, or
- * `requireAlibabaEnv()` for DashScope); the `inference.ts` import is
+ * module load (e.g. `requireAlibabaEnv()` for DashScope, or the
+ * `openai-adapter` module for GPT-Image); the `inference.ts` import is
  * a no-op until a method is called.
  */
 
@@ -55,7 +56,8 @@ export type LogicalModel = (typeof LOGICAL_MODEL)[keyof typeof LOGICAL_MODEL];
 // ─── Provider selection ────────────────────────────────────────────────────
 
 /**
- * The literal `"alibaba"` is the only wired provider as of #1240. The
+ * The literal `"alibaba"` (default since #1240) and `"openai"` (wired in
+ * #1506) are the live providers. The
  * `fal | replicate` strings remain in this union so an operator that
  * sets `INFERENCE_PROVIDER=fal|replicate` gets a clear error from
  * `assertInferenceConfigured` / `getInferenceClient` instead of a
