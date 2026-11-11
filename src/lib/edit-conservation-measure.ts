@@ -10,9 +10,10 @@
  * images are already loaded.
  *
  * The split follows the repo convention (see `lib/thumbnail-geometry.ts`
- * + `lib/inpaint-thumbnail.ts`): the pixel math lives in the pure module
- * `lib/edit-conservation-regions.ts`, and this file is the thin browser
- * glue that decodes images into RGBA frames.
+ * + `lib/inpaint-thumbnail.ts`): the pixel math lives in the pure modules
+ * `lib/edit-conservation-regions.ts` (region scoring) and
+ * `lib/edit-conservation-geometry.ts` (sample-size math), and this file
+ * is the thin browser glue that decodes images into RGBA frames.
  *
  * FAILURE POLICY: any failure (image not loadable, CORS-blocked canvas
  * read, zero-sized frame) yields `null` — the caller's explicit "not
@@ -27,16 +28,15 @@ import {
   type RgbaFrame,
   type SceneConservationMeasurements,
 } from "@/lib/edit-conservation-regions";
+import { computeConservationSampleSize } from "@/lib/edit-conservation-geometry";
 
-/**
- * Width (px) the frames are sampled at. Small enough to keep the pixel
- * pass cheap (65k pixels), large enough that a 4×4 grid still sees real
- * structure.
- */
-export const CONSERVATION_SAMPLE_WIDTH = 256;
-
-/** Upper bound on the sampled height (guards against absurd aspect ratios). */
-export const CONSERVATION_MAX_SAMPLE_HEIGHT = 1024;
+// The sample-size constants moved to the pure geometry module (issue
+// #1513) so the math can be unit-pinned; they are re-exported here to
+// keep the existing public surface of this module unchanged.
+export {
+  CONSERVATION_SAMPLE_WIDTH,
+  CONSERVATION_MAX_SAMPLE_HEIGHT,
+} from "@/lib/edit-conservation-geometry";
 
 /**
  * Loads an image element for `url`.
@@ -116,10 +116,9 @@ export async function measureSceneConservation(params: {
   if (!referenceImage || !candidateImage) return null;
   if (!referenceImage.naturalWidth || !referenceImage.naturalHeight) return null;
 
-  const width = CONSERVATION_SAMPLE_WIDTH;
-  const height = Math.min(
-    CONSERVATION_MAX_SAMPLE_HEIGHT,
-    Math.max(1, Math.round((width * referenceImage.naturalHeight) / referenceImage.naturalWidth))
+  const { width, height } = computeConservationSampleSize(
+    referenceImage.naturalWidth,
+    referenceImage.naturalHeight,
   );
 
   const reference = drawImageToFrame(referenceImage, width, height);
