@@ -328,8 +328,9 @@ export const batchRoomTypesRequestSchema = z
  * - `qualityWarnings`: distinct warning strings; advisory only, never blocks
  *   submit; client deduplicates per-room on render
  *
- * Side effects: none (pure evaluation); the fal.ai inpaint call is gated
- * separately by `assertFalConfigured()`/`FAL_KEY`.
+ * Side effects: none (pure evaluation); the inpaint call is gated
+ * separately by `assertInferenceConfigured()` (the active provider's
+ * keys).
  */
 export const inpaintQualityGateSchema = z.object({
   specificity: z.number().int().min(0).max(3),
