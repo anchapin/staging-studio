@@ -86,9 +86,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Issue #1526: the refund in the catch below is guarded by
+    // `segmentUserId`, so it must be set on EVERY path that can reach the
+    // quota claim — not only on the validation-failure branch, which
+    // returns before anything was charged. Mirrors the `quotaUserId =
+    // user.id` assignment in `app/api/inpaint/route.ts`.
+    segmentUserId = user.id;
+
     const parsed = furnishingsSegmentRequestSchema.safeParse(await request.json());
     if (!parsed.success) {
-      segmentUserId = user.id;
       const conceptInvalid = parsed.error.issues.some((issue) =>
         issue.path.includes("concept"),
       );
