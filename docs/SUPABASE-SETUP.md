@@ -7,9 +7,9 @@ Everything a fresh clone needs to reach a **working login** and a **successful r
 
 ## Prerequisites
 
-- Node.js 18.18+ (Next.js 15's minimum; 20 LTS recommended) and npm
+- Node.js 24 and npm 10+ — `.nvmrc` pins `24.21.0` and `package.json` `engines.node` is `>=24.0.0 <25`; the app runs on Next.js 16
 - A Supabase account ([supabase.com](https://supabase.com) → sign in with GitHub or email)
-- Accounts on the other three providers, created in Step 4 as you reach them: fal.ai, OpenAI, Browserless.io
+- Accounts on the other three providers, created in Step 4 as you reach them: Alibaba Cloud Model Studio (DashScope), OpenAI, Browserless.io
 
 ## Step 1 — Create the Supabase project
 
@@ -44,26 +44,36 @@ The login page (`/login`) offers both password sign-in (`signInWithPassword`) an
 
 ## Step 3 — Create the storage buckets
 
-The code hard-depends on **two** buckets, by exact name:
+The code hard-depends on **three** buckets, by exact name:
 
 | Bucket | Created by | What goes in it |
 | --- | --- | --- |
 | `room-photos` | `src/app/actions/room-photos.ts` (signed upload URLs) | Room before-images: `rooms/{roomId}/before-image[-2].{jpg\|jpeg\|png\|webp}` |
 | `logos` | `src/app/(auth)/setup/setup-form.tsx` (direct client upload) | Firm logo uploaded by the mandatory `/setup` wizard |
+| `staging-images` | `src/lib/inpaint-status.ts` → `persistInpaintImage` (server-side upload) | Inpaint result PNGs: `after-{requestId}.png` |
 
-**Both buckets must be public.** The app calls `getPublicUrl()` and stores the resulting URL in Postgres (room image columns, the firm logo URL, inpaint result URLs), then renders those URLs through `next/image`. A private bucket makes every stored URL 404 — upload would "succeed" and the image would still never display.
+**All three buckets must be public.** The app calls `getPublicUrl()` and stores the resulting URL in Postgres (room image columns, the firm logo URL, inpaint result URLs), then renders those URLs through `next/image`. A private bucket makes every stored URL 404 — upload would "succeed" and the image would still never display.
 
 **Via the dashboard** (per bucket):
 
-1. Storage → **New bucket** → name it exactly `room-photos` (then `logos`) → toggle **Public bucket** on → Create.
+1. Storage → **New bucket** → name it exactly `room-photos` (then `logos`, then `staging-images`) → toggle **Public bucket** on → Create.
 2. Still in Storage → **Policies** (per bucket) → New policy → template **"Allow access to authenticated users only"** with `INSERT` checked. Public buckets are readable by anyone via public URLs; the policy is what lets *signed-in app users* upload.
 
-**Via the SQL Editor** (one paste does both buckets and both policies):
+**Via the SQL Editor** (one paste does all three buckets and their policies):
 
 ```sql
 insert into storage.buckets (id, name, public)
-values ('room-photos', 'room-photos', true), ('logos', 'logos', true)
+values ('room-photos', 'room-photos', true), ('logos', 'logos', true), ('staging-images', 'staging-images', true)
 on conflict (id) do update set public = true;
+
+-- Drop first so this block is re-runnable (the policies below use fixed names).
+drop policy if exists "authenticated can upload to room-photos" on storage.objects;
+drop policy if exists "authenticated can delete from room-photos" on storage.objects;
+drop policy if exists "authenticated can read room-photos" on storage.objects;
+drop policy if exists "authenticated can upload to logos" on storage.objects;
+drop policy if exists "authenticated can read logos" on storage.objects;
+drop policy if exists "authenticated can upload to staging-images" on storage.objects;
+drop policy if exists "authenticated can read staging-images" on storage.objects;
 
 create policy "authenticated can upload to room-photos"
 on storage.objects for insert to authenticated
@@ -72,16 +82,20 @@ with check (bucket_id = 'room-photos');
 create policy "authenticated can upload to logos"
 on storage.objects for insert to authenticated
 with check (bucket_id = 'logos');
+
+create policy "authenticated can upload to staging-images"
+on storage.objects for insert to authenticated
+with check (bucket_id = 'staging-images');
 ```
 
 Notes:
 
-- Without the INSERT policies, the room-photo flow fails with `new row violates row-level security policy` when the server requests a signed upload URL, and the logo upload fails in the `/setup` wizard.
+- Without the INSERT policies, the room-photo flow fails with `new row violates row-level security policy` when the server requests a signed upload URL, the logo upload fails in the `/setup` wizard, and the server-side inpaint upload to `staging-images` fails the same way.
 - Bucket-level allowed-MIME/size limits are optional hardening; the app already enforces `jpg|jpeg|png|webp` extensions in code. If you do set MIME types on the bucket, allow at least `image/jpeg`, `image/png`, `image/webp` or uploads will be rejected by Storage.
 
 ## Storage RLS Policies
 
-> **Issue #987 audit findings.** This section documents the RLS policy requirements for all Supabase Storage buckets used by the app, security findings, and recommended policies.
+> **Issue #987 audit findings.** This section documents the RLS policy requirements for all Supabase Storage buckets used by the app, security findings, and recommended policies. It is the original #987 record: Step 3 above now creates all three buckets (including `staging-images`) and their INSERT policies, and the complete SQL block at the end of this section is the copy-paste version of everything.
 
 ### Buckets in use
 
@@ -89,15 +103,15 @@ Notes:
 | --- | --- | --- | --- |
 | `room-photos` | `rooms/{roomId}/before-image[-2].{ext}`, `rooms/{roomId}/versions/{slot}/{now}-{uuid}.jpg` | Signed upload URL (server issues URL, browser PUTs directly) | before/after images + inpaint version thumbnails |
 | `logos` | `{email}-logo-{timestamp}.{ext}` | Client-side direct upload (setup wizard) | Firm logo; email in path provides natural scoping |
-| `staging-images` | `after-{requestId}.png` | Server-side only (`src/lib/inpaint-status.ts` → `persistFalImage`) | fal.ai result staging; see policy gap below |
+| `staging-images` | `after-{requestId}.png` | Server-side only (`src/lib/inpaint-status.ts` → `persistInpaintImage`) | Inpaint result staging (provider PNG re-hosted by the server); see policy gap below |
 
 ### Security findings (Issue #987)
 
-#### CRITICAL: `staging-images` bucket has no documented RLS policies
+#### CRITICAL: `staging-images` bucket has no documented RLS policies (since fixed in Step 3)
 
-The `staging-images` bucket is referenced in `src/lib/inpaint-status.ts` (`persistFalImage`) but **has no policies documented or created** in SUPABASE-SETUP.md. The upload path `after-{requestId}.png` uses a UUID-like request ID generated server-side, which provides unpredictability — but the bucket itself has no INSERT, SELECT, or DELETE policies. If this bucket was created as private (the default), all uploads via `persistFalImage` would fail with RLS violations.
+The `staging-images` bucket is referenced in `src/lib/inpaint-status.ts` (`persistInpaintImage`), and as of the #987 audit it **had no policies documented or created** in SUPABASE-SETUP.md (Step 3 now creates the bucket plus its INSERT policy; the full policy set is in the complete SQL block below). The upload path `after-{requestId}.png` uses a UUID-like request ID generated server-side, which provides unpredictability — but the bucket itself had no INSERT, SELECT, or DELETE policies. If this bucket was created as private (the default), all uploads via `persistInpaintImage` would fail with RLS violations.
 
-**Action required:** Create the `staging-images` bucket with the following policies, or clarify whether it is intended to be a public bucket:
+**Action required (now covered by Step 3):** Create the `staging-images` bucket with the following policies, or clarify whether it is intended to be a public bucket:
 
 ```sql
 -- If `staging-images` is intended to be PUBLIC (accessible without auth):
@@ -231,6 +245,16 @@ values
   ('staging-images', 'staging-images', true)  -- Issue #987: was missing
 on conflict (id) do update set public = true;
 
+-- Drop first so the block is re-runnable and does not clash with the
+-- policy names Step 3 already creates.
+drop policy if exists "authenticated can upload to room-photos" on storage.objects;
+drop policy if exists "authenticated can delete from room-photos" on storage.objects;
+drop policy if exists "authenticated can read room-photos" on storage.objects;
+drop policy if exists "authenticated can upload to logos" on storage.objects;
+drop policy if exists "authenticated can read logos" on storage.objects;
+drop policy if exists "authenticated can upload to staging-images" on storage.objects;
+drop policy if exists "authenticated can read staging-images" on storage.objects;
+
 -- ============================================================
 -- room-photos bucket
 -- ============================================================
@@ -267,7 +291,7 @@ using (bucket_id = 'logos');
 -- ============================================================
 -- staging-images bucket (Issue #987: was undocumented)
 -- ============================================================
--- Uploads are server-side only (persistFalImage in inpaint-status.ts).
+-- Uploads are server-side only (persistInpaintImage in inpaint-status.ts).
 -- Path `after-{requestId}.png` uses UUID requestId — unpredictable.
 -- If bucket is public (public=true), uploads succeed without policy.
 -- If bucket is private, server-side uploads require service role (bypasses RLS).
@@ -287,7 +311,7 @@ using (bucket_id = 'staging-images');
 | `room-photos` INSERT | `getSignedUploadUrl` checks `userId → project → room` before issuing URL | INSERT allowed for authenticated (path check is app-level) |
 | `room-photos` DELETE | `saveInpaintVersion` Prisma ownership check before evicting thumbnails | DELETE policy added Issue #987 |
 | `logos` INSERT | Client uploads from authenticated setup wizard; email in path | INSERT allowed for authenticated |
-| `staging-images` INSERT | Server-side only (`persistFalImage`); requestId is UUID | INSERT allowed for authenticated (Issue #987 fix) |
+| `staging-images` INSERT | Server-side only (`persistInpaintImage`); requestId is UUID | INSERT allowed for authenticated (Issue #987 fix) |
 | `staging-images` SELECT | Public URL stored in `InpaintRequest.resultUrl` | SELECT policy added Issue #987 |
 
 ## Step 4 — Get the other service keys
@@ -295,13 +319,14 @@ using (bucket_id = 'staging-images');
 | Provider | Console URL | Key / setting in `.env.local` | Capability needed |
 | --- | --- | --- | --- |
 | Supabase | [supabase.com/dashboard](https://supabase.com/dashboard) | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `DATABASE_URL` | Postgres project + Email auth (password & magic link) + Storage buckets + auth redirect config (Steps 1–3) |
-| fal.ai | [fal.ai/dashboard/keys](https://fal.ai/dashboard/keys) | `FAL_KEY` | Access to the **FLUX.1 Fill** model — the app queues `fal-ai/flux-fill` for room inpainting |
-| OpenAI | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) | `OPENAI_API_KEY` | **gpt-4o-mini** access (lookbook room copy generation) |
+| Alibaba Cloud Model Studio (DashScope) | [Alibaba Cloud console](https://console.aliyun.com/) → Model Studio → API keys | `ALIBABA_DASHSCOPE_API_KEY` (plus `ALIBABA_BAILIAN_WORKSPACE_ID`) | Access to the **Qwen-Image-2.1 Pro** model — the default inpaint provider since #1240 (`INFERENCE_PROVIDER=alibaba`) |
+| OpenAI | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) | `OPENAI_API_KEY` | **gpt-4o-mini** access (lookbook room copy generation); also the GPT-Image inpaint surface when `INFERENCE_PROVIDER=openai` (#1506) |
 | Browserless.io | [browserless.io](https://browserless.io) → account → API keys | `BROWSERLESS_API_KEY` | Headless-Chrome PDF rendering plan (lookbook export) |
 
 Notes per provider:
 
-- **fal.ai**: create an API key on the keys page; the key gets access to fal's public models including `fal-ai/flux-fill`. `lib/fal.ts` throws at import when `FAL_KEY` is missing, so the app can't even build without it.
+- **Alibaba Cloud DashScope**: create the API key in the Model Studio console. The key is region-bound — a Singapore key cannot call the Beijing endpoint — so `ALIBABA_BAILIAN_WORKSPACE_ID` (which implies the workspace region) must be set to the same region as the key. The optional `ALIBABA_INPAINT_MODEL` selects the model (default `qwen-image-2.1-pro`). `src/lib/alibaba-adapter.ts` throws `MissingEnvVarsError` at call time when `ALIBABA_DASHSCOPE_API_KEY`, `ALIBABA_BAILIAN_WORKSPACE_ID`, or `ALIBABA_INPAINT_MODEL` is missing — at call time, not at import, so the app still builds without them.
+- **fal.ai was retired in #1240**: the fal adapter was deleted, `FAL_KEY` is no longer read by the app and is not in `.env.example`. Setting `INFERENCE_PROVIDER=fal` (or `replicate`) now fails with a clear configuration error instead of falling through silently — leave `INFERENCE_PROVIDER` unset (default `alibaba`) or set it to `alibaba`/`openai`. Drop any stale `FAL_KEY` line from your `.env.local`.
 - **OpenAI**: the key must belong to a project/org with `gpt-4o-mini` available (any standard API project). Usage-based billing applies to copy generation calls.
 - **Browserless**: only needed for PDF export. Without it, everything else works and export returns a 500.
 - Two more optional `.env.local` keys are documented inline in `.env.example`: `NEXT_PUBLIC_APP_URL` (dev falls back to `http://localhost:3000`; only matters for local PDF export, which [DEPLOYMENT.md](DEPLOYMENT.md) explains further) and `PREVIEW_TOKEN_SECRET` (optional in dev — a fixed public fallback is used; **required in production**, generate with `openssl rand -base64 32`).
@@ -315,9 +340,11 @@ npm install
 # 2. Create your env file
 cp .env.example .env.local
 
-# 3. Fill in the values from Steps 1 and 4:
+# 3. Fill in the values from Steps 1 and 4 (every key in .env.example is
+#    listed in the table below):
 #    DATABASE_URL, NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY,
-#    OPENAI_API_KEY, FAL_KEY, BROWSERLESS_API_KEY
+#    OPENAI_API_KEY, ALIBABA_DASHSCOPE_API_KEY, ALIBABA_BAILIAN_WORKSPACE_ID,
+#    BROWSERLESS_API_KEY
 
 # 4. Push the Prisma schema to the database
 npx prisma db push
@@ -327,6 +354,29 @@ npm run dev
 ```
 
 **`npx prisma db push` is the first hard gate.** It talks to live Postgres over `DATABASE_URL` — if the connection string is wrong (bad password, wrong host/port), it fails with `P1001: Can't reach database server` before anything else in the app can work. This is also why there is no offline "first run" without either a hosted Supabase project (Steps 1–3) or the local Supabase stack at the end of this guide. The Prisma schema (`prisma/schema.prisma`) is the source of truth; the project uses `db push`, not migrations.
+
+Every key in `.env.example`, and what to do with it in local dev:
+
+| `.env.local` key | In local dev |
+| --- | --- |
+| `DATABASE_URL` | **Fill in** — from Step 1 (or the local Supabase stack below) |
+| `NEXT_PUBLIC_SUPABASE_URL` | **Fill in** — from Step 1 |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | **Fill in** — from Step 1 |
+| `OPENAI_API_KEY` | **Fill in** — from Step 4 |
+| `ALIBABA_DASHSCOPE_API_KEY` | **Fill in** — from Step 4 |
+| `ALIBABA_BAILIAN_WORKSPACE_ID` | **Fill in** — from Step 4 (must match the key's region) |
+| `BROWSERLESS_API_KEY` | **Fill in** — from Step 4 (only needed for PDF export) |
+| `ALIBABA_INPAINT_MODEL` | Leave the default (`qwen-image-2.1-pro`) |
+| `OPENAI_INPAINT_MODEL` | Leave the default (`gpt-image-2.6-flare`) |
+| `OPENAI_INPAINT_COMPOSITE` | Leave unset (commented out in `.env.example`) |
+| `INFERENCE_PROVIDER` | Leave the default (`alibaba`); `openai` selects the GPT-Image inpaint surface (#1506) |
+| `NEXT_PUBLIC_APP_URL` | Leave the default (`http://localhost:3000`); set it to a public tunnel URL if you want local PDF export |
+| `NEXT_PUBLIC_SENTRY_DSN` | Leave blank in dev (Sentry stays a no-op) |
+| `DAILY_INPAINT_LIMIT`, `DAILY_COPY_LIMIT`, `DAILY_LABEL_LIMIT`, `DAILY_EXPORT_LIMIT`, `DAILY_SEGMENT_LIMIT` | Leave the defaults (20 / 50 / 50 / 20 / 100) |
+| `PREVIEW_TOKEN_SECRET`, `SIGNATURE_ENCRYPTION_KEY` | Optional in dev (fixed public fallbacks); generate with `openssl rand -base64 32` for production |
+| `SUPABASE_SERVICE_ROLE_KEY` | Leave alone — no app code reads it today |
+| `TYPESAFE_API_KEY` | Leave blank — only `docs/dana-rig/` tooling reads it |
+| `E2E_HERMETIC`, `E2E_BROWSERLESS_PDF_URL` | Leave blank — the e2e harness supplies them itself |
 
 Then verify the app end-to-end:
 
@@ -356,4 +406,4 @@ Then:
 
 - Run `npx prisma db push` against the local database as in Step 5.
 - Replicate Step 2 (Site URL + `http://localhost:3000/auth/callback` redirect) and Step 3 (buckets + policies) in the local Studio at [127.0.0.1:54323](http://127.0.0.1:54323), or the equivalent SQL against the local DB.
-- **Caveat:** the AI and PDF services have no local equivalents. `FAL_KEY`, `OPENAI_API_KEY`, and `BROWSERLESS_API_KEY` must still be real cloud keys from Step 4 — inpainting, copy generation, and PDF export always hit the cloud, even with a fully local database.
+- **Caveat:** the AI and PDF services have no local equivalents. `ALIBABA_DASHSCOPE_API_KEY` (with `ALIBABA_BAILIAN_WORKSPACE_ID`), `OPENAI_API_KEY`, and `BROWSERLESS_API_KEY` must still be real cloud keys from Step 4 — inpainting, copy generation, and PDF export always hit the cloud, even with a fully local database.
