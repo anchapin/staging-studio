@@ -7,6 +7,7 @@ import {
   API_ERROR_INVALID_REQUEST,
   API_ERROR_RATE_LIMIT_EXCEEDED,
   API_ERROR_ROOM_NOT_FOUND,
+  API_ERROR_SEGMENTATION_FAILED,
   API_ERROR_UNAUTHORIZED,
 } from "@/lib/api-errors";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
@@ -22,8 +23,10 @@ import {
 import { classifyIntegrationError } from "@/lib/error-classify";
 import { DETECTION_TIMEOUT_MS } from "@/lib/segment-timeouts";
 import {
+  assertSegmentLogicalModelSupported,
   defaultSegmentFurnishingsServiceDeps,
   runFurnishingDetection,
+  UnsupportedLogicalModelError,
   validateSegmentAccess,
 } from "@/lib/segment-furnishings-service";
 import type { QuotaClaim } from "@/lib/api-quota";
@@ -118,6 +121,18 @@ export async function POST(request: NextRequest) {
     const deps = defaultSegmentFurnishingsServiceDeps();
     await validateSegmentAccess({ roomId }, user, deps);
 
+    // Issue #1527: the wired inference providers (Alibaba DashScope #1240,
+    // OpenAI GPT-Image #1506) do NOT implement `LOGICAL_MODEL.SAM_3_1_IMAGE`
+    // — the model this surface defaults to. Before the fix every call
+    // claimed a daily quota unit, passed `assertInferenceConfigured()`, and
+    // then threw "unknown logical model" in provider dispatch (an opaque
+    // 500). The capability check runs BEFORE `claimDailyQuota` so a call
+    // that is guaranteed to fail in dispatch never burns a quota unit.
+    // End state (b) of #1527: fail fast and honestly. (End state (a) —
+    // restoring a fal-backed SAM path — needs a paid third-party service
+    // and a production `FAL_KEY`; out of scope.)
+    await assertSegmentLogicalModelSupported(deps);
+
     // Issue #226/#1132: claim one segment unit ATOMICALLY here, on the
     // eve of the paid call, instead of gate-reading the counter up front.
     segmentClaim = await claimDailyQuota(
@@ -195,6 +210,24 @@ export async function POST(request: NextRequest) {
       JSON.stringify({ event: "furnishings_detection_failed", roomId: roomId ?? null }),
       error,
     );
+
+    // Issue #1527: an unsupported logical model is already classified (501
+    // Not Implemented, `retryable: false`) — surface it verbatim instead of
+    // flattening it into the generic "detection failed" copy. Nothing was
+    // claimed (the check runs before `claimDailyQuota`), so the refund
+    // above is a no-op here.
+    if (error instanceof UnsupportedLogicalModelError) {
+      return NextResponse.json(
+        {
+          error: "Furnishings detection unavailable",
+          message:
+            "Furnishings detection is not available right now — the configured inference provider does not support the SAM 3.1 detection model. Please try again later, or use the brush tools to mask furnishings by hand.",
+          retryable: false,
+          code: API_ERROR_SEGMENTATION_FAILED,
+        },
+        { status: error.status },
+      );
+    }
 
     const classified = classifyIntegrationError(error, FURNISHINGS_ERROR_COPY);
 

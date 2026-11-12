@@ -22,6 +22,7 @@ import { ApiError } from "@/lib/api-error-handler";
 import {
   API_ERROR_INVALID_REQUEST,
   API_ERROR_ROOM_NOT_FOUND,
+  API_ERROR_SEGMENTATION_FAILED,
   API_ERROR_UNAUTHORIZED,
 } from "@/lib/api-errors";
 import {
@@ -32,6 +33,8 @@ import {
   assertInferenceConfigured,
   getInferenceClient,
   LOGICAL_MODEL,
+  resolveProvider,
+  type InferenceClient,
 } from "@/lib/inference";
 import { prisma } from "@/lib/prisma";
 
@@ -101,6 +104,12 @@ export interface SegmentFurnishingsServiceDeps {
     input: Record<string, unknown>;
     abortSignal: AbortSignal;
   }) => Promise<unknown>;
+  /**
+   * Resolve the wired inference client. Used by the pre-claim capability
+   * check (issue #1527) to ask the client which logical models it
+   * implements — resolving the client is free (no request goes out).
+   */
+  getInferenceClient: () => Promise<InferenceClient>;
   /** The logical model id passed to `subscribe`. */
   logicalModel: string;
   assertInferenceConfigured: () => void;
@@ -117,11 +126,118 @@ export function defaultSegmentFurnishingsServiceDeps(): SegmentFurnishingsServic
       const client = await getInferenceClient();
       return client.subscribe(model as Parameters<typeof client.subscribe>[0], opts);
     },
+    getInferenceClient: () => getInferenceClient(),
     logicalModel: LOGICAL_MODEL.SAM_3_1_IMAGE,
     assertInferenceConfigured,
     fetch,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Provider capability (issue #1527)
+// ---------------------------------------------------------------------------
+
+/**
+ * The logical models each WIRED inference provider actually implements.
+ *
+ * Issue #1527: `LOGICAL_MODEL.SAM_3_1_IMAGE` — the model the
+ * segment-furnishings surface defaults to — has NO wired implementation.
+ * `resolveAlibabaModel` (#1240) and `resolveOpenAiModel` (#1506) both throw
+ * `unknown logical model` for it, so every real call used to claim a daily
+ * quota unit, pass `assertInferenceConfigured()`, and then die in provider
+ * dispatch as an opaque 500.
+ *
+ * The fal-backed SAM path was retired in #1240. Restoring it (end state (a)
+ * of #1527) needs a paid third-party service and a production `FAL_KEY`,
+ * which is out of scope here: this issue ships end state (b) — fail fast
+ * and honestly, BEFORE any quota claim.
+ *
+ * This table is the fallback source of truth for inference clients that do
+ * not declare their own capabilities. A client MAY declare
+ * `supportedLogicalModels` to override it (see
+ * `assertSegmentLogicalModelSupported`). `tests/segment-sam-fail-fast-seam.test.ts`
+ * pins this table against the REAL `getInferenceClient()` dispatch, so it
+ * cannot silently drift from the adapters.
+ */
+export const WIRED_PROVIDER_LOGICAL_MODELS: Readonly<
+  Record<string, readonly string[]>
+> = Object.freeze({
+  alibaba: Object.freeze([LOGICAL_MODEL.FLUX_FILL]),
+  openai: Object.freeze([LOGICAL_MODEL.FLUX_FILL]),
+});
+
+/**
+ * Optional capability declaration an inference client may expose.
+ *
+ * `InferenceClient` itself (in `lib/inference.ts`) carries no capability
+ * metadata, so this is read structurally (duck-typed) by the check below.
+ * A client that declares the list is authoritative: it knows which logical
+ * models it can dispatch.
+ */
+export interface InferenceClientCapabilities {
+  readonly supportedLogicalModels?: readonly string[];
+}
+
+/**
+ * Issue #1527 — the requested logical model is not implemented by the wired
+ * inference provider.
+ *
+ * Thrown BEFORE the daily-quota claim so a call that is guaranteed to fail
+ * in provider dispatch never costs the user a quota unit.
+ *
+ * 501 Not Implemented: the provider does not implement the model at all, so
+ * retrying the same request cannot help (`retryable: false`). The route
+ * surfaces this verbatim instead of the generic "detection failed" copy.
+ */
+export class UnsupportedLogicalModelError extends ApiError {
+  readonly logicalModel: string;
+  readonly provider: string;
+
+  constructor(logicalModel: string, provider: string) {
+    super({
+      code: API_ERROR_SEGMENTATION_FAILED,
+      message:
+        `Furnishings detection is unavailable: the "${provider}" inference ` +
+        `provider does not implement the "${logicalModel}" model.`,
+      status: 501,
+      details: { logicalModel, provider },
+    });
+    this.name = "UnsupportedLogicalModelError";
+    this.logicalModel = logicalModel;
+    this.provider = provider;
+  }
+}
+
+/**
+ * Issue #1527 — assert that the wired inference client can dispatch the
+ * logical model this surface needs, BEFORE any quota is claimed.
+ *
+ * Resolution order:
+ *   1. The client declares `supportedLogicalModels` → that list wins.
+ *   2. Otherwise the per-provider table (`WIRED_PROVIDER_LOGICAL_MODELS`)
+ *      is the truth — today both wired providers implement `FLUX_FILL` only.
+ *
+ * The client is only *resolved* (no request goes out), so this check is
+ * free and side-effect free. A client that cannot be resolved at all (e.g.
+ * a retired `INFERENCE_PROVIDER=fal|replicate`) throws its own
+ * configuration error, which the route classifies as before.
+ *
+ * Throws `UnsupportedLogicalModelError` when the model cannot be dispatched.
+ */
+export async function assertSegmentLogicalModelSupported(
+  deps: SegmentFurnishingsServiceDeps,
+): Promise<void> {
+  const client = await deps.getInferenceClient();
+  const provider = resolveProvider();
+  const declared = (client as InferenceClientCapabilities)
+    .supportedLogicalModels;
+  const implemented =
+    declared ?? WIRED_PROVIDER_LOGICAL_MODELS[provider] ?? [];
+  if (implemented.includes(deps.logicalModel)) return;
+  throw new UnsupportedLogicalModelError(deps.logicalModel, provider);
+}
+
+
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for unit tests)

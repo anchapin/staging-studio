@@ -134,6 +134,12 @@ function makeDeps(overrides: Partial<SegmentFurnishingsServiceDeps> = {}): Segme
     buildPayload: vi.fn(() => ({ input: "payload" })),
     parseResponse: vi.fn(() => ({ maskUrls: ["https://x/mask1.png"], scores: [0.9] })),
     subscribe: vi.fn(async () => ({ result: "ok" })),
+    // Issue #1527: the pre-claim capability check resolves the wired
+    // client (no request goes out). This stub declares SAM 3.1 support.
+    getInferenceClient: vi.fn(async () => ({
+      subscribe: vi.fn(),
+      supportedLogicalModels: ["sam-3-1-image"],
+    })) as unknown as SegmentFurnishingsServiceDeps["getInferenceClient"],
     logicalModel: "sam-3-1-image",
     assertInferenceConfigured: vi.fn(),
     fetch: vi.fn(async () =>
