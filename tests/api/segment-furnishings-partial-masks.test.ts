@@ -37,6 +37,11 @@ vi.mock("@/lib/inference", async (importOriginal) => {
       submit: vi.fn(),
       status: vi.fn(),
       result: vi.fn(),
+      // Issue #1527: the route asks the wired client which logical models
+      // it implements BEFORE claiming quota. This stub stands in for a
+      // provider that DOES implement SAM 3.1, so the happy path still
+      // reaches the mask-fetch behaviour this file pins.
+      supportedLogicalModels: ["sam-3-1-image"],
     })),
   };
 });
