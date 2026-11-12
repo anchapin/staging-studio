@@ -1,8 +1,13 @@
 /**
  * Inpainting completion webhook (issue #1221).
  *
- * Opt-in delivery path: when `INFERENCE_DELIVERY=webhook`, the
- * provider callbacks here instead of waiting for the client poller.
+ * Completion endpoint: a provider (or any caller that can sign the
+ * request) posts a job completion here instead of the client poller
+ * picking it up. No env knob gates this route — it is always
+ * reachable, and the only precondition is the shared
+ * `INPAINT_WEBHOOK_SECRET` used for the signature check. The live
+ * providers (Alibaba, OpenAI) are synchronous and do not post here
+ * today; the fal/Replicate adapters they replaced are retired.
  * Signature verification happens on the RAW body (not the parsed
  * JSON), so tampering with the payload cannot survive the HMAC check;
  * every rejection writes nothing.

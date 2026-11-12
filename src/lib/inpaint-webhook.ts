@@ -170,16 +170,6 @@ export async function applyInpaintWebhookEvent(params: {
 }
 
 /**
- * Resolves the delivery mode from `INFERENCE_DELIVERY`. Unset/empty
- * (and any unknown value) is `polling`, which keeps today's behavior
- * byte-identical for every deploy that has not opted in.
- */
-export function resolveInpaintDelivery(): "polling" | "webhook" {
-  const raw = process.env.INFERENCE_DELIVERY?.trim().toLowerCase();
-  return raw === "webhook" ? "webhook" : "polling";
-}
-
-/**
  * Shared completion tail for inline and response_url-fetched results:
  * persist the image, then the durable COMPLETED write, with the same
  * failure contract in both paths.

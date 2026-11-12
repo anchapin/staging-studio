@@ -117,10 +117,12 @@ export interface SubscribeOptions {
   input: Record<string, unknown>;
   abortSignal?: AbortSignal;
   /**
-   * Optional completion webhook URL (issue #1221). Set only when
-   * `INFERENCE_DELIVERY=webhook`: fal receives `webhook`, Replicate
-   * `webhook` + `events_filter`. Unset keeps the polling path
-   * byte-identical.
+   * Optional completion webhook URL (issue #1221). No env knob
+   * enables it and no live provider consumes it: the current
+   * adapters (Alibaba, OpenAI) are synchronous and ignore this
+   * field, and the fal/Replicate adapters that honoured it were
+   * retired in #1240. It stays in the interface only so an adapter
+   * with a real callback surface can use it.
    */
   webhookUrl?: string;
 }
