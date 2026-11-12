@@ -119,6 +119,49 @@ describe("POST /api/segment/furnishings (issue #1108)", () => {
       expect(body.error).toBe("Unauthorized");
       // Issue #1108: the cap must never be charged for an unauth request.
       expect(mockClaimDailyQuota).not.toHaveBeenCalled();
+      // Issue #1526: nothing was claimed, so nothing may be refunded.
+      expect(mockRefundDailyQuota).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("quota refund on failure (issue #1526)", () => {
+    it("refunds the claimed segment unit when detection fails after the claim", async () => {
+      mockFalSubscribe.mockRejectedValue(new Error("fal subscribe blew up"));
+
+      const response = await POST(buildRequest());
+
+      expect(response.status).toBeGreaterThanOrEqual(500);
+      expect(mockClaimDailyQuota).toHaveBeenCalledTimes(1);
+      // Issue #1526: the claim was charged, so the failure must give the
+      // unit back — exactly once, for the authenticated user.
+      expect(mockRefundDailyQuota).toHaveBeenCalledTimes(1);
+      expect(mockRefundDailyQuota).toHaveBeenCalledWith("segment", MOCK_USER_ID);
+    });
+
+    it("refunds the claimed segment unit when every mask fails to download", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response("nope", { status: 500 })));
+
+      const response = await POST(buildRequest());
+
+      expect(response.status).toBeGreaterThanOrEqual(500);
+      expect(mockClaimDailyQuota).toHaveBeenCalledTimes(1);
+      expect(mockRefundDailyQuota).toHaveBeenCalledTimes(1);
+      expect(mockRefundDailyQuota).toHaveBeenCalledWith("segment", MOCK_USER_ID);
+    });
+
+    it("does not refund when the request body is invalid (no claim happened)", async () => {
+      const request = {
+        url: "http://localhost/api/segment/furnishings",
+        json: async () => ({ roomId: MOCK_ROOM_ID, imageUrl: "not-a-url" }),
+      } as unknown as NextRequest;
+
+      const response = await POST(request);
+      const body = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(body.code).toBe("invalid-request");
+      expect(mockClaimDailyQuota).not.toHaveBeenCalled();
+      expect(mockRefundDailyQuota).not.toHaveBeenCalled();
     });
   });
 
