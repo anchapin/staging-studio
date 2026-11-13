@@ -29,6 +29,32 @@ const DIRECTIVE_CARD_CLASSES =
 const REALISM_TOOLTIP_COPY =
   "Intended to set how closely staged results stick to the original photo's light and camera feel: lower is more stylized and freer with lighting, higher stays closer to the original photo. Not wired to generation yet, so moving it has no effect on output. Once wired, 75-90% is the recommended range for listing photos.";
 
+/**
+ * Issue #1543 (Modern Web Guidance — IME-safe Enter): a keydown that fires
+ * while an IME composition is still in progress must not be treated as a
+ * real Enter press, otherwise confirming a candidate word would add a lock
+ * by accident. Browsers signal this either with `isComposing` or, on
+ * older engines, with the legacy `keyCode === 229` marker.
+ */
+export function isEnterToAddLock(e: {
+  key: string;
+  isComposing?: boolean;
+  keyCode?: number;
+}): boolean {
+  return e.key === "Enter" && !e.isComposing && e.keyCode !== 229;
+}
+
+/**
+ * Enter adds the lock to the list. Exported so the IME gate can be covered
+ * by a unit test without a DOM (issue #1543).
+ */
+export function handleAddLockKeyDown(
+  e: { key: string; isComposing?: boolean; keyCode?: number },
+  addLock: () => void
+): void {
+  if (isEnterToAddLock(e)) addLock();
+}
+
 interface GlobalStagingDirectivesBarProps {
   /** Current design aesthetic selection */
   aesthetic: string;
@@ -147,7 +173,7 @@ export default function GlobalStagingDirectivesBar({
                 value={addLockInput}
                 onChange={(e) => setAddLockInput(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") handleAddLock();
+                  handleAddLockKeyDown(e, handleAddLock);
                   if (e.key === "Escape") {
                     setShowAddLock(false);
                     setAddLockInput("");
