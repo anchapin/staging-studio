@@ -25,10 +25,11 @@ import {
   DAILY_LIMIT_ENV_VAR,
   dailyQuotaExceededPayload,
   claimDailyQuota,
+  refundDailyQuota,
   resolveDailyLimit,
 } from "@/lib/api-quota";
 import {
-  BROWSERLESS_TIMEOUT_MS,
+  BROWSERLESS_RENDER_TIMEOUT_MS,
   E2E_BROWSERLESS_PDF_URL_ENV_VAR,
   E2E_HERMETIC_ENV_VAR,
   buildBrowserlessPdfBody,
@@ -53,6 +54,19 @@ const PREVIEW_CAPTURE_QUERY_PARAM = "capture";
 const PREVIEW_CAPTURE_QUERY_VALUE = "pdf";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * Detect a request-aborted fetch — Node's WHATWG fetch surfaces
+ * `AbortError` with name === "AbortError"; some adapters (undici, mock
+ * service workers) expose the same shape under a duck-typed object. Mirrors
+ * `isAbortErrorLike` in `@/lib/export-pdf-service` so both routes classify
+ * a timeout identically.
+ */
+function isAbortErrorLike(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const e = error as { code?: unknown; name?: unknown };
+  return e.code === "ABORT_ERR" || e.name === "AbortError";
+}
 
 export async function POST(req: NextRequest) {
   const versionInfo = buildVersionHeaders("v1");
@@ -230,7 +244,11 @@ export async function POST(req: NextRequest) {
     const controller = new AbortController();
     const timeoutId = setTimeout(
       () => controller.abort(),
-      BROWSERLESS_TIMEOUT_MS
+      // Issue #1536: use the shared 90s render budget (#1424) instead of the
+      // v1-only 60s constant, so a slow lookbook render is not aborted
+      // early here. `BROWSERLESS_RENDER_TIMEOUT_MS` is pinned equal to the
+      // unversioned route's `EXPORT_PDF_DEFAULT_TIMEOUT_MS`.
+      BROWSERLESS_RENDER_TIMEOUT_MS
     );
 
     let chromeResponse: Response;
@@ -257,6 +275,30 @@ export async function POST(req: NextRequest) {
           signal: controller.signal,
         }
       );
+    } catch (error) {
+      // Issue #1424: a fetch that dies here with an AbortError-class error
+      // is almost always our own timeout AbortController firing — not the
+      // Browserless provider rejecting with an upstream status. Refund the
+      // claimed quota unit so a slow render does not silently consume the
+      // user's `DAILY_EXPORT_LIMIT`. Provider HTTP errors (issue #1124)
+      // never reach this branch: they arrive as a non-ok RESPONSE, not a
+      // rejection, and keep their claim.
+      if (
+        error instanceof Error &&
+        (error.name === "AbortError" || isAbortErrorLike(error))
+      ) {
+        try {
+          await refundDailyQuota("export", user.id, 1);
+        } catch (refundError) {
+          // Refund is best-effort — never override the upstream timeout
+          // shape for the caller. Log and continue.
+          console.warn(
+            "[export-pdf] failed to refund quota after timeout",
+            refundError
+          );
+        }
+      }
+      throw error;
     } finally {
       clearTimeout(timeoutId);
     }
@@ -302,7 +344,10 @@ export async function POST(req: NextRequest) {
     // No charge is written here: the unit was claimed atomically before
     // the render (issue #1132) and stays claimed on every post-dispatch
     // outcome (issue #1124): failed renders consumed Browserless compute
-    // and count toward the user's daily cap.
+    // and count toward the user's daily cap. The ONE carve-out is the
+    // abort case handled above (issue #1424): a fetch that dies with an
+    // AbortError-class error is almost always our own timeout
+    // AbortController, so that unit is refunded.
 
     return new NextResponse(await chromeResponse.arrayBuffer(), {
       status: 200,
@@ -313,9 +358,18 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error) {
-    // Issue #1124: a dispatch that dies here (timeout abort, network
-    // error) keeps its claim; it consumed or attempted Browserless
-    // compute and counts toward the user's daily cap.
+    // Issue #1124: a dispatch that dies here (network error, provider
+    // failure surfaced as an exception) keeps its claim; it consumed or
+    // attempted Browserless compute and counts toward the user's daily
+    // cap.
+    //
+    // Issue #1424 carve-out: an AbortError-class failure is almost always
+    // our own timeout AbortController firing (the fetch is bounded by
+    // BROWSERLESS_RENDER_TIMEOUT_MS, the same 90s budget the unversioned
+    // route uses). That case refunds the claimed unit in the catch above,
+    // so it never reaches this handler. Provider HTTP errors (issue
+    // #1124) are not rejections — they arrive as a non-ok response and
+    // keep their claim.
     console.error("Export PDF error:", error);
     return NextResponse.json(
       {
