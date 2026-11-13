@@ -161,6 +161,8 @@ function LoginForm() {
             <Input
               id="email"
               type="email"
+              // Issue #1543: let password managers fill the email field.
+              autoComplete="username"
               value={email}
               onChange={(e) => {
                 setEmail(e.target.value);
@@ -195,6 +197,8 @@ function LoginForm() {
               <Input
                 id="password"
                 type="password"
+                // Issue #1543: let password managers fill the password field.
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => {
                   setPassword(e.target.value);
