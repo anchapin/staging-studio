@@ -74,7 +74,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: ESLint
+      - name: Lint (oxlint)
         run: npm run lint
 
   typecheck:
@@ -117,29 +117,32 @@ jobs:
       - name: Unit tests (vitest)
         run: npm test
 
-  # Browser suite (Playwright). A sibling of fast-checks, not part of it.
+  # Browser suite (Playwright). A sibling of the fast checks, not part of
+  # them.
   #
-  # `fast-checks` covers lint + typecheck + vitest, which is what branch
-  # protection requires — but it cannot see anything that only exists in a
-  # real browser against a real server. That gap is not hypothetical: the
-  # `/api/v1/export-pdf` 429 branch was missing from this suite entirely,
-  # and a header rename that had already shipped to main
-  # (`API-Version` → `X-Supabase-API-Version`) was caught by this suite
-  # while `develop` was still stale — vitest was green throughout.
+  # The `Lint` / `Typecheck` / `Unit tests (vitest)` jobs cover what
+  # branch protection requires, but they cannot see anything that only
+  # exists in a real browser against a real server. That gap is not
+  # hypothetical: the `/api/v1/export-pdf` 429 branch was missing from
+  # this suite entirely, and a header rename that had already shipped to
+  # main (`API-Version` → `X-Supabase-API-Version`) was caught by this
+  # suite while `develop` was still stale — vitest was green throughout.
   #
   # Scoped to `push` on the long-lived branches ON PURPOSE. The suite is
   # hermetic but not cheap: it builds the app, starts Postgres in Docker,
-  # and runs 62 specs on a single worker (workers: 1 is required — the mock
-  # Browserless's request log is process-wide).
+  # and runs 95 specs (95 `test()` cases across 24 `*.spec.ts` files) on a
+  # single worker (workers: 1 is required — the mock Browserless's request
+  # log is process-wide).
   #
-  # Push is not a compromise between "on PRs" and "on branches" here, it is
-  # the only scope that would ever fire: `develop` is UNPROTECTED and
-  # ordinary work is pushed to it directly. PRs exist only for the
-  # develop→main release. A `pull_request`-scoped e2e job would therefore
-  # run once per release and never for the work it is meant to cover.
-  # Charging that to every PR push buys little either way, because a PR's
-  # commits are what land on develop, and this job fires on that push.
-  # The regression is caught at the branch tip instead of before merge.
+  # Push-only is a cost / non-blockability trade, not a branch-protection
+  # fact. Feature branches DO get PRs, and the `pull_request` trigger
+  # already runs the `Lint` / `Typecheck` / `Unit tests (vitest)` jobs
+  # there; `develop` is protected with those same three required checks as
+  # `main` (strict, enforce_admins). A `pull_request`-scoped e2e job would
+  # pay a production build plus the whole browser suite on every PR push,
+  # while the push-scoped run already covers the same commits at the
+  # branch tip — the regression is caught just after merge rather than
+  # before it.
   #
   # Consequences of push-only, stated so nobody is surprised:
   #   - A red e2e run does NOT block the merge that caused it. It reports
@@ -171,11 +174,11 @@ jobs:
       DATABASE_URL: postgresql://e2e:e2e@127.0.0.1:39921/staging_studio_e2e
     # Measured on a clean checkout with no env files (the closest thing to
     # this runner available locally): `npm ci` ~20s, then ~4min for the
-    # production build inside the webServer plus all 62 specs. The 30min
-    # ceiling is deliberately slack rather than fitted — a cold runner with
-    # an empty browser cache is slower, and Playwright's own 90s per-test
-    # and 420s webServer timeouts already bound real hangs. This only stops
-    # a wedged job from holding a runner for hours.
+    # production build inside the webServer plus all 95 specs (24 spec
+    # files). The 30min ceiling is deliberately slack rather than fitted —
+    # a cold runner with an empty browser cache is slower, and Playwright's
+    # own 90s per-test and 420s webServer timeouts already bound real
+    # hangs. This only stops a wedged job from holding a runner for hours.
 
     steps:
       - name: Checkout
