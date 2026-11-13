@@ -128,17 +128,33 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
 
     // No charge is written here: the per-crop units were claimed atomically
     // before the call (issue #1132). The persistence is best-effort — if it
-    // throws, we still respond with the labels we already have.
-    await persistLabelRows(
-      {
-        imageUrl,
-        concept: rawConcept,
-        userId: user.id,
-        roomId,
-      },
-      labels,
-      deps,
-    );
+    // throws, we still respond with the labels we already have (issue #1535).
+    // The catch is deliberately scoped to the persistence call so a storage
+    // failure cannot fall through to the generation-failure handler below
+    // (which would refund the quota and 500 the request).
+    try {
+      await persistLabelRows(
+        {
+          imageUrl,
+          concept: rawConcept,
+          userId: user.id,
+          roomId,
+        },
+        labels,
+        deps,
+      );
+    } catch (persistError) {
+      console.error(
+        JSON.stringify({
+          event: "label_instances_persistence_error",
+          userId: user.id,
+          roomId,
+          error:
+            persistError instanceof Error ? persistError.message : String(persistError),
+        }),
+        persistError,
+      );
+    }
 
     return NextResponse.json({ success: true, labels }, { status: 200 });
   } catch (error) {

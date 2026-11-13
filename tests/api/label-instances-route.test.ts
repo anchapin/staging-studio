@@ -11,6 +11,8 @@ import { POST } from "@/app/api/label-instances/route";
 import { getAuthedPrismaUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { generateWithCircuitBreaker } from "@/lib/ai";
+import { refundDailyQuota } from "@/lib/api-quota";
+import { upsertVisionLabels } from "@/lib/vision-labels";
 
 const MOCK_USER_ID = "cuser12345678901234567890";
 const MOCK_ROOM_ID = "croom12345678901234567890";
@@ -359,6 +361,49 @@ describe("POST /api/label-instances", () => {
       expect(body.labels).toHaveLength(2);
       expect(body.labels[0].label).toBe("Modern Grey Sofa");
       expect(body.labels[1].label).toBe("Wooden Coffee Table");
+    });
+  });
+
+  describe("Best-effort persistence (issue #1535)", () => {
+    it("returns 200 with the generated labels when persistence throws, without refunding quota", async () => {
+      vi.mocked(generateWithCircuitBreaker).mockImplementation(async () => ({
+        object: {
+          labels: [{ instanceIndex: 0, label: "Modern Grey Sofa", confidence: 0.97 }],
+        },
+      }));
+      vi.mocked(upsertVisionLabels).mockRejectedValueOnce(
+        new Error("VisionLabel upsert failed"),
+      );
+      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const response = await POST(
+        buildRequest({
+          roomId: MOCK_ROOM_ID,
+          concept: "sofa",
+          crops: [{ instanceIndex: 0, cropDataUrl: "data:image/jpeg;base64,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==" }],
+          imageUrl: "https://room.supabase.co/room.jpg",
+        }),
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.success).toBe(true);
+      expect(body.labels).toHaveLength(1);
+      expect(body.labels[0]).toEqual({
+        instanceIndex: 0,
+        label: "Modern Grey Sofa",
+      });
+      // Quota was consumed by a successful generation — no refund (#1132).
+      expect(refundDailyQuota).not.toHaveBeenCalled();
+      // The persistence failure must not be swallowed silently (#1535).
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      const logged = consoleErrorSpy.mock.calls
+        .map((call) => call[0])
+        .filter((arg): arg is string => typeof arg === "string")
+        .find((arg) => arg.includes("label_instances_persistence_error"));
+      expect(logged).toBeDefined();
+
+      consoleErrorSpy.mockRestore();
     });
   });
 

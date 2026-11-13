@@ -1,5 +1,34 @@
 export const BROWSERLESS_PDF_ENDPOINT = "https://chrome.browserless.io/pdf";
 
+/**
+ * Outbound render budget for the Browserless PDF call.
+ *
+ * Issue #1424 raised the budget from 60s → 90s after measurements showed
+ * the chrome `networkidle` window trips for slow lookbook pages right at
+ * the 60s ceiling. The unversioned `/api/export-pdf` route uses
+ * `EXPORT_PDF_DEFAULT_TIMEOUT_MS` (90_000, `src/lib/export-pdf-service.ts`).
+ * Issue #1536: the v1 `/api/v1/export-pdf` route still aborted at 60s, so
+ * the same render could succeed on the unversioned path and be aborted on
+ * the v1 path. It now uses this constant.
+ *
+ * Why the value is repeated instead of imported from
+ * `@/lib/export-pdf-service`: the v1 route may not import that module —
+ * the auth-seam regression suite (`tests/api-auth-route-regression.test.ts`)
+ * pins the v1 route's seam set to the route file itself, and reaching the
+ * service transitively adds the service's seams to it. The two constants
+ * are pinned equal by `tests/api/v1-export-pdf-route.test.ts`, so they
+ * cannot drift apart silently.
+ */
+export const BROWSERLESS_RENDER_TIMEOUT_MS = 90_000;
+
+/**
+ * Legacy 60s render budget.
+ *
+ * @deprecated Issue #1536 — the last consumer in `src/` (the v1
+ * `/api/v1/export-pdf` route) now uses {@link BROWSERLESS_RENDER_TIMEOUT_MS}
+ * (90s). The constant is kept only so the pinned value in
+ * `tests/browserless.test.ts` still resolves; nothing in `src/` reads it.
+ */
 export const BROWSERLESS_TIMEOUT_MS = 60_000;
 
 /**
