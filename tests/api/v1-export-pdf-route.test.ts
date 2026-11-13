@@ -45,6 +45,28 @@ const mockDailyApiUsageFindUnique = vi.hoisted(() => vi.fn());
 const mockDailyApiUsageUpdateMany = vi.hoisted(() => vi.fn());
 const mockDailyApiUsageCreate = vi.hoisted(() => vi.fn());
 const mockSignPreviewToken = vi.hoisted(() => vi.fn());
+// Issue #1536: the v1 route must refund the claimed export unit when its
+// OWN timeout aborts the render (#1424). Spy on `refundDailyQuota` — but
+// call through to the real implementation, so the ledger write still
+// happens and the pinned #1124 test (which asserts on the ledger
+// decrement) keeps its full meaning.
+const { mockRefundDailyQuota, realRefundDailyQuota } = vi.hoisted(() => ({
+  mockRefundDailyQuota: vi.fn(),
+  realRefundDailyQuota: {
+    fn: undefined as undefined | ((...args: unknown[]) => Promise<void>),
+  },
+}));
+
+vi.mock("@/lib/api-quota", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api-quota")>();
+  realRefundDailyQuota.fn = actual.refundDailyQuota as unknown as (
+    ...args: unknown[]
+  ) => Promise<void>;
+  mockRefundDailyQuota.mockImplementation((...args: unknown[]) =>
+    (realRefundDailyQuota.fn as (...a: unknown[]) => Promise<void>)(...args)
+  );
+  return { ...actual, refundDailyQuota: mockRefundDailyQuota };
+});
 
 vi.mock("@/lib/api-auth", () => ({
   getAuthedPrismaUser: mockGetAuthedPrismaUser,
@@ -62,20 +84,32 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/preview-token", () => ({
   signPreviewToken: mockSignPreviewToken,
+  // The route imports the shared render budget from `@/lib/export-pdf-service`,
+  // which pulls these constants in from the preview-token module — they must
+  // exist on the mock or the import fails to link.
+  PREVIEW_TOKEN_QUERY_PARAM: "token",
+  PREVIEW_CAPTURE_QUERY_PARAM: "capture",
+  PREVIEW_CAPTURE_QUERY_VALUE: "pdf",
 }));
 
-vi.mock("@/lib/browserless", () => ({
-  buildBrowserlessPdfUrl,
-  buildBrowserlessPdfBody,
-  resolveBrowserlessPdfUrl,
-  BROWSERLESS_TIMEOUT_MS: 60_000,
-  E2E_HERMETIC_ENV_VAR: "E2E_HERMETIC",
-  E2E_BROWSERLESS_PDF_URL_ENV_VAR: "E2E_BROWSERLESS_PDF_URL",
-  fetchBrowserlessPdfWithCircuitBreaker,
-}));
+vi.mock("@/lib/browserless", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/browserless")>();
+  return {
+    ...actual,
+    buildBrowserlessPdfUrl,
+    buildBrowserlessPdfBody,
+    resolveBrowserlessPdfUrl,
+    // Issue #1536: the timeout constant is NOT mocked — the route must use
+    // the real shared 90s render budget (`BROWSERLESS_RENDER_TIMEOUT_MS`),
+    // so a stale 60s value is not even reachable from this route.
+    fetchBrowserlessPdfWithCircuitBreaker,
+  };
+});
 
 // We need to import after mocking
 import { POST } from "@/app/api/v1/export-pdf/route";
+import { BROWSERLESS_RENDER_TIMEOUT_MS } from "@/lib/browserless";
+import { EXPORT_PDF_DEFAULT_TIMEOUT_MS } from "@/lib/export-pdf-service";
 
 const USER_ID = "user-1";
 // Exactly 25 chars: c + 24 lowercase alphanumerics (matches PROJECT_ID_PATTERN /^c[a-z0-9]{24}$/)
@@ -99,6 +133,11 @@ const ORIGINAL_ENV = { ...process.env };
     mockDailyApiUsageUpdateMany.mockResolvedValue({ count: 1 });
     mockDailyApiUsageCreate.mockResolvedValue({ count: 1 });
     mockSignPreviewToken.mockResolvedValue("test-preview-token");
+    // `vi.restoreAllMocks()` clears a plain `vi.fn()`'s implementation, so
+    // re-arm the call-through into the real refund.
+    mockRefundDailyQuota.mockImplementation((...args: unknown[]) =>
+      (realRefundDailyQuota.fn as (...a: unknown[]) => Promise<void>)(...args)
+    );
 
     // Default: the resolver hands back the real endpoint. The hermetic-seam
     // tests below override it; every other test keeps production behavior.
@@ -350,5 +389,89 @@ describe("POST /api/v1/export-pdf — failed exports consume quota (issue #1124)
     expect(response.status).toBeGreaterThanOrEqual(500);
     expect(increments).toEqual([1]);
     expect(decrements).toEqual([]);
+  });
+});
+
+/**
+ * Issue #1536: the v1 route missed the #1424 fix on two counts —
+ *   1. it aborted the Browserless fetch at 60s while the unversioned route
+ *      uses the shared 90s budget (EXPORT_PDF_DEFAULT_TIMEOUT_MS), and
+ *   2. it kept the claimed daily export unit when that own timeout fired,
+ *      where the service refunds it (#1424).
+ *
+ * The provider-HTTP-error carve-out from #1124 is unchanged: a non-ok
+ * Browserless RESPONSE keeps the claim (pinned by the block above).
+ */
+describe("POST /api/v1/export-pdf — render budget and timeout refund (issue #1536)", () => {
+  it("shares the unversioned route's render budget (90s, not the old 60s)", () => {
+    expect(BROWSERLESS_RENDER_TIMEOUT_MS).toBe(90_000);
+    // The v1 route's budget is the SAME constant value the unversioned
+    // `/api/export-pdf` route uses (EXPORT_PDF_DEFAULT_TIMEOUT_MS, #1424).
+    expect(BROWSERLESS_RENDER_TIMEOUT_MS).toBe(EXPORT_PDF_DEFAULT_TIMEOUT_MS);
+  });
+
+  it("gives the Browserless fetch the shared 90s budget (not the old 60s)", async () => {
+    const delays: number[] = [];
+    const realSetTimeout = globalThis.setTimeout;
+    const timeoutSpy = vi
+      .spyOn(globalThis, "setTimeout")
+      .mockImplementation(((
+        handler: TimerHandler,
+        timeout?: number,
+        ...args: unknown[]
+      ) => {
+        delays.push(Number(timeout));
+        return realSetTimeout(handler, timeout, ...args);
+      }) as unknown as typeof globalThis.setTimeout);
+
+    try {
+      const response = await callExportRoute(PROJECT_ID);
+      expect(response.status).toBe(200);
+    } finally {
+      timeoutSpy.mockRestore();
+    }
+
+    expect(delays).toContain(90_000);
+    expect(delays).not.toContain(60_000);
+  });
+
+  it("refunds exactly one export unit when the fetch aborts with an AbortError", async () => {
+    const updateManyCalls: {
+      where?: { userId?: string; surface?: string };
+      data?: { count?: { increment?: number; decrement?: number } };
+    }[] = [];
+    mockDailyApiUsageUpdateMany.mockImplementation(async (args: never) => {
+      updateManyCalls.push(args);
+      return { count: 1 };
+    });
+
+    const abortError = new Error("The operation was aborted");
+    abortError.name = "AbortError";
+    fetchBrowserlessPdfWithCircuitBreaker.mockRejectedValue(abortError);
+
+    const response = await callExportRoute(PROJECT_ID);
+
+    // The response keeps the v1 route's classified 500 shape (unchanged).
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      success: false,
+      error: "Internal error",
+      message: "An unexpected error occurred",
+      code: "internal_error",
+    });
+
+    // Exactly one refund, for this user, for the export surface.
+    expect(mockRefundDailyQuota).toHaveBeenCalledTimes(1);
+    expect(mockRefundDailyQuota).toHaveBeenCalledWith("export", USER_ID, 1);
+
+    // ...and the ledger really was decremented by one unit.
+    const refunds = updateManyCalls.filter(
+      (call) => call?.data?.count?.decrement !== undefined
+    );
+    expect(refunds).toHaveLength(1);
+    expect(refunds[0].data?.count?.decrement).toBe(1);
+    expect(refunds[0].where?.userId).toBe(USER_ID);
+    expect(refunds[0].where?.surface).toBe("export");
   });
 });
