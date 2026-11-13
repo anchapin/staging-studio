@@ -8,14 +8,63 @@ import {
   fifoEvictionTake,
   versionThumbnailStoragePath,
 } from "@/lib/inpaint-version-storage";
+import {
+  extractStoragePathFromUrl,
+  isReclaimableRoomStoragePath,
+  removeStorageObjects,
+} from "@/lib/storage-cleanup";
 import { revalidatePath } from "next/cache";
 
 const MAX_VERSIONS_PER_VARIANT = 20;
+
+/**
+ * Max length of the persisted `seed` string, matching the repo's
+ * seed caps: `src/lib/metadata-schemas.ts:93` ("FineTune seed must be
+ * 6 digits or fewer") and `src/lib/ai-route-schemas.ts:103`
+ * (`seed: z.number().int().min(0).max(999999)` → at most 6 digits).
+ */
+const MAX_SEED_LENGTH = 6;
+
+/**
+ * Max length of the persisted `promptDirectives` string, matching the
+ * repo cap `src/lib/ai-route-schemas.ts:95`
+ * (`promptDirectives: z.string().min(1).max(2000)`).
+ */
+const MAX_PROMPT_DIRECTIVES_LENGTH = 2000;
+
+/** The two "after" variant slots a room can hold. */
+type VariantSlot = 0 | 1;
 
 type ActionFailure = { success: false; error: string };
 
 function failure(error: string): ActionFailure {
   return { success: false, error };
+}
+
+/**
+ * Runtime guard for the variant slot. Server actions are HTTP-invocable
+ * with arbitrary JSON, so the `0 | 1` TypeScript type is not a runtime
+ * guarantee. Mirrors `isVariantSlot()` in `src/app/actions/room-photos.ts:34`.
+ */
+function isVariantSlot(value: unknown): value is VariantSlot {
+  return value === 0 || value === 1;
+}
+
+/**
+ * Runtime guard for `resultUrl`: must be a non-empty, parseable absolute
+ * http(s) URL. Guards against `""` / `"not-a-url"` payloads that would
+ * otherwise persist a broken `InpaintVersion.resultUrl` row.
+ */
+function isValidResultUrl(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -45,12 +94,41 @@ export async function saveInpaintVersion({
   promptDirectives,
 }: {
   roomId: string;
-  variantSlot: 0 | 1;
+  // Widened to `number` so the runtime guard below is meaningful:
+  // server actions are HTTP-invocable with arbitrary JSON payloads.
+  variantSlot: number;
   resultUrl: string;
   thumbnailDataUrl: string;
   seed?: string;
   promptDirectives?: string;
 }): Promise<{ success: true; versionId: string } | ActionFailure> {
+  // Runtime validation (issue #1545). Server actions are HTTP-invocable,
+  // so the TypeScript types below are not a runtime guarantee — reject
+  // malformed payloads BEFORE any storage upload, transaction, or DB write.
+  if (!isVariantSlot(variantSlot)) {
+    return failure("Invalid variant slot: must be 0 or 1");
+  }
+  if (!isValidResultUrl(resultUrl)) {
+    return failure("Invalid resultUrl: must be a non-empty http(s) URL");
+  }
+  if (seed !== undefined && seed !== null) {
+    if (typeof seed !== "string" || seed.length > MAX_SEED_LENGTH) {
+      return failure(
+        `Invalid seed: must be a string of at most ${MAX_SEED_LENGTH} characters`
+      );
+    }
+  }
+  if (promptDirectives !== undefined && promptDirectives !== null) {
+    if (
+      typeof promptDirectives !== "string" ||
+      promptDirectives.length > MAX_PROMPT_DIRECTIVES_LENGTH
+    ) {
+      return failure(
+        `Invalid promptDirectives: must be a string of at most ${MAX_PROMPT_DIRECTIVES_LENGTH} characters`
+      );
+    }
+  }
+
   const user = await getAuthedPrismaUser();
   if (!user) return failure("Not authenticated");
 
@@ -191,7 +269,7 @@ export async function saveInpaintVersion({
  */
 export async function getInpaintVersions(
   roomId: string,
-  variantSlot: 0 | 1
+  variantSlot: number
 ): Promise<
   | {
       success: true;
@@ -206,6 +284,12 @@ export async function getInpaintVersions(
     }
   | ActionFailure
 > {
+  // Runtime validation (issue #1545) — reject an out-of-range slot
+  // BEFORE any Prisma call.
+  if (!isVariantSlot(variantSlot)) {
+    return failure("Invalid variant slot: must be 0 or 1");
+  }
+
   const user = await getAuthedPrismaUser();
   if (!user) return failure("Not authenticated");
 
@@ -299,11 +383,17 @@ export async function restoreInpaintVersion(
  */
 export async function deleteInpaintVariant(
   roomId: string,
-  variantSlot: 0 | 1,
+  variantSlot: number,
 ): Promise<
   | { success: true; deletedCount: number; remaining: { A: boolean; B: boolean } }
   | ActionFailure
 > {
+  // Runtime validation (issue #1545) — reject an out-of-range slot
+  // BEFORE any Prisma call.
+  if (!isVariantSlot(variantSlot)) {
+    return failure("Invalid variant slot: must be 0 or 1");
+  }
+
   const user = await getAuthedPrismaUser();
   if (!user) return failure("Not authenticated");
 
@@ -321,6 +411,17 @@ export async function deleteInpaintVariant(
     },
   });
   if (!room) return failure("Room not found or not owned by user");
+
+  // Read the rows about to be deleted so their thumbnail objects can be
+  // reclaimed from storage afterwards (issue #1545). Only the thumbnails
+  // of the rows deleted here are touched — the full-resolution `resultUrl`
+  // images are shared with `Room.afterImageUrl` / `afterImageUrl2` and are
+  // NEVER deleted here.
+  const versionsToDelete: Array<{ id: string; thumbnailUrl: string | null }> =
+    await prisma.inpaintVersion.findMany({
+      where: { roomId, variantSlot },
+      select: { id: true, thumbnailUrl: true },
+    });
 
   // Delete every version row for this (roomId, variantSlot). Any dependent
   // logs (per AGENTS.md: Room → InpaintVersion cascades with the room; the
@@ -370,6 +471,32 @@ export async function deleteInpaintVariant(
       where: { id: roomId },
       data: { selectedVariantIndex: nextPin },
     });
+  }
+
+  // Reclaim the thumbnails of the deleted versions from Supabase Storage
+  // (issue #1545). Best-effort: a storage failure is logged and the action
+  // still reports success — losing the DB delete to a storage error would
+  // be far worse than leaving an orphan object behind. Only the thumbnails
+  // of the rows deleted above are removed; the full-resolution `resultUrl`
+  // images are shared with `Room.afterImageUrl` / `afterImageUrl2` and are
+  // deliberately left alone.
+  const thumbnailPaths = versionsToDelete
+    .map((v) => v.thumbnailUrl)
+    .filter((url): url is string => Boolean(url))
+    .map((url) => extractStoragePathFromUrl(url))
+    .filter((p): p is string => Boolean(p))
+    .filter((p) => isReclaimableRoomStoragePath(p, roomId, room.projectId));
+  const uniqueThumbnailPaths = Array.from(new Set(thumbnailPaths));
+
+  if (uniqueThumbnailPaths.length > 0) {
+    try {
+      await removeStorageObjects(uniqueThumbnailPaths);
+    } catch (storageError) {
+      console.error(
+        "[inpaint-versions] deleted thumbnail cleanup failed:",
+        storageError
+      );
+    }
   }
 
   revalidatePath(`/projects/${room.projectId}`);
