@@ -57,8 +57,9 @@ outside the modelled product and is listed in
 - **Lookbook is a projection of `Project`**, not an entity with its own
   lifecycle. Its "states" are the owning `Project`'s
   `clientSignatureStatus` / `clientSignatureTimestamp`.
-- **Hero Artifact** is a distinct named component *within* the Lookbook —
-  the finished, Circle-G-branded PDF. The two terms are not synonyms.
+- **Hero Artifact** is the Lookbook itself — the finished, Circle-G-branded
+  PDF. The two terms name one resource; there is no distinct component
+  (Alex's call, 2026-11-14, confirming the naming packet's N1 evidence).
 - Every entity file names the persisted record and its code anchor.
 
 ## Staging aesthetic
