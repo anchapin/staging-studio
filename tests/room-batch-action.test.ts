@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock dependencies
 const mockPrisma = {
@@ -6,6 +6,10 @@ const mockPrisma = {
     findFirst: vi.fn(),
     findUnique: vi.fn(),
   },
+  room: {
+    create: vi.fn(),
+  },
+  $transaction: vi.fn(),
 };
 
 const mockGetAuthedPrismaUser = vi.fn();
@@ -17,6 +21,29 @@ const mockDetectRoomType = vi.fn();
 const mockClaimDailyQuota = vi.fn();
 
 const mockRefundDailyQuota = vi.fn();
+
+const mockRemoveStorageObjects = vi.fn();
+
+const mockReadUploadedObjectSize = vi.fn();
+
+const mockRevalidatePath = vi.fn();
+
+vi.mock("next/cache", () => ({
+  revalidatePath: mockRevalidatePath,
+}));
+
+vi.mock("@/lib/supabase", () => ({
+  createSupabaseRequestClient: vi.fn(),
+}));
+
+vi.mock("@/lib/storage-cleanup", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/storage-cleanup")>();
+  return {
+    ...actual,
+    removeStorageObjects: mockRemoveStorageObjects,
+    readUploadedObjectSize: mockReadUploadedObjectSize,
+  };
+});
 
 vi.mock("@/lib/prisma", () => ({
   prisma: mockPrisma,
@@ -41,7 +68,7 @@ vi.mock("@/lib/api-quota", async (importOriginal) => {
 });
 
 // Re-import after mocks are set up
-const { detectBatchRoomTypes } = await import(
+const { detectBatchRoomTypes, createRoomsBatch } = await import(
   "@/app/actions/room-batch"
 );
 
@@ -293,5 +320,89 @@ describe("detectBatchRoomTypes", () => {
     expect(mockClaimDailyQuota).not.toHaveBeenCalled();
     expect(mockRefundDailyQuota).not.toHaveBeenCalled();
     expect(mockDetectRoomType).not.toHaveBeenCalled();
+  });
+});
+
+describe("createRoomsBatch", () => {
+  const PROJECT_ID = "project-1";
+  const ENTRIES = [
+    {
+      fileName: "room-0.jpg",
+      roomType: "Living Room",
+      beforeImageUrl:
+        "https://proj.supabase.co/storage/v1/object/public/room-photos/batch-rooms/project-1/room-0-aaaaaaaa.jpg",
+    },
+    {
+      fileName: "room-1.jpg",
+      roomType: "Kitchen",
+      beforeImageUrl:
+        "https://proj.supabase.co/storage/v1/object/public/room-photos/batch-rooms/project-1/room-1-bbbbbbbb.jpg",
+    },
+  ];
+  const EXPECTED_UPLOADED_PATHS = [
+    "room-photos/batch-rooms/project-1/room-0-aaaaaaaa.jpg",
+    "room-photos/batch-rooms/project-1/room-1-bbbbbbbb.jpg",
+  ];
+
+  let infoSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetAuthedPrismaUser.mockResolvedValue({ id: "user-1" });
+    mockPrisma.project.findUnique.mockResolvedValue({
+      id: PROJECT_ID,
+      rooms: [],
+    });
+    mockPrisma.room.create.mockImplementation(() => ({ select: "room-create" }));
+    mockReadUploadedObjectSize.mockResolvedValue(null);
+    mockRemoveStorageObjects.mockResolvedValue(undefined);
+    infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    infoSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  it("reclaims the uploaded batch photos when the transaction fails (issue #1546)", async () => {
+    mockPrisma.$transaction.mockRejectedValue(new Error("tx exploded"));
+
+    const result = await createRoomsBatch(PROJECT_ID, ENTRIES);
+
+    expect(result).toEqual({ success: false, error: "tx exploded" });
+    // The photos are already uploaded but no Room row references them,
+    // so the failed batch must not leave storage orphans behind.
+    expect(mockRemoveStorageObjects).toHaveBeenCalledTimes(1);
+    expect(mockRemoveStorageObjects).toHaveBeenCalledWith(EXPECTED_UPLOADED_PATHS);
+  });
+
+  it("keeps the failure result when the storage cleanup itself fails (issue #1546)", async () => {
+    mockPrisma.$transaction.mockRejectedValue(new Error("tx exploded"));
+    mockRemoveStorageObjects.mockRejectedValue(new Error("cleanup boom"));
+
+    const result = await createRoomsBatch(PROJECT_ID, ENTRIES);
+
+    // A cleanup failure must never change the error contract.
+    expect(result).toEqual({ success: false, error: "tx exploded" });
+    expect(mockRemoveStorageObjects).toHaveBeenCalledWith(EXPECTED_UPLOADED_PATHS);
+  });
+
+  it("does not touch storage and revalidates both paths on success", async () => {
+    const rooms = [
+      { id: "room-1", name: "Living Room", beforeImageUrl: ENTRIES[0].beforeImageUrl },
+      { id: "room-2", name: "Kitchen", beforeImageUrl: ENTRIES[1].beforeImageUrl },
+    ];
+    mockPrisma.$transaction.mockResolvedValue(rooms);
+
+    const result = await createRoomsBatch(PROJECT_ID, ENTRIES);
+
+    expect(result).toEqual({ success: true, rooms });
+    // A committed batch keeps its photos — nothing may be reclaimed.
+    expect(mockRemoveStorageObjects).not.toHaveBeenCalled();
+    expect(mockRevalidatePath).toHaveBeenCalledTimes(2);
+    expect(mockRevalidatePath).toHaveBeenCalledWith(`/projects/${PROJECT_ID}`);
+    expect(mockRevalidatePath).toHaveBeenCalledWith(`/preview/${PROJECT_ID}`);
   });
 });
