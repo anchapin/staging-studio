@@ -193,6 +193,17 @@ export async function createRoomsBatch(
     return { success: true, rooms };
   } catch (error) {
     console.error("Failed to create rooms batch:", error);
+    // #1546: the transaction never committed, so no Room row references
+    // the uploaded photos. Reclaim them (the #1145 orphan rule) so a
+    // failed batch leaves no storage orphans behind — a client retry
+    // mints fresh random paths, so these would be unrecoverable.
+    // Best-effort: a cleanup failure must never change the returned
+    // error contract.
+    try {
+      await removeStorageObjects(uploadedPaths);
+    } catch (cleanupError) {
+      console.error("Failed to reclaim batch room photos:", cleanupError);
+    }
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",
