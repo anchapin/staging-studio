@@ -79,9 +79,6 @@ export const projectCreateRequestSchema = z
   })
   .strict();
 
-/** The validated shape of a {@link projectCreateRequestSchema} parse. */
-export type ProjectCreateInput = z.infer<typeof projectCreateRequestSchema>;
-
 /**
  * Narrows a persisted `buyerDemographics` JSON value to the shape the
  * lookbook can render, returning null for anything else.

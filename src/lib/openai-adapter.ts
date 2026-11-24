@@ -76,11 +76,6 @@ function requireOpenAiEnv(): { apiKey: string; model: string } {
   };
 }
 
-/** Asserts the OpenAI provider is configured. Side effects: reads process.env; throws when missing. */
-export function assertOpenAiConfigured(): void {
-  requireEnvVars("OPENAI_API_KEY");
-}
-
 function resolveOpenAiModel(logical: LogicalModel): string {
   switch (logical) {
     case LOGICAL_MODEL.FLUX_FILL:

@@ -177,8 +177,6 @@ export const ATELIER_CONTRAST_PAIRS = [
   background: AtelierColorToken;
 }>;
 
-export type AtelierContrastPair = (typeof ATELIER_CONTRAST_PAIRS)[number];
-
 /** Pill shapes use 12px (0.75rem), never 9999px (issue #613 task 5). */
 export const PILL_RADIUS = "0.75rem";
 /** True circles (avatars, dots) keep the browser-full radius. */

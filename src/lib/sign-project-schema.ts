@@ -63,9 +63,6 @@ export const signProjectPayloadSchema = z
   })
   .strict();
 
-/** The validated shape of a {@link signProjectPayloadSchema} parse. */
-export type SignProjectPayload = z.infer<typeof signProjectPayloadSchema>;
-
 /**
  * Zod schema for the full `POST /api/sign-project` request body: the
  * shared payload plus the preview token (the route's only credential;
@@ -76,9 +73,6 @@ export const signProjectRequestSchema = signProjectPayloadSchema
     token: z.string().min(1, { message: "Preview token is required." }),
   })
   .strict();
-
-/** The validated shape of a {@link signProjectRequestSchema} parse. */
-export type SignProjectRequest = z.infer<typeof signProjectRequestSchema>;
 
 /**
  * Pure token-scope check for the sign-project route: a token

@@ -89,6 +89,3 @@ export const roomPatchSchema = z
   })
   .partial()
   .strict();
-
-/** The validated shape of a room patch request body ({@link roomPatchSchema}). */
-export type RoomPatchInput = z.infer<typeof roomPatchSchema>;

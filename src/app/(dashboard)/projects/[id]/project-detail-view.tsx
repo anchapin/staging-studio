@@ -92,8 +92,6 @@ import {
   resolveRoomAesthetic,
 } from "@/lib/project-aesthetic";
 
-const MAX_DIRECTIVE_LENGTH = 2000;
-
 interface Room {
   id: string;
   name: string;

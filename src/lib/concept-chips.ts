@@ -98,9 +98,6 @@ export function buildConceptEmptyMessage(concept: string): string {
     : `no ${name} found — paint the area with the brush, or try '${DEFAULT_CONCEPT}'`;
 }
 
-/** Stable console prefix so operators can filter concept-tool events. */
-export const CONCEPT_EVENT_LOG_PREFIX = "[concept-tool]";
-
 /** A successful instance toggle, logged for the training corpus (W3). */
 export interface SelectionLoggedEvent {
   event: "selection_logged";

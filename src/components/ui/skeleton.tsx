@@ -33,24 +33,6 @@ export function ProjectCardSkeleton() {
   );
 }
 
-export function RoomCardSkeleton() {
-  return (
-    <div className="overflow-hidden rounded-lg border border-border bg-card">
-      <div className="relative aspect-[4/3] bg-muted">
-        <Skeleton className="absolute inset-0 rounded-none" />
-        <div className="absolute bottom-2 left-2 flex gap-1">
-          <Skeleton className="h-6 w-6 rounded-full" />
-          <Skeleton className="h-6 w-6 rounded-full" />
-        </div>
-      </div>
-      <div className="p-3">
-        <Skeleton className="mb-1 h-4 w-2/3" />
-        <Skeleton className="h-3 w-1/3" />
-      </div>
-    </div>
-  );
-}
-
 export function ProjectsGridSkeleton({ count = 6 }: { count?: number }) {
   return (
     <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">

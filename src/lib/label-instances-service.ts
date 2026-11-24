@@ -59,12 +59,6 @@ export interface LabelInstanceOutput {
   label: string;
 }
 
-export interface GenerateVisionLabelsResult {
-  /** One entry per requested instance. The provider is expected to use the
-   *  same `instanceIndex` keys we pass in. */
-  labels: LabelInstanceOutput[];
-}
-
 export interface ValidatedRoomAccess {
   roomId: string;
   projectId: string;

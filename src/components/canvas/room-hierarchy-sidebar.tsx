@@ -61,16 +61,6 @@ export interface HierarchyRoom {
   hasPhotos?: boolean;
 }
 
-/** Derive camera status from image URLs. */
-export function deriveCameraStatus(
-  beforeUrl: string | null | undefined,
-  afterUrl: string | null | undefined
-): CameraStatus {
-  if (!beforeUrl) return "pending";
-  if (!afterUrl) return "in-progress";
-  return "staged";
-}
-
 /** Label for a camera status badge. */
 export function cameraStatusLabel(status: CameraStatus): string {
   switch (status) {

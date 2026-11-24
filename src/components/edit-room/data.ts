@@ -13,28 +13,3 @@
  * `selectedVariantIndex` column on `Room` (0 / 1) stay consistent
  * across the shell, the version strip, and the lookbook mirror.
  */
-
-import type { SlotId } from "@/lib/edit-room-scope";
-
-/**
- * Maps a `SlotId` to the integer column stored in Prisma
- * `Room.selectedVariantIndex`. `original` does not have an index; the
- * caller decides whether to fall back to 0 (the default).
- */
-export function slotIdToVariantIndex(slot: SlotId): number | null {
-  switch (slot) {
-    case "A":
-      return 0;
-    case "B":
-      return 1;
-    case "original":
-      return null;
-  }
-}
-
-/** Inverse of `slotIdToVariantIndex`; `null` collapses to `"original"`. */
-export function variantIndexToSlotId(index: number | null): SlotId {
-  if (index === 0) return "A";
-  if (index === 1) return "B";
-  return "original";
-}

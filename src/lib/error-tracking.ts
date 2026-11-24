@@ -1,4 +1,3 @@
-import { NextRequest } from "next/server";
 import { ZodError } from "zod";
 import { logger } from "@/lib/logger";
 
@@ -93,32 +92,4 @@ export function trackError(error: unknown, context: ErrorContext = {}): void {
   } catch {
     // Intentionally swallowed — see the JSDoc contract above.
   }
-}
-
-/**
- * Wraps a Next.js Route Handler and:
- * 1. Logs any unhandled error with full ErrorContext.
- * 2. Returns a consistent JSON error response.
- *
- * This does NOT replace withErrorHandler from api-error-handler.ts — it
- * supplements it by adding structured logging on top.
- */
-export function createErrorHandler(
-  handler: (request: NextRequest, ...args: unknown[]) => Promise<Response>
-) {
-  return async (request: NextRequest | undefined, ...args: unknown[]): Promise<Response> => {
-    try {
-      return await handler(request as NextRequest, ...args);
-    } catch (error) {
-      const requestId = request?.headers.get("x-request-id") ?? undefined;
-      const sessionId = request?.cookies.get("sb-access-token")?.value ?? undefined;
-      const path = request ? new URL(request.url).pathname : "(unknown)";
-      const method = request ? request.method : "(unknown)";
-
-      trackError(error, { requestId, sessionId, path, method });
-
-      // Re-throw so api-error-handler or the route's own catch can format the response
-      throw error;
-    }
-  };
 }
