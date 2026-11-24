@@ -46,8 +46,6 @@ export const inpaintSubmitSchema = inpaintRequestSchema.extend({
   maskCoverageRatio: z.number().min(0).max(1).optional(),
 });
 
-export type InpaintSubmitInput = z.infer<typeof inpaintSubmitSchema>;
-
 // ─── Error Copy ──────────────────────────────────────────────────────────────
 
 export const INPAINT_ERROR_COPY = {

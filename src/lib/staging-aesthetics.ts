@@ -7,5 +7,3 @@ export const STAGING_AESTHETICS = [
   "Urban Industrial",
   "Classic Elegant",
 ] as const;
-
-export type StagingAesthetic = (typeof STAGING_AESTHETICS)[number];

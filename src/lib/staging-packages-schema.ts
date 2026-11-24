@@ -32,8 +32,6 @@ export const STAGING_PACKAGES = [
   },
 ] as const;
 
-export type StagingPackageId = (typeof STAGING_PACKAGES)[number]["id"];
-
 export interface StagingPackage {
   id: string;
   name: string;

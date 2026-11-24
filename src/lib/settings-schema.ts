@@ -81,8 +81,5 @@ export const settingsSchema = z
   })
   .strict();
 
-/** The validated shape written to the `User` row ({@link settingsSchema}). */
-export type SettingsOutput = z.output<typeof settingsSchema>;
-
 /** The payload shape the client form sends ({@link settingsSchema}). */
 export type SettingsInput = z.input<typeof settingsSchema>;

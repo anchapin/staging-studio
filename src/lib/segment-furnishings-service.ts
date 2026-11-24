@@ -42,12 +42,6 @@ import { prisma } from "@/lib/prisma";
 // Domain types
 // ---------------------------------------------------------------------------
 
-export interface SegmentFurnishingsRequest {
-  roomId: string;
-  imageUrl: string;
-  concept?: string;
-}
-
 export interface FurnishingDetectionResult {
   /** Resolved mask data URLs (data:image/png;base64,…), one per instance. */
   masks: string[];

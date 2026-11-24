@@ -45,32 +45,6 @@ export interface SegmentPrewarmTimingEvent {
   imageUrl: string;
 }
 
-/**
- * Formats a duration for humans: whole milliseconds below a second,
- * fixed two-decimal seconds at or above it ("812ms", "1.23s").
- * Side effects: none (pure).
- */
-export function formatSegmentMs(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  return `${(ms / 1000).toFixed(2)}s`;
-}
-
-/** Builds a client click-timing event. Side effects: none (pure). */
-export function buildSegmentTimingEvent(input: {
-  ms: number;
-  source: SegmentTimingSource;
-  prewarmed: boolean;
-  imageUrl: string;
-}): SegmentTimingEvent {
-  return {
-    event: "segment_timing",
-    ms: Math.round(input.ms),
-    source: input.source,
-    prewarmed: input.prewarmed,
-    imageUrl: input.imageUrl,
-  };
-}
-
 /** Builds a pre-warm ping event. Side effects: none (pure). */
 export function buildSegmentPrewarmTimingEvent(input: {
   ms: number;

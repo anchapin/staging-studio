@@ -40,22 +40,6 @@ export interface InpaintRequestRow {
   readonly roomId: string;
 }
 
-export interface DiscoverArgs {
-  readonly now: Date;
-  /**
-   * Lower bound for "this row is recent enough to leave alone". Rows
-   * NEWER than this timestamp stay unpinned. Default is `now`
-   * (not used as a floor in the function body, but surfaced for callers
-   * that want to log the cutoff).
-   */
-  readonly recentFloorMs?: number;
-  /**
-   * Backstop on the SELECT. Defaults to scanning the entire table;
-   * callers with very large tables can override (e.g. `lt: new Date(Date.now() - 1)`).
-   */
-  readonly allRows?: ReadonlyArray<InpaintRequestRow>;
-}
-
 /** 24 hours, in milliseconds. ROWS older than this are RECOVERY candidates. */
 export const RECOVERY_AGE_MS = 24 * 60 * 60 * 1000;
 /** 7 days, in milliseconds. PERSISTENCE_FAILED rows older than this are CLEANUP candidates. */

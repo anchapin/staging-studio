@@ -79,5 +79,3 @@ export const generatedCopySchema = z
     checklist: z.array(checklistItemSchema),
   })
   .strict();
-
-export type GeneratedCopyInput = z.infer<typeof generatedCopySchema>;
